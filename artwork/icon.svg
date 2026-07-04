@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0c1226"/>
+      <stop offset="1" stop-color="#101b3a"/>
+    </linearGradient>
+    <linearGradient id="flow" x1="0" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#2dd4bf"/>
+      <stop offset="0.55" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="12" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect x="16" y="16" width="992" height="992" rx="224" fill="url(#bg)"/>
+
+  <g filter="url(#glow)" fill="none" stroke="url(#flow)" stroke-linecap="round">
+    <path d="M 255 250
+             C 430 290, 390 450, 460 520
+             C 480 545, 494 562, 500 580"
+          stroke-width="46"/>
+    <path d="M 255 910
+             C 430 870, 390 710, 460 640
+             C 480 615, 494 598, 500 580"
+          stroke-width="38"/>
+  </g>
+
+  <!-- play-button triangle; left edge centered on the junction -->
+  <g filter="url(#glow)">
+    <path d="M 500 452
+             Q 500 580 500 708
+             Q 504 742 536 726
+             L 806 612
+             Q 836 580 806 548
+             L 536 434
+             Q 504 418 500 452 Z"
+          fill="url(#flow)"/>
+  </g>
+  <circle cx="500" cy="580" r="22" fill="#38bdf8"/>
+  <circle cx="500" cy="580" r="11" fill="#e0f7ff"/>
+  <circle cx="255" cy="250" r="14" fill="#99f6e4" opacity="0.95"/>
+  <circle cx="255" cy="910" r="12" fill="#99f6e4" opacity="0.85"/>
+</svg>

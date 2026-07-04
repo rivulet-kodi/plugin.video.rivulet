@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyz
+*.egg-info/
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Packaged addon zips
+/*.zip
+/dist/
+/build/

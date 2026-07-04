@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<settings version="1">
+    <section id="plugin.video.rivulet">
+        <category id="general" label="30100">
+            <group id="1">
+                <setting id="server_url" type="string" label="30102">
+                    <level>0</level>
+                    <default>http://127.0.0.1:11470</default>
+                    <constraints>
+                        <allowempty>false</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30102</heading>
+                    </control>
+                </setting>
+            </group>
+        </category>
+        <category id="server" label="30101">
+            <group id="1">
+                <setting id="server_enable" type="boolean" label="30103">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="server_binary" type="path" label="30104">
+                    <level>0</level>
+                    <default/>
+                    <constraints>
+                        <writable>false</writable>
+                        <masking>executable</masking>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="button" format="file">
+                        <heading>30104</heading>
+                    </control>
+                </setting>
+                <setting id="server_download" type="action" label="30060">
+                    <level>0</level>
+                    <data>RunPlugin(plugin://plugin.video.rivulet/?action=server_download)</data>
+                    <control type="button" format="action"/>
+                </setting>
+            </group>
+        </category>
+        <category id="subtitles" label="30050">
+            <group id="1">
+                <setting id="subs_enable" type="boolean" label="30051">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="subs_language" type="string" label="30052">
+                    <level>0</level>
+                    <default>en</default>
+                    <constraints>
+                        <allowempty>false</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30052</heading>
+                    </control>
+                </setting>
+            </group>
+        </category>
+    </section>
+</settings>

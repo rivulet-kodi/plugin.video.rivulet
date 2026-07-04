@@ -1,0 +1,32 @@
+name: Build addon zip
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read addon version
+        id: addon
+        run: |
+          VERSION=$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('addon.xml').getroot().get('version'))")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build addon package
+        run: |
+          git archive --format=zip --prefix=plugin.video.rivulet/ \
+            -o "plugin.video.rivulet-${{ steps.addon.outputs.version }}.zip" \
+            HEAD -- addon.xml default.py service.py resources lib
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin.video.rivulet-${{ steps.addon.outputs.version }}
+          path: plugin.video.rivulet-${{ steps.addon.outputs.version }}.zip

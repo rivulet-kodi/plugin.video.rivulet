@@ -1,0 +1,141 @@
+# Kodi Media Center language file
+# Addon Name: Rivulet
+# Addon id: plugin.video.rivulet
+# Addon Provider: M0Rf30
+msgid ""
+msgstr ""
+"Project-Id-Version: plugin.video.rivulet\n"
+"Report-Msgid-Bugs-To: https://github.com/M0Rf30/plugin.video.rivulet/issues\n"
+"POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: M0Rf30\n"
+"Language-Team: English (GB)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: en_GB\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgctxt "#30000"
+msgid "Discover"
+msgstr ""
+
+msgctxt "#30001"
+msgid "Search"
+msgstr ""
+
+msgctxt "#30002"
+msgid "Library"
+msgstr ""
+
+msgctxt "#30003"
+msgid "Addons"
+msgstr ""
+
+msgctxt "#30004"
+msgid "Settings"
+msgstr ""
+
+msgctxt "#30010"
+msgid "Install addon from URL"
+msgstr ""
+
+msgctxt "#30011"
+msgid "Remove addon"
+msgstr ""
+
+msgctxt "#30012"
+msgid "Addon installed"
+msgstr ""
+
+msgctxt "#30013"
+msgid "Addon removed"
+msgstr ""
+
+msgctxt "#30014"
+msgid "Invalid addon manifest"
+msgstr ""
+
+msgctxt "#30020"
+msgid "Login to Stremio"
+msgstr ""
+
+msgctxt "#30021"
+msgid "Logout"
+msgstr ""
+
+msgctxt "#30022"
+msgid "Logged in as %s"
+msgstr ""
+
+msgctxt "#30023"
+msgid "Login failed"
+msgstr ""
+
+msgctxt "#30030"
+msgid "No streams found"
+msgstr ""
+
+msgctxt "#30031"
+msgid "Streaming server unavailable"
+msgstr ""
+
+msgctxt "#30040"
+msgid "Next page"
+msgstr ""
+
+msgctxt "#30100"
+msgid "General"
+msgstr ""
+
+msgctxt "#30101"
+msgid "Streaming server"
+msgstr ""
+
+msgctxt "#30102"
+msgid "Server URL"
+msgstr ""
+
+msgctxt "#30103"
+msgid "Run embedded server"
+msgstr ""
+
+msgctxt "#30104"
+msgid "Server binary path"
+msgstr ""
+
+msgctxt "#30105"
+msgid "Account"
+msgstr ""
+
+msgctxt "#30050"
+msgid "Subtitles"
+msgstr ""
+
+msgctxt "#30051"
+msgid "Enable addon subtitles"
+msgstr ""
+
+msgctxt "#30052"
+msgid "Preferred subtitle language"
+msgstr ""
+
+msgctxt "#30060"
+msgid "Download stremio-server binary"
+msgstr ""
+
+msgctxt "#30061"
+msgid "Downloading stremio-server"
+msgstr ""
+
+msgctxt "#30062"
+msgid "Server binary installed (%s)"
+msgstr ""
+
+msgctxt "#30063"
+msgid "Download failed"
+msgstr ""
+
+msgctxt "#30064"
+msgid "No release asset for this platform"
+msgstr ""

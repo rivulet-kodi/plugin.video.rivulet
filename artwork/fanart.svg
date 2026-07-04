@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#070b18"/>
+      <stop offset="0.6" stop-color="#0c1226"/>
+      <stop offset="1" stop-color="#111c3d"/>
+    </linearGradient>
+    <linearGradient id="flow" x1="0" y1="0" x2="1" y2="0.4">
+      <stop offset="0" stop-color="#2dd4bf"/>
+      <stop offset="0.55" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+    <filter id="blur1"><feGaussianBlur stdDeviation="6"/></filter>
+    <filter id="blur2"><feGaussianBlur stdDeviation="22"/></filter>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+
+  <!-- distant soft glow -->
+  <ellipse cx="1500" cy="820" rx="700" ry="380" fill="#38bdf8" opacity="0.06" filter="url(#blur2)"/>
+  <ellipse cx="300" cy="200" rx="500" ry="300" fill="#2dd4bf" opacity="0.05" filter="url(#blur2)"/>
+
+  <!-- braided streams flowing left-to-right, converging bottom-right -->
+  <g fill="none" stroke="url(#flow)" stroke-linecap="round" opacity="0.55" filter="url(#blur1)">
+    <path d="M -60 220 C 400 260, 700 420, 1080 560 C 1380 670, 1650 740, 1980 790" stroke-width="10"/>
+    <path d="M -60 430 C 350 430, 760 540, 1120 620 C 1420 686, 1680 760, 1980 800" stroke-width="16"/>
+    <path d="M -60 660 C 420 640, 820 660, 1180 690 C 1460 714, 1700 770, 1980 810" stroke-width="8"/>
+    <path d="M -60 900 C 460 880, 900 800, 1260 750 C 1520 714, 1740 780, 1980 820" stroke-width="12"/>
+  </g>
+  <!-- a few brighter filaments -->
+  <g fill="none" stroke="url(#flow)" stroke-linecap="round" opacity="0.8">
+    <path d="M -60 500 C 420 480, 840 570, 1200 640 C 1480 694, 1700 766, 1980 804" stroke-width="4"/>
+    <path d="M -60 780 C 480 760, 920 720, 1280 720 C 1540 720, 1760 780, 1980 812" stroke-width="3"/>
+  </g>
+
+  <!-- sparse droplets -->
+  <g fill="#99f6e4">
+    <circle cx="420" cy="470" r="4" opacity="0.7"/>
+    <circle cx="900" cy="590" r="5" opacity="0.55"/>
+    <circle cx="1320" cy="700" r="4" opacity="0.6"/>
+    <circle cx="700" cy="740" r="3" opacity="0.5"/>
+    <circle cx="1560" cy="760" r="6" opacity="0.5"/>
+  </g>
+</svg>
