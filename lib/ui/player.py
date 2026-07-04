@@ -14,7 +14,7 @@ from lib.store import Store
 from lib.stremio.addons import AddonClient
 from lib.stremio.server import ServerClient, UNKNOWN_FILE_IDX, buffered_bytes, guess_file_idx
 from lib.stremio.subtitles import collect_subtitles, sort_subtitles
-from lib.ui.compat import ADDON, L, addon_profile_dir, log, notify
+from lib.ui.compat import ADDON, L, addon_profile_dir, log, notify, setting_bool, setting_int
 
 #: Hard cap on total pre-buffer wait time (contract step 5: "120s elapsed").
 _BUFFER_MAX_WAIT_SECONDS = 120
@@ -54,7 +54,7 @@ def _attach_subtitles(list_item, behavior_hints, stype, sid):
     """Best-effort addon-subtitle lookup: never raises, never blocks
     playback - a broken subtitle addon just means a missing subtitle track.
     """
-    if not ADDON.getSettingBool('subs_enable'):
+    if not setting_bool('subs_enable', True):
         return
     try:
         extra = []
@@ -137,7 +137,12 @@ def _prebuffer_torrent(server, stream, url):
     guess the file index. ANY unexpected error degrades to `(True, url)` -
     a broken pre-buffer must never block playback.
     """
-    if not ADDON.getSettingBool('buffer_enable'):
+    buffer_enable = setting_bool('buffer_enable', True)
+    log(
+        'player: pre-buffer entry: buffer_enable=%s fileIdx=%r' % (buffer_enable, stream.get('fileIdx')),
+        xbmc.LOGINFO,
+    )
+    if not buffer_enable:
         return True, url
 
     info_hash = stream['infoHash']
@@ -167,7 +172,12 @@ def _prebuffer_torrent(server, stream, url):
         else:
             server.create_engine(info_hash)
 
-        configured_target = ADDON.getSettingInt('buffer_mb') * 1024 * 1024
+        buffer_mb = setting_int('buffer_mb', 20, minimum=5)
+        configured_target = buffer_mb * 1024 * 1024
+        log(
+            'player: pre-buffer target: buffer_mb=%d target_bytes=%d' % (buffer_mb, configured_target),
+            xbmc.LOGINFO,
+        )
         while elapsed < _BUFFER_MAX_WAIT_SECONDS:
             if dialog.iscanceled():
                 return False, url
@@ -191,12 +201,17 @@ def _prebuffer_torrent(server, stream, url):
             )
 
             if buffered >= target:
+                log(
+                    'player: pre-buffer complete for %s: buffered=%d target=%d' % (info_hash, buffered, target),
+                    xbmc.LOGINFO,
+                )
                 return True, url
 
             if monitor.waitForAbort(1.0):
                 return False, url
             elapsed += 1
 
+        log('player: pre-buffer timed out for %s after %ds' % (info_hash, elapsed), xbmc.LOGINFO)
         notify(L(30083))
         return True, url
     except Exception as exc:  # noqa: BLE001 - pre-buffer is a bonus, never fatal

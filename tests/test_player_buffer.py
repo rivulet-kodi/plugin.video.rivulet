@@ -92,6 +92,7 @@ class _Env:
         self.monitor_abort_calls = 0
         self.notifications = []
         self.resolved = []
+        self.log_calls = []
 
 
 def _make_fake_xbmc(env):
@@ -100,7 +101,7 @@ def _make_fake_xbmc(env):
     module.LOGINFO = 1
     module.LOGWARNING = 2
     module.LOGERROR = 3
-    module.log = lambda msg, level=0: None
+    module.log = lambda msg, level=0: env.log_calls.append((msg, level))
 
     class Monitor:
         def waitForAbort(self, timeout=None):
@@ -217,10 +218,10 @@ def kodi_stubs():
         for name in _RELOADED_MODULES:
             sys.modules.pop(name, None)
 
-        importlib.import_module('lib.ui.compat')
+        compat = importlib.import_module('lib.ui.compat')
         player = importlib.import_module('lib.ui.player')
 
-        yield SimpleNamespace(env=env, player=player)
+        yield SimpleNamespace(env=env, player=player, compat=compat)
     finally:
         for name, original in saved.items():
             if original is None:
@@ -349,7 +350,7 @@ def test_buffer_disabled_skips_engine_and_resolves_immediately(kodi_stubs, monke
 
 def test_happy_path_polls_until_target_then_resolves_true(kodi_stubs, monkeypatch):
     env = kodi_stubs.env
-    env.addon.settings['buffer_mb'] = 1  # configured_target = 1 MiB = 1048576 bytes
+    env.addon.settings['buffer_mb'] = 1  # clamped up to the 5 MiB floor by setting_int(minimum=5), but streamLen (1 MiB) still caps the effective target below that
     below_target = {'streamProgress': 0.5, 'streamLen': 1048576, 'downloadSpeed': 500000, 'peers': 3}
     at_target = {'streamProgress': 1.0, 'streamLen': 1048576, 'downloadSpeed': 500000, 'peers': 5}
     script = _ServerScript(
@@ -626,3 +627,161 @@ def test_non_torrent_stream_never_engages_prebuffer(kodi_stubs, monkeypatch):
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (10, True)
     assert list_item.path == 'https://example.com/a.mp4'
+
+
+# --- buffer_enable read via raw getSetting() string (resolve-time fix) ----
+
+
+def test_buffer_enable_missing_key_defaults_on_and_polls(kodi_stubs, monkeypatch):
+    """Production bug repro: settings.xml has buffer_enable=true, but at
+    resolve-time `ADDON.getSettingBool()` has been observed to flake and
+    return False - see lib/ui/compat.py's `setting_bool()` docstring.
+    Simulate that as `getSetting('buffer_enable')` coming back '' (as it
+    would for a genuinely missing/unreadable key): pre-buffer must still
+    default ON and poll, not silently vanish before ever logging or
+    creating the dialog.
+    """
+    env = kodi_stubs.env
+    env.addon.settings['buffer_enable'] = ''  # raw getSetting() for a missing/unreadable key
+    at_target = {'streamProgress': 1.0, 'streamLen': 1048576, 'downloadSpeed': 1, 'peers': 1}
+    script = _ServerScript(
+        resolve_url='http://server/x/0',
+        file_stats_results=[at_target],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(14, _torrent_stream(fileIdx=0), 'movie', 'tt14')
+
+    assert script.create_engine_calls == [INFO_HASH]  # engine WAS warmed: pre-buffer ran
+    assert script.file_stats_calls == [(INFO_HASH, 0)]  # AND polled - not skipped
+    assert env.dialog_created == [('STR30080', 'Example Movie')]
+    assert env.dialog_closed_count == 1
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (14, True)
+    assert list_item.path == 'http://server/x/0'
+
+
+def test_buffer_enable_raw_false_string_still_skips(kodi_stubs, monkeypatch):
+    """An explicit user "off" (settings.xml -> raw getSetting() == 'false')
+    must still disable pre-buffering - only a missing/unreadable value
+    defaults ON, never an explicit off.
+    """
+    env = kodi_stubs.env
+    env.addon.settings['buffer_enable'] = 'false'
+    script = _ServerScript(resolve_url='http://server/x/0').install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(15, _torrent_stream(fileIdx=0), 'movie', 'tt15')
+
+    assert script.create_engine_calls == []
+    assert script.file_stats_calls == []
+    assert env.dialog_created == []
+    assert env.dialog_closed_count == 0
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (15, True)
+    assert list_item.path == 'http://server/x/0'
+
+
+# --- LOGINFO traceability: kodi.log must show which branch ran ------------
+
+
+def test_prebuffer_entry_always_logs_enable_and_file_idx_at_loginfo(kodi_stubs, monkeypatch):
+    """The exact fix for the live bug: entry into `_prebuffer_torrent` now
+    logs unconditionally, BEFORE the buffer_enable check short-circuits -
+    so a future kodi.log always shows which branch ran, even when
+    pre-buffering ends up skipped.
+    """
+    env = kodi_stubs.env
+    env.addon.settings['buffer_enable'] = False
+    _ServerScript(resolve_url='http://server/x/0').install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(16, _torrent_stream(fileIdx=26), 'movie', 'tt16')
+
+    loginfo = kodi_stubs.player.xbmc.LOGINFO
+    entries = [msg for msg, level in env.log_calls if level == loginfo]
+    assert any('buffer_enable=False' in msg and 'fileIdx=26' in msg for msg in entries), entries
+
+
+def test_prebuffer_target_and_completion_logged_at_loginfo(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    at_target = {'streamProgress': 1.0, 'streamLen': 1048576, 'downloadSpeed': 1, 'peers': 1}
+    _ServerScript(
+        resolve_url='http://server/x/0', file_stats_results=[at_target],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(17, _torrent_stream(fileIdx=0), 'movie', 'tt17')
+
+    loginfo = kodi_stubs.player.xbmc.LOGINFO
+    entries = [msg for msg, level in env.log_calls if level == loginfo]
+    assert any('buffer_enable=True' in msg and 'fileIdx=0' in msg for msg in entries), entries
+    assert any('buffer_mb=' in msg and 'target_bytes=' in msg for msg in entries), entries
+    assert any('pre-buffer complete' in msg for msg in entries), entries
+
+
+def test_prebuffer_timeout_logged_at_loginfo(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    _ServerScript(
+        resolve_url='http://server/x/0',
+        file_stats_results=[{'streamProgress': 0.01, 'streamLen': 1000, 'downloadSpeed': 100, 'peers': 1}],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(18, _torrent_stream(fileIdx=0), 'movie', 'tt18')
+
+    loginfo = kodi_stubs.player.xbmc.LOGINFO
+    entries = [msg for msg, level in env.log_calls if level == loginfo]
+    assert any('pre-buffer timed out' in msg for msg in entries), entries
+
+
+# --- compat.setting_bool()/setting_int(): raw-string parsing, never raises -
+
+
+@pytest.mark.parametrize('raw,expected', [
+    ('true', True), ('True', True), ('1', True), ('yes', True), ('on', True),
+    ('false', False), ('False', False), ('0', False), ('no', False), ('off', False),
+])
+def test_setting_bool_parses_recognized_strings(kodi_stubs, raw, expected):
+    kodi_stubs.env.addon.settings['buffer_enable'] = raw
+    assert kodi_stubs.compat.setting_bool('buffer_enable', not expected) is expected
+
+
+@pytest.mark.parametrize('raw', ['', 'maybe', 'null', '  '])
+def test_setting_bool_falls_back_to_default_on_unreadable(kodi_stubs, raw):
+    kodi_stubs.env.addon.settings['buffer_enable'] = raw
+    assert kodi_stubs.compat.setting_bool('buffer_enable', True) is True
+    assert kodi_stubs.compat.setting_bool('buffer_enable', False) is False
+
+
+def test_setting_bool_missing_key_falls_back_to_default(kodi_stubs):
+    del kodi_stubs.env.addon.settings['buffer_enable']
+    assert kodi_stubs.compat.setting_bool('buffer_enable', True) is True
+    assert kodi_stubs.compat.setting_bool('buffer_enable', False) is False
+
+
+def test_setting_bool_never_raises_when_getsetting_raises(kodi_stubs, monkeypatch):
+    def boom(key):
+        raise RuntimeError('kodi settings db locked')
+
+    monkeypatch.setattr(kodi_stubs.env.addon, 'getSetting', boom)
+    assert kodi_stubs.compat.setting_bool('buffer_enable', True) is True
+
+
+def test_setting_int_parses_and_falls_back_to_default(kodi_stubs):
+    kodi_stubs.env.addon.settings['buffer_mb'] = '42'
+    assert kodi_stubs.compat.setting_int('buffer_mb', 20) == 42
+    kodi_stubs.env.addon.settings['buffer_mb'] = ''
+    assert kodi_stubs.compat.setting_int('buffer_mb', 20) == 20
+    kodi_stubs.env.addon.settings['buffer_mb'] = 'not-a-number'
+    assert kodi_stubs.compat.setting_int('buffer_mb', 20) == 20
+
+
+def test_setting_int_clamps_to_minimum(kodi_stubs):
+    kodi_stubs.env.addon.settings['buffer_mb'] = '1'
+    assert kodi_stubs.compat.setting_int('buffer_mb', 20, minimum=5) == 5
+    kodi_stubs.env.addon.settings['buffer_mb'] = '10'
+    assert kodi_stubs.compat.setting_int('buffer_mb', 20, minimum=5) == 10
+
+
+def test_setting_int_never_raises_when_getsetting_raises(kodi_stubs, monkeypatch):
+    def boom(key):
+        raise RuntimeError('kodi settings db locked')
+
+    monkeypatch.setattr(kodi_stubs.env.addon, 'getSetting', boom)
+    assert kodi_stubs.compat.setting_int('buffer_mb', 20) == 20

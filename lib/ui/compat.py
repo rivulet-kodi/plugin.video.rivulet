@@ -59,6 +59,51 @@ def notify(msg, heading=None, icon=None, time_ms=4000):
     )
 
 
+def setting_bool(key, default):
+    """Read a boolean addon setting via the raw `getSetting()` string.
+
+    `xbmcaddon.Addon.getSettingBool()` has been observed, live, to
+    spuriously return False for a setting settings.xml genuinely has as
+    "true" - specifically when read at torrent pre-buffer time, inside a
+    setResolvedUrl-bound call, often right after an addon upgrade (see
+    lib/ui/player.py's `_prebuffer_torrent()`). Parsing the raw setting
+    string ourselves sidesteps whatever internal typing/caching quirk
+    causes that. Any empty/missing/unreadable/unrecognized value falls
+    back to `default` - this never raises and never silently goes False.
+    """
+    try:
+        raw = ADDON.getSetting(key)
+    except Exception:  # noqa: BLE001 - a broken setting read must never raise
+        return default
+    raw = (raw or '').strip().lower()
+    if raw in ('true', '1', 'yes', 'on'):
+        return True
+    if raw in ('false', '0', 'no', 'off'):
+        return False
+    return default
+
+
+def setting_int(key, default, minimum=None):
+    """Read an int addon setting via the raw `getSetting()` string.
+
+    Same rationale as `setting_bool()`: sidesteps `getSettingInt()`
+    misbehaving the same way, and never raises. An empty/missing/
+    unparseable value falls back to `default`; when `minimum` is given,
+    the result is clamped up to it.
+    """
+    try:
+        raw = ADDON.getSetting(key)
+    except Exception:  # noqa: BLE001 - a broken setting read must never raise
+        return default
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None and value < minimum:
+        return minimum
+    return value
+
+
 _KODI_MAJOR = None
 
 
