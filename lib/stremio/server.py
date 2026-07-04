@@ -117,21 +117,24 @@ class ServerClient:
             return None
         return self.torrent_url(info_hash, UNKNOWN_FILE_IDX, query.get('tr', []))
 
-    def create_engine(self, info_hash):
+    def create_engine(self, info_hash, timeout=100):
         """GET `{base}/{infoHash}/create` - start/attach the torrent engine.
 
         Per stremio-server-go's handleCreate (internal/api/api.go:697-750,
         docs/swagger.yaml `/{infoHash}/create`), the server calls
         EnsureEngine + Ready() with a 90s timeout blocking until torrent
         metadata is available, then returns `types.Stats` including
-        `guessedFileIdx` (set when the server picked a best file). Uses a
-        100s client timeout to stay above the server's 90s Ready() budget.
+        `guessedFileIdx` (set when the server picked a best file).
+        Defaults to a 100s client timeout (above the server's 90s Ready()
+        budget); callers polling in a cancellable UI loop pass a short
+        timeout instead so a slow /create can't freeze the loop between
+        cancel checks (each timeout just re-polls the same warming engine).
         """
         if requests is None:
             raise ServerError('the "requests" package is required for ServerClient')
         url = '%s/%s/create' % (self.base_url, str(info_hash).lower())
         try:
-            resp = requests.get(url, timeout=100)
+            resp = requests.get(url, timeout=timeout)
             resp.raise_for_status()
         except requests.RequestException as exc:
             raise ServerError('GET %s failed: %s' % (url, exc))

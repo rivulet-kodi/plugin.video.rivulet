@@ -16,8 +16,29 @@ from lib.stremio.server import ServerClient, UNKNOWN_FILE_IDX, guess_file_idx
 from lib.stremio.subtitles import collect_subtitles, sort_subtitles
 from lib.ui.compat import ADDON, L, addon_profile_dir, log, notify, setting_bool, setting_int
 
-#: Hard cap on total pre-buffer wait time (contract step 5: "120s elapsed").
-_BUFFER_MAX_WAIT_SECONDS = 120
+#: Bounded (connect, read) timeouts for the pre-buffer network calls. The
+#: SHORT read timeout is what makes the "Preparing stream" dialog
+#: cancellable: on a stalled/dead-swarm read the socket unblocks within a
+#: few seconds so the loop can recheck dialog.iscanceled(), instead of the
+#: whole UI freezing for a 60s read (the original "can't cancel" bug -
+#: kodi.log showed three back-to-back 60s freezes on a dead torrent). A
+#: read that keeps receiving bytes resets its own clock, so this never
+#: aborts a genuinely-progressing (even very slow) download.
+_FRONT_TIMEOUT = (3.05, 5)
+_METADATA_TIMEOUT = (3.05, 8)
+
+#: Pause between retry attempts; also the abort-poll interval.
+_ATTEMPT_PAUSE_SECONDS = 2.0
+
+#: Retry-attempt budgets before giving up. Each attempt is bounded by the
+#: short timeouts above (so cancel is always seen within a few seconds);
+#: these caps are just the give-up backstop for a genuinely dead swarm.
+_MAX_METADATA_ATTEMPTS = 60
+_MAX_FRONT_ATTEMPTS = 60
+
+#: Seconds to wait for a not-yet-reachable streaming server to come up
+#: (e.g. one the background service is still launching) before giving up.
+_SERVER_WAIT_ATTEMPTS = 5
 
 #: Minimum bytes streamed from the file's FRONT (offset 0) before Kodi's
 #: player can reliably probe the container header and start playback (see
@@ -92,35 +113,41 @@ def _human_size(num_bytes):
     return '%.1f GB' % value
 
 
-def _await_file_idx(server, stream, info_hash, url, dialog, monitor, elapsed):
+def _await_file_idx(server, stream, info_hash, url, dialog, monitor):
     """Poll `GET /create` until stremio-server-go resolves a file index for
-    streams with no fileIdx of their own, sharing `elapsed`/`dialog`/
-    `monitor` with the caller's per-file byte-poll loop so both phases
-    spend one combined `_BUFFER_MAX_WAIT_SECONDS` budget rather than one
-    each.
+    streams with no fileIdx of their own, sharing `dialog`/`monitor` with
+    the caller so the whole flow stays cancellable.
 
     Live-verified gap this closes: against stremio-server-go v0.8.5,
     `/create` returns BEFORE metadata resolves and its response never
     gains `guessedFileIdx` later - only a `files` array once metadata
     lands (see `guess_file_idx()`). Older/other server builds that DO
-    emit `guessedFileIdx` up front resolve on the very first iteration
-    below, so this costs them nothing.
+    emit `guessedFileIdx` up front resolve on the very first iteration.
 
-    Returns `(file_idx, url, elapsed, proceed)`. `proceed` is False only
-    on cancellation (caller must resolve False, matching the byte-poll
-    loop's cancel semantics). When the budget runs out with no usable
-    metadata, `file_idx` is UNKNOWN_FILE_IDX and `proceed` is True - the
-    caller then falls back to "proceed without polling".
+    Each poll uses a SHORT client timeout (`_METADATA_TIMEOUT`) so a
+    still-warming `/create` cannot freeze the loop between cancel checks -
+    a timed-out poll just re-hits the same warming engine next iteration.
+
+    Returns `(file_idx, url, proceed)`. `proceed` is False only on
+    cancellation (caller must resolve False). When the budget runs out
+    with no usable metadata, `file_idx` is UNKNOWN_FILE_IDX and `proceed`
+    is True - the caller then falls back to "proceed without polling".
     """
-    while elapsed < _BUFFER_MAX_WAIT_SECONDS:
+    for _attempt in range(_MAX_METADATA_ATTEMPTS):
         if dialog.iscanceled():
-            return UNKNOWN_FILE_IDX, url, elapsed, False
+            return UNKNOWN_FILE_IDX, url, False
 
-        stats = server.create_engine(info_hash)
+        try:
+            stats = server.create_engine(info_hash, timeout=_METADATA_TIMEOUT)
+        except Exception as exc:  # noqa: BLE001 - a slow/failed poll just means "try again"
+            log('player: metadata poll failed for %s: %r' % (info_hash, exc), xbmc.LOGWARNING)
+            stats = None
+
         idx = guess_file_idx(stats)
         if idx is not None:
-            rebuilt = server.torrent_url(stream['infoHash'], idx, stream.get('announce') or [])
-            return idx, rebuilt, elapsed, True
+            trackers = stream.get('announce') or stream.get('sources') or []
+            rebuilt = server.torrent_url(stream['infoHash'], idx, trackers)
+            return idx, rebuilt, True
 
         peers = (stats or {}).get('peers')
         message = L(30080)
@@ -130,21 +157,21 @@ def _await_file_idx(server, stream, info_hash, url, dialog, monitor, elapsed):
         dialog.update(0, message)
 
         if monitor.waitForAbort(1.0):
-            return UNKNOWN_FILE_IDX, url, elapsed, False
-        elapsed += 1
+            return UNKNOWN_FILE_IDX, url, False
 
-    return UNKNOWN_FILE_IDX, url, elapsed, True
+    return UNKNOWN_FILE_IDX, url, True
 
 
 def _prebuffer_torrent(server, stream, url):
-    """Warm the torrent engine and show progress before playback starts.
+    """Warm the torrent engine and show cancellable progress before playback.
 
     Only called for torrent streams (`infoHash` present) once the server is
     already known available. Returns `(proceed, url)`: `proceed` is False
-    only when the user cancelled the dialog (caller must resolve False);
-    `url` is the original url, or the rebuilt one when the server had to
-    guess the file index. ANY unexpected error degrades to `(True, url)` -
-    a broken pre-buffer must never block playback.
+    when the user cancelled OR no usable front data could be obtained
+    (caller must resolve False); `url` is the original url, or the rebuilt
+    one when the server had to guess the file index. ANY unexpected error
+    degrades to `(True, url)` - a broken pre-buffer must never block
+    playback.
     """
     buffer_enable = setting_bool('buffer_enable', True)
     log(
@@ -160,26 +187,29 @@ def _prebuffer_torrent(server, stream, url):
     dialog = xbmcgui.DialogProgress()
     try:
         dialog.create(L(30080), title)
+        monitor = xbmc.Monitor()
 
         file_idx = stream.get('fileIdx')
         if file_idx is None:
             file_idx = UNKNOWN_FILE_IDX
-
-        monitor = xbmc.Monitor()
-        elapsed = 0
         if file_idx == UNKNOWN_FILE_IDX:
-            file_idx, url, elapsed, proceed = _await_file_idx(
-                server, stream, info_hash, url, dialog, monitor, elapsed
-            )
+            file_idx, url, proceed = _await_file_idx(server, stream, info_hash, url, dialog, monitor)
             if not proceed:
                 return False, url
             if file_idx == UNKNOWN_FILE_IDX:
-                # Metadata never arrived within budget; nothing to poll
-                # per-file stats for, so just start playback.
+                # Metadata never arrived within budget; nothing to stream
+                # the front of, so just start playback.
                 notify(L(30083))
                 return True, url
         else:
-            server.create_engine(info_hash)
+            # Warm the engine, but bounded: a cold /create would otherwise
+            # block for its full timeout with no cancel check. The front
+            # reads below drive the engine anyway, so a failed/slow warm is
+            # non-fatal.
+            try:
+                server.create_engine(info_hash, timeout=_METADATA_TIMEOUT)
+            except Exception as exc:  # noqa: BLE001 - front reads drive the engine regardless
+                log('player: engine warm failed for %s: %r (continuing)' % (info_hash, exc), xbmc.LOGWARNING)
 
         buffer_mb = setting_int('buffer_mb', 20, minimum=5)
         target = buffer_mb * 1024 * 1024
@@ -188,23 +218,21 @@ def _prebuffer_torrent(server, stream, url):
             xbmc.LOGINFO,
         )
 
-        # Front-priming readiness loop. Live-verified bug this replaces:
-        # polling aggregate file_stats()/buffered_bytes() can report
-        # megabytes "buffered" while the file's FRONT (offset 0, where
-        # ffmpeg's container-header probe reads from) was never actually
-        # downloaded - torrent pieces arrive out of order. Streaming the
-        # front directly both drives the server's own front-prioritization
-        # (NewReader -> primeBoundary/warmMoov) and proves playback will
-        # really start. A dead/unseeded torrent now fails honestly (30084)
-        # instead of handing Kodi a URL that produces a cryptic
-        # CURLE_PARTIAL_FILE / "error probing input format" error.
-        while elapsed < _BUFFER_MAX_WAIT_SECONDS:
+        # Front-priming readiness loop. Streams the file FRONT (offset 0,
+        # where ffmpeg's container probe reads) directly rather than
+        # trusting aggregate download stats, which can report megabytes
+        # "buffered" from out-of-order pieces while the front is still
+        # missing (the live CURLE_PARTIAL_FILE / "error probing input
+        # format" bug). Short per-read timeout keeps the dialog cancellable;
+        # a genuinely dead swarm fails honestly (30084) after the budget
+        # rather than hanging or handing Kodi a doomed URL.
+        for _attempt in range(_MAX_FRONT_ATTEMPTS):
             if dialog.iscanceled():
                 return False, url
 
             got = 0
             try:
-                for chunk_len in server.iter_front(info_hash, file_idx, target):
+                for chunk_len in server.iter_front(info_hash, file_idx, target, timeout=_FRONT_TIMEOUT):
                     got += chunk_len
                     percent = min(100, got * 100 // target) if target else 100
                     dialog.update(percent, L(30081) % (_human_size(got), _human_size(target)))
@@ -222,12 +250,12 @@ def _prebuffer_torrent(server, stream, url):
                 )
                 return True, url
 
-            if monitor.waitForAbort(2.0):
+            if monitor.waitForAbort(_ATTEMPT_PAUSE_SECONDS):
                 return False, url
-            elapsed += 2
 
         log(
-            'player: pre-buffer timed out for %s after %ds with no usable front data' % (info_hash, elapsed),
+            'player: pre-buffer timed out for %s after %d attempts with no usable front data'
+            % (info_hash, _MAX_FRONT_ATTEMPTS),
             xbmc.LOGINFO,
         )
         notify(L(30084))
@@ -239,12 +267,34 @@ def _prebuffer_torrent(server, stream, url):
         dialog.close()
 
 
+def _wait_for_server(server):
+    """Return True as soon as the streaming server answers, waiting briefly
+    for a not-yet-reachable instance (e.g. one the background service is
+    still launching) to come up rather than failing instantly on the first
+    probe. Cancellable via the dialog or a Kodi shutdown.
+    """
+    if server.is_available():
+        return True
+    monitor = xbmc.Monitor()
+    dialog = xbmcgui.DialogProgress()
+    try:
+        dialog.create(L(30080), L(30031))
+        for _attempt in range(_SERVER_WAIT_ATTEMPTS):
+            if dialog.iscanceled() or monitor.waitForAbort(1.0):
+                return False
+            if server.is_available():
+                return True
+        return False
+    finally:
+        dialog.close()
+
+
 def play(handle, stream, stype, sid):
     """Resolve `stream` (Stremio Stream object for content `stype`/`sid`)."""
     stream = stream or {}
 
     server = _server_client()
-    if any(key in stream for key in _SERVER_DEPENDENT_KEYS) and not server.is_available():
+    if any(key in stream for key in _SERVER_DEPENDENT_KEYS) and not _wait_for_server(server):
         notify(L(30031))
         xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())
         return

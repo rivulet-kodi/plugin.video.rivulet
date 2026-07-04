@@ -269,11 +269,12 @@ class _ServerScript:
     entry, matching this file's other *_results scripting conventions.
     """
 
-    def __init__(self, *, available=True, resolve_url='http://server/x/0',
+    def __init__(self, *, available=True, available_results=None, resolve_url='http://server/x/0',
                  create_engine_result=None, create_engine_results=None, create_engine_error=None,
                  iter_front_attempts=None,
                  torrent_url_result=None):
         self.available = available
+        self.available_results = list(available_results or [])
         self.resolve_url = resolve_url
         self.create_engine_result = {} if create_engine_result is None else create_engine_result
         self.create_engine_results = list(create_engine_results or [])
@@ -293,13 +294,17 @@ class _ServerScript:
                 self.base_url = base_url
 
             def is_available(self):
+                idx = script.is_available_calls
                 script.is_available_calls += 1
+                if script.available_results:
+                    results = script.available_results
+                    return results[idx] if idx < len(results) else results[-1]
                 return script.available
 
             def resolve_stream(self, stream):
                 return script.resolve_url
 
-            def create_engine(self, info_hash):
+            def create_engine(self, info_hash, timeout=None):
                 script.create_engine_calls.append(info_hash)
                 if script.create_engine_error is not None:
                     raise script.create_engine_error
@@ -483,20 +488,27 @@ def test_timeout_with_no_front_data_notifies_30084_and_resolves_false(kodi_stubs
     assert list_item.path == ''
 
 
-# --- create_engine() exception degrades to immediate play ------------------
+# --- engine-warm failure (known fileIdx path) is non-fatal -----------------
 
 
-def test_create_engine_exception_degrades_to_resolve_true(kodi_stubs, monkeypatch):
+def test_engine_warm_exception_is_nonfatal_front_streaming_still_proceeds(kodi_stubs, monkeypatch):
+    """When the fileIdx is already known, create_engine() is only a best-
+    effort warm - the front reads drive the engine regardless. A failing
+    warm must be logged and swallowed, NOT abort pre-buffer, so front
+    streaming still runs and succeeds on its own.
+    """
     env = kodi_stubs.env
     script = _ServerScript(
         resolve_url='http://server/x/0',
         create_engine_error=RuntimeError('engine boom'),
+        iter_front_attempts=[[600_000]],
     ).install(monkeypatch, kodi_stubs.player)
 
     kodi_stubs.player.play(6, _torrent_stream(fileIdx=0), 'movie', 'tt6')
 
-    assert script.create_engine_calls == [INFO_HASH]
-    assert script.iter_front_calls == []
+    assert script.create_engine_calls == [INFO_HASH]  # warm was attempted
+    assert any(level == kodi_stubs.player.xbmc.LOGWARNING for _, level in env.log_calls)
+    assert script.iter_front_calls == [(INFO_HASH, 0, DEFAULT_TARGET_BYTES)]  # AND front streaming proceeded
     assert env.dialog_closed_count == 1
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (6, True)
@@ -602,8 +614,8 @@ def test_metadata_never_resolves_exhausts_budget_and_proceeds(kodi_stubs, monkey
 
     kodi_stubs.player.play(9, _torrent_stream(), 'movie', 'tt9')  # fileIdx missing -> UNKNOWN_FILE_IDX
 
-    assert len(script.create_engine_calls) == 120  # _BUFFER_MAX_WAIT_SECONDS; never resolves an index
-    assert env.monitor_abort_calls == 120
+    assert len(script.create_engine_calls) == 60  # _MAX_METADATA_ATTEMPTS; never resolves an index
+    assert env.monitor_abort_calls == 60
     assert script.torrent_url_calls == []
     assert script.iter_front_calls == []  # never reached per-file front streaming
     assert [msg for _, msg, _, _ in env.notifications] == ['STR30083']
@@ -807,6 +819,65 @@ def test_prebuffer_timeout_logged_at_loginfo(kodi_stubs, monkeypatch):
     loginfo = kodi_stubs.player.xbmc.LOGINFO
     entries = [msg for msg, level in env.log_calls if level == loginfo]
     assert any('pre-buffer timed out' in msg for msg in entries), entries
+
+
+# --- _wait_for_server: brief cancellable wait for the streaming server ----
+
+
+def test_server_available_immediately_no_wait_dialog(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    script = _ServerScript(
+        available=True, resolve_url='http://server/x/0', iter_front_attempts=[[600_000]],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(20, _torrent_stream(fileIdx=0), 'movie', 'tt20')
+
+    assert script.is_available_calls == 1  # single probe, no wait loop
+    handle, succeeded, _ = _resolved_one(env)
+    assert (handle, succeeded) == (20, True)
+
+
+def test_server_comes_up_during_wait_then_proceeds(kodi_stubs, monkeypatch):
+    """A server the background service is still launching should be waited
+    for briefly rather than failing on the first probe."""
+    env = kodi_stubs.env
+    script = _ServerScript(
+        available_results=[False, False, True],  # up on the third probe
+        resolve_url='http://server/x/0',
+        iter_front_attempts=[[600_000]],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(21, _torrent_stream(fileIdx=0), 'movie', 'tt21')
+
+    assert script.is_available_calls == 3  # kept probing until it came up
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (21, True)
+    assert list_item.path == 'http://server/x/0'
+
+
+def test_server_never_comes_up_notifies_unavailable_and_resolves_false(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    script = _ServerScript(available=False).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(22, _torrent_stream(fileIdx=0), 'movie', 'tt22')
+
+    assert script.create_engine_calls == []  # never entered pre-buffer
+    assert [msg for _, msg, _, _ in env.notifications] == ['STR30031']
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (22, False)
+    assert list_item.path == ''
+
+
+def test_server_wait_cancelled_resolves_false(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    env.cancel = True
+    script = _ServerScript(available=False).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(23, _torrent_stream(fileIdx=0), 'movie', 'tt23')
+
+    assert script.create_engine_calls == []
+    handle, succeeded, _ = _resolved_one(env)
+    assert (handle, succeeded) == (23, False)
 
 
 # --- compat.setting_bool()/setting_int(): raw-string parsing, never raises -
