@@ -246,7 +246,7 @@ def home():
     if store.get_auth():
         items.append(_folder_item(L(30002), router.url_for('library'), compat.addon_media_path('library.png')))
     items.append(_folder_item(L(30003), router.url_for('addons'), compat.addon_media_path('addons.png')))
-    items.append(_folder_item(L(30004), router.url_for('settings'), compat.addon_media_path('settings.png')))
+    items.append(_action_item(L(30004), router.url_for('settings'), compat.addon_media_path('settings.png')))
     xbmcplugin.addDirectoryItems(handle, items, len(items))
     xbmcplugin.setContent(handle, 'files')
     xbmcplugin.setPluginCategory(handle, compat.ADDON_NAME)

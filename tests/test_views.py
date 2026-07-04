@@ -356,7 +356,9 @@ def test_home_without_auth_lists_four_entries_no_library(load_views):
         'resources/media/settings.png',
     ]
     for (_, li, is_folder), suffix in zip(items, suffixes):
-        assert is_folder is True
+        # every entry navigates as a folder except Settings, which runs
+        # in place (openSettings) and must NOT trigger GetDirectory
+        assert is_folder is (not suffix.endswith('settings.png'))
         assert li.art['icon'].endswith(suffix)
         assert li.art['thumb'].endswith(suffix)
         assert li.art['fanart'] == compat.addon_fanart()
