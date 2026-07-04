@@ -21,16 +21,16 @@
   <ellipse cx="300" cy="200" rx="500" ry="300" fill="#2dd4bf" opacity="0.05" filter="url(#blur2)"/>
 
   <!-- braided streams flowing left-to-right, converging bottom-right -->
-  <g fill="none" stroke="url(#flow)" stroke-linecap="round" opacity="0.55" filter="url(#blur1)">
-    <path d="M -60 220 C 400 260, 700 420, 1080 560 C 1380 670, 1650 740, 1980 790" stroke-width="10"/>
-    <path d="M -60 430 C 350 430, 760 540, 1120 620 C 1420 686, 1680 760, 1980 800" stroke-width="16"/>
-    <path d="M -60 660 C 420 640, 820 660, 1180 690 C 1460 714, 1700 770, 1980 810" stroke-width="8"/>
-    <path d="M -60 900 C 460 880, 900 800, 1260 750 C 1520 714, 1740 780, 1980 820" stroke-width="12"/>
+  <g fill="none" stroke="url(#flow)" stroke-linecap="round" opacity="0.85" filter="url(#blur1)">
+    <path d="M -60 220 C 400 260, 700 420, 1080 560 C 1380 670, 1650 740, 1980 790" stroke-width="16"/>
+    <path d="M -60 430 C 350 430, 760 540, 1120 620 C 1420 686, 1680 760, 1980 800" stroke-width="24"/>
+    <path d="M -60 660 C 420 640, 820 660, 1180 690 C 1460 714, 1700 770, 1980 810" stroke-width="13"/>
+    <path d="M -60 900 C 460 880, 900 800, 1260 750 C 1520 714, 1740 780, 1980 820" stroke-width="18"/>
   </g>
   <!-- a few brighter filaments -->
-  <g fill="none" stroke="url(#flow)" stroke-linecap="round" opacity="0.8">
-    <path d="M -60 500 C 420 480, 840 570, 1200 640 C 1480 694, 1700 766, 1980 804" stroke-width="4"/>
-    <path d="M -60 780 C 480 760, 920 720, 1280 720 C 1540 720, 1760 780, 1980 812" stroke-width="3"/>
+  <g fill="none" stroke="url(#flow)" stroke-linecap="round" opacity="1">
+    <path d="M -60 500 C 420 480, 840 570, 1200 640 C 1480 694, 1700 766, 1980 804" stroke-width="6"/>
+    <path d="M -60 780 C 480 760, 920 720, 1280 720 C 1540 720, 1760 780, 1980 812" stroke-width="5"/>
   </g>
 
   <!-- sparse droplets -->

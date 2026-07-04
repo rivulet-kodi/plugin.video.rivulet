@@ -41,6 +41,42 @@
                 </setting>
             </group>
         </category>
+        <category id="playback" label="30070">
+            <group id="1">
+                <setting id="buffer_enable" type="boolean" label="30071">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="buffer_mb" type="integer" label="30072">
+                    <level>0</level>
+                    <default>20</default>
+                    <constraints>
+                        <minimum>5</minimum>
+                        <step>5</step>
+                        <maximum>100</maximum>
+                    </constraints>
+                    <control type="slider" format="integer">
+                        <popup>false</popup>
+                    </control>
+                </setting>
+                <setting id="stream_sort" type="string" label="30073">
+                    <level>0</level>
+                    <default>quality</default>
+                    <constraints>
+                        <options>
+                            <option label="30074">quality</option>
+                            <option label="30075">size</option>
+                            <option label="30076">seeders</option>
+                        </options>
+                        <allowempty>false</allowempty>
+                    </constraints>
+                    <control type="list" format="string">
+                        <heading>30073</heading>
+                    </control>
+                </setting>
+            </group>
+        </category>
         <category id="subtitles" label="30050">
             <group id="1">
                 <setting id="subs_enable" type="boolean" label="30051">

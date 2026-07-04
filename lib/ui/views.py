@@ -7,6 +7,7 @@ invoked via RunPlugin from inside another listing, finish with
 _finish_action() instead.
 """
 import re
+import sys
 from functools import wraps
 from urllib.parse import parse_qsl
 
@@ -15,6 +16,7 @@ import xbmcgui
 import xbmcplugin
 
 from lib.stremio import addons as addons_lib
+from lib.stremio import streaminfo
 from lib.stremio.addons import AddonClient, AddonError
 from lib.stremio.api import ApiError, StremioAPI
 from lib.store import Store
@@ -63,11 +65,31 @@ def _finish_action(handle, refresh=True):
         xbmc.executebuiltin('Container.Refresh')
 
 
-def _folder_item(label, url, icon=None):
+def _folder_item(label, url, icon=None, fanart=None):
     li = xbmcgui.ListItem(label=label)
+    art = {'fanart': fanart or compat.addon_fanart()}
     if icon:
-        li.setArt({'icon': icon, 'thumb': icon})
+        art.update({'icon': icon, 'thumb': icon})
+    li.setArt(art)
     return (url, li, True)
+
+
+def _action_item(label, url, icon=None):
+    """A RunPlugin-style action row (login/logout/install/...): gets art
+    like any other row but keeps isFolder=False, so Kodi runs it in place
+    instead of pushing it onto the navigation stack."""
+    li = xbmcgui.ListItem(label=label)
+    art = {'fanart': compat.addon_fanart()}
+    if icon:
+        art.update({'icon': icon, 'thumb': icon})
+    li.setArt(art)
+    return (url, li, False)
+
+
+def _row_fanart(background=None):
+    """Fanart for a directory row: addon/catalog-provided background art
+    when there is one, else Rivulet's own bundled fanart."""
+    return background or compat.addon_fanart()
 
 
 def _content_for_type(ctype):
@@ -124,15 +146,12 @@ def _meta_item(meta, ctype=None):
     name = meta.get('name') or meta.get('id') or '?'
     li = xbmcgui.ListItem(label=name)
 
-    art = {}
     poster = meta.get('poster')
     background = meta.get('background') or meta.get('logo')
+    art = {'fanart': _row_fanart(background)}
     if poster:
         art.update({'poster': poster, 'thumb': poster, 'icon': poster})
-    if background:
-        art['fanart'] = background
-    if art:
-        li.setArt(art)
+    li.setArt(art)
 
     info = {
         'title': name,
@@ -150,25 +169,35 @@ def _meta_item(meta, ctype=None):
     return (url, li, True)
 
 
-def _stream_item(addon_name, stream, stype, sid):
-    stream = stream or {}
-    name = stream.get('name')
-    title = stream.get('title')
-    if name and title and name != title:
-        label = '%s - %s' % (name, title)
-    else:
-        label = name or title or addon_name
+def _stream_item(info, stream, stype, sid, poster=None, title=None, logo=None):
+    """Build a (url, ListItem, False) tuple for one parsed stream result.
 
-    li = xbmcgui.ListItem(label='[%s] %s' % (addon_name, label))
+    `poster`/`title` come from the calling meta/videos view (poster
+    continuity); `logo` is that stream's addon manifest logo, used only
+    when the caller passed no poster of its own.
+    """
+    stream = stream or {}
+    label = streaminfo.format_label(info) or info.get('raw') or info.get('addon') or '?'
+    # Defensive: format_label() never emits '\n', but never trust upstream
+    # data enough to let a stray newline wrap a Kodi list row onto two lines.
+    label = label.replace('\r', ' ').replace('\n', ' ')
+
+    li = xbmcgui.ListItem(label=label)
     li.setProperty('IsPlayable', 'true')
+
+    thumb = poster or logo or 'DefaultVideo.png'
+    li.setArt({'icon': thumb, 'thumb': thumb, 'fanart': compat.addon_fanart()})
+
     set_video_info(li, {
-        'title': label,
-        'plot': stream.get('description') or title or '',
+        'title': title or info.get('title') or label,
+        'plot': streaminfo.format_plot(info),
         'mediatype': 'episode' if stype == 'series' else 'movie',
     })
     behavior_hints = stream.get('behaviorHints') or {}
     if behavior_hints.get('videoSize'):
         li.setProperty('size', str(behavior_hints['videoSize']))
+    elif info.get('size_bytes'):
+        li.setProperty('size', str(info['size_bytes']))
 
     url = router.url_for('play', stream=router.encode_stream(stream), type=stype, id=sid)
     return (url, li, False)
@@ -211,15 +240,16 @@ def home():
     handle = router.ADDON_HANDLE
     store = _get_store()
     items = [
-        _folder_item(L(30000), router.url_for('discover'), 'DefaultAddonsList.png'),
-        _folder_item(L(30001), router.url_for('search'), 'DefaultAddonSearch.png'),
+        _folder_item(L(30000), router.url_for('discover'), compat.addon_media_path('discover.png')),
+        _folder_item(L(30001), router.url_for('search'), compat.addon_media_path('search.png')),
     ]
     if store.get_auth():
-        items.append(_folder_item(L(30002), router.url_for('library'), 'DefaultVideoPlaylists.png'))
-    items.append(_folder_item(L(30003), router.url_for('addons'), 'DefaultAddonNone.png'))
-    items.append(_folder_item(L(30004), router.url_for('settings'), 'DefaultAddonService.png'))
+        items.append(_folder_item(L(30002), router.url_for('library'), compat.addon_media_path('library.png')))
+    items.append(_folder_item(L(30003), router.url_for('addons'), compat.addon_media_path('addons.png')))
+    items.append(_folder_item(L(30004), router.url_for('settings'), compat.addon_media_path('settings.png')))
     xbmcplugin.addDirectoryItems(handle, items, len(items))
     xbmcplugin.setContent(handle, 'files')
+    xbmcplugin.setPluginCategory(handle, compat.ADDON_NAME)
     xbmcplugin.endOfDirectory(handle)
 
 
@@ -239,8 +269,10 @@ def discover():
         label = '%s: %s (%s)' % (addon_name, catalog_name, catalog.get('type'))
         li = xbmcgui.ListItem(label=label)
         logo = manifest.get('logo')
+        art = {'fanart': _row_fanart(manifest.get('background'))}
         if logo:
-            li.setArt({'icon': logo, 'thumb': logo})
+            art.update({'icon': logo, 'thumb': logo})
+        li.setArt(art)
         url = router.url_for(
             'catalog', transport=transport_url, type=catalog.get('type'), id=catalog.get('id')
         )
@@ -280,7 +312,7 @@ def catalog(transport, ctype, cid, extra=None):
             next_pairs.append(('skip', str(current_skip + len(metas))))
             next_extra = addons_lib.encode_extra(next_pairs)
             next_url = router.url_for('catalog', transport=transport, type=ctype, id=cid, extra=next_extra)
-            items.append((next_url, xbmcgui.ListItem(label=L(30040)), True))
+            items.append(_folder_item(L(30040), next_url, 'DefaultFolder.png'))
 
     if not items:
         notify(L(30030))
@@ -334,7 +366,7 @@ def meta(stype, sid):
     if not videos:
         # Movies (and channel/tv/anything without a video list) go straight
         # to the stream picker instead of an intermediate listing.
-        return streams(stype, sid)
+        return streams(stype, sid, poster=meta_obj.get('poster'), title=meta_obj.get('name'))
 
     seasons = _ordered_seasons(videos)
     poster = meta_obj.get('poster')
@@ -345,11 +377,10 @@ def meta(stype, sid):
     for season in seasons:
         label = 'Specials' if season == 0 else 'Season %d' % season
         li = xbmcgui.ListItem(label=label)
+        art = {'fanart': _row_fanart(background)}
         if poster:
-            art = {'poster': poster, 'thumb': poster}
-            if background:
-                art['fanart'] = background
-            li.setArt(art)
+            art.update({'poster': poster, 'thumb': poster})
+        li.setArt(art)
         set_video_info(li, {
             'title': label, 'tvshowtitle': show_name, 'season': season, 'mediatype': 'season',
         })
@@ -377,6 +408,7 @@ def videos(stype, sid, season):
 
     show_name = meta_obj.get('name')
     fallback_thumb = meta_obj.get('poster')
+    fallback_fanart = _row_fanart(meta_obj.get('background') or meta_obj.get('logo') or fallback_thumb)
     episodes = [v for v in (meta_obj.get('videos') or []) if v.get('season') == season_num]
     episodes.sort(key=lambda v: v.get('episode') or 0)
 
@@ -386,8 +418,10 @@ def videos(stype, sid, season):
         label = 'S%02dE%02d - %s' % (video.get('season') or 0, video.get('episode') or 0, title)
         li = xbmcgui.ListItem(label=label)
         thumb = video.get('thumbnail') or fallback_thumb
+        art = {'fanart': fallback_fanart}
         if thumb:
-            li.setArt({'thumb': thumb, 'icon': thumb})
+            art.update({'thumb': thumb, 'icon': thumb})
+        li.setArt(art)
         set_video_info(li, {
             'title': title,
             'tvshowtitle': show_name,
@@ -397,7 +431,9 @@ def videos(stype, sid, season):
             'aired': _date_only(video.get('released')),
             'mediatype': 'episode',
         })
-        url = router.url_for('streams', type=stype, id=video.get('id') or sid)
+        url = router.url_for(
+            'streams', type=stype, id=video.get('id') or sid, poster=thumb, title=label
+        )
         items.append((url, li, True))
 
     xbmcplugin.addDirectoryItems(handle, items, len(items))
@@ -405,12 +441,33 @@ def videos(stype, sid, season):
     xbmcplugin.endOfDirectory(handle)
 
 
+def _stream_query_extras():
+    """Best-effort read of extra plugin-request query params (poster/title)
+    that router.run()'s per-action dispatch table doesn't forward
+    positionally to streams() -- see the `videos()` call site, which puts
+    them on the URL instead of calling this view directly.
+    """
+    try:
+        raw_qs = sys.argv[2]
+    except IndexError:
+        return {}
+    if raw_qs.startswith('?'):
+        raw_qs = raw_qs[1:]
+    return dict(_parse_extra(raw_qs))
+
+
 @_safe_listing
-def streams(stype, sid):
+def streams(stype, sid, poster=None, title=None):
     handle = router.ADDON_HANDLE
+    if poster is None or title is None:
+        extra = _stream_query_extras()
+        poster = poster or extra.get('poster')
+        title = title or extra.get('title')
+
     store = _get_store()
     client = _get_client()
-    items = []
+    pairs = []
+    logos = {}
     for descriptor in store.get_addons():
         manifest = descriptor.get('manifest') or {}
         transport_url = descriptor.get('transportUrl')
@@ -422,13 +479,23 @@ def streams(stype, sid):
             log('views.streams: %s failed: %r' % (transport_url, exc), xbmc.LOGERROR)
             continue
         addon_name = manifest.get('name', '?')
+        logos.setdefault(streaminfo.clean_text(addon_name), manifest.get('logo'))
         for stream in results or []:
-            items.append(_stream_item(addon_name, stream, stype, sid))
+            pairs.append((streaminfo.parse_stream(stream, addon_name=addon_name), stream))
 
-    if not items:
+    if not pairs:
         notify(L(30030))
+
+    sort_key = compat.ADDON.getSetting('stream_sort') or 'quality'
+    pairs = streaminfo.sort_streams(pairs, key=sort_key)
+
+    items = [
+        _stream_item(info, stream, stype, sid, poster=poster, title=title, logo=logos.get(info['addon']))
+        for info, stream in pairs
+    ]
     xbmcplugin.addDirectoryItems(handle, items, len(items))
     xbmcplugin.setContent(handle, 'videos')
+    xbmcplugin.addSortMethod(handle, xbmcplugin.SORT_METHOD_NONE)
     xbmcplugin.endOfDirectory(handle)
 
 
@@ -445,8 +512,10 @@ def addons():
         label = '%s v%s' % (manifest.get('name', '?'), manifest.get('version', '?'))
         li = xbmcgui.ListItem(label=label)
         logo = manifest.get('logo')
+        art = {'fanart': _row_fanart(manifest.get('background'))}
         if logo:
-            li.setArt({'icon': logo, 'thumb': logo})
+            art.update({'icon': logo, 'thumb': logo})
+        li.setArt(art)
         set_video_info(li, {'title': label, 'plot': manifest.get('description', '')})
         if not flags.get('protected'):
             remove_url = router.url_for('addon_remove', transport=transport_url)
@@ -455,15 +524,15 @@ def addons():
         else:
             items.append((router.url_for('discover'), li, False))
 
-    items.append((router.url_for('addon_install'), xbmcgui.ListItem(label=L(30010)), False))
+    items.append(_action_item(L(30010), router.url_for('addon_install'), 'DefaultAddonNone.png'))
 
     auth = store.get_auth()
     if auth:
         user = auth.get('user') or {}
         label = L(30022) % (user.get('email') or user.get('name') or '?')
-        items.append((router.url_for('logout'), xbmcgui.ListItem(label=label), False))
+        items.append(_action_item(label, router.url_for('logout'), 'DefaultAddonService.png'))
     else:
-        items.append((router.url_for('login'), xbmcgui.ListItem(label=L(30020)), False))
+        items.append(_action_item(L(30020), router.url_for('login'), 'DefaultAddonService.png'))
 
     xbmcplugin.addDirectoryItems(handle, items, len(items))
     xbmcplugin.setContent(handle, 'files')
@@ -597,8 +666,10 @@ def library():
             name = entry.get('name') or entry.get('_id')
             li = xbmcgui.ListItem(label=name)
             poster = entry.get('poster')
+            art = {'fanart': _row_fanart(entry.get('background'))}
             if poster:
-                li.setArt({'poster': poster, 'thumb': poster})
+                art.update({'poster': poster, 'thumb': poster, 'icon': poster})
+            li.setArt(art)
             entry_type = entry.get('type')
             set_video_info(li, {
                 'title': name, 'mediatype': 'tvshow' if entry_type == 'series' else 'movie',
@@ -607,5 +678,5 @@ def library():
             items.append((url, li, True))
 
     xbmcplugin.addDirectoryItems(handle, items, len(items))
-    xbmcplugin.setContent(handle, 'files')
+    xbmcplugin.setContent(handle, 'videos')
     xbmcplugin.endOfDirectory(handle)

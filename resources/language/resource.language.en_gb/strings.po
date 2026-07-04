@@ -139,3 +139,47 @@ msgstr ""
 msgctxt "#30064"
 msgid "No release asset for this platform"
 msgstr ""
+
+msgctxt "#30070"
+msgid "Playback"
+msgstr ""
+
+msgctxt "#30071"
+msgid "Pre-buffer torrents"
+msgstr ""
+
+msgctxt "#30072"
+msgid "Pre-buffer size (MB)"
+msgstr ""
+
+msgctxt "#30073"
+msgid "Sort streams by"
+msgstr ""
+
+msgctxt "#30074"
+msgid "Quality"
+msgstr ""
+
+msgctxt "#30075"
+msgid "Size"
+msgstr ""
+
+msgctxt "#30076"
+msgid "Seeders"
+msgstr ""
+
+msgctxt "#30080"
+msgid "Preparing stream"
+msgstr ""
+
+msgctxt "#30081"
+msgid "Buffering: %s of %s"
+msgstr ""
+
+msgctxt "#30082"
+msgid "%s/s — %d peers"
+msgstr ""
+
+msgctxt "#30083"
+msgid "Buffering timed out, starting anyway"
+msgstr ""

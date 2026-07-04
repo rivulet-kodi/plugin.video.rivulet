@@ -40,6 +40,16 @@ _YT_SAFE_CHARS = "-_.!~*'()"
 UNKNOWN_FILE_IDX = -1
 
 
+class ServerError(Exception):
+    """Raised when a stremio-server-go engine/stats request fails.
+
+    Mirrors AddonError/ApiError in this package: network failures and
+    malformed JSON both surface as this one type so callers (e.g. the
+    playback pre-buffer poller) can catch a single exception and fall
+    back to "proceed without buffering" rather than bricking playback.
+    """
+
+
 class ServerClient:
     """Talks to a local stremio-server-go instance (default http://127.0.0.1:11470)."""
 
@@ -94,6 +104,54 @@ class ServerClient:
             return None
         return self.torrent_url(info_hash, UNKNOWN_FILE_IDX, query.get('tr', []))
 
+    def create_engine(self, info_hash):
+        """GET `{base}/{infoHash}/create` - start/attach the torrent engine.
+
+        Per stremio-server-go's handleCreate (internal/api/api.go:697-750,
+        docs/swagger.yaml `/{infoHash}/create`), the server calls
+        EnsureEngine + Ready() with a 90s timeout blocking until torrent
+        metadata is available, then returns `types.Stats` including
+        `guessedFileIdx` (set when the server picked a best file). Uses a
+        100s client timeout to stay above the server's 90s Ready() budget.
+        """
+        if requests is None:
+            raise ServerError('the "requests" package is required for ServerClient')
+        url = '%s/%s/create' % (self.base_url, str(info_hash).lower())
+        try:
+            resp = requests.get(url, timeout=100)
+            resp.raise_for_status()
+        except requests.RequestException as exc:
+            raise ServerError('GET %s failed: %s' % (url, exc))
+        try:
+            return resp.json()
+        except ValueError as exc:
+            raise ServerError('GET %s returned invalid JSON: %s' % (url, exc))
+
+    def file_stats(self, info_hash, file_idx):
+        """GET `{base}/{infoHash}/{fileIdx}/stats.json` - per-file buffer stats.
+
+        Per docs/swagger.yaml `/{infoHash}/{fileIdx}/stats.json` and
+        writeStats (internal/api/api.go:818-825), returns `types.Stats`
+        with the per-file extras (`streamProgress`, `streamLen`,
+        `streamName`) populated in addition to the torrent-level fields
+        (`downloadSpeed`, `peers`, ...). Requesting per-file stats also
+        triggers ensureDownloading(idx) server-side, prioritizing this
+        file's pieces. Uses a short 10s timeout since this is polled
+        repeatedly during pre-buffer.
+        """
+        if requests is None:
+            raise ServerError('the "requests" package is required for ServerClient')
+        url = '%s/%s/%s/stats.json' % (self.base_url, str(info_hash).lower(), file_idx)
+        try:
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+        except requests.RequestException as exc:
+            raise ServerError('GET %s failed: %s' % (url, exc))
+        try:
+            return resp.json()
+        except ValueError as exc:
+            raise ServerError('GET %s returned invalid JSON: %s' % (url, exc))
+
     def resolve_stream(self, stream):
         """Resolve a Stream protocol dict to a playable URL, or None.
 
@@ -129,3 +187,72 @@ class ServerClient:
             return '%s/yt/%s' % (self.base_url, quote(str(yt_id), safe=_YT_SAFE_CHARS))
 
         return None
+
+
+def buffered_bytes(stats):
+    """How many bytes of the current stream file are buffered so far.
+
+    `stats` is a `types.Stats` dict as returned by `file_stats()`:
+    `streamProgress` (float, 0-1, BytesCompleted/Length per
+    internal/engine/engine.go:1124-1278) times `streamLen` (int, file
+    size in bytes, swagger.yaml types.Stats.streamLen). Tolerates a
+    missing/None/non-numeric `stats`, or missing/None fields, returning
+    0 rather than raising - this feeds a UI progress poll that must
+    never crash playback over a transient/incomplete stats payload.
+    """
+    if not isinstance(stats, dict):
+        return 0
+    progress = stats.get('streamProgress')
+    length = stats.get('streamLen')
+    if progress is None or length is None:
+        return 0
+    try:
+        value = int(round(float(progress) * float(length)))
+    except (TypeError, ValueError):
+        return 0
+    return max(0, value)
+
+
+def guess_file_idx(stats):
+    """Pick the torrent file index to pre-buffer/poll from a `/create`
+    response, tolerating a server-version gap confirmed live against
+    stremio-server-go v0.8.5 (Sintel torrent 08ada5a7a618...): that
+    build's `/create` response NEVER carries `guessedFileIdx` (only a
+    per-file `/{infoHash}/{fileIdx}/stats.json` response does, once a
+    concrete index is already being polled) but DOES carry a `files`
+    array once metadata resolves (`[{name, path, length, offset}, ...]`).
+
+    Prefers an explicit non-negative int `guessedFileIdx` when present -
+    server builds that still emit it up front win outright. Otherwise,
+    when `files` is a non-empty list, picks the index of the entry with
+    the largest `length` (ties keep the first/lowest index), the same
+    "biggest file is the movie" heuristic the server used to apply
+    itself. Returns None when neither is usable.
+
+    Tolerates garbage input throughout rather than raising - this feeds
+    a playback pre-buffer poll that must never crash on an unexpected
+    server response shape: a non-dict `stats`, a missing/non-list
+    `files`, and entries that are not dicts or have a missing/non-numeric
+    `length` (treated as length 0) all fall through safely.
+    """
+    if not isinstance(stats, dict):
+        return None
+
+    guessed = stats.get('guessedFileIdx')
+    if isinstance(guessed, int) and not isinstance(guessed, bool) and guessed >= 0:
+        return guessed
+
+    files = stats.get('files')
+    if not isinstance(files, list) or not files:
+        return None
+
+    best_idx, best_length = None, -1
+    for idx, entry in enumerate(files):
+        length = entry.get('length') if isinstance(entry, dict) else None
+        try:
+            length = float(length)
+        except (TypeError, ValueError):
+            length = 0
+        if length > best_length:
+            best_idx, best_length = idx, length
+    return best_idx

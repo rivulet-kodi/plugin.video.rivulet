@@ -16,6 +16,7 @@ ADDON = xbmcaddon.Addon()
 ADDON_ID = ADDON.getAddonInfo('id')
 ADDON_NAME = ADDON.getAddonInfo('name')
 ADDON_ICON = ADDON.getAddonInfo('icon')
+ADDON_FANART = ADDON.getAddonInfo('fanart')
 
 _LOG_PREFIX = '[%s] ' % ADDON_ID
 
@@ -31,6 +32,21 @@ def addon_profile_dir():
     if not xbmcvfs.exists(path):
         xbmcvfs.mkdirs(path)
     return path
+
+
+def addon_media_path(name):
+    """Return the special:// filesystem path to a bundled resources/media asset.
+
+    Built from ADDON_ID at call time (never a hardcoded addon id) so this
+    keeps working under a future rename/fork.
+    """
+    return xbmcvfs.translatePath('special://home/addons/%s/resources/media/%s' % (ADDON_ID, name))
+
+
+def addon_fanart():
+    """Return the addon's own bundled fanart image path, for rows/menus
+    that have no more specific art of their own."""
+    return ADDON_FANART
 
 
 def log(msg, level=xbmc.LOGDEBUG):
