@@ -183,3 +183,7 @@ msgstr ""
 msgctxt "#30083"
 msgid "Buffering timed out, starting anyway"
 msgstr ""
+
+msgctxt "#30084"
+msgid "No peers available for this stream"
+msgstr ""

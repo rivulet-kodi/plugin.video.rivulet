@@ -12,12 +12,21 @@ import xbmcplugin
 
 from lib.store import Store
 from lib.stremio.addons import AddonClient
-from lib.stremio.server import ServerClient, UNKNOWN_FILE_IDX, buffered_bytes, guess_file_idx
+from lib.stremio.server import ServerClient, UNKNOWN_FILE_IDX, guess_file_idx
 from lib.stremio.subtitles import collect_subtitles, sort_subtitles
 from lib.ui.compat import ADDON, L, addon_profile_dir, log, notify, setting_bool, setting_int
 
 #: Hard cap on total pre-buffer wait time (contract step 5: "120s elapsed").
 _BUFFER_MAX_WAIT_SECONDS = 120
+
+#: Minimum bytes streamed from the file's FRONT (offset 0) before Kodi's
+#: player can reliably probe the container header and start playback (see
+#: ServerClient.iter_front's docstring in lib/stremio/server.py). Reaching
+#: this floor means "safe to start", not "fully pre-buffered" - the
+#: server's own readahead keeps filling ahead once playback begins, and
+#: it is deliberately much smaller than the user's configured buffer_mb
+#: target (a minimum of 5 MiB).
+_HEADER_MIN_BYTES = 512 * 1024
 
 # Stream source kinds that require the local streaming server to produce a
 # playable URL at all (see stremio-protocol-spec.md gotcha #3).
@@ -173,47 +182,56 @@ def _prebuffer_torrent(server, stream, url):
             server.create_engine(info_hash)
 
         buffer_mb = setting_int('buffer_mb', 20, minimum=5)
-        configured_target = buffer_mb * 1024 * 1024
+        target = buffer_mb * 1024 * 1024
         log(
-            'player: pre-buffer target: buffer_mb=%d target_bytes=%d' % (buffer_mb, configured_target),
+            'player: pre-buffer target: buffer_mb=%d target_bytes=%d' % (buffer_mb, target),
             xbmc.LOGINFO,
         )
+
+        # Front-priming readiness loop. Live-verified bug this replaces:
+        # polling aggregate file_stats()/buffered_bytes() can report
+        # megabytes "buffered" while the file's FRONT (offset 0, where
+        # ffmpeg's container-header probe reads from) was never actually
+        # downloaded - torrent pieces arrive out of order. Streaming the
+        # front directly both drives the server's own front-prioritization
+        # (NewReader -> primeBoundary/warmMoov) and proves playback will
+        # really start. A dead/unseeded torrent now fails honestly (30084)
+        # instead of handing Kodi a URL that produces a cryptic
+        # CURLE_PARTIAL_FILE / "error probing input format" error.
         while elapsed < _BUFFER_MAX_WAIT_SECONDS:
             if dialog.iscanceled():
                 return False, url
 
+            got = 0
             try:
-                stats = server.file_stats(info_hash, file_idx)
-            except Exception as exc:  # noqa: BLE001 - a stats hiccup must not brick playback
-                log('player: buffer stats failed for %s: %r' % (info_hash, exc), xbmc.LOGWARNING)
-                return True, url
+                for chunk_len in server.iter_front(info_hash, file_idx, target):
+                    got += chunk_len
+                    percent = min(100, got * 100 // target) if target else 100
+                    dialog.update(percent, L(30081) % (_human_size(got), _human_size(target)))
+                    if dialog.iscanceled():
+                        return False, url
+                    if got >= target:
+                        break
+            except Exception as exc:  # noqa: BLE001 - a front-read hiccup must not brick playback
+                log('player: front read failed for %s: %r' % (info_hash, exc), xbmc.LOGWARNING)
 
-            buffered = buffered_bytes(stats)
-            stream_len = (stats or {}).get('streamLen') or 0
-            target = min(configured_target, stream_len) if stream_len else configured_target
-
-            percent = min(100, buffered * 100 // target) if target else 100
-            speed = _human_size((stats or {}).get('downloadSpeed') or 0)
-            peers = (stats or {}).get('peers') or 0
-            dialog.update(
-                percent,
-                L(30081) % (_human_size(buffered), _human_size(target)) + '\n' + L(30082) % (speed, peers)
-            )
-
-            if buffered >= target:
+            if got >= _HEADER_MIN_BYTES:
                 log(
-                    'player: pre-buffer complete for %s: buffered=%d target=%d' % (info_hash, buffered, target),
+                    'player: pre-buffer complete for %s: buffered=%d target=%d' % (info_hash, got, target),
                     xbmc.LOGINFO,
                 )
                 return True, url
 
-            if monitor.waitForAbort(1.0):
+            if monitor.waitForAbort(2.0):
                 return False, url
-            elapsed += 1
+            elapsed += 2
 
-        log('player: pre-buffer timed out for %s after %ds' % (info_hash, elapsed), xbmc.LOGINFO)
-        notify(L(30083))
-        return True, url
+        log(
+            'player: pre-buffer timed out for %s after %ds with no usable front data' % (info_hash, elapsed),
+            xbmc.LOGINFO,
+        )
+        notify(L(30084))
+        return False, url
     except Exception as exc:  # noqa: BLE001 - pre-buffer is a bonus, never fatal
         log('player: pre-buffer failed for %s: %r' % (stream.get('infoHash'), exc), xbmc.LOGWARNING)
         return True, url

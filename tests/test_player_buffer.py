@@ -19,6 +19,18 @@ monkeypatching the `ServerClient` name player.py itself binds via
 `from lib.stremio.server import ServerClient, ...` - that's the exact
 symbol `_server_client()` calls to build the server object `play()` uses
 throughout.
+
+FRONT-PRIMING REWRITE (live bug fix): pre-buffer used to poll aggregate
+file_stats()/buffered_bytes(), which can report megabytes "buffered" while
+the file's FRONT (offset 0, where ffmpeg's container-header probe reads
+from) was never actually downloaded - torrent pieces arrive out of order.
+Verified live: a 1-peer torrent reported buffered=22.7MB by the aggregate
+metric yet a Range read of the front returned 0 bytes, reproducing Kodi's
+exact CURLE_PARTIAL_FILE(18)/"error probing input format" failure. Pre-
+buffer now streams the FRONT directly via ServerClient.iter_front() and
+only proceeds once _HEADER_MIN_BYTES (512 KiB) of front data is actually
+obtained; a torrent that never yields usable front data now fails honestly
+(string 30084, resolves False) instead of handing Kodi a doomed URL.
 """
 import importlib
 import sys
@@ -244,24 +256,33 @@ class _ServerScript:
 
     Installed by monkeypatching the `ServerClient` name in lib.ui.player -
     exactly the symbol `_server_client()` calls (`from lib.stremio.server
-    import ServerClient, ...`) to build the server object `play()` uses.
+    import ServerClient, ...`) to build the server object `play()` uses
+    throughout.
+
+    `iter_front_attempts` scripts successive calls to `iter_front()` (one
+    entry per outer pre-buffer retry): each entry is either a list of
+    chunk-byte-counts to yield (mirrors a real front Range read streaming
+    in pieces, ending normally once exhausted - real iter_front() never
+    raises once it has yielded ANY bytes, per its own docstring) or an
+    Exception instance to raise immediately with zero bytes yielded (the
+    "this attempt got nothing" case). Exhausted lists repeat the last
+    entry, matching this file's other *_results scripting conventions.
     """
 
     def __init__(self, *, available=True, resolve_url='http://server/x/0',
                  create_engine_result=None, create_engine_results=None, create_engine_error=None,
-                 file_stats_results=None, file_stats_error=None,
+                 iter_front_attempts=None,
                  torrent_url_result=None):
         self.available = available
         self.resolve_url = resolve_url
         self.create_engine_result = {} if create_engine_result is None else create_engine_result
         self.create_engine_results = list(create_engine_results or [])
         self.create_engine_error = create_engine_error
-        self.file_stats_results = list(file_stats_results or [])
-        self.file_stats_error = file_stats_error
+        self.iter_front_attempts = list(iter_front_attempts or [])
         self.torrent_url_result = torrent_url_result
         self.is_available_calls = 0
         self.create_engine_calls = []
-        self.file_stats_calls = []
+        self.iter_front_calls = []
         self.torrent_url_calls = []
 
     def build_class(self):
@@ -288,15 +309,17 @@ class _ServerScript:
                 idx = len(script.create_engine_calls) - 1
                 return results[idx] if idx < len(results) else results[-1]
 
-            def file_stats(self, info_hash, file_idx):
-                script.file_stats_calls.append((info_hash, file_idx))
-                if script.file_stats_error is not None:
-                    raise script.file_stats_error
-                results = script.file_stats_results
-                if not results:
-                    return {}
-                idx = len(script.file_stats_calls) - 1
-                return results[idx] if idx < len(results) else results[-1]
+            def iter_front(self, info_hash, file_idx, want_bytes, chunk_size=1048576, timeout=60):
+                script.iter_front_calls.append((info_hash, file_idx, want_bytes))
+                idx = len(script.iter_front_calls) - 1
+                attempts = script.iter_front_attempts
+                if not attempts:
+                    return
+                attempt = attempts[idx] if idx < len(attempts) else attempts[-1]
+                if isinstance(attempt, Exception):
+                    raise attempt
+                for chunk_len in attempt:
+                    yield chunk_len
 
             def torrent_url(self, info_hash, file_idx, announce=None):
                 script.torrent_url_calls.append((info_hash, file_idx, tuple(announce or ())))
@@ -326,6 +349,12 @@ def _resolved_one(env):
     return env.resolved[0]
 
 
+# With the default _FakeAddon settings (buffer_mb=1, clamped up to the 5
+# MiB floor by setting_int(minimum=5)), every test below that doesn't
+# override buffer_mb targets this many bytes.
+DEFAULT_TARGET_BYTES = 5 * 1024 * 1024
+
+
 # --- buffer_enable=False: pre-buffer entirely skipped ---------------------
 
 
@@ -337,7 +366,7 @@ def test_buffer_disabled_skips_engine_and_resolves_immediately(kodi_stubs, monke
     kodi_stubs.player.play(1, _torrent_stream(fileIdx=0), 'movie', 'tt1')
 
     assert script.create_engine_calls == []
-    assert script.file_stats_calls == []
+    assert script.iter_front_calls == []
     assert env.dialog_created == []
     assert env.dialog_closed_count == 0
     handle, succeeded, list_item = _resolved_one(env)
@@ -345,28 +374,48 @@ def test_buffer_disabled_skips_engine_and_resolves_immediately(kodi_stubs, monke
     assert list_item.path == 'http://server/x/0'
 
 
-# --- happy path: polls until target reached, then resolves True -----------
+# --- happy path: front read crosses the header floor, resolves True -------
 
 
-def test_happy_path_polls_until_target_then_resolves_true(kodi_stubs, monkeypatch):
+def test_happy_path_streams_front_to_target_then_resolves_true(kodi_stubs, monkeypatch):
     env = kodi_stubs.env
-    env.addon.settings['buffer_mb'] = 1  # clamped up to the 5 MiB floor by setting_int(minimum=5), but streamLen (1 MiB) still caps the effective target below that
-    below_target = {'streamProgress': 0.5, 'streamLen': 1048576, 'downloadSpeed': 500000, 'peers': 3}
-    at_target = {'streamProgress': 1.0, 'streamLen': 1048576, 'downloadSpeed': 500000, 'peers': 5}
+    env.addon.settings['buffer_mb'] = 1  # clamped up to the 5 MiB floor by setting_int(minimum=5)
+    half = DEFAULT_TARGET_BYTES // 2
     script = _ServerScript(
         resolve_url='http://server/x/0',
-        file_stats_results=[below_target, at_target],
+        iter_front_attempts=[[half, half]],  # two chunks summing exactly to the target
     ).install(monkeypatch, kodi_stubs.player)
 
     kodi_stubs.player.play(2, _torrent_stream(fileIdx=0), 'movie', 'tt2')
 
     assert script.create_engine_calls == [INFO_HASH]
-    assert script.file_stats_calls == [(INFO_HASH, 0), (INFO_HASH, 0)]
+    assert script.iter_front_calls == [(INFO_HASH, 0, DEFAULT_TARGET_BYTES)]
     assert env.dialog_created == [('STR30080', 'Example Movie')]
-    # percent = min(100, buffered * 100 // target); pinned by the exact
-    # byte counts above so a flipped clamp/off-by-one reddens this.
+    # percent = min(100, got * 100 // target); pinned by the exact byte
+    # counts above so a flipped clamp/off-by-one reddens this.
     assert [percent for percent, _ in env.dialog_updates] == [50, 100]
     assert env.dialog_closed_count == 1
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (2, True)
+    assert list_item.path == 'http://server/x/0'
+
+
+def test_partial_front_above_header_floor_resolves_true_without_reaching_target(kodi_stubs, monkeypatch):
+    """A single front-read attempt that gets enough for ffmpeg to probe
+    (_HEADER_MIN_BYTES = 512 KiB) but falls well short of the configured
+    buffer_mb target must still start playback immediately - the server's
+    own readahead keeps filling ahead once playback begins; there is no
+    reason to keep the user waiting once the header is obtainable.
+    """
+    env = kodi_stubs.env
+    script = _ServerScript(
+        resolve_url='http://server/x/0',
+        iter_front_attempts=[[600_000]],  # > 512 KiB, well under the 5 MiB target
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(2, _torrent_stream(fileIdx=0), 'movie', 'tt2b')
+
+    assert script.iter_front_calls == [(INFO_HASH, 0, DEFAULT_TARGET_BYTES)]  # one attempt was enough
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (2, True)
     assert list_item.path == 'http://server/x/0'
@@ -379,13 +428,13 @@ def test_cancel_via_dialog_iscanceled_resolves_false(kodi_stubs, monkeypatch):
     env = kodi_stubs.env
     env.cancel = True
     script = _ServerScript(
-        file_stats_results=[{'streamProgress': 0.1, 'streamLen': 1000, 'downloadSpeed': 0, 'peers': 0}],
+        iter_front_attempts=[[100]],
     ).install(monkeypatch, kodi_stubs.player)
 
     kodi_stubs.player.play(3, _torrent_stream(fileIdx=0), 'movie', 'tt3')
 
     assert script.create_engine_calls == [INFO_HASH]
-    assert script.file_stats_calls == []  # cancelled before the first poll
+    assert script.iter_front_calls == []  # cancelled before the first front-read attempt
     assert env.dialog_closed_count == 1
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (3, False)
@@ -396,40 +445,45 @@ def test_cancel_via_monitor_waitforabort_resolves_false(kodi_stubs, monkeypatch)
     env = kodi_stubs.env
     env.monitor_abort = True
     script = _ServerScript(
-        file_stats_results=[{'streamProgress': 0.1, 'streamLen': 1000, 'downloadSpeed': 0, 'peers': 0}],
+        iter_front_attempts=[[100]],  # well under the header floor, so the loop proceeds to wait/abort
     ).install(monkeypatch, kodi_stubs.player)
 
     kodi_stubs.player.play(4, _torrent_stream(fileIdx=0), 'movie', 'tt4')
 
-    assert len(script.file_stats_calls) == 1  # one poll happens before the abort check
+    assert len(script.iter_front_calls) == 1  # one attempt happens before the abort
     assert env.monitor_abort_calls == 1
     assert env.dialog_closed_count == 1
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (4, False)
 
 
-# --- ~120 polls without reaching target: notifies 30083, resolves True ----
+# --- no usable front data ever: notifies 30084, resolves False honestly ---
 
 
-def test_timeout_after_max_polls_notifies_and_resolves_true(kodi_stubs, monkeypatch):
+def test_timeout_with_no_front_data_notifies_30084_and_resolves_false(kodi_stubs, monkeypatch):
+    """The live production bug's dead-torrent case: every front-read
+    attempt returns far too little to probe (a 1-peer swarm with no front
+    pieces available). Rather than hand Kodi a doomed URL, pre-buffer must
+    give up after the full budget and fail honestly.
+    """
     env = kodi_stubs.env
     script = _ServerScript(
         resolve_url='http://server/x/0',
-        file_stats_results=[{'streamProgress': 0.01, 'streamLen': 1000, 'downloadSpeed': 100, 'peers': 1}],
+        iter_front_attempts=[[10]],  # far below the 512 KiB header floor, every attempt
     ).install(monkeypatch, kodi_stubs.player)
 
     kodi_stubs.player.play(5, _torrent_stream(fileIdx=0), 'movie', 'tt5')
 
-    assert len(script.file_stats_calls) == 120  # _BUFFER_MAX_WAIT_SECONDS
-    assert env.monitor_abort_calls == 120
-    assert [msg for _, msg, _, _ in env.notifications] == ['STR30083']
+    assert len(script.iter_front_calls) == 60  # _BUFFER_MAX_WAIT_SECONDS / 2s retry cadence
+    assert env.monitor_abort_calls == 60
+    assert [msg for _, msg, _, _ in env.notifications] == ['STR30084']
     assert env.dialog_closed_count == 1
     handle, succeeded, list_item = _resolved_one(env)
-    assert (handle, succeeded) == (5, True)
-    assert list_item.path == 'http://server/x/0'
+    assert (handle, succeeded) == (5, False)
+    assert list_item.path == ''
 
 
-# --- create_engine()/file_stats() exceptions degrade to immediate play ----
+# --- create_engine() exception degrades to immediate play ------------------
 
 
 def test_create_engine_exception_degrades_to_resolve_true(kodi_stubs, monkeypatch):
@@ -442,25 +496,52 @@ def test_create_engine_exception_degrades_to_resolve_true(kodi_stubs, monkeypatc
     kodi_stubs.player.play(6, _torrent_stream(fileIdx=0), 'movie', 'tt6')
 
     assert script.create_engine_calls == [INFO_HASH]
-    assert script.file_stats_calls == []
+    assert script.iter_front_calls == []
     assert env.dialog_closed_count == 1
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (6, True)
     assert list_item.path == 'http://server/x/0'
 
 
-def test_file_stats_exception_degrades_to_resolve_true(kodi_stubs, monkeypatch):
+# --- iter_front() exceptions are retried, not treated as fatal -------------
+
+
+def test_iter_front_exception_every_attempt_times_out_notifies_30084(kodi_stubs, monkeypatch):
+    """A front-read exception (e.g. a transient connection error) must be
+    logged and RETRIED, not treated as an immediate "give up and play
+    anyway" signal like the old aggregate-stats exception handling did -
+    a single hiccup shouldn't hand Kodi a doomed URL any more than a
+    single zero-byte attempt should. If every attempt keeps failing, the
+    budget still exhausts to the same honest 30084 failure.
+    """
     env = kodi_stubs.env
     script = _ServerScript(
         resolve_url='http://server/x/0',
-        file_stats_error=RuntimeError('stats boom'),
+        iter_front_attempts=[RuntimeError('front boom')],
     ).install(monkeypatch, kodi_stubs.player)
 
     kodi_stubs.player.play(7, _torrent_stream(fileIdx=0), 'movie', 'tt7')
 
     assert script.create_engine_calls == [INFO_HASH]
-    assert len(script.file_stats_calls) == 1
+    assert len(script.iter_front_calls) == 60
+    assert any(level == kodi_stubs.player.xbmc.LOGWARNING for _, level in env.log_calls)
+    assert [msg for _, msg, _, _ in env.notifications] == ['STR30084']
     assert env.dialog_closed_count == 1
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (7, False)
+
+
+def test_iter_front_exception_then_recovers_on_retry(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    script = _ServerScript(
+        resolve_url='http://server/x/0',
+        iter_front_attempts=[RuntimeError('transient'), [600_000]],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(7, _torrent_stream(fileIdx=0), 'movie', 'tt7b')
+
+    assert len(script.iter_front_calls) == 2  # first attempt failed, second succeeded
+    assert env.monitor_abort_calls == 1  # one wait between the failed attempt and the retry
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (7, True)
     assert list_item.path == 'http://server/x/0'
@@ -474,21 +555,20 @@ def test_file_stats_exception_degrades_to_resolve_true(kodi_stubs, monkeypatch):
     [{}, {'fileIdx': None}, {'fileIdx': -1}],
     ids=['missing', 'none', 'negative_one'],
 )
-def test_missing_file_idx_rebuilds_url_and_polls_guessed_index(kodi_stubs, monkeypatch, file_idx_override):
+def test_missing_file_idx_rebuilds_url_and_streams_guessed_index(kodi_stubs, monkeypatch, file_idx_override):
     env = kodi_stubs.env
     stream = _torrent_stream(**file_idx_override)
-    at_target = {'streamProgress': 1.0, 'streamLen': 1048576, 'downloadSpeed': 1, 'peers': 1}
     script = _ServerScript(
         resolve_url='http://server/x/-1',
         create_engine_result={'guessedFileIdx': 4},
-        file_stats_results=[at_target],
+        iter_front_attempts=[[600_000]],
         torrent_url_result='http://server/x/4',
     ).install(monkeypatch, kodi_stubs.player)
 
     kodi_stubs.player.play(8, stream, 'movie', 'tt8')
 
     assert script.torrent_url_calls == [(INFO_HASH, 4, tuple(stream['announce']))]
-    assert script.file_stats_calls == [(INFO_HASH, 4)]  # polls the guessed index, not -1
+    assert script.iter_front_calls == [(INFO_HASH, 4, DEFAULT_TARGET_BYTES)]  # streams the guessed index, not -1
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (8, True)
     assert list_item.path == 'http://server/x/4'  # resolved to the rebuilt url, not the original
@@ -510,6 +590,9 @@ def test_metadata_never_resolves_exhausts_budget_and_proceeds(kodi_stubs, monkey
     /create response never grows a guessedFileIdx later, so the only sane
     behaviour left is to keep polling for the full budget, then fall back
     to unbuffered playback exactly like a genuine metadata timeout would.
+    This is a DIFFERENT failure mode from "we resolved an index but its
+    front data never arrived" (30084): here we never even got metadata to
+    check, so trying anyway (30083) is the only option left.
     """
     env = kodi_stubs.env
     script = _ServerScript(
@@ -522,7 +605,7 @@ def test_metadata_never_resolves_exhausts_budget_and_proceeds(kodi_stubs, monkey
     assert len(script.create_engine_calls) == 120  # _BUFFER_MAX_WAIT_SECONDS; never resolves an index
     assert env.monitor_abort_calls == 120
     assert script.torrent_url_calls == []
-    assert script.file_stats_calls == []  # never reached per-file polling
+    assert script.iter_front_calls == []  # never reached per-file front streaming
     assert [msg for _, msg, _, _ in env.notifications] == ['STR30083']
     assert env.dialog_closed_count == 1
     handle, succeeded, list_item = _resolved_one(env)
@@ -530,11 +613,11 @@ def test_metadata_never_resolves_exhausts_budget_and_proceeds(kodi_stubs, monkey
     assert list_item.path == 'http://server/x/-1'  # original url, never rebuilt
 
 
-def test_files_array_without_guessed_idx_picks_largest_file_and_polls_it(kodi_stubs, monkeypatch):
+def test_files_array_without_guessed_idx_picks_largest_file_and_streams_it(kodi_stubs, monkeypatch):
     """v0.8.5 shape confirmed live: /create's response carries `files`
     ([{name, path, length, offset}, ...]) but no `guessedFileIdx` at all -
-    guess_file_idx() must pick the largest file itself, and per-file
-    polling must engage against that index (not stall like the old
+    guess_file_idx() must pick the largest file itself, and front streaming
+    must engage against that index (not stall like the old
     guessedFileIdx-only code path did).
     """
     env = kodi_stubs.env
@@ -544,11 +627,10 @@ def test_files_array_without_guessed_idx_picks_largest_file_and_polls_it(kodi_st
         {'name': 'Sintel.mkv', 'length': 129241752},
         {'name': 'subs.srt', 'length': 2048},
     ]
-    at_target = {'streamProgress': 1.0, 'streamLen': 129241752, 'downloadSpeed': 1, 'peers': 1}
     script = _ServerScript(
         resolve_url='http://server/x/-1',
         create_engine_result={'files': files},
-        file_stats_results=[at_target],
+        iter_front_attempts=[[600_000]],
         torrent_url_result='http://server/x/1',
     ).install(monkeypatch, kodi_stubs.player)
 
@@ -556,7 +638,7 @@ def test_files_array_without_guessed_idx_picks_largest_file_and_polls_it(kodi_st
 
     assert script.create_engine_calls == [INFO_HASH]  # resolved on the very first /create poll
     assert script.torrent_url_calls == [(INFO_HASH, 1, tuple(stream['announce']))]
-    assert script.file_stats_calls == [(INFO_HASH, 1)]  # polls the largest file's index, not -1
+    assert script.iter_front_calls == [(INFO_HASH, 1, DEFAULT_TARGET_BYTES)]  # streams the largest file's index
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (11, True)
     assert list_item.path == 'http://server/x/1'
@@ -565,18 +647,17 @@ def test_files_array_without_guessed_idx_picks_largest_file_and_polls_it(kodi_st
 def test_metadata_arrives_on_third_create_poll(kodi_stubs, monkeypatch):
     """The metadata-wait loop must keep re-polling /create (not just call
     it once) and, once resolved, spend only the REMAINING shared budget on
-    per-file byte polling - not a fresh 120s.
+    front streaming - not a fresh 120s.
     """
     env = kodi_stubs.env
     stream = _torrent_stream()  # fileIdx missing -> UNKNOWN_FILE_IDX
     no_metadata_yet = {'peers': 2}
     still_no_metadata = {'peers': 5}
     resolved = {'files': [{'length': 100}, {'length': 900}]}
-    at_target = {'streamProgress': 1.0, 'streamLen': 900, 'downloadSpeed': 1, 'peers': 5}
     script = _ServerScript(
         resolve_url='http://server/x/-1',
         create_engine_results=[no_metadata_yet, still_no_metadata, resolved],
-        file_stats_results=[at_target],
+        iter_front_attempts=[[600_000]],
         torrent_url_result='http://server/x/1',
     ).install(monkeypatch, kodi_stubs.player)
 
@@ -587,7 +668,7 @@ def test_metadata_arrives_on_third_create_poll(kodi_stubs, monkeypatch):
     # metadata-wait phase shows an indeterminate 0% while no file is picked yet
     assert [percent for percent, _ in env.dialog_updates[:2]] == [0, 0]
     assert script.torrent_url_calls == [(INFO_HASH, 1, tuple(stream['announce']))]
-    assert script.file_stats_calls == [(INFO_HASH, 1)]  # continues with the shared, not reset, budget
+    assert script.iter_front_calls == [(INFO_HASH, 1, DEFAULT_TARGET_BYTES)]  # continues with the shared, not reset, budget
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (12, True)
     assert list_item.path == 'http://server/x/1'
@@ -603,7 +684,7 @@ def test_cancel_during_metadata_wait_resolves_false(kodi_stubs, monkeypatch):
     kodi_stubs.player.play(13, _torrent_stream(), 'movie', 'tt13')  # fileIdx missing -> UNKNOWN_FILE_IDX
 
     assert script.create_engine_calls == []  # cancelled before the first /create poll
-    assert script.file_stats_calls == []
+    assert script.iter_front_calls == []
     assert env.dialog_closed_count == 1
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (13, False)
@@ -621,7 +702,7 @@ def test_non_torrent_stream_never_engages_prebuffer(kodi_stubs, monkeypatch):
 
     assert script.is_available_calls == 0  # 'url' isn't a _SERVER_DEPENDENT_KEYS entry
     assert script.create_engine_calls == []
-    assert script.file_stats_calls == []
+    assert script.iter_front_calls == []
     assert env.dialog_created == []
     assert env.dialog_closed_count == 0
     handle, succeeded, list_item = _resolved_one(env)
@@ -632,27 +713,26 @@ def test_non_torrent_stream_never_engages_prebuffer(kodi_stubs, monkeypatch):
 # --- buffer_enable read via raw getSetting() string (resolve-time fix) ----
 
 
-def test_buffer_enable_missing_key_defaults_on_and_polls(kodi_stubs, monkeypatch):
+def test_buffer_enable_missing_key_defaults_on_and_streams_front(kodi_stubs, monkeypatch):
     """Production bug repro: settings.xml has buffer_enable=true, but at
     resolve-time `ADDON.getSettingBool()` has been observed to flake and
     return False - see lib/ui/compat.py's `setting_bool()` docstring.
     Simulate that as `getSetting('buffer_enable')` coming back '' (as it
     would for a genuinely missing/unreadable key): pre-buffer must still
-    default ON and poll, not silently vanish before ever logging or
-    creating the dialog.
+    default ON and stream the front, not silently vanish before ever
+    logging or creating the dialog.
     """
     env = kodi_stubs.env
     env.addon.settings['buffer_enable'] = ''  # raw getSetting() for a missing/unreadable key
-    at_target = {'streamProgress': 1.0, 'streamLen': 1048576, 'downloadSpeed': 1, 'peers': 1}
     script = _ServerScript(
         resolve_url='http://server/x/0',
-        file_stats_results=[at_target],
+        iter_front_attempts=[[600_000]],
     ).install(monkeypatch, kodi_stubs.player)
 
     kodi_stubs.player.play(14, _torrent_stream(fileIdx=0), 'movie', 'tt14')
 
     assert script.create_engine_calls == [INFO_HASH]  # engine WAS warmed: pre-buffer ran
-    assert script.file_stats_calls == [(INFO_HASH, 0)]  # AND polled - not skipped
+    assert script.iter_front_calls == [(INFO_HASH, 0, DEFAULT_TARGET_BYTES)]  # AND streamed - not skipped
     assert env.dialog_created == [('STR30080', 'Example Movie')]
     assert env.dialog_closed_count == 1
     handle, succeeded, list_item = _resolved_one(env)
@@ -672,7 +752,7 @@ def test_buffer_enable_raw_false_string_still_skips(kodi_stubs, monkeypatch):
     kodi_stubs.player.play(15, _torrent_stream(fileIdx=0), 'movie', 'tt15')
 
     assert script.create_engine_calls == []
-    assert script.file_stats_calls == []
+    assert script.iter_front_calls == []
     assert env.dialog_created == []
     assert env.dialog_closed_count == 0
     handle, succeeded, list_item = _resolved_one(env)
@@ -702,9 +782,8 @@ def test_prebuffer_entry_always_logs_enable_and_file_idx_at_loginfo(kodi_stubs, 
 
 def test_prebuffer_target_and_completion_logged_at_loginfo(kodi_stubs, monkeypatch):
     env = kodi_stubs.env
-    at_target = {'streamProgress': 1.0, 'streamLen': 1048576, 'downloadSpeed': 1, 'peers': 1}
     _ServerScript(
-        resolve_url='http://server/x/0', file_stats_results=[at_target],
+        resolve_url='http://server/x/0', iter_front_attempts=[[600_000]],
     ).install(monkeypatch, kodi_stubs.player)
 
     kodi_stubs.player.play(17, _torrent_stream(fileIdx=0), 'movie', 'tt17')
@@ -720,7 +799,7 @@ def test_prebuffer_timeout_logged_at_loginfo(kodi_stubs, monkeypatch):
     env = kodi_stubs.env
     _ServerScript(
         resolve_url='http://server/x/0',
-        file_stats_results=[{'streamProgress': 0.01, 'streamLen': 1000, 'downloadSpeed': 100, 'peers': 1}],
+        iter_front_attempts=[[10]],  # far below the header floor, every attempt
     ).install(monkeypatch, kodi_stubs.player)
 
     kodi_stubs.player.play(18, _torrent_stream(fileIdx=0), 'movie', 'tt18')

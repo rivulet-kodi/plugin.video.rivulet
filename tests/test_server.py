@@ -83,6 +83,36 @@ def test_resolve_stream_info_hash_with_file_idx_and_announce():
     assert resolved == client.torrent_url("bb" * 20, 2, ["udp://tracker1/announce"])
 
 
+def test_resolve_stream_forwards_sources_when_announce_absent():
+    """stremio-core deserializes torrent trackers from `announce` with
+    `#[serde(alias = "sources")]` (stream.rs:812) - Torrentio/AIOStreams-
+    style addons ship trackers under `sources`, not `announce`. Live bug
+    fix: resolve_stream must fall back to `sources` so the server actually
+    receives tracker URLs (it strips "tracker:"/ignores "dht:" itself)."""
+    client = make_client()
+    stream = {
+        "infoHash": "cc" * 20,
+        "fileIdx": 26,
+        "sources": ["tracker:udp://tracker1/announce", "dht:" + "cc" * 20],
+    }
+    resolved = client.resolve_stream(stream)
+    assert resolved == client.torrent_url(
+        "cc" * 20, 26, ["tracker:udp://tracker1/announce", "dht:" + "cc" * 20]
+    )
+
+
+def test_resolve_stream_prefers_announce_over_sources_when_both_present():
+    client = make_client()
+    stream = {
+        "infoHash": "dd" * 20,
+        "fileIdx": 1,
+        "announce": ["udp://real-tracker/announce"],
+        "sources": ["tracker:udp://ignored/announce"],
+    }
+    resolved = client.resolve_stream(stream)
+    assert resolved == client.torrent_url("dd" * 20, 1, ["udp://real-tracker/announce"])
+
+
 def test_resolve_stream_yt_id_builds_yt_endpoint():
     client = make_client()
     stream = {"ytId": "dQw4w9WgXcQ"}
@@ -422,3 +452,147 @@ def test_guess_file_idx_non_dict_stats_returns_none():
 def test_guess_file_idx_garbage_file_entries_treated_as_zero_length():
     stats = {"files": [None, "x", 42, {"length": "not-a-number"}, {"length": 7}]}
     assert guess_file_idx(stats) == 4
+
+
+# ============================================================================
+# iter_front: front-priming readiness probe (live-verified fix)
+#
+# Bug this defends against: pre-buffer used to poll aggregate
+# streamProgress/streamLen (buffered_bytes()), which can report megabytes
+# "buffered" while the file's FRONT (offset 0 - where ffmpeg's container
+# probe reads from) was never downloaded, since torrent pieces arrive out
+# of order. Live-verified against a real stremio-server-go instance: a
+# 1-peer torrent reached buffered=22.7MB by that metric yet a Range read
+# of the front returned 0 bytes, reproducing Kodi's exact
+# CURLE_PARTIAL_FILE(18)/"error probing input format" failure; a
+# well-seeded torrent's front read returned data immediately. iter_front()
+# streams a `Range: bytes=0-(want_bytes-1)` GET and yields each chunk's
+# length, so pre-buffer can measure (and drive) front availability
+# directly instead of trusting an aggregate/scattered-pieces metric.
+# ============================================================================
+
+
+class _StreamResp:
+    """Stand-in for a streamed requests.Response (resp.iter_content())."""
+
+    def __init__(self, chunks, status_code=200, raise_after=None):
+        self._chunks = list(chunks)
+        self.status_code = status_code
+        self.ok = 200 <= status_code < 400
+        self._raise_after = raise_after
+        self.closed = False
+
+    def raise_for_status(self):
+        if not self.ok:
+            raise requests.exceptions.HTTPError("%s error" % self.status_code, response=self)
+
+    def iter_content(self, chunk_size=None):
+        for chunk in self._chunks:
+            yield chunk
+        if self._raise_after is not None:
+            raise self._raise_after
+
+    def close(self):
+        self.closed = True
+
+
+def test_iter_front_requests_range_header_and_streams(fake_requests):
+    fake_requests.queue_get(_StreamResp([b"a" * 1024, b"b" * 1024]))
+    client = make_client()
+
+    lengths = list(client.iter_front("AA" * 20, 5, want_bytes=2048))
+
+    assert lengths == [1024, 1024]
+    call = fake_requests.calls[0]
+    assert call["url"] == BASE + "/" + "aa" * 20 + "/5"  # info_hash lower-cased like other methods
+    assert call["kwargs"]["headers"] == {"Range": "bytes=0-2047"}
+    assert call["kwargs"]["stream"] is True
+
+
+def test_iter_front_stops_early_once_want_bytes_satisfied(fake_requests):
+    fake_requests.queue_get(_StreamResp([b"a" * 1024, b"b" * 1024, b"c" * 1024]))
+    client = make_client()
+
+    lengths = list(client.iter_front("bb" * 20, 0, want_bytes=1500))
+
+    assert lengths == [1024, 1024]  # stops after the SECOND chunk crosses want_bytes
+
+
+def test_iter_front_skips_empty_chunks(fake_requests):
+    fake_requests.queue_get(_StreamResp([b"", b"abcd", b""]))
+    client = make_client()
+
+    assert list(client.iter_front("cc" * 20, 0, want_bytes=4)) == [4]
+
+
+def test_iter_front_default_chunk_size_and_timeout_passed_through(fake_requests):
+    fake_requests.queue_get(_StreamResp([b"x"]))
+    client = make_client()
+
+    list(client.iter_front("dd" * 20, 0, want_bytes=1))
+
+    assert fake_requests.calls[0]["kwargs"].get("timeout") == 60
+
+
+def test_iter_front_raises_server_error_on_connection_failure(fake_requests):
+    fake_requests.queue_get(requests.exceptions.ConnectionError("refused"))
+    client = make_client()
+    with pytest.raises(ServerError):
+        list(client.iter_front("ee" * 20, 0, want_bytes=1024))
+
+
+def test_iter_front_raises_server_error_on_http_error(fake_requests):
+    fake_requests.queue_get(_StreamResp([], status_code=500))
+    client = make_client()
+    with pytest.raises(ServerError):
+        list(client.iter_front("ff" * 20, 0, want_bytes=1024))
+
+
+def test_iter_front_raises_server_error_when_zero_bytes_then_stream_error(fake_requests):
+    """A torrent with no peers at offset 0: the request succeeds but the
+    stream yields nothing before the connection drops - the exact live
+    symptom (Batman 1989, 1 peer: 0 bytes, instantly). Zero usable bytes
+    from this attempt -> raise, so the caller (player.py's retry loop)
+    knows this attempt produced nothing and should wait before retrying.
+    """
+    fake_requests.queue_get(
+        _StreamResp([], raise_after=requests.exceptions.ChunkedEncodingError("closed"))
+    )
+    client = make_client()
+    with pytest.raises(ServerError):
+        list(client.iter_front("aa" * 20, 1, want_bytes=1024))
+
+
+def test_iter_front_tolerates_partial_read_then_mid_stream_close(fake_requests):
+    """Some front bytes arrived before the connection closed early - the
+    exact live symptom for a well-seeded torrent under load (Sintel: 254KB
+    delivered then IncompleteRead). Still useful data, so this must NOT
+    raise; the generator just ends, yielding what it got.
+    """
+    fake_requests.queue_get(
+        _StreamResp([b"x" * 512], raise_after=requests.exceptions.ChunkedEncodingError("closed"))
+    )
+    client = make_client()
+
+    lengths = list(client.iter_front("bb" * 20, 3, want_bytes=4096))
+
+    assert lengths == [512]
+
+
+def test_iter_front_raises_when_requests_module_unavailable(fake_requests, monkeypatch):
+    import lib.stremio.server as server_module
+
+    monkeypatch.setattr(server_module, "requests", None)
+    client = make_client()
+    with pytest.raises(ServerError):
+        list(client.iter_front("cc" * 20, 0, want_bytes=1024))
+
+
+def test_iter_front_closes_response_when_done(fake_requests):
+    resp = _StreamResp([b"a" * 10])
+    fake_requests.queue_get(resp)
+    client = make_client()
+
+    list(client.iter_front("dd" * 20, 0, want_bytes=10))
+
+    assert resp.closed is True

@@ -5,7 +5,7 @@ src/types/resource/stream.rs StreamSource) into URLs playable against a
 local stremio-server-go instance, mirroring stremio-core's Stream::convert
 (stream.rs:234-604) for the sources this client supports:
 
-- Torrent (infoHash/fileIdx/announce) -> GET {server}/{infoHash}/{fileIdx}
+- Torrent (infoHash/fileIdx/announce-or-sources) -> GET {server}/{infoHash}/{fileIdx}
   with repeated `tr=` tracker query params. Confirmed against server-go's
   internal/api/api.go (`trackers := q["tr"]`) and docs/swagger.yaml's
   `/{infoHash}/{fileIdx}` streaming endpoint.
@@ -17,6 +17,19 @@ local stremio-server-go instance, mirroring stremio-core's Stream::convert
 Archives (rar/zip/7zip/tar/tgz), Nzb and ftp(s) sources need stremio-core's
 lz-string `/…/create` payload conversion, which is out of scope here;
 callers see those as unresolved (None) rather than a guessed URL.
+
+iter_front() is the client's readiness probe for torrents: it streams the
+FIRST bytes of the file (offset 0, Range GET) rather than trusting
+aggregate download progress. Verified live against stremio-server-go
+v0.8.5: a torrent's *aggregate* per-file stats (buffered_bytes()) can
+report megabytes downloaded while the front of the file - where ffmpeg's
+container-header probe reads from - is still completely unavailable
+(pieces download out of order), causing Kodi's player to fail with
+CURLE_PARTIAL_FILE / "error probing input format" even though pre-buffer
+"succeeded" by the old aggregate-byte-count metric. A front Range read
+both DRIVES the server's front-prioritization (NewReader ->
+primeBoundary/warmMoov, internal/engine/engine.go:766-813) and PROVES
+playback will actually start cleanly.
 
 resolve_stream() is a pure URL builder - it does not check whether the
 server is actually reachable. Callers should call is_available() first
@@ -152,6 +165,61 @@ class ServerClient:
         except ValueError as exc:
             raise ServerError('GET %s returned invalid JSON: %s' % (url, exc))
 
+    def iter_front(self, info_hash, file_idx, want_bytes, chunk_size=16384, timeout=60):
+        """Stream the FRONT (offset 0) of a torrent file, yielding each
+        chunk's length as it arrives - the pre-buffer readiness probe.
+
+        Issues `GET {base}/{infoHash}/{fileIdx}` with a `Range:
+        bytes=0-(want_bytes-1)` header (the same request shape Kodi's own
+        player makes), streamed rather than buffered whole. A connection
+        that closes after delivering SOME bytes (IncompleteRead /
+        ChunkedEncodingError - the normal shape of a live, poorly-seeded
+        Range read) is treated as a non-fatal end of this attempt, since
+        partial front data is still meaningful; the caller re-issues a
+        fresh request to keep trying. Only a request that fails with NO
+        bytes received raises `ServerError`, matching this file's other
+        methods.
+
+        `chunk_size` defaults small (16 KiB), NOT large: `requests`'
+        `iter_content()` does one `raw.read(chunk_size)` per chunk, and if
+        the connection closes before a FULL chunk_size of bytes has
+        arrived, `http.client` raises `IncompleteRead` for that WHOLE
+        chunk before yielding anything - losing every byte read so far in
+        it. Live-verified against a real mid-stream close: a 1 MiB
+        chunk_size lost an entire ~1 MB of genuinely-received front data
+        (reported as 0 bytes obtained) when the connection closed 8 KB
+        short of that chunk boundary; shrinking to 16 KiB reduces a worst-
+        case loss to a single small tail fragment instead of the whole
+        read.
+        """
+        if requests is None:
+            raise ServerError('the "requests" package is required for ServerClient')
+        url = '%s/%s/%s' % (self.base_url, str(info_hash).lower(), file_idx)
+        headers = {'Range': 'bytes=0-%d' % (want_bytes - 1)}
+        try:
+            resp = requests.get(url, headers=headers, stream=True, timeout=timeout)
+            resp.raise_for_status()
+        except requests.RequestException as exc:
+            raise ServerError('GET %s failed: %s' % (url, exc))
+        got = 0
+        try:
+            for chunk in resp.iter_content(chunk_size=chunk_size):
+                if not chunk:
+                    continue
+                got += len(chunk)
+                yield len(chunk)
+                if got >= want_bytes:
+                    break
+        except requests.RequestException as exc:
+            if got == 0:
+                raise ServerError('GET %s failed mid-stream: %s' % (url, exc))
+            return
+        finally:
+            try:
+                resp.close()
+            except Exception:  # noqa: BLE001 - closing must never mask the real outcome
+                pass
+
     def resolve_stream(self, stream):
         """Resolve a Stream protocol dict to a playable URL, or None.
 
@@ -159,9 +227,16 @@ class ServerClient:
           is converted via _magnet_to_torrent_url() when it carries a
           parseable info hash, else None (playing a bare magnet needs a
           torrent client, which the addon doesn't embed).
-        - `infoHash` (+ `fileIdx`, `announce`): -> torrent_url(). Missing
-          `fileIdx` defaults to UNKNOWN_FILE_IDX (-1), matching
-          stremio-core, NOT 0.
+        - `infoHash` (+ `fileIdx`, `announce`/`sources`): -> torrent_url().
+          Missing `fileIdx` defaults to UNKNOWN_FILE_IDX (-1), matching
+          stremio-core, NOT 0. Trackers come from `announce`, falling back
+          to `sources` when absent - stremio-core deserializes torrent
+          trackers with `#[serde(alias = "sources")]` (stream.rs:812), and
+          Torrentio/AIOStreams-style addons ship them under `sources`
+          (e.g. "tracker:udp://host:port/announce", "dht:<hash>").
+          stremio-server-go strips the "tracker:" prefix and ignores
+          "dht:" entries itself (engine.go mergeTrackers), so forwarding
+          raw sources entries as `tr=` is correct as-is.
         - `ytId`: -> `{base}/yt/{ytId}`.
         - `externalUrl`/`playerFrameUrl`/anything else (archives, nzb,
           ftp): -> None, unsupported without full stremio-core conversion.
@@ -179,7 +254,7 @@ class ServerClient:
             file_idx = stream.get('fileIdx')
             if file_idx is None:
                 file_idx = UNKNOWN_FILE_IDX
-            announce = stream.get('announce') or []
+            announce = stream.get('announce') or stream.get('sources') or []
             return self.torrent_url(info_hash, file_idx, announce)
 
         yt_id = stream.get('ytId')
