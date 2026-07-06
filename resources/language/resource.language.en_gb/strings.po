@@ -80,6 +80,10 @@ msgctxt "#30031"
 msgid "Streaming server unavailable"
 msgstr ""
 
+msgctxt "#30032"
+msgid "Something went wrong"
+msgstr ""
+
 msgctxt "#30040"
 msgid "Next page"
 msgstr ""

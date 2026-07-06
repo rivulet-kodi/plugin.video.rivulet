@@ -458,6 +458,7 @@ def test_fail_gracefully_ends_directory_for_non_play_action(load_router):
         {'handle': 11, 'succeeded': False, 'updateListing': False, 'cacheToDisc': True}
     ]
     assert ctx.env.resolved == []
+    assert [m for _, m, _, _ in ctx.env.notifications] == ['STR30032']
 
 
 def test_fail_gracefully_resolves_url_false_for_play_action(load_router):
@@ -471,6 +472,7 @@ def test_fail_gracefully_resolves_url_false_for_play_action(load_router):
     handle, succeeded, list_item = ctx.env.resolved[0]
     assert (handle, succeeded) == (11, False)
     assert isinstance(list_item, FakeListItem)
+    assert [m for _, m, _, _ in ctx.env.notifications] == ['STR30032']
 
 
 # ---------------------------------------------------------------------------

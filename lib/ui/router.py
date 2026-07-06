@@ -142,6 +142,9 @@ def _fail_gracefully(action):
     import xbmcgui
     import xbmcplugin
 
+    from lib.ui.compat import L, notify
+
+    notify(L(30032))
     if action == 'play':
         xbmcplugin.setResolvedUrl(ADDON_HANDLE, False, xbmcgui.ListItem())
     else:
