@@ -144,8 +144,9 @@ class FakeInfoTag:
 class FakeListItem:
     """Stand-in for `xbmcgui.ListItem`: records label/art/property/info
     mutations (test_views.py's directory-listing assertions) as well as
-    the `path`/subtitles fields `lib.ui.player.play()` sets on the item it
-    hands to `xbmcplugin.setResolvedUrl()` (test_player_buffer.py).
+    the `path`/subtitles/mimetype/content_lookup fields
+    `lib.ui.player.play()` sets on the item it hands to
+    `xbmcplugin.setResolvedUrl()` (test_player_buffer.py).
     """
 
     def __init__(self, label='', label2='', path='', offscreen=False):
@@ -159,6 +160,8 @@ class FakeListItem:
         self.subtitles = None
         self.context_menu_items = []
         self.info_tag = FakeInfoTag()
+        self.mimetype = None
+        self.content_lookup = None
 
     def getLabel(self):
         return self._label
@@ -175,6 +178,12 @@ class FakeListItem:
     def setInfo(self, kind, info):
         assert kind == 'video'
         self.legacy_info.update(info)
+
+    def setMimeType(self, value):
+        self.mimetype = value
+
+    def setContentLookup(self, enable):
+        self.content_lookup = enable
 
     def getVideoInfoTag(self):
         return self.info_tag

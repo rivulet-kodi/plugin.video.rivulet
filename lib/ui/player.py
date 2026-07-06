@@ -4,6 +4,7 @@ Kodi calls default.py -> router.run() -> here with the ADDON_HANDLE and the
 base64url-decoded stream dict for action=play. This module owns the only
 xbmc* calls involved in actually starting playback.
 """
+import os
 from urllib.parse import urlencode
 
 import xbmc
@@ -14,7 +15,55 @@ from lib.store import Store
 from lib.stremio.addons import AddonClient
 from lib.stremio.server import UNKNOWN_FILE_IDX, ServerClient, guess_file_idx
 from lib.stremio.subtitles import collect_subtitles, sort_subtitles
-from lib.ui.compat import ADDON, L, addon_profile_dir, log, notify, setting_bool, setting_int
+from lib.ui.compat import (
+    ADDON,
+    L,
+    addon_profile_dir,
+    log,
+    notify,
+    set_video_info,
+    setting_bool,
+    setting_int,
+)
+
+#: Extension -> MIME type for the video containers Stremio streams commonly
+#: use. Keyed by `os.path.splitext()` output (lowercased, leading dot kept).
+_MIME_TYPES = {
+    '.mkv': 'video/x-matroska',
+    '.mp4': 'video/mp4',
+    '.m4v': 'video/mp4',
+    '.avi': 'video/x-msvideo',
+    '.mov': 'video/quicktime',
+    '.ts': 'video/mp2t',
+    '.m2ts': 'video/mp2t',
+    '.webm': 'video/webm',
+    '.flv': 'video/x-flv',
+    '.wmv': 'video/x-ms-wmv',
+    '.mpg': 'video/mpeg',
+    '.mpeg': 'video/mpeg',
+}
+
+
+def _mime_for(filename):
+    """Best-effort MIME type for `filename`'s extension, or None.
+
+    Unknown/absent extensions return None so the caller skips
+    `setMimeType` entirely rather than hinting a wrong/generic type.
+    """
+    if not filename:
+        return None
+    ext = os.path.splitext(filename)[1].lower()
+    return _MIME_TYPES.get(ext)
+
+
+def _filename_from_url(url):
+    """Last path segment of a resolved playback `url`, with any baked
+    `|urlencoded-headers` suffix (see the header-baking below in `play()`)
+    and query string stripped first.
+    """
+    base = url.split('|', 1)[0].split('?', 1)[0]
+    return base.rsplit('/', 1)[-1]
+
 
 #: Bounded (connect, read) timeouts for the pre-buffer network calls. The
 #: SHORT read timeout is what makes the "Preparing stream" dialog
@@ -323,10 +372,26 @@ def play(handle, stream, stype, sid):
         # the player send these headers with every request for that URL.
         url = '%s|%s' % (url, urlencode(request_headers))
 
-    list_item = xbmcgui.ListItem(path=url)
     filename = behavior_hints.get('filename')
+
+    list_item = xbmcgui.ListItem(path=url)
+    # Disable Kodi's content-type HEAD probe: it races/aborts against a
+    # torrent engine that is still (re)priming a range on open/seek, which
+    # is the primary cause of seek-exits-playback. setMimeType (when the
+    # extension is known) gives Kodi the same information up front so the
+    # probe was never needed.
+    list_item.setContentLookup(False)
+    mime = _mime_for(filename or _filename_from_url(url))
+    if mime:
+        list_item.setMimeType(mime)
+
     if filename:
         list_item.setLabel(filename)
+
+    set_video_info(list_item, {
+        'title': filename or list_item.getLabel(),
+        'mediatype': 'episode' if stype == 'series' else 'movie',
+    })
 
     _attach_subtitles(list_item, behavior_hints, stype, sid)
 

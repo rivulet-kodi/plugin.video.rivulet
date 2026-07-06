@@ -529,6 +529,83 @@ def test_non_torrent_stream_never_engages_prebuffer(kodi_stubs, monkeypatch):
     assert list_item.path == 'https://example.com/a.mp4'
 
 
+# --- ListItem hardening: setContentLookup/setMimeType/video-info (seek-exit fix) -
+
+
+def test_play_disables_content_lookup_and_sets_mimetype_for_known_extension(kodi_stubs, monkeypatch):
+    """The primary seek-exits-playback fix: `setContentLookup(False)` stops
+    Kodi's own content-type HEAD probe, which races/aborts against the
+    torrent engine re-priming a range on (re)open and seek. A known
+    container extension additionally gets an explicit `setMimeType` so
+    Kodi never needs that probe in the first place.
+    """
+    env = kodi_stubs.env
+    env.addon.settings['buffer_enable'] = False
+    _ServerScript(resolve_url='http://server/x/0').install(monkeypatch, kodi_stubs.player)
+
+    stream = _torrent_stream(fileIdx=0, behaviorHints={'filename': 'My.Movie.2020.mkv'})
+    kodi_stubs.player.play(30, stream, 'movie', 'tt30')
+
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (30, True)
+    assert list_item.content_lookup is False
+    assert list_item.mimetype == 'video/x-matroska'
+
+
+@pytest.mark.parametrize('behavior_hints', [
+    None,                              # no behaviorHints key at all
+    {},                                # behaviorHints present, no filename
+    {'filename': 'readme.txt'},        # filename present, unrecognized extension
+])
+def test_play_leaves_mimetype_unset_for_unknown_or_absent_filename(kodi_stubs, monkeypatch, behavior_hints):
+    env = kodi_stubs.env
+    env.addon.settings['buffer_enable'] = False
+    _ServerScript(resolve_url='http://server/x/0').install(monkeypatch, kodi_stubs.player)
+
+    overrides = {'fileIdx': 0}
+    if behavior_hints is not None:
+        overrides['behaviorHints'] = behavior_hints
+    kodi_stubs.player.play(31, _torrent_stream(**overrides), 'movie', 'tt31')
+
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (31, True)
+    assert list_item.mimetype is None
+    # Kodi's own content-type probe must stay disabled regardless of
+    # whether a MIME type could be derived.
+    assert list_item.content_lookup is False
+
+
+def test_play_sets_title_and_mediatype_infolabels_for_movie(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    env.addon.settings['buffer_enable'] = False
+    _ServerScript(resolve_url='http://server/x/0').install(monkeypatch, kodi_stubs.player)
+
+    stream = _torrent_stream(fileIdx=0, behaviorHints={'filename': 'My.Movie.2020.mkv'})
+    kodi_stubs.player.play(32, stream, 'movie', 'tt32')
+
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (32, True)
+    # This file's kodi_stubs fixture leaves System.BuildVersion unset, so
+    # lib.ui.compat.set_video_info() takes the Kodi-19 legacy
+    # ListItem.setInfo('video', {...}) path, recorded as legacy_info.
+    assert list_item.legacy_info.get('title') == 'My.Movie.2020.mkv'
+    assert list_item.legacy_info.get('mediatype') == 'movie'
+
+
+def test_play_sets_episode_mediatype_for_series_stream(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    env.addon.settings['buffer_enable'] = False
+    _ServerScript(resolve_url='http://server/x/0').install(monkeypatch, kodi_stubs.player)
+
+    stream = _torrent_stream(fileIdx=0, behaviorHints={'filename': 'Show.S01E01.mkv'})
+    kodi_stubs.player.play(33, stream, 'series', 'tt33:1:1')
+
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (33, True)
+    assert list_item.legacy_info.get('title') == 'Show.S01E01.mkv'
+    assert list_item.legacy_info.get('mediatype') == 'episode'
+
+
 # --- buffer_enable read via raw getSetting() string (resolve-time fix) ----
 
 
