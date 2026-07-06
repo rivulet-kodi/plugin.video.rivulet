@@ -7,8 +7,9 @@ module docstring: "This module owns the only xbmc* calls involved in
 actually starting playback"), and lib.ui.compat - which player.py imports
 ADDON/L/notify/log from - additionally imports xbmcaddon/xbmcvfs and binds
 `ADDON = xbmcaddon.Addon()` at module scope. None of those five modules
-exist in this environment, so the `kodi_stubs` fixture below injects fakes
-into sys.modules and (re)imports lib.ui.compat/lib.ui.player under them,
+exist in this environment, so the `kodi_stubs` fixture below (a thin
+wrapper over tests.kodistubs.install_kodi_stubs()) injects fakes into
+sys.modules and (re)imports lib.ui.compat/lib.ui.player under them,
 restoring sys.modules exactly on teardown so no other test file ever sees
 the stubs.
 
@@ -32,220 +33,27 @@ only proceeds once _HEADER_MIN_BYTES (512 KiB) of front data is actually
 obtained; a torrent that never yields usable front data now fails honestly
 (string 30084, resolves False) instead of handing Kodi a doomed URL.
 """
-import importlib
-import sys
-import types
-from types import SimpleNamespace
-
 import pytest
+
+from tests.kodistubs import install_kodi_stubs
 
 INFO_HASH = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
 
-_STUB_MODULES = ('xbmc', 'xbmcgui', 'xbmcplugin', 'xbmcaddon', 'xbmcvfs')
 _RELOADED_MODULES = ('lib.ui.compat', 'lib.ui.player')
-
-
-# --- fake xbmc* modules ------------------------------------------------
-
-
-class _FakeAddon:
-    """Stand-in for xbmcaddon.Addon(), configurable per test via .settings."""
-
-    def __init__(self):
-        self.settings = {
-            'server_url': '',
-            'buffer_enable': True,
-            'buffer_mb': 1,
-            'subs_enable': False,
-            'subs_language': 'en',
-        }
-        self.info = {
-            'id': 'plugin.video.rivulet',
-            'name': 'Rivulet',
-            'icon': '',
-            'fanart': '',
-        }
-        # Only strings player.py applies `%` formatting to need real
-        # placeholders (see _prebuffer_torrent's dialog.update text); every
-        # other id gets a unique deterministic marker so notify()/dialog
-        # calls can be asserted on without hardcoding real strings.po text.
-        self._localized = {
-            30081: 'buffered %s of %s',
-            30082: 'speed %s, %s peers',
-        }
-
-    def getSetting(self, key):
-        value = self.settings.get(key, '')
-        return '' if value is None else str(value)
-
-    def getSettingBool(self, key):
-        return bool(self.settings.get(key, False))
-
-    def getSettingInt(self, key):
-        return int(self.settings.get(key, 0))
-
-    def getLocalizedString(self, string_id):
-        return self._localized.get(string_id, 'STR%d' % string_id)
-
-    def getAddonInfo(self, key):
-        return self.info.get(key, '')
-
-
-class _Env:
-    """Recorder shared by every fake xbmc* module for one test invocation."""
-
-    def __init__(self):
-        self.addon = _FakeAddon()
-        self.dialog_created = []
-        self.dialog_updates = []
-        self.dialog_closed_count = 0
-        self.cancel = False
-        self.monitor_abort = False
-        self.monitor_abort_calls = 0
-        self.notifications = []
-        self.resolved = []
-        self.log_calls = []
-
-
-def _make_fake_xbmc(env):
-    module = types.ModuleType('xbmc')
-    module.LOGDEBUG = 0
-    module.LOGINFO = 1
-    module.LOGWARNING = 2
-    module.LOGERROR = 3
-    module.log = lambda msg, level=0: env.log_calls.append((msg, level))
-
-    class Monitor:
-        def waitForAbort(self, timeout=None):
-            env.monitor_abort_calls += 1
-            abort = env.monitor_abort
-            return bool(abort(env.monitor_abort_calls)) if callable(abort) else bool(abort)
-
-    module.Monitor = Monitor
-    return module
-
-
-def _make_fake_xbmcgui(env):
-    module = types.ModuleType('xbmcgui')
-
-    class ListItem:
-        def __init__(self, label='', label2='', path='', offscreen=False):
-            self.path = path
-            self.label = label
-            self.subtitles = None
-
-        def setLabel(self, label):
-            self.label = label
-
-        def setSubtitles(self, urls):
-            self.subtitles = urls
-
-    class DialogProgress:
-        def create(self, heading, message=''):
-            env.dialog_created.append((heading, message))
-
-        def iscanceled(self):
-            cancel = env.cancel
-            return bool(cancel()) if callable(cancel) else bool(cancel)
-
-        def update(self, percent, message=''):
-            env.dialog_updates.append((percent, message))
-
-        def close(self):
-            env.dialog_closed_count += 1
-
-    class Dialog:
-        def notification(self, heading, message, icon=None, time=0):
-            env.notifications.append((heading, message, icon, time))
-
-    module.ListItem = ListItem
-    module.DialogProgress = DialogProgress
-    module.Dialog = Dialog
-    module.NOTIFICATION_INFO = 'info'
-    return module
-
-
-def _make_fake_xbmcplugin(env):
-    module = types.ModuleType('xbmcplugin')
-
-    def setResolvedUrl(handle, succeeded, list_item):
-        env.resolved.append((handle, succeeded, list_item))
-
-    module.setResolvedUrl = setResolvedUrl
-    return module
-
-
-def _make_fake_xbmcaddon(env):
-    module = types.ModuleType('xbmcaddon')
-    module.Addon = lambda *a, **k: env.addon
-    return module
-
-
-def _make_fake_xbmcvfs(env):
-    module = types.ModuleType('xbmcvfs')
-    module.translatePath = lambda path: path
-    return module
-
-
-# Sentinel distinguishing "the lib.ui package had no such attribute before"
-# from "it had the attribute set to None" when snapshotting for restore.
-_MISSING = object()
 
 
 @pytest.fixture
 def kodi_stubs():
-    """Inject fake xbmc*/xbmcaddon/xbmcvfs and (re)import lib.ui.player.
-
-    Snapshots the previous sys.modules entry for every name we touch and
-    restores it verbatim in `finally`, so a failure mid-test still leaves
-    other test files' import state untouched.
-
-    `importlib.import_module('lib.ui.compat')` is a dotted import, so it
-    always re-execs when the name is absent from sys.modules regardless of
-    the `lib.ui` package's cached attribute - but the import protocol also
-    sets `lib.ui.compat`/`lib.ui.player` as attributes on the `lib.ui`
-    package object as a side effect, and merely popping sys.modules on
-    teardown does NOT clear those attributes. A sibling module that does
-    `from lib.ui import compat` (attribute-fromlist, e.g. lib/ui/views.py)
-    would then silently reuse that stale, now-orphaned attribute via
-    getattr - bypassing sys.modules entirely - instead of importing fresh.
-    Snapshot and restore those two attributes too, so this fixture cannot
-    leak a stubbed module into any other file regardless of which import
-    style it uses.
+    """Install fresh stubs (via tests.kodistubs.install_kodi_stubs),
+    (re)importing lib.ui.compat/lib.ui.player fresh against them, and
+    yield the namespace directly (`.env`, `.player`, `.compat`) - every
+    test in this file configures its scenario by mutating
+    `kodi_stubs.env.addon.settings[...]`/`env.cancel`/`env.monitor_abort`
+    after setup rather than via fixture arguments. Restored exactly at
+    teardown so no other test file ever sees the stubs.
     """
-    env = _Env()
-    fakes = {
-        'xbmc': _make_fake_xbmc(env),
-        'xbmcgui': _make_fake_xbmcgui(env),
-        'xbmcplugin': _make_fake_xbmcplugin(env),
-        'xbmcaddon': _make_fake_xbmcaddon(env),
-        'xbmcvfs': _make_fake_xbmcvfs(env),
-    }
-    saved = {name: sys.modules.get(name) for name in _STUB_MODULES + _RELOADED_MODULES}
-    leaves = [name.rsplit('.', 1)[-1] for name in _RELOADED_MODULES]
-    lib_ui_pkg = sys.modules.get('lib.ui')
-    saved_attrs = {leaf: getattr(lib_ui_pkg, leaf, _MISSING) for leaf in leaves} if lib_ui_pkg else {}
-    try:
-        sys.modules.update(fakes)
-        for name in _RELOADED_MODULES:
-            sys.modules.pop(name, None)
-
-        compat = importlib.import_module('lib.ui.compat')
-        player = importlib.import_module('lib.ui.player')
-
-        yield SimpleNamespace(env=env, player=player, compat=compat)
-    finally:
-        for name, original in saved.items():
-            if original is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = original
-        for leaf, original_attr in saved_attrs.items():
-            if original_attr is _MISSING:
-                if hasattr(lib_ui_pkg, leaf):
-                    delattr(lib_ui_pkg, leaf)
-            else:
-                setattr(lib_ui_pkg, leaf, original_attr)
+    with install_kodi_stubs(reload=_RELOADED_MODULES) as ctx:
+        yield ctx
 
 
 # --- fake ServerClient ---------------------------------------------------
@@ -323,8 +131,7 @@ class _ServerScript:
                 attempt = attempts[idx] if idx < len(attempts) else attempts[-1]
                 if isinstance(attempt, Exception):
                     raise attempt
-                for chunk_len in attempt:
-                    yield chunk_len
+                yield from attempt
 
             def torrent_url(self, info_hash, file_idx, announce=None):
                 script.torrent_url_calls.append((info_hash, file_idx, tuple(announce or ())))

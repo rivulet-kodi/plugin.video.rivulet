@@ -9,6 +9,7 @@ inside a method - either way it ends up looking up attributes on the single
 module-under-test's own namespace) therefore works uniformly regardless of
 which import style a given module uses.
 """
+import contextlib
 import socket
 import sys
 from pathlib import Path
@@ -21,6 +22,11 @@ import requests
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+# kodistubs imports `lib.ui` submodules by dotted name at call time (not
+# import time), but needs REPO_ROOT on sys.path first to be importable
+# itself as `tests.kodistubs` - hence this import follows the bootstrap.
+from tests.kodistubs import install_kodi_stubs
 
 
 # --- hard network block (defense in depth) ----------------------------------
@@ -117,3 +123,35 @@ class FakeRequests:
 def fake_requests(monkeypatch):
     """Patches requests.get/requests.post globally; returns the controller."""
     return FakeRequests(monkeypatch)
+
+
+# --- fake xbmc* stub injection (opt-in) --------------------------------------
+# The Kodi-facing layer (`lib.ui.*`) imports `xbmc`/`xbmcgui`/`xbmcplugin`/
+# `xbmcaddon`/`xbmcvfs`, none of which exist off a real Kodi runtime. This
+# fixture is intentionally NOT autouse: the pure-Python test files (this
+# suite's majority) must never see xbmc injected into `sys.modules`.
+@pytest.fixture
+def kodi_stubs():
+    """Factory fixture: `kodi_stubs(reload=(...), **config)` installs fresh
+    fake xbmc*/xbmcgui/xbmcplugin/xbmcaddon/xbmcvfs modules (see
+    `tests/kodistubs`) and (re)imports the given `lib.ui.*` dotted module
+    names against them, returning a namespace with `.env` (the shared call
+    recorder) plus one attribute per reloaded module, keyed by its last
+    dotted component (`'lib.ui.compat'` -> `.compat`).
+
+    `reload` differs per caller - each Kodi-facing module under test needs
+    a different slice of `lib.ui.*` refreshed against the fakes. `**config`
+    forwards straight to `install_kodi_stubs()` (addon_info/settings/
+    localized/info_labels/dialog_inputs/cancel/monitor_abort).
+
+    Every install this fixture makes is torn down, in reverse order, at
+    test teardown - restoring `sys.modules` and the `lib.ui` package's
+    leaf attributes exactly - so a test may call it more than once (e.g.
+    to reload a different module slice partway through) without leaking
+    state into later tests.
+    """
+    with contextlib.ExitStack() as stack:
+        def _install(reload, **config):
+            return stack.enter_context(install_kodi_stubs(reload=reload, **config))
+
+        yield _install
