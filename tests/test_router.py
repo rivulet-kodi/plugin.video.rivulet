@@ -30,6 +30,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse
 
 import pytest
 
+import lib.advancedsettings as advancedsettings
 import lib.serverbin as serverbin
 from tests.kodistubs import FakeListItem, install_kodi_stubs
 
@@ -566,3 +567,118 @@ def test_server_download_user_cancel_mid_download_notifies_download_error(load_r
 
     assert [msg for _, msg, _, _ in ctx.env.notifications] == ['STR30063']
     assert ctx.env.dialog_closed_count == 1
+
+
+# ---------------------------------------------------------------------------
+# _install_advancedsettings() (action 'advancedsettings_install')
+# ---------------------------------------------------------------------------
+
+
+def test_advancedsettings_install_success_notifies_restart_message(load_router, monkeypatch):
+    ctx = load_router(localized={30066: 'restart Kodi to apply'})
+    monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=advancedsettings_install'])
+
+    calls = []
+
+    def fake_install(source_path, dest_path):
+        calls.append((source_path, dest_path))
+        return 'installed'
+
+    monkeypatch.setattr(advancedsettings, 'install', fake_install)
+
+    ctx.router.run()
+
+    assert calls == [(
+        '/fake-kodi-home/home/addons/plugin.video.rivulet/resources/advancedsettings.xml',
+        '/fake-kodi-home/masterprofile/advancedsettings.xml',
+    )]
+    assert ctx.env.notifications == [('Rivulet', 'restart Kodi to apply', 'info', 4000)]
+    assert ctx.env.end_of_directory == []
+    assert ctx.env.resolved == []
+    assert ctx.views.calls == []
+    assert ctx.player.calls == []
+
+
+def test_advancedsettings_install_resolves_source_path_from_addon_id_not_hardcoded(load_router, monkeypatch):
+    """Regression guard: the source path must be built from the addon's own
+    ADDON_ID (so a fork/rename keeps working), never a literal
+    'plugin.video.rivulet' string."""
+    ctx = load_router(addon_info={'id': 'plugin.video.otherfork'})
+    monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=advancedsettings_install'])
+
+    calls = []
+
+    def fake_install(source_path, dest_path):
+        calls.append((source_path, dest_path))
+        return 'installed'
+
+    monkeypatch.setattr(advancedsettings, 'install', fake_install)
+
+    ctx.router.run()
+
+    assert calls == [(
+        '/fake-kodi-home/home/addons/plugin.video.otherfork/resources/advancedsettings.xml',
+        '/fake-kodi-home/masterprofile/advancedsettings.xml',
+    )]
+
+
+def test_advancedsettings_install_exists_notifies_merge_manually_message(load_router, monkeypatch):
+    ctx = load_router(localized={30067: 'already exists - merge manually'})
+    monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=advancedsettings_install'])
+
+    monkeypatch.setattr(advancedsettings, 'install', lambda source_path, dest_path: 'exists')
+
+    ctx.router.run()
+
+    assert ctx.env.notifications == [('Rivulet', 'already exists - merge manually', 'info', 4000)]
+    assert ctx.env.end_of_directory == []
+    assert ctx.env.resolved == []
+
+
+def test_advancedsettings_install_error_notifies_failure_and_logs_error(load_router, monkeypatch):
+    ctx = load_router(localized={30068: 'Failed to install advancedsettings.xml'})
+    monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=advancedsettings_install'])
+
+    def fake_install(source_path, dest_path):
+        raise advancedsettings.AdvancedSettingsError('disk full')
+
+    monkeypatch.setattr(advancedsettings, 'install', fake_install)
+    xbmc_mod = sys.modules['xbmc']
+
+    ctx.router.run()
+
+    assert ctx.env.notifications == [('Rivulet', 'Failed to install advancedsettings.xml', 'info', 4000)]
+    assert any(
+        level == xbmc_mod.LOGERROR and 'router: advancedsettings_install failed:' in msg
+        for msg, level in ctx.env.log_calls
+    )
+    assert ctx.env.end_of_directory == []
+    assert ctx.env.resolved == []
+
+
+def test_advancedsettings_install_unwrapped_oserror_is_not_swallowed(load_router, monkeypatch):
+    """_install_advancedsettings() only catches
+    advancedsettings.AdvancedSettingsError (lib.advancedsettings.install()'s
+    documented contract) - a plain OSError escaping install() by mistake
+    must still surface via router.run()'s top-level guard instead of
+    vanishing silently."""
+    ctx = load_router()
+    monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=advancedsettings_install'])
+
+    def fake_install(source_path, dest_path):
+        raise OSError('unexpected raw OSError, not wrapped')
+
+    monkeypatch.setattr(advancedsettings, 'install', fake_install)
+    xbmc_mod = sys.modules['xbmc']
+
+    ctx.router.run()
+
+    assert ctx.env.end_of_directory == [
+        {'handle': 7, 'succeeded': False, 'updateListing': False, 'cacheToDisc': True}
+    ]
+    assert ctx.env.resolved == []
+    assert [msg for _, msg, _, _ in ctx.env.notifications] == ['STR30032']
+    assert any(
+        level == xbmc_mod.LOGERROR and 'action "advancedsettings_install" failed' in msg
+        for msg, level in ctx.env.log_calls
+    )

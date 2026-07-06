@@ -93,6 +93,7 @@ def run():
         'library': lambda p: views.library(),
         'settings': lambda p: views.open_settings(),
         'server_download': lambda p: _download_server_binary(),
+        'advancedsettings_install': lambda p: _install_advancedsettings(),
     }
 
     handler = dispatch.get(action, dispatch['home'])
@@ -136,6 +137,38 @@ def _download_server_binary():
         notify(L(30062) % path)
     finally:
         dialog.close()
+
+
+def _install_advancedsettings():
+    """Action 'advancedsettings_install': install the addon's bundled
+    resources/advancedsettings.xml template into the user's Kodi userdata
+    dir (special://masterprofile/advancedsettings.xml) so its generous
+    cURL timeouts + streaming cache apply globally - opt-in, and never
+    overwrites an advancedsettings.xml the user or another addon already
+    placed there.
+    """
+    import xbmc
+    import xbmcvfs
+
+    from lib import advancedsettings
+    from lib.ui.compat import ADDON_ID, L, log, notify
+
+    source = xbmcvfs.translatePath(
+        'special://home/addons/%s/resources/advancedsettings.xml' % ADDON_ID
+    )
+    dest = xbmcvfs.translatePath('special://masterprofile/advancedsettings.xml')
+
+    try:
+        status = advancedsettings.install(source, dest)
+    except advancedsettings.AdvancedSettingsError as exc:
+        log('router: advancedsettings_install failed: %s' % exc, xbmc.LOGERROR)
+        notify(L(30068))
+        return
+
+    if status == advancedsettings.STATUS_EXISTS:
+        notify(L(30067))
+    else:
+        notify(L(30066))
 
 
 def _fail_gracefully(action):

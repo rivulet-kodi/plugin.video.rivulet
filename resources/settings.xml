@@ -75,6 +75,11 @@
                         <heading>30073</heading>
                     </control>
                 </setting>
+                <setting id="advancedsettings_install" type="action" label="30065">
+                    <level>0</level>
+                    <data>RunPlugin(plugin://plugin.video.rivulet/?action=advancedsettings_install)</data>
+                    <control type="button" format="action"/>
+                </setting>
             </group>
         </category>
         <category id="subtitles" label="30050">

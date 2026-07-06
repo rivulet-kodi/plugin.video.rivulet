@@ -172,6 +172,22 @@ msgctxt "#30076"
 msgid "Seeders"
 msgstr ""
 
+msgctxt "#30065"
+msgid "Install recommended advancedsettings.xml"
+msgstr ""
+
+msgctxt "#30066"
+msgid "advancedsettings.xml installed - restart Kodi to apply"
+msgstr ""
+
+msgctxt "#30067"
+msgid "advancedsettings.xml already exists - merge changes manually"
+msgstr ""
+
+msgctxt "#30068"
+msgid "Failed to install advancedsettings.xml"
+msgstr ""
+
 msgctxt "#30080"
 msgid "Preparing stream"
 msgstr ""

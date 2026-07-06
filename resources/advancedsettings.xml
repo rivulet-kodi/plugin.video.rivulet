@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<advancedsettings>
+    <network>
+        <curlclienttimeout>60</curlclienttimeout>
+        <curllowspeedtime>60</curllowspeedtime>
+        <curlretries>2</curlretries>
+    </network>
+    <cache>
+        <buffermode>1</buffermode>
+        <memorysize>209715200</memorysize>
+        <readfactor>20</readfactor>
+    </cache>
+</advancedsettings>

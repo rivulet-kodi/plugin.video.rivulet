@@ -71,4 +71,4 @@ warn_unused_ignores = false
 # code project-wide (scoped to files below) covers requests cleanly without
 # adding a types-requests dev dependency.
 disable_error_code = ["import-untyped"]
-files = ["lib/stremio", "lib/store.py"]
+files = ["lib/stremio", "lib/store.py", "lib/advancedsettings.py"]
