@@ -382,3 +382,76 @@ def test_open_detail_series_builds_window_against_skin_path_and_starts_with_the_
     assert result is True
     assert captured['init_args'] == ('DetailWindow.xml', '/addon/path', 'Default', '720p')
     assert captured['start_args'] == (meta, 'series')
+
+
+def test_open_detail_movie_success_wraps_the_fetch_in_a_busy_dialog(
+    load_detailwindow, monkeypatch,
+):
+    ctx = load_detailwindow()
+    meta = {'id': 'tt1', 'name': 'A Movie', 'poster': 'https://x/poster.jpg', 'videos': []}
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: meta)
+    monkeypatch.setattr(ctx.streamswindow, 'open_streams', lambda stype, sid, poster=None: True)
+
+    result = ctx.detailwindow.open_detail('movie', 'tt1')
+
+    assert result is True
+    assert ctx.env.dialog_created == [('STR30033', '')]
+    assert ctx.env.dialog_updates == [(0, '')]
+    assert ctx.env.dialog_closed_count == 1
+
+
+def test_open_detail_movie_closes_the_busy_dialog_before_opening_streams(
+    load_detailwindow, monkeypatch,
+):
+    ctx = load_detailwindow()
+    meta = {'id': 'tt1', 'name': 'A Movie', 'poster': 'https://x/poster.jpg', 'videos': []}
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: meta)
+    captured = {}
+
+    def fake_open_streams(stype, sid, poster=None):
+        captured['dialog_closed_count'] = ctx.env.dialog_closed_count
+        return True
+
+    monkeypatch.setattr(ctx.streamswindow, 'open_streams', fake_open_streams)
+
+    result = ctx.detailwindow.open_detail('movie', 'tt1')
+
+    assert result is True
+    assert captured['dialog_closed_count'] == 1
+
+
+def test_open_detail_series_closes_the_busy_dialog_before_building_the_window(
+    load_detailwindow, monkeypatch,
+):
+    ctx = load_detailwindow(addon_info={'path': '/addon/path'})
+    meta = {'id': 'tt1', 'name': 'One', 'videos': [{'id': 'v1', 'season': 1, 'episode': 1}]}
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: meta)
+    captured = {}
+
+    class RecordingWindow(ctx.detailwindow.DetailWindow):
+        def __init__(self, *args, **kwargs):
+            captured['dialog_closed_count'] = ctx.env.dialog_closed_count
+            super().__init__(*args, **kwargs)
+
+        def start(self, meta_obj, stype):
+            return True
+
+    monkeypatch.setattr(ctx.detailwindow, 'DetailWindow', RecordingWindow)
+
+    result = ctx.detailwindow.open_detail('series', 'tt1')
+
+    assert result is True
+    assert captured['dialog_closed_count'] == 1
+
+
+def test_open_detail_not_found_still_closes_the_busy_dialog_around_the_fetch(
+    load_detailwindow, monkeypatch,
+):
+    ctx = load_detailwindow()
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: None)
+
+    result = ctx.detailwindow.open_detail('movie', 'tt404')
+
+    assert result is False
+    assert ctx.env.dialog_created == [('STR30033', '')]
+    assert ctx.env.dialog_closed_count == 1

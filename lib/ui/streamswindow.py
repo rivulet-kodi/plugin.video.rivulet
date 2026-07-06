@@ -14,7 +14,7 @@ import xbmcgui
 from lib.store import Store
 from lib.stremio import streaminfo
 from lib.stremio.addons import AddonClient, AddonError, addon_supports
-from lib.ui.uicommon import BACK_ACTIONS, open_window
+from lib.ui.uicommon import BACK_ACTIONS, busy_dialog, open_window
 
 BACKGROUND = 30000
 LIST = 30002
@@ -90,19 +90,27 @@ def open_streams(stype, sid, poster=None):
     store = Store(addon_profile_dir())
     client = AddonClient()
     pairs = []
+    addons = []
     for descriptor in store.get_addons():
         manifest = descriptor.get('manifest') or {}
-        transport_url = descriptor.get('transportUrl')
-        if not addon_supports(manifest, 'stream', stype, sid):
-            continue
-        try:
-            results = client.streams(transport_url, stype, sid)
-        except AddonError as exc:
-            log('streamswindow: %s failed: %r' % (transport_url, exc), xbmc.LOGERROR)
-            continue
-        addon_name = manifest.get('name', '?')
-        for stream in results or []:
-            pairs.append((streaminfo.parse_stream(stream, addon_name=addon_name), stream))
+        if addon_supports(manifest, 'stream', stype, sid):
+            addons.append((descriptor, manifest))
+    total_addons = len(addons)
+    with busy_dialog(L(30033)) as dialog:
+        for index, (descriptor, manifest) in enumerate(addons):
+            if dialog.iscanceled():
+                break
+            transport_url = descriptor.get('transportUrl')
+            addon_name = manifest.get('name', '?')
+            percent = int(index * 100 / total_addons) if total_addons else 0
+            dialog.update(percent, 'Checking %s...' % addon_name)
+            try:
+                results = client.streams(transport_url, stype, sid)
+            except AddonError as exc:
+                log('streamswindow: %s failed: %r' % (transport_url, exc), xbmc.LOGERROR)
+                continue
+            for stream in results or []:
+                pairs.append((streaminfo.parse_stream(stream, addon_name=addon_name), stream))
 
     if not pairs:
         notify(L(30030))

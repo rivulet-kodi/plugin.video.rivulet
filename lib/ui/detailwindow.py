@@ -15,7 +15,7 @@ here, not a reuse of the picked item).
 """
 import xbmcgui
 
-from lib.ui.uicommon import BACK_ACTIONS, open_window
+from lib.ui.uicommon import BACK_ACTIONS, busy_dialog, open_window
 
 BACKGROUND = 30000
 LIST = 30002
@@ -103,7 +103,8 @@ def open_detail(stype, sid):
     from lib.ui.compat import L, log, notify
     from lib.ui.views import _fetch_meta
 
-    meta_obj = _fetch_meta(stype, sid)
+    with busy_dialog(L(30033)):
+        meta_obj = _fetch_meta(stype, sid)
     if not meta_obj:
         notify(L(30030))
         return False

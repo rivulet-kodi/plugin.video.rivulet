@@ -61,6 +61,55 @@ def test_dismiss_busy_dialog_closes_every_dialog(load_uicommon):
 
 
 # ---------------------------------------------------------------------------
+# busy_dialog()
+# ---------------------------------------------------------------------------
+
+
+def test_busy_dialog_creates_and_updates_on_enter_then_closes_on_normal_exit(load_uicommon):
+    ctx = load_uicommon()
+
+    with ctx.uicommon.busy_dialog('My Heading', 'my message'):
+        assert ctx.env.dialog_created == [('My Heading', 'my message')]
+        assert ctx.env.dialog_updates[0] == (0, 'my message')
+        assert ctx.env.dialog_closed_count == 0
+
+    assert ctx.env.dialog_closed_count == 1
+
+
+def test_busy_dialog_defaults_message_to_empty_string(load_uicommon):
+    ctx = load_uicommon()
+
+    with ctx.uicommon.busy_dialog('My Heading'):
+        pass
+
+    assert ctx.env.dialog_created == [('My Heading', '')]
+
+
+def test_busy_dialog_yields_the_dialog_for_progress_updates_and_cancellation(load_uicommon):
+    ctx = load_uicommon()
+    ctx.env.cancel = True
+
+    with ctx.uicommon.busy_dialog('My Heading', 'my message') as dialog:
+        dialog.update(42, 'progress')
+        assert dialog.iscanceled() is True
+
+    assert ctx.env.dialog_updates == [(0, 'my message'), (42, 'progress')]
+
+
+def test_busy_dialog_closes_the_dialog_even_when_the_body_raises(load_uicommon):
+    ctx = load_uicommon()
+
+    class _MarkerError(Exception):
+        pass
+
+    with pytest.raises(_MarkerError):
+        with ctx.uicommon.busy_dialog('My Heading', 'my message'):
+            raise _MarkerError('boom')
+
+    assert ctx.env.dialog_closed_count == 1
+
+
+# ---------------------------------------------------------------------------
 # addon_skin_path()
 # ---------------------------------------------------------------------------
 

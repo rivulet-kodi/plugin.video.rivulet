@@ -96,6 +96,10 @@ msgctxt "#30032"
 msgid "Something went wrong"
 msgstr ""
 
+msgctxt "#30033"
+msgid "Loading…"
+msgstr ""
+
 msgctxt "#30034"
 msgid "Addons synced"
 msgstr ""

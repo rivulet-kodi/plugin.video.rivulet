@@ -7,7 +7,7 @@ that catalog's items; picking a TITLE from the coverflow opens
 import xbmcgui
 
 from lib.stremio.addons import AddonError
-from lib.ui.uicommon import BACK_ACTIONS, open_window
+from lib.ui.uicommon import BACK_ACTIONS, busy_dialog, open_window
 
 LIST = 30002
 
@@ -62,12 +62,13 @@ class CatalogPickerWindow(xbmcgui.WindowXMLDialog):
         self._open_catalog(transport_url, catalog)
 
     def _open_catalog(self, transport_url, catalog):
-        from lib.ui.compat import log
+        from lib.ui.compat import L, log
         from lib.ui.views import _fetch_catalog
 
         ctype = catalog.get('type')
         try:
-            metas = _fetch_catalog(transport_url, ctype, catalog.get('id'))
+            with busy_dialog(L(30033)):
+                metas = _fetch_catalog(transport_url, ctype, catalog.get('id'))
         except AddonError as exc:
             log('catalogpicker: %s failed: %r' % (transport_url, exc))
             return
@@ -76,7 +77,7 @@ class CatalogPickerWindow(xbmcgui.WindowXMLDialog):
 
         import xbmc
 
-        from lib.ui.compat import L, notify
+        from lib.ui.compat import notify
 
         log('catalogpicker: opening coverflow (%d results)' % len(metas), xbmc.LOGINFO)
         try:

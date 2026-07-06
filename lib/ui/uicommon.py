@@ -11,6 +11,12 @@ bits every one of those screens needs so they stay consistent:
   GetDirectory call is in flight; a custom window opened from inside that
   call must close it first or the window can appear uninteractive/behind
   it (mirrors the reference addon's `prevent_busy()`).
+- `busy_dialog(heading, message='')`: unlike that classical GetDirectory
+  spinner above, Kodi has no busy indicator of its own for a fetch made
+  from INSIDE an already-open custom window (search aggregation, a
+  catalog/meta/streams fetch) - so screens open this context-managed
+  `xbmcgui.DialogProgress` explicitly for the fetch's duration and close
+  it before opening any further window.
 - `open_window(window_cls, xml_name, *args, **kwargs)`: build one of our
   windows against the addon's own skin directory
   (`resources/skins/Default/720p/<xml_name>`), matching
@@ -23,6 +29,8 @@ helper (which blocks until that screen closes); "back" is simply that
 inner call returning, so nested doModal() calls form a navigation stack
 for free - no separate router/state machine needed.
 """
+import contextlib
+
 import xbmc
 import xbmcgui
 
@@ -37,6 +45,33 @@ def dismiss_busy_dialog():
     """Close Kodi's GetDirectory "working" spinner so a modal opened from
     inside a directory callback is immediately interactive."""
     xbmc.executebuiltin('Dialog.Close(all, true)')
+
+
+@contextlib.contextmanager
+def busy_dialog(heading, message=''):
+    """An indeterminate `xbmcgui.DialogProgress` spinner for a blocking
+    network fetch made from inside an already-open custom window - which,
+    unlike a classical GetDirectory call, has no Kodi-provided busy
+    indicator of its own once the window is open (see the module
+    docstring's `busy_dialog` bullet). Mirrors the exact DialogProgress
+    idiom `lib.ui.player._prebuffer_torrent` and
+    `lib.ui.router._download_server_binary` already use.
+
+    Yields the `xbmcgui.DialogProgress` instance so callers can
+    `.update(percent, message)` for real progress feedback (e.g.
+    per-addon in a fetch loop) or check `.iscanceled()` to support early
+    cancellation; both are optional - a caller that does neither still
+    gets a visible spinner for the duration of the `with` block. Always
+    closed on the way out, even on an exception, so it can never overlap
+    a subsequently-opened window.
+    """
+    dialog = xbmcgui.DialogProgress()
+    dialog.create(heading, message)
+    dialog.update(0, message)
+    try:
+        yield dialog
+    finally:
+        dialog.close()
 
 
 def addon_skin_path():

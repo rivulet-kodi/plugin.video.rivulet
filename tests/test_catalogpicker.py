@@ -270,6 +270,52 @@ def test_open_catalog_selected_meta_without_type_falls_back_to_the_catalogs_own_
     assert captured['args'] == ('movie', 'tt2')
 
 
+def test_open_catalog_fetch_shows_and_closes_the_busy_dialog(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker()
+    win = _make_window(ctx.catalogpicker)
+    metas = [{'id': 'tt1', 'name': 'One', 'type': 'series'}]
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid: metas)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: None)
+
+    win._open_catalog('https://a.example/manifest.json', {'type': 'movie', 'id': 'top'})
+
+    assert ctx.env.dialog_created == [('STR30033', '')]
+    assert ctx.env.dialog_closed_count == 1
+
+
+def test_open_catalog_closes_busy_dialog_before_opening_coverflow(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker()
+    win = _make_window(ctx.catalogpicker)
+    metas = [{'id': 'tt1', 'name': 'One', 'type': 'series'}]
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid: metas)
+    captured = {}
+
+    def fake_open_showcase(m):
+        captured['dialog_closed_count'] = ctx.env.dialog_closed_count
+        return None
+
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', fake_open_showcase)
+
+    win._open_catalog('https://a.example/manifest.json', {'type': 'movie', 'id': 'top'})
+
+    assert captured['dialog_closed_count'] == 1
+
+
+def test_open_catalog_addon_error_still_closes_the_busy_dialog(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker()
+    win = _make_window(ctx.catalogpicker)
+
+    def _raise(transport, ctype, cid):
+        raise AddonError('upstream down')
+
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', _raise)
+
+    win._open_catalog('https://a.example/manifest.json', {'type': 'movie', 'id': 'top'})
+
+    assert ctx.env.dialog_created == [('STR30033', '')]
+    assert ctx.env.dialog_closed_count == 1
+
+
 # ---------------------------------------------------------------------------
 # CatalogPickerWindow.start() - the doModal()/empty-catalogs contract
 # ---------------------------------------------------------------------------

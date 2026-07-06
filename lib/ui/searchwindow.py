@@ -15,6 +15,7 @@ def open_search():
     import xbmcgui
 
     from lib.ui.compat import L, addon_profile_dir, log, notify
+    from lib.ui.uicommon import busy_dialog
 
     query = xbmcgui.Dialog().input(L(30001))
     if not query:
@@ -23,15 +24,22 @@ def open_search():
     store = Store(addon_profile_dir())
     client = AddonClient()
     metas = []
-    for transport_url, _manifest, cat in iter_catalogs(store.get_addons(), extra_required='search'):
-        try:
-            results = client.catalog(transport_url, cat.get('type'), cat.get('id'), extra=[('search', query)])
-        except AddonError as exc:
-            log('searchwindow: %s failed: %r' % (transport_url, exc), xbmc.LOGERROR)
-            continue
-        for meta_obj in results or []:
-            meta_obj['type'] = meta_obj.get('type') or cat.get('type')
-            metas.append(meta_obj)
+    catalogs = list(iter_catalogs(store.get_addons(), extra_required='search'))
+    total_catalogs = len(catalogs)
+    with busy_dialog(L(30033), query) as dialog:
+        for index, (transport_url, manifest, cat) in enumerate(catalogs):
+            if dialog.iscanceled():
+                break
+            percent = int(index * 100 / total_catalogs) if total_catalogs else 0
+            dialog.update(percent, 'Searching %s...' % (manifest.get('name') or '?'))
+            try:
+                results = client.catalog(transport_url, cat.get('type'), cat.get('id'), extra=[('search', query)])
+            except AddonError as exc:
+                log('searchwindow: %s failed: %r' % (transport_url, exc), xbmc.LOGERROR)
+                continue
+            for meta_obj in results or []:
+                meta_obj['type'] = meta_obj.get('type') or cat.get('type')
+                metas.append(meta_obj)
 
     if not metas:
         notify(L(30030))

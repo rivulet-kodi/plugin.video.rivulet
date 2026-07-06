@@ -257,3 +257,136 @@ def test_open_search_no_selection_returns_false_without_fallback(load_searchwind
 
     assert result is False
     assert ctx.env.executed_builtins == []
+
+
+# ---------------------------------------------------------------------------
+# open_search() - busy_dialog progress reporting/cancellation
+# ---------------------------------------------------------------------------
+
+
+def _cancel_after(n):
+    """Builds a zero-arg closure for `ctx.env.cancel` that reports
+    cancelled (True) starting from its (n+1)th call onward. Mirrors
+    DialogProgress.iscanceled()'s no-arg call convention (unlike
+    Monitor.waitForAbort()'s 1-based-count-arg convention)."""
+    state = {'calls': 0}
+
+    def _check():
+        state['calls'] += 1
+        return state['calls'] > n
+    return _check
+
+
+def test_open_search_busy_dialog_reports_progress_and_skips_addonerror(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow(dialog_inputs=['batman'])
+    searchwindow = ctx.searchwindow
+    transport_a = 'https://a.example/manifest.json'
+    transport_b = 'https://b.example/manifest.json'
+    descriptor_a = {
+        'transportUrl': transport_a,
+        'manifest': {'name': 'Addon A', 'catalogs': [
+            {'type': 'movie', 'id': 'search', 'extra': [{'name': 'search'}]},
+        ]},
+    }
+    descriptor_b = {
+        'transportUrl': transport_b,
+        'manifest': {'name': 'Addon B', 'catalogs': [
+            {'type': 'series', 'id': 'search', 'extraSupported': ['search']},
+        ]},
+    }
+    descriptor_c = {
+        'transportUrl': 'https://c.example/manifest.json',
+        'manifest': {'name': 'Addon C', 'catalogs': [
+            {'type': 'movie', 'id': 'top'},  # no search extra -> excluded before total_catalogs is even computed
+        ]},
+    }
+    client = _FakeAddonClient({
+        transport_a: AddonError('addon a down'),
+        transport_b: [{'id': 'tt1', 'name': 'Batman'}],
+    })
+    _wire_data_layer(searchwindow, _FakeStore(addons=[descriptor_a, descriptor_b, descriptor_c]), client)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: None)
+
+    result = searchwindow.open_search()
+
+    assert ctx.env.dialog_created == [('STR30033', 'batman')]
+    # addon C never enters the loop at all (iter_catalogs' extra_required='search'
+    # filter excludes it up front), so total_catalogs is 2, not 3: index 0 -> 0%,
+    # index 1 -> 50%. Addon A raises AddonError but its update() still fires
+    # first (iscanceled() -> update() -> fetch, in that order).
+    assert ctx.env.dialog_updates == [
+        (0, 'batman'),                 # busy_dialog's own initial update(0, message)
+        (0, 'Searching Addon A...'),   # index 0 of 2 -> int(0 * 100 / 2)
+        (50, 'Searching Addon B...'),  # index 1 of 2 -> int(1 * 100 / 2)
+    ]
+    assert ctx.env.dialog_closed_count == 1  # closed exactly once, even though A raised AddonError
+    assert result is False  # open_showcase returned None -> nothing selected
+
+
+def test_open_search_cancelled_mid_loop_keeps_partial_results_and_closes_dialog(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow(dialog_inputs=['batman'])
+    searchwindow = ctx.searchwindow
+    transport_a = 'https://a.example/manifest.json'
+    transport_b = 'https://b.example/manifest.json'
+    descriptor_a = {
+        'transportUrl': transport_a,
+        'manifest': {'name': 'Addon A', 'catalogs': [
+            {'type': 'movie', 'id': 'search', 'extra': [{'name': 'search'}]},
+        ]},
+    }
+    descriptor_b = {
+        'transportUrl': transport_b,
+        'manifest': {'name': 'Addon B', 'catalogs': [
+            {'type': 'series', 'id': 'search', 'extraSupported': ['search']},
+        ]},
+    }
+    client = _FakeAddonClient({
+        transport_a: [{'id': 'tt1', 'name': 'Batman'}],  # no 'type' -> tagged from its catalog
+        transport_b: [{'id': 'tt2', 'name': 'Should never be fetched'}],
+    })
+    _wire_data_layer(searchwindow, _FakeStore(addons=[descriptor_a, descriptor_b]), client)
+    ctx.env.cancel = _cancel_after(1)  # index 0 -> not cancelled; index 1 -> cancelled, breaks
+    captured = {}
+
+    def fake_open_showcase(metas):
+        captured['metas'] = metas
+        return None
+
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', fake_open_showcase)
+
+    result = searchwindow.open_search()
+
+    # only addon A is ever queried - iscanceled() is checked before update()/fetch,
+    # so the loop breaks as soon as it reaches catalog index 1 without touching it.
+    assert [call[0] for call in client.calls] == [transport_a]
+    assert ctx.env.dialog_updates == [(0, 'batman'), (0, 'Searching Addon A...')]
+    # the already-aggregated meta from catalog A is NOT discarded on cancel - the
+    # coverflow still opens with whatever was collected before the cancel fired.
+    assert captured['metas'] == [{'id': 'tt1', 'name': 'Batman', 'type': 'movie'}]
+    assert ctx.env.dialog_closed_count == 1
+    assert result is False
+
+
+def test_open_search_cancelled_before_first_catalog_falls_back_to_no_results(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow(dialog_inputs=['nomatch'])
+    searchwindow = ctx.searchwindow
+    descriptor = {
+        'transportUrl': 't1',
+        'manifest': {'catalogs': [{'type': 'movie', 'id': 'search', 'extra': [{'name': 'search'}]}]},
+    }
+    client = _FakeAddonClient({'t1': [{'id': 'tt1', 'name': 'Should never be fetched'}]})
+    _wire_data_layer(searchwindow, _FakeStore(addons=[descriptor]), client)
+    ctx.env.cancel = True  # cancelled before the loop ever reaches a catalog
+    opened = []
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas))
+
+    result = searchwindow.open_search()
+
+    assert client.calls == []  # nothing was ever fetched
+    assert ctx.env.dialog_updates == [(0, 'nomatch')]  # only busy_dialog's own initial update fires
+    assert ctx.env.dialog_closed_count == 1
+    # cancelling with nothing collected is NOT special-cased: it falls through to
+    # the exact same empty-aggregate path a genuine no-results search takes.
+    assert result is False
+    assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
+    assert opened == []  # the coverflow is never opened

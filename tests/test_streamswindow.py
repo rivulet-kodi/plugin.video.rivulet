@@ -438,3 +438,130 @@ def test_open_streams_reads_stream_sort_setting_and_applies_it_to_final_order(lo
     ctx.env.addon.settings['stream_sort'] = 'seeders'
     sw.open_streams('movie', 'tt1')
     assert [s for _info, s in captured['pairs']] == [lo_res_hi_seeds, hi_res_low_seeds]
+
+
+# ---------------------------------------------------------------------------
+# open_streams() - busy_dialog progress reporting/cancellation
+# ---------------------------------------------------------------------------
+
+
+def _cancel_after(n):
+    """Builds a zero-arg closure for `ctx.env.cancel` that reports
+    cancelled (True) starting from its (n+1)th call onward. Mirrors
+    DialogProgress.iscanceled()'s no-arg call convention (unlike
+    Monitor.waitForAbort()'s 1-based-count-arg convention)."""
+    state = {'calls': 0}
+
+    def _check():
+        state['calls'] += 1
+        return state['calls'] > n
+    return _check
+
+
+def test_open_streams_busy_dialog_reports_progress_and_skips_unsupported_addons(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    alpha = {
+        'transportUrl': 't-alpha',
+        'manifest': {'name': 'Alpha', 'resources': ['stream'], 'types': ['movie']},
+    }
+    beta = {
+        'transportUrl': 't-beta',
+        'manifest': {'name': 'Beta', 'resources': ['stream'], 'types': ['movie']},
+    }
+    unsupported = {
+        'transportUrl': 't-unsupported',
+        # no 'stream' resource -> excluded before total_addons is even computed.
+        'manifest': {'name': 'Unsupported', 'resources': ['catalog'], 'types': ['movie']},
+    }
+    alpha_stream = {'url': 'https://a.example/a.mp4'}
+    beta_stream = {'url': 'https://b.example/b.mp4'}
+    client = _FakeAddonClient({'t-alpha': [alpha_stream], 't-beta': [beta_stream]})
+    _wire_data_layer(sw, _FakeStore(addons=[alpha, beta, unsupported]), client)
+    captured = {}
+
+    class RecordingWindow(sw.StreamsWindow):
+        def start(self, pairs, stype, sid, poster=None):
+            captured['pairs'] = pairs
+            return True
+
+    monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+
+    result = sw.open_streams('movie', 'tt1')
+
+    assert result is True
+    assert [call[0] for call in client.calls] == ['t-alpha', 't-beta']
+    assert [s for _info, s in captured['pairs']] == [alpha_stream, beta_stream]
+    assert ctx.env.dialog_created == [('STR30033', '')]
+    # total_addons is 2 (the unsupported addon never counts toward the
+    # denominator), so percent is index * 100 / 2 -> 0, then 50; the
+    # unsupported addon produces no 'Checking Unsupported...' entry at all.
+    assert ctx.env.dialog_updates == [
+        (0, ''),  # busy_dialog's own initial update(0, message) on entry
+        (0, 'Checking Alpha...'),
+        (50, 'Checking Beta...'),
+    ]
+    assert ctx.env.dialog_closed_count == 1
+
+
+def test_open_streams_cancelled_mid_loop_keeps_partial_results_and_closes_dialog(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    alpha = {
+        'transportUrl': 't-alpha',
+        'manifest': {'name': 'Alpha', 'resources': ['stream'], 'types': ['movie']},
+    }
+    beta = {
+        'transportUrl': 't-beta',
+        'manifest': {'name': 'Beta', 'resources': ['stream'], 'types': ['movie']},
+    }
+    alpha_stream = {'url': 'https://a.example/a.mp4'}
+    beta_stream = {'url': 'https://b.example/b.mp4'}
+    client = _FakeAddonClient({'t-alpha': [alpha_stream], 't-beta': [beta_stream]})
+    _wire_data_layer(sw, _FakeStore(addons=[alpha, beta]), client)
+    ctx.env.cancel = _cancel_after(1)  # index 0 -> not cancelled; index 1 -> cancelled, breaks
+    captured = {}
+
+    class RecordingWindow(sw.StreamsWindow):
+        def start(self, pairs, stype, sid, poster=None):
+            captured['pairs'] = pairs
+            return True
+
+    monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+
+    result = sw.open_streams('movie', 'tt1')
+
+    assert result is True
+    assert [call[0] for call in client.calls] == ['t-alpha']  # beta never queried
+    assert [s for _info, s in captured['pairs']] == [alpha_stream]  # partial results kept
+    assert ctx.env.dialog_closed_count == 1
+
+
+def test_open_streams_cancelled_before_first_addon_falls_back_to_no_results(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    descriptor = {
+        'transportUrl': 't1',
+        'manifest': {'name': 'Alpha', 'resources': ['stream'], 'types': ['movie']},
+    }
+    client = _FakeAddonClient({'t1': [{'url': 'https://a.example/a.mp4'}]})
+    _wire_data_layer(sw, _FakeStore(addons=[descriptor]), client)
+    ctx.env.cancel = True  # already cancelled before the loop ever starts
+
+    def _unexpected(*a, **k):
+        raise AssertionError('StreamsWindow must never be constructed on an empty aggregate')
+
+    monkeypatch.setattr(sw, 'StreamsWindow', _unexpected)
+
+    result = sw.open_streams('movie', 'tt1')
+
+    assert client.calls == []  # cancelled before the first addon was ever queried
+    assert result is False
+    assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
+    assert ctx.env.dialog_closed_count == 1
