@@ -668,13 +668,13 @@ def _read_json(path, default):
     if not os.path.isfile(path):
         return default
     try:
-        with open(path, "r") as fh:
+        with open(path) as fh:
             return json.load(fh)
     except (ValueError, OSError):
         return default
 
 
-class Store(object):
+class Store:
     """Filesystem-backed store for addons and auth state."""
 
     def __init__(self, data_dir):

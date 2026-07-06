@@ -56,9 +56,10 @@ def run():
     # Deferred imports: views/player pull in xbmcgui/xbmcplugin and, more
     # importantly, `from lib.ui import router` themselves — importing them
     # eagerly at module scope here would form an import cycle.
+    import xbmc
+
     from lib.ui import player, views
     from lib.ui.compat import log
-    import xbmc
 
     BASE_URL = sys.argv[0] if len(sys.argv) > 0 else 'plugin://plugin.video.rivulet/'
     try:

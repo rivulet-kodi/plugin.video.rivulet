@@ -1,0 +1,74 @@
+[project]
+name = "plugin.video.rivulet"
+version = "0.4.1"
+description = "Kodi video addon (Rivulet) - not a pip-installable package; config-only pyproject.toml for dev tooling"
+requires-python = ">=3.8"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["lib"]
+branch = true
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 60
+
+[tool.ruff]
+target-version = "py38"
+line-length = 100
+src = ["lib", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = [
+    # 97 pre-existing %-format call sites span lib/ and tests/; converting all of
+    # them to str.format/f-strings is a sweeping rewrite outside this slice's scope.
+    "UP031",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"lib/*" = [
+    # 18 pre-existing lib/ui/* and lib/stremio/* lines run 101-111 cols; fixing
+    # them means reformatting lib/, which is out of scope for this config slice.
+    "E501",
+    # 15 pre-existing `except ... raise Err(...)` sites in lib/serverbin.py and
+    # lib/stremio/* don't chain `from exc`; adding it is a lib/ behavior/style
+    # change outside this slice's scope (lib/ is owned by other slices).
+    "B904",
+]
+"tests/*" = [
+    # test_server.py imports mid-file, after a documented monkeypatch-setup
+    # comment block; that ordering is deliberate, not disorganized.
+    "E402",
+    # Test data (long URLs, parametrize ids, inline meta dicts) reads better
+    # unwrapped; E501 is already ignored for lib/* above, so keep it uniform.
+    "E501",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["lib", "tests"]
+
+[tool.mypy]
+# 3.9 is the lowest target current mypy (>=1.15) accepts; mypy <2.0 still
+# refuses 3.8 here. Real Python-3.8 runtime compatibility (Kodi 19 Matrix) is
+# guarded instead by the CI test matrix, which runs the suite on 3.8.
+python_version = "3.9"
+ignore_missing_imports = true
+warn_unused_ignores = false
+# mypy <2.0 special-cases a handful of packages it used to bundle stubs for
+# (requests among them): `ignore_missing_imports` alone doesn't silence their
+# "Library stubs not installed" [import-untyped] error. Disabling the error
+# code project-wide (scoped to files below) covers requests cleanly without
+# adding a types-requests dev dependency.
+disable_error_code = ["import-untyped"]
+files = ["lib/stremio", "lib/store.py"]

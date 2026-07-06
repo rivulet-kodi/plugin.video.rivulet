@@ -487,8 +487,7 @@ class _StreamResp:
             raise requests.exceptions.HTTPError("%s error" % self.status_code, response=self)
 
     def iter_content(self, chunk_size=None):
-        for chunk in self._chunks:
-            yield chunk
+        yield from self._chunks
         if self._raise_after is not None:
             raise self._raise_after
 

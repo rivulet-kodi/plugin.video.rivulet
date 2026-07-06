@@ -18,7 +18,7 @@ from urllib.parse import quote
 try:
     import requests
 except ImportError:  # pragma: no cover - exercised only without the dependency
-    requests = None
+    requests = None  # type: ignore[assignment]
 
 #: stremio-core's URI_COMPONENT_ENCODE_SET (constants.rs): percent-encode
 #: everything except alphanumerics and these characters.

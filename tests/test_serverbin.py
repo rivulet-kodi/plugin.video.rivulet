@@ -18,9 +18,9 @@ import pytest
 import requests
 
 from lib.serverbin import (
-    DownloadError,
     GITHUB_API_URL,
     GITHUB_REPO,
+    DownloadError,
     NoAssetError,
     install_binary,
     latest_release,

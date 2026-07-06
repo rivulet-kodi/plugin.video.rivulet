@@ -1,0 +1,17 @@
+# Dev/test toolchain for plugin.video.rivulet. Install with: pip install -r requirements-dev.txt
+#
+# Floors are MINIMUMS only (no upper bounds except mypy). pip resolves the
+# highest compatible release per interpreter, so the CI matrix installs modern
+# pytest/xdist on 3.11/3.13 while the Python 3.8 leg (Kodi 19 "Matrix" target)
+# still gets the last 3.8-compatible releases. Do NOT bump these floors to the
+# 3.9+-only current versions or the 3.8 CI leg's `pip install` breaks.
+requests>=2.28
+pytest>=7.4
+pytest-cov>=4.1
+pytest-randomly>=3.15
+pytest-xdist>=3.5
+ruff>=0.6
+# mypy>=2.0 dropped `--python-version 3.8/3.9` support (checks now require
+# 3.10+), which would silently defeat this project's py38/py39-scoped mypy
+# config (see pyproject.toml [tool.mypy]). Stay on the 1.x line.
+mypy>=1.13.0,<2.0

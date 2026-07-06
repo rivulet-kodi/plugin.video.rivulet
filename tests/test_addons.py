@@ -16,7 +16,6 @@ from lib.stremio.addons import (
 )
 from tests.conftest import FakeSession
 
-
 # --- encode_extra ------------------------------------------------------
 
 

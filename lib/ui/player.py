@@ -12,7 +12,7 @@ import xbmcplugin
 
 from lib.store import Store
 from lib.stremio.addons import AddonClient
-from lib.stremio.server import ServerClient, UNKNOWN_FILE_IDX, guess_file_idx
+from lib.stremio.server import UNKNOWN_FILE_IDX, ServerClient, guess_file_idx
 from lib.stremio.subtitles import collect_subtitles, sort_subtitles
 from lib.ui.compat import ADDON, L, addon_profile_dir, log, notify, setting_bool, setting_int
 

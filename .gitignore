@@ -9,7 +9,14 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
+
+# Virtual environments
+.venv/
+.venv*/
+venv/
 
 # Editors / OS
 .vscode/

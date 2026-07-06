@@ -53,9 +53,26 @@ and sorted using the **Preferred subtitle language** setting under
 
 `lib/stremio/` and `lib/store.py` are plain Python with no `xbmc*` imports,
 so they run and test outside Kodi. Everything Kodi-specific lives in
-`lib/ui/`, `lib/service_runner.py`, `default.py` and `service.py`.
+`lib/ui/`, `lib/service_runner.py`, `default.py` and `service.py`. The
+Kodi-facing layer is tested against the shared fake-Kodi modules in
+`tests/kodistubs/` (a hermetic, per-test `sys.modules` install/restore of
+`xbmc*` stubs), so the whole suite runs with no Kodi runtime and no network.
+
+Set up the dev toolchain and run the tests:
 
 ```sh
-pip install requests pytest
-pytest tests/
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements-dev.txt
+
+make test        # run the test suite
+make cov         # tests + coverage report (gate: >=60%)
+make lint        # ruff check
+make typecheck   # mypy (pure lib/stremio + lib/store layer)
+make check       # lint + typecheck + tests
+make random      # tests in randomized order (order-independence)
+make parallel    # tests across CPUs (pytest-xdist)
 ```
+
+Tool config lives in `pyproject.toml`. CI (`.github/workflows/test.yml`)
+runs ruff + the test suite with coverage across Python 3.8/3.11/3.13
+(Kodi 19 "Matrix" through current), on every push and pull request.

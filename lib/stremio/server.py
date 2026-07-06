@@ -41,7 +41,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse
 try:
     import requests
 except ImportError:  # pragma: no cover - exercised only without the dependency
-    requests = None
+    requests = None  # type: ignore[assignment]
 
 #: Same percent-encoding safe set stremio-core uses for the /yt/{id} path
 #: segment (URI_COMPONENT_ENCODE_SET, constants.rs).

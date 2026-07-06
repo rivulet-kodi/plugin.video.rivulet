@@ -26,12 +26,12 @@ class ApiError(Exception):
     """
 
     def __init__(self, message, code=None):
-        super(ApiError, self).__init__(message)
+        super().__init__(message)
         self.message = message
         self.code = code
 
 
-class StremioAPI(object):
+class StremioAPI:
     """Thin client for the Stremio account/sync API."""
 
     def __init__(self, base_url=API_URL, timeout=DEFAULT_TIMEOUT):
