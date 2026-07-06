@@ -155,19 +155,23 @@ class FakeAddonClient:
 
 
 class FakeStremioAPI:
-    """Fake `lib.stremio.api.StremioAPI` for login()/logout()/library()."""
+    """Fake `lib.stremio.api.StremioAPI` for login()/logout()/library()/
+    addon_install()/addon_remove() (the latter two only exercise
+    addon_collection_set(), the push side of the addon sync)."""
 
     def __init__(self, login_result=None, login_error=None, addon_collection_result=None,
-                 addon_collection_error=None, logout_error=None,
+                 addon_collection_error=None, addon_collection_set_error=None, logout_error=None,
                  datastore_result=None, datastore_error=None):
         self._login_result = login_result
         self._login_error = login_error
         self._addon_collection_result = addon_collection_result
         self._addon_collection_error = addon_collection_error
+        self._addon_collection_set_error = addon_collection_set_error
         self._logout_error = logout_error
         self._datastore_result = datastore_result if datastore_result is not None else []
         self._datastore_error = datastore_error
         self.logout_calls = []
+        self.addon_collection_set_calls = []  # [(auth_key, [descriptor, ...]), ...]
 
     def login(self, email, password):
         if self._login_error is not None:
@@ -178,6 +182,11 @@ class FakeStremioAPI:
         if self._addon_collection_error is not None:
             raise self._addon_collection_error
         return self._addon_collection_result
+
+    def addon_collection_set(self, auth_key, addons):
+        self.addon_collection_set_calls.append((auth_key, list(addons)))
+        if self._addon_collection_set_error is not None:
+            raise self._addon_collection_set_error
 
     def logout(self, auth_key):
         self.logout_calls.append(auth_key)
@@ -1373,12 +1382,15 @@ def test_addons_shows_logout_action_with_user_label_when_authenticated(load_view
 def test_addon_install_cancelled_prompt_is_a_noop(load_views):
     ctx = load_views()  # no dialog_inputs -> Dialog.input() returns ''
     views = ctx.views
-    store = FakeStore()
+    store = FakeStore(auth={'authKey': 'abc123'})
+    api = FakeStremioAPI()
     _wire_data_layer(views, store, FakeAddonClient())
+    _wire_api(views, api)
 
     views.addon_install()
 
     assert store.installed == []
+    assert api.addon_collection_set_calls == []
     assert ctx.env.notifications == []
     assert 'Container.Refresh' not in ctx.env.executed_builtins
     assert ctx.env.end_of_directory[-1]['succeeded'] is True
@@ -1387,13 +1399,16 @@ def test_addon_install_cancelled_prompt_is_a_noop(load_views):
 def test_addon_install_manifest_fetch_failure_notifies_and_does_not_install(load_views):
     ctx = load_views(dialog_inputs=['https://bad.example/manifest.json'])
     views = ctx.views
-    store = FakeStore()
+    store = FakeStore(auth={'authKey': 'abc123'})
     client = FakeAddonClient(manifest_error=AddonError('404'))
+    api = FakeStremioAPI()
     _wire_data_layer(views, store, client)
+    _wire_api(views, api)
 
     views.addon_install()
 
     assert store.installed == []
+    assert api.addon_collection_set_calls == []
     assert ctx.env.notifications[-1][1] == 'STR30014'
     assert 'Container.Refresh' not in ctx.env.executed_builtins
 
@@ -1401,13 +1416,16 @@ def test_addon_install_manifest_fetch_failure_notifies_and_does_not_install(load
 def test_addon_install_manifest_missing_id_notifies_and_does_not_install(load_views):
     ctx = load_views(dialog_inputs=['https://bad2.example/manifest.json'])
     views = ctx.views
-    store = FakeStore()
+    store = FakeStore(auth={'authKey': 'abc123'})
     client = FakeAddonClient(manifest_result={'name': 'No Id Here'})
+    api = FakeStremioAPI()
     _wire_data_layer(views, store, client)
+    _wire_api(views, api)
 
     views.addon_install()
 
     assert store.installed == []
+    assert api.addon_collection_set_calls == []
     assert ctx.env.notifications[-1][1] == 'STR30014'
 
 
@@ -1431,6 +1449,67 @@ def test_addon_install_success_persists_notifies_and_refreshes_container(load_vi
     }
 
 
+def test_addon_install_success_while_logged_in_syncs_addon_collection(load_views):
+    """A successful install while logged in pushes the store's *current*
+    (post-install) addon list back to Stremio via addon_collection_set()."""
+    url = 'https://new.example/manifest.json'
+    ctx = load_views(dialog_inputs=[url])
+    views = ctx.views
+    auth = {'authKey': 'abc123'}
+    store = FakeStore(auth=auth)
+    manifest = {'id': 'org.new', 'name': 'New Addon'}
+    client = FakeAddonClient(manifest_result=manifest)
+    api = FakeStremioAPI()
+    _wire_data_layer(views, store, client)
+    _wire_api(views, api)
+
+    views.addon_install()
+
+    assert store.installed == [(url, manifest)]
+    assert api.addon_collection_set_calls == [(auth['authKey'], store.get_addons())]
+    assert ctx.env.notifications[-1][1] == 'STR30012'
+
+
+def test_addon_install_success_while_logged_out_never_syncs(load_views):
+    url = 'https://new.example/manifest.json'
+    ctx = load_views(dialog_inputs=[url])
+    views = ctx.views
+    store = FakeStore()  # get_auth() -> None
+    manifest = {'id': 'org.new', 'name': 'New Addon'}
+    client = FakeAddonClient(manifest_result=manifest)
+    api = FakeStremioAPI()
+    _wire_data_layer(views, store, client)
+    _wire_api(views, api)
+
+    views.addon_install()
+
+    assert store.installed == [(url, manifest)]
+    assert api.addon_collection_set_calls == []
+    assert ctx.env.notifications[-1][1] == 'STR30012'
+
+
+def test_addon_install_success_sync_push_failure_does_not_block_install(load_views):
+    """addon_collection_set() raising ApiError is logged and swallowed -
+    the local install still succeeds and still notifies success."""
+    url = 'https://new.example/manifest.json'
+    ctx = load_views(dialog_inputs=[url])
+    views = ctx.views
+    store = FakeStore(auth={'authKey': 'abc123'})
+    manifest = {'id': 'org.new', 'name': 'New Addon'}
+    client = FakeAddonClient(manifest_result=manifest)
+    api = FakeStremioAPI(addon_collection_set_error=ApiError('sync up failed'))
+    _wire_data_layer(views, store, client)
+    _wire_api(views, api)
+
+    views.addon_install()
+
+    assert store.installed == [(url, manifest)]
+    assert len(api.addon_collection_set_calls) == 1
+    assert ctx.env.notifications[-1][1] == 'STR30012'
+    assert 'Container.Refresh' in ctx.env.executed_builtins
+    assert ctx.env.end_of_directory[-1]['succeeded'] is True
+
+
 # ---------------------------------------------------------------------------
 # addon_remove()
 # ---------------------------------------------------------------------------
@@ -1439,10 +1518,14 @@ def test_addon_install_success_persists_notifies_and_refreshes_container(load_vi
 def test_addon_remove_without_transport_is_a_noop(load_views):
     ctx = load_views()
     views = ctx.views
-    _wire_data_layer(views, FakeStore(), FakeAddonClient())
+    store = FakeStore(auth={'authKey': 'abc123'})
+    api = FakeStremioAPI()
+    _wire_data_layer(views, store, FakeAddonClient())
+    _wire_api(views, api)
 
     views.addon_remove(None)
 
+    assert api.addon_collection_set_calls == []
     assert ctx.env.notifications == []
     assert 'Container.Refresh' not in ctx.env.executed_builtins
     assert ctx.env.end_of_directory[-1]['succeeded'] is True
@@ -1452,12 +1535,15 @@ def test_addon_remove_declined_confirmation_is_a_noop(load_views):
     ctx = load_views(dialog_yesno=[False])
     views = ctx.views
     transport = 'https://x.example/manifest.json'
-    store = FakeStore(addons=[{'transportUrl': transport, 'flags': {}}])
+    store = FakeStore(addons=[{'transportUrl': transport, 'flags': {}}], auth={'authKey': 'abc123'})
+    api = FakeStremioAPI()
     _wire_data_layer(views, store, FakeAddonClient())
+    _wire_api(views, api)
 
     views.addon_remove(transport)
 
     assert store.get_addons() == [{'transportUrl': transport, 'flags': {}}]
+    assert api.addon_collection_set_calls == []
     assert ctx.env.notifications == []
     assert 'Container.Refresh' not in ctx.env.executed_builtins
 
@@ -1466,12 +1552,18 @@ def test_addon_remove_protected_addon_notifies_failure_but_still_refreshes(load_
     ctx = load_views(dialog_yesno=[True])
     views = ctx.views
     transport = 'https://official.example/manifest.json'
-    store = FakeStore(addons=[{'transportUrl': transport, 'flags': {'protected': True}}])
+    store = FakeStore(
+        addons=[{'transportUrl': transport, 'flags': {'protected': True}}],
+        auth={'authKey': 'abc123'},
+    )
+    api = FakeStremioAPI()
     _wire_data_layer(views, store, FakeAddonClient())
+    _wire_api(views, api)
 
     views.addon_remove(transport)
 
     assert store.get_addons() == [{'transportUrl': transport, 'flags': {'protected': True}}]
+    assert api.addon_collection_set_calls == []
     assert 'cannot remove protected addon' in ctx.env.notifications[-1][1]
     assert 'Container.Refresh' in ctx.env.executed_builtins
 
@@ -1486,6 +1578,60 @@ def test_addon_remove_success_notifies_and_refreshes(load_views):
     views.addon_remove(transport)
 
     assert store.get_addons() == []
+    assert ctx.env.notifications[-1][1] == 'STR30013'
+    assert 'Container.Refresh' in ctx.env.executed_builtins
+
+
+def test_addon_remove_success_while_logged_in_syncs_addon_collection(load_views):
+    """A successful removal while logged in pushes the store's *current*
+    (post-removal) addon list back to Stremio via addon_collection_set()."""
+    ctx = load_views(dialog_yesno=[True])
+    views = ctx.views
+    transport = 'https://community.example/manifest.json'
+    auth = {'authKey': 'abc123'}
+    store = FakeStore(addons=[{'transportUrl': transport, 'flags': {}}], auth=auth)
+    api = FakeStremioAPI()
+    _wire_data_layer(views, store, FakeAddonClient())
+    _wire_api(views, api)
+
+    views.addon_remove(transport)
+
+    assert store.get_addons() == []
+    assert api.addon_collection_set_calls == [(auth['authKey'], [])]
+    assert ctx.env.notifications[-1][1] == 'STR30013'
+
+
+def test_addon_remove_success_while_logged_out_never_syncs(load_views):
+    ctx = load_views(dialog_yesno=[True])
+    views = ctx.views
+    transport = 'https://community.example/manifest.json'
+    store = FakeStore(addons=[{'transportUrl': transport, 'flags': {}}])  # get_auth() -> None
+    api = FakeStremioAPI()
+    _wire_data_layer(views, store, FakeAddonClient())
+    _wire_api(views, api)
+
+    views.addon_remove(transport)
+
+    assert store.get_addons() == []
+    assert api.addon_collection_set_calls == []
+    assert ctx.env.notifications[-1][1] == 'STR30013'
+
+
+def test_addon_remove_success_sync_push_failure_does_not_block_removal(load_views):
+    """addon_collection_set() raising ApiError is logged and swallowed -
+    the local removal still succeeds and still notifies success."""
+    ctx = load_views(dialog_yesno=[True])
+    views = ctx.views
+    transport = 'https://community.example/manifest.json'
+    store = FakeStore(addons=[{'transportUrl': transport, 'flags': {}}], auth={'authKey': 'abc123'})
+    api = FakeStremioAPI(addon_collection_set_error=ApiError('sync up failed'))
+    _wire_data_layer(views, store, FakeAddonClient())
+    _wire_api(views, api)
+
+    views.addon_remove(transport)
+
+    assert store.get_addons() == []
+    assert len(api.addon_collection_set_calls) == 1
     assert ctx.env.notifications[-1][1] == 'STR30013'
     assert 'Container.Refresh' in ctx.env.executed_builtins
 

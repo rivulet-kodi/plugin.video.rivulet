@@ -643,6 +643,20 @@ def addons():
     xbmcplugin.endOfDirectory(handle)
 
 
+def _sync_addons_if_logged_in(store):
+    """Best-effort push of the local addon collection back to Stremio's
+    remote sync API when the user is logged in. Mirrors login()'s own
+    remote-fetch failure handling: a failed push is logged but must
+    never block or fail the local install/remove that triggered it."""
+    auth = store.get_auth()
+    if not auth:
+        return
+    try:
+        StremioAPI().addon_collection_set(auth.get('authKey'), store.get_addons())
+    except ApiError as exc:
+        log('views._sync_addons_if_logged_in: %r' % (exc,), xbmc.LOGERROR)
+
+
 def addon_install():
     handle = router.ADDON_HANDLE
     url = xbmcgui.Dialog().input(L(30010))
@@ -664,6 +678,7 @@ def addon_install():
         return
 
     _get_store().install_addon(url, manifest)
+    _sync_addons_if_logged_in(_get_store())
     notify(L(30012))
     _finish_action(handle)
 
@@ -680,6 +695,7 @@ def addon_remove(transport):
 
     try:
         _get_store().remove_addon(transport)
+        _sync_addons_if_logged_in(_get_store())
         notify(L(30013))
     except Exception as exc:  # noqa: BLE001 - e.g. protected-addon refusal
         log('views.addon_remove: %r' % (exc,), xbmc.LOGERROR)
