@@ -103,7 +103,9 @@ def open_detail(stype, sid):
     """Fetch (stype, sid)'s full meta and show its detail/episode list;
     opens StreamsWindow on a pick. Returns True if playback started
     somewhere down the chain (the caller should also close)."""
-    from lib.ui.compat import L, notify
+    import xbmc
+
+    from lib.ui.compat import L, log, notify
     from lib.ui.views import _fetch_meta
 
     meta_obj = _fetch_meta(stype, sid)
@@ -111,5 +113,11 @@ def open_detail(stype, sid):
         notify(L(30030))
         return False
 
-    win = open_window(DetailWindow, 'DetailWindow.xml')
-    return win.start(meta_obj, stype)
+    log('detailwindow: opening DetailWindow for %s/%s' % (stype, sid), xbmc.LOGINFO)
+    try:
+        win = open_window(DetailWindow, 'DetailWindow.xml')
+        return win.start(meta_obj, stype)
+    except Exception as exc:  # a skin/UI failure must surface, not vanish
+        log('detailwindow: window failed to open: %r' % (exc,), xbmc.LOGERROR)
+        notify(L(30032))
+        return False

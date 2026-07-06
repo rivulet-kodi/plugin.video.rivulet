@@ -111,5 +111,11 @@ def open_streams(stype, sid, poster=None):
     sort_key = ADDON.getSetting('stream_sort') or 'quality'
     pairs = streaminfo.sort_streams(pairs, key=sort_key)
 
-    win = open_window(StreamsWindow, 'StreamsWindow.xml')
-    return win.start(pairs, stype, sid, poster=poster)
+    log('streamswindow: opening StreamsWindow (%d streams)' % len(pairs), xbmc.LOGINFO)
+    try:
+        win = open_window(StreamsWindow, 'StreamsWindow.xml')
+        return win.start(pairs, stype, sid, poster=poster)
+    except Exception as exc:  # a skin/UI failure must surface, not vanish
+        log('streamswindow: window failed to open: %r' % (exc,), xbmc.LOGERROR)
+        notify(L(30032))
+        return False

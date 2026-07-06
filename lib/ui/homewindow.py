@@ -109,5 +109,11 @@ _ACTIONS = {
 
 def open_home():
     """Build and run the HomeWindow modal; blocks until the user exits."""
+    import xbmc
+
+    from lib.ui.compat import log
+
+    log('homewindow: opening HomeWindow', xbmc.LOGINFO)
     win = open_window(HomeWindow, 'HomeWindow.xml')
     win.doModal()
+    log('homewindow: HomeWindow closed', xbmc.LOGINFO)

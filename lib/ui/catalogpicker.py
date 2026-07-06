@@ -74,8 +74,18 @@ class CatalogPickerWindow(xbmcgui.WindowXMLDialog):
         if not metas:
             return
 
-        from lib.ui.infowindow import open_showcase
-        selected = open_showcase(metas)
+        import xbmc
+
+        from lib.ui.compat import L, notify
+
+        log('catalogpicker: opening coverflow (%d results)' % len(metas), xbmc.LOGINFO)
+        try:
+            from lib.ui.infowindow import open_showcase
+            selected = open_showcase(metas)
+        except Exception as exc:  # a skin/UI failure must surface, not vanish
+            log('catalogpicker: coverflow failed to open: %r' % (exc,), xbmc.LOGERROR)
+            notify(L(30032))
+            return
         if not selected:
             return
 
@@ -89,14 +99,22 @@ def open_catalog_picker():
     """List every installed addon's catalogs and open the coverflow for
     the one picked. Returns True if the caller should also close (see
     the module docstring)."""
+    import xbmc
+
     from lib.store import Store
     from lib.stremio.addons import iter_catalogs
-    from lib.ui.compat import L, addon_profile_dir, notify
+    from lib.ui.compat import L, addon_profile_dir, log, notify
 
     catalogs = list(iter_catalogs(Store(addon_profile_dir()).get_addons()))
     if not catalogs:
         notify(L(30030))
         return False
 
-    win = open_window(CatalogPickerWindow, 'CatalogPickerWindow.xml')
-    return win.start(catalogs)
+    log('catalogpicker: opening CatalogPickerWindow (%d catalogs)' % len(catalogs), xbmc.LOGINFO)
+    try:
+        win = open_window(CatalogPickerWindow, 'CatalogPickerWindow.xml')
+        return win.start(catalogs)
+    except Exception as exc:  # a skin/UI failure must surface, not vanish
+        log('catalogpicker: window failed to open: %r' % (exc,), xbmc.LOGERROR)
+        notify(L(30032))
+        return False

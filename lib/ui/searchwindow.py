@@ -37,8 +37,14 @@ def open_search():
         notify(L(30030))
         return False
 
-    from lib.ui.infowindow import open_showcase
-    selected = open_showcase(metas)
+    log('searchwindow: opening coverflow (%d results)' % len(metas), xbmc.LOGINFO)
+    try:
+        from lib.ui.infowindow import open_showcase
+        selected = open_showcase(metas)
+    except Exception as exc:  # a skin/UI failure must surface, not vanish
+        log('searchwindow: coverflow failed to open: %r' % (exc,), xbmc.LOGERROR)
+        notify(L(30032))
+        return False
     if not selected:
         return False
 
