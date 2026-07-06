@@ -647,7 +647,9 @@ def test_meta_item_maps_year_runtime_rating_and_skips_missing_fields(load_views)
         {
             'id': 'tt1', 'name': 'Full Meta', 'type': 'movie',
             'releaseInfo': '2014-2020', 'runtime': '169 min', 'imdbRating': '8.6',
-            'genres': ['Sci-Fi', 'Drama'],
+            'genres': ['Sci-Fi', 'Drama'], 'logo': 'https://x.example/logo.png',
+            'certification': 'PG-13', 'country': 'USA', 'director': ['Chris Nolan'],
+            'writer': ['Jonathan Nolan'], 'tagline': 'Mankind was born on Earth.',
         },
         {'id': 'tt2', 'name': 'Bare Meta', 'type': 'movie'},
     ]
@@ -661,11 +663,26 @@ def test_meta_item_maps_year_runtime_rating_and_skips_missing_fields(load_views)
     assert li_full.info_tag.calls.get('setDuration') == 169 * 60
     assert li_full.info_tag.calls.get('setRating') == 8.6
     assert li_full.info_tag.calls.get('setGenres') == ['Sci-Fi', 'Drama']
+    assert li_full.info_tag.calls.get('setOriginalTitle') == 'Full Meta'
+    assert li_full.info_tag.calls.get('setMpaa') == 'PG-13'
+    assert li_full.info_tag.calls.get('setCountries') == ['USA']
+    assert li_full.info_tag.calls.get('setDirectors') == ['Chris Nolan']
+    assert li_full.info_tag.calls.get('setWriters') == ['Jonathan Nolan']
+    assert li_full.info_tag.calls.get('setPlotOutline') == 'Mankind was born on Earth.'
+    assert li_full.art['clearlogo'] == 'https://x.example/logo.png'
+    assert li_full.getLabel() == 'Full Meta [COLOR grey](2014)[/COLOR] [COLOR gold]8.6[/COLOR]'
 
     _, li_bare, _ = items[1]
     assert 'setYear' not in li_bare.info_tag.calls
     assert 'setDuration' not in li_bare.info_tag.calls
     assert 'setRating' not in li_bare.info_tag.calls
+    assert 'setMpaa' not in li_bare.info_tag.calls
+    assert 'setCountries' not in li_bare.info_tag.calls
+    assert 'setDirectors' not in li_bare.info_tag.calls
+    assert 'setWriters' not in li_bare.info_tag.calls
+    assert 'setPlotOutline' not in li_bare.info_tag.calls
+    assert 'clearlogo' not in li_bare.art
+    assert li_bare.getLabel() == 'Bare Meta'
 
 
 # ---------------------------------------------------------------------------
@@ -933,7 +950,7 @@ def test_videos_filters_sorts_episodes_and_forwards_poster_title(load_views):
     assert len(items) == 2  # season-2 episode excluded
 
     labels = [li.getLabel() for _, li, _ in items]
-    assert labels == ['S01E01 - Ep One', 'S01E02 - Ep Two']
+    assert labels == ['1x01. Ep One', '1x02. Ep Two']
 
     url0, li0, is_folder0 = items[0]
     assert is_folder0 is True
@@ -943,7 +960,7 @@ def test_videos_filters_sorts_episodes_and_forwards_poster_title(load_views):
     assert li0.info_tag.calls.get('setTvShowTitle') == 'A Show'
     query0 = dict(parse_qsl(urlparse(url0).query))
     assert query0['poster'] == 'show-poster.jpg'
-    assert query0['title'] == 'S01E01 - Ep One'
+    assert query0['title'] == '1x01. Ep One'
 
     _, li1, _ = items[1]
     assert li1.art['thumb'] == 'ep2-thumb.jpg'
@@ -975,7 +992,7 @@ def test_videos_unparseable_season_param_matches_only_seasonless_entries(load_vi
     items = ctx.env.directory_items[-1]['items']
     assert len(items) == 1
     _, li, _ = items[0]
-    assert li.getLabel() == 'S00E01 - Loose Episode'
+    assert li.getLabel() == '0x01. Loose Episode'
 
 
 # ---------------------------------------------------------------------------

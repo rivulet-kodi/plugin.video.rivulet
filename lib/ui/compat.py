@@ -145,6 +145,7 @@ _VIDEO_INFO_SETTERS = {
     'sortseason': ('setSortSeason', int),
     'sortepisode': ('setSortEpisode', int),
     'rating': ('setRating', float),
+    'votes': ('setVotes', str),
     'duration': ('setDuration', int),
     'mediatype': ('setMediaType', _identity),
     'premiered': ('setPremiered', _identity),

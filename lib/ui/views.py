@@ -140,29 +140,63 @@ def _find_manifest(store, transport_url):
     return None
 
 
+def _decorate_label(name, year=None, rating=None):
+    """Render a catalog/search row label as BBCode, mirroring the
+    reference addon's `typo()` decoration style: "Name [COLOR grey]
+    (Year)[/COLOR] [COLOR gold]Rating[/COLOR]". Either suffix is omitted
+    when its value is falsy.
+    """
+    label = name
+    if year:
+        label = '%s [COLOR grey](%s)[/COLOR]' % (label, year)
+    if rating:
+        label = '%s [COLOR gold]%s[/COLOR]' % (label, rating)
+    return label
+
+
 def _meta_item(meta, ctype=None):
     meta = meta or {}
     mtype = meta.get('type') or ctype or 'movie'
     name = meta.get('name') or meta.get('id') or '?'
-    li = xbmcgui.ListItem(label=name)
+    year = _extract_year(meta.get('releaseInfo') or meta.get('released'))
+    rating = meta.get('imdbRating')
+    li = xbmcgui.ListItem(label=_decorate_label(name, year, rating))
 
     poster = meta.get('poster')
-    background = meta.get('background') or meta.get('logo')
+    logo = meta.get('logo')
+    background = meta.get('background') or logo
     art = {'fanart': _row_fanart(background)}
     if poster:
         art.update({'poster': poster, 'thumb': poster, 'icon': poster})
+    if logo:
+        art['clearlogo'] = logo
+    if meta.get('landscape'):
+        art['landscape'] = meta.get('landscape')
+    if meta.get('banner'):
+        art['banner'] = meta.get('banner')
     li.setArt(art)
 
     info = {
         'title': name,
+        'originaltitle': meta.get('name'),
         'plot': meta.get('description'),
         'genre': meta.get('genres') or [],
-        'year': _extract_year(meta.get('releaseInfo') or meta.get('released')),
+        'year': year,
         'mediatype': 'tvshow' if mtype == 'series' else 'movie',
         'duration': _parse_runtime_seconds(meta.get('runtime')),
     }
-    if meta.get('imdbRating'):
-        info['rating'] = meta.get('imdbRating')
+    if rating:
+        info['rating'] = rating
+    if meta.get('certification'):
+        info['mpaa'] = meta.get('certification')
+    if meta.get('country'):
+        info['country'] = meta.get('country')
+    if meta.get('director'):
+        info['director'] = meta.get('director')
+    if meta.get('writer'):
+        info['writer'] = meta.get('writer')
+    if meta.get('tagline'):
+        info['plotoutline'] = meta.get('tagline')
     set_video_info(li, info)
 
     url = router.url_for('meta', type=mtype, id=meta.get('id'))
@@ -415,7 +449,7 @@ def videos(stype, sid, season):
     items = []
     for video in episodes:
         title = video.get('title') or video.get('name') or video.get('id') or '?'
-        label = 'S%02dE%02d - %s' % (video.get('season') or 0, video.get('episode') or 0, title)
+        label = '%dx%02d. %s' % (video.get('season') or 0, video.get('episode') or 0, title)
         li = xbmcgui.ListItem(label=label)
         thumb = video.get('thumbnail') or fallback_thumb
         art = {'fanart': fallback_fanart}
