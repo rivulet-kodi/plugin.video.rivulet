@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<window>
+    <depth>0.52</depth>
+    <coordinates><left>0</left><top>0</top></coordinates>
+    <controls>
+        <control type="group">
+            <left>0</left><top>0</top>
+            <animation type="WindowOpen" reversible="false">
+                <effect type="fade" delay="0" end="100" time="200" />
+            </animation>
+            <animation type="WindowClose" reversible="false">
+                <effect type="fade" start="100" end="0" time="160" />
+            </animation>
+            <control type="image"><width>1280</width><height>720</height><texture colordiffuse="FF141414">white.png</texture></control>
+            <control type="image" id="30000"><width>1280</width><height>720</height><texture colordiffuse="FF3A3A3A"></texture><aspectratio>scale</aspectratio></control>
+            <control type="image"><width>1280</width><height>720</height><texture colordiffuse="CC000000">white.png</texture></control>
+            <control type="label"><left>90</left><top>80</top><width>600</width><height>60</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
+                <label>Rivulet</label>
+            </control>
+            <control type="list" id="30002">
+                <left>90</left><top>200</top><width>600</width><height>420</height>
+                <onleft>30002</onleft><onright>30002</onright>
+                <itemlayout height="70">
+                    <control type="label"><left>10</left><width>580</width><height>70</height><font>font13</font><textcolor>FFAAAAAA</textcolor><aligny>center</aligny>
+                        <label>$INFO[ListItem.Label]</label>
+                    </control>
+                </itemlayout>
+                <focusedlayout height="70">
+                    <control type="image"><width>600</width><height>70</height><texture colordiffuse="33FFFFFF">white.png</texture></control>
+                    <control type="label"><left>10</left><width>580</width><height>70</height><font>font13</font><textcolor>FFFFFFFF</textcolor><aligny>center</aligny>
+                        <label>[B]$INFO[ListItem.Label][/B]</label>
+                    </control>
+                </focusedlayout>
+            </control>
+        </control>
+    </controls>
+</window>
