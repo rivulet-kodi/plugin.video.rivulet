@@ -72,6 +72,14 @@ msgctxt "#30023"
 msgid "Login failed"
 msgstr ""
 
+msgctxt "#30024"
+msgid "Stremio email"
+msgstr ""
+
+msgctxt "#30025"
+msgid "Password"
+msgstr ""
+
 msgctxt "#30030"
 msgid "No streams found"
 msgstr ""

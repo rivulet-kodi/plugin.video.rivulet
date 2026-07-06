@@ -626,11 +626,11 @@ def addon_remove(transport):
 def login():
     handle = router.ADDON_HANDLE
     dialog = xbmcgui.Dialog()
-    email = dialog.input(L(30020))
+    email = dialog.input(L(30024))
     if not email:
         _finish_action(handle, refresh=False)
         return
-    password = dialog.input(L(30020), option=xbmcgui.ALPHANUM_HIDE_INPUT)
+    password = dialog.input(L(30025), option=xbmcgui.ALPHANUM_HIDE_INPUT)
     if not password:
         _finish_action(handle, refresh=False)
         return

@@ -1357,7 +1357,7 @@ def test_login_cancelled_email_prompt_is_a_noop(load_views):
 
     views.login()
 
-    assert ctx.env.dialog_input_prompts == ['STR30020']
+    assert ctx.env.dialog_input_prompts == ['STR30024']
     assert store.auth_set_calls == []
     assert 'Container.Refresh' not in ctx.env.executed_builtins
 
@@ -1370,7 +1370,7 @@ def test_login_cancelled_password_prompt_is_a_noop(load_views):
 
     views.login()
 
-    assert ctx.env.dialog_input_prompts == ['STR30020', 'STR30020']
+    assert ctx.env.dialog_input_prompts == ['STR30024', 'STR30025']
     assert store.auth_set_calls == []
     assert 'Container.Refresh' not in ctx.env.executed_builtins
 
