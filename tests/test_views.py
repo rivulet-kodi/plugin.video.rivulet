@@ -819,7 +819,7 @@ def test_search_cancelled_dialog_ends_directory_without_querying_addons(load_vie
     }
 
 
-def test_search_aggregates_labelled_results_and_skips_addon_errors(load_views):
+def test_search_aggregates_results_and_opens_coverflow_skipping_errors(load_views, monkeypatch):
     ctx = load_views(dialog_inputs=['batman'])
     views = ctx.views
     transport_a = 'https://a.example/manifest.json'
@@ -855,14 +855,44 @@ def test_search_aggregates_labelled_results_and_skips_addon_errors(load_views):
     })
     _wire_data_layer(views, FakeStore(addons=[descriptor_a, descriptor_b, descriptor_c]), client)
 
+    captured = {}
+
+    def fake_open_showcase(metas):
+        captured['metas'] = metas
+        return None  # user closes the coverflow without picking
+
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', fake_open_showcase)
+
     views.search()
 
-    items = ctx.env.directory_items[-1]['items']
-    assert len(items) == 1
-    _, li, is_folder = items[0]
-    assert is_folder is True
-    assert li.getLabel() == '[Addon B] Batman   [0.0]'
-    assert ctx.env.content[-1][1] == 'videos'
+    # addon A errored and addon C returned nothing -> only B's result is shown
+    assert captured['metas'] == [{'id': 'tt1', 'name': 'Batman', 'type': 'movie'}]
+    # search no longer builds a directory list; closing the overlay ends it
+    assert ctx.env.directory_items == []
+    assert ctx.env.end_of_directory[-1]['succeeded'] is False
+
+
+def test_search_selection_resolves_directory_to_picked_title(load_views, monkeypatch):
+    ctx = load_views(dialog_inputs=['batman'])
+    views = ctx.views
+    transport_b = 'https://b.example/manifest.json'
+    descriptor_b = {
+        'transportUrl': transport_b,
+        'manifest': {
+            'id': 'org.b', 'name': 'Addon B',
+            'catalogs': [{'type': 'movie', 'id': 'search', 'extra': [{'name': 'search'}]}],
+        },
+        'flags': {},
+    }
+    chosen = {'id': 'tt1', 'name': 'Batman', 'type': 'movie'}
+    _wire_data_layer(views, FakeStore(addons=[descriptor_b]), FakeAddonClient(catalog_results={transport_b: [chosen]}))
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: chosen)
+    calls = []
+    monkeypatch.setattr(views, 'meta', lambda stype, sid: calls.append((stype, sid)))
+
+    views.search()
+
+    assert calls == [('movie', 'tt1')]
 
 
 def test_search_no_matching_catalogs_notifies_empty_result(load_views):
@@ -877,8 +907,9 @@ def test_search_no_matching_catalogs_notifies_empty_result(load_views):
 
     views.search()
 
-    assert ctx.env.directory_items[-1]['items'] == []
+    assert ctx.env.directory_items == []
     assert ctx.env.notifications[-1][1] == 'STR30030'
+    assert ctx.env.end_of_directory[-1]['succeeded'] is False
 
 
 # ---------------------------------------------------------------------------

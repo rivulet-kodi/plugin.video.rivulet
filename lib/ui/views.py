@@ -420,26 +420,41 @@ def search():
 
     store = _get_store()
     client = _get_client()
-    items = []
-    for transport_url, manifest, cat in addons_lib.iter_catalogs(store.get_addons(), extra_required='search'):
+    metas = []
+    for transport_url, _manifest, cat in addons_lib.iter_catalogs(store.get_addons(), extra_required='search'):
         try:
-            metas = client.catalog(transport_url, cat.get('type'), cat.get('id'), extra=[('search', query)])
+            results = client.catalog(transport_url, cat.get('type'), cat.get('id'), extra=[('search', query)])
         except AddonError as exc:
             log('views.search: %s failed: %r' % (transport_url, exc), xbmc.LOGERROR)
             continue
-        if not metas:
-            continue
-        addon_name = manifest.get('name', '?')
-        for meta in metas:
-            url, li, is_folder = _meta_item(meta, cat.get('type'))
-            li.setLabel('[%s] %s' % (addon_name, li.getLabel()))
-            items.append((url, li, is_folder))
+        for meta_obj in results or []:
+            meta_obj['type'] = meta_obj.get('type') or cat.get('type')
+            metas.append(meta_obj)
 
-    if not items:
+    if not metas:
         notify(L(30030))
-    xbmcplugin.addDirectoryItems(handle, items, len(items))
-    xbmcplugin.setContent(handle, 'videos')
-    xbmcplugin.endOfDirectory(handle)
+        xbmcplugin.endOfDirectory(handle, succeeded=False, updateListing=False, cacheToDisc=False)
+        return
+
+    # Search results are presented directly in the coverflow showcase overlay
+    # (the default search UX). Dismiss Kodi's GetDirectory busy dialog first so
+    # the modal is interactable, mirroring the reference addon's prevent_busy().
+    xbmc.executebuiltin('Dialog.Close(all, true)')
+    try:
+        from lib.ui.infowindow import open_showcase
+        selected = open_showcase(metas)
+    except Exception as exc:  # a skin/UI failure must surface, not vanish
+        log('views.search: showcase overlay failed: %r' % (exc,), xbmc.LOGERROR)
+        notify(L(30032))
+        xbmcplugin.endOfDirectory(handle, succeeded=False, updateListing=False, cacheToDisc=False)
+        return
+
+    if not selected:
+        xbmcplugin.endOfDirectory(handle, succeeded=False, updateListing=False, cacheToDisc=False)
+        return
+
+    # Picking a poster resolves this search directory into that title's content.
+    meta(selected.get('type') or 'movie', selected.get('id'))
 
 
 @_safe_listing
