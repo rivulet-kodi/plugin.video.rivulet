@@ -29,7 +29,7 @@ from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
     'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.router',
-    'lib.ui.views', 'lib.ui.infowindow', 'lib.ui.catalogpicker',
+    'lib.ui.views', 'lib.ui.infowindow', 'lib.ui.detailwindow', 'lib.ui.catalogpicker',
 )
 
 
@@ -210,38 +210,64 @@ def test_open_catalog_no_selection_does_not_fallback_or_close(load_catalogpicker
     assert ctx.env.executed_builtins == []
 
 
-def test_open_catalog_with_selection_falls_back_to_classical_meta_and_closes(load_catalogpicker, monkeypatch):
+def test_open_catalog_with_selection_opens_detail_and_closes_when_playback_started(
+    load_catalogpicker, monkeypatch,
+):
     ctx = load_catalogpicker()
-    ctx.router.BASE_URL = 'plugin://plugin.video.rivulet/'
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'series'}]
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid: metas)
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
+    captured = {}
+
+    def fake_open_detail(stype, sid):
+        captured['args'] = (stype, sid)
+        return True
+
+    monkeypatch.setattr(ctx.detailwindow, 'open_detail', fake_open_detail)
 
     win._open_catalog('https://a.example/manifest.json', {'type': 'movie', 'id': 'top'})
 
+    assert captured['args'] == ('series', 'tt1')
     assert win.should_close_caller is True
     assert win.closed is True
-    assert ctx.env.executed_builtins == [
-        'Container.Update(plugin://plugin.video.rivulet/?action=meta&type=series&id=tt1)'
-    ]
+
+
+def test_open_catalog_with_selection_does_not_close_when_detail_returns_false(
+    load_catalogpicker, monkeypatch,
+):
+    ctx = load_catalogpicker()
+    win = _make_window(ctx.catalogpicker)
+    metas = [{'id': 'tt1', 'name': 'One', 'type': 'series'}]
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid: metas)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
+    monkeypatch.setattr(ctx.detailwindow, 'open_detail', lambda stype, sid: False)
+
+    win._open_catalog('https://a.example/manifest.json', {'type': 'movie', 'id': 'top'})
+
+    assert win.should_close_caller is False
+    assert win.closed is False
 
 
 def test_open_catalog_selected_meta_without_type_falls_back_to_the_catalogs_own_type(
     load_catalogpicker, monkeypatch,
 ):
     ctx = load_catalogpicker()
-    ctx.router.BASE_URL = 'plugin://plugin.video.rivulet/'
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt2', 'name': 'Two'}]  # no 'type' key on the selected meta
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid: metas)
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
+    captured = {}
+
+    def fake_open_detail(stype, sid):
+        captured['args'] = (stype, sid)
+        return True
+
+    monkeypatch.setattr(ctx.detailwindow, 'open_detail', fake_open_detail)
 
     win._open_catalog('https://a.example/manifest.json', {'type': 'movie', 'id': 'top'})
 
-    assert ctx.env.executed_builtins == [
-        'Container.Update(plugin://plugin.video.rivulet/?action=meta&type=movie&id=tt2)'
-    ]
+    assert captured['args'] == ('movie', 'tt2')
 
 
 # ---------------------------------------------------------------------------
@@ -272,13 +298,13 @@ def test_start_resets_should_close_caller_on_each_call(load_catalogpicker):
 
 def test_start_with_catalogs_calls_domodal_and_returns_should_close_caller(load_catalogpicker, monkeypatch):
     ctx = load_catalogpicker()
-    ctx.router.BASE_URL = 'plugin://plugin.video.rivulet/'
     picker = ctx.catalogpicker
     win = _make_window(picker)
     catalogs = [('https://a.example/manifest.json', {'name': 'A'}, {'id': 'top', 'type': 'movie'})]
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'movie'}]
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid: metas)
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
+    monkeypatch.setattr(ctx.detailwindow, 'open_detail', lambda stype, sid: True)
 
     # The fake doModal() is a no-op counter; simulate what a real modal event
     # loop would drive around it (onInit(), the user picking the only row),

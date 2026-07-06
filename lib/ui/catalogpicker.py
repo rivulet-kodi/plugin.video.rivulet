@@ -1,20 +1,13 @@
 """CatalogPickerWindow: a vertical list of every installed addon's
 catalogs - Rivulet's custom replacement for the classical `discover()`
 directory. Picking a row opens the coverflow (`lib.ui.infowindow`) over
-that catalog's items.
-
-Picking a TITLE from the coverflow has no custom detail screen yet, so
-it falls back to the classical `meta` directory
-(`lib.ui.uicommon.fallback_to_classical`) and signals its own caller to
-close too, so the classical directory - which lands on Kodi's Home
-container, behind our modal stack - actually becomes visible. This is a
-temporary bridge: once a `DetailWindow` exists, `_open_catalog` should
-call it directly instead of falling back.
+that catalog's items; picking a TITLE from the coverflow opens
+`lib.ui.detailwindow` for it.
 """
 import xbmcgui
 
 from lib.stremio.addons import AddonError
-from lib.ui.uicommon import BACK_ACTIONS, fallback_to_classical, open_window
+from lib.ui.uicommon import BACK_ACTIONS, open_window
 
 LIST = 30002
 
@@ -86,9 +79,10 @@ class CatalogPickerWindow(xbmcgui.WindowXMLDialog):
         if not selected:
             return
 
-        fallback_to_classical('meta', type=selected.get('type') or ctype, id=selected.get('id'))
-        self.should_close_caller = True
-        self.close()
+        from lib.ui.detailwindow import open_detail
+        if open_detail(selected.get('type') or ctype, selected.get('id')):
+            self.should_close_caller = True
+            self.close()
 
 
 def open_catalog_picker():

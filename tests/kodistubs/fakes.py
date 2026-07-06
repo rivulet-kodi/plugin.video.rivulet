@@ -114,6 +114,7 @@ class Env:
         self.log_calls = []          # [(msg, level)]
         self.executed_builtins = []  # [cmd, ...]
         self.monitor_abort_calls = 0
+        self.player_play_calls = []  # [(url, list_item)] - xbmc.Player().play() calls
 
         # xbmcaddon.Addon.openSettings recorder
         self.opened_settings = False

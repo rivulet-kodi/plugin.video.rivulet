@@ -338,15 +338,24 @@ def _wait_for_server(server):
         dialog.close()
 
 
-def play(handle, stream, stype, sid):
-    """Resolve `stream` (Stremio Stream object for content `stype`/`sid`)."""
+def _resolve_playable_item(stream, stype, sid):
+    """Resolve `stream` (Stremio Stream object for content `stype`/`sid`)
+    to a `(url, list_item)` pair ready to hand to Kodi's player, or
+    `(None, None)` on failure - a notification has already been shown
+    (either here or inside `_prebuffer_torrent`) by the time this
+    returns `None`.
+
+    Shared by `play()` (the classical GetDirectory path -
+    `xbmcplugin.setResolvedUrl`) and `play_direct()` (the custom-window
+    path - `xbmc.Player().play()`): neither `xbmcplugin` nor an
+    `ADDON_HANDLE` is touched here, only stream resolution.
+    """
     stream = stream or {}
 
     server = _server_client()
     if any(key in stream for key in _SERVER_DEPENDENT_KEYS) and not _wait_for_server(server):
         notify(L(30031))
-        xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())
-        return
+        return None, None
 
     try:
         url = server.resolve_stream(stream)
@@ -356,14 +365,12 @@ def play(handle, stream, stype, sid):
 
     if not url:
         notify(L(30030))
-        xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())
-        return
+        return None, None
 
     if stream.get('infoHash'):
         proceed, url = _prebuffer_torrent(server, stream, url)
         if not proceed:
-            xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())
-            return
+            return None, None
 
     behavior_hints = stream.get('behaviorHints') or {}
     request_headers = (behavior_hints.get('proxyHeaders') or {}).get('request') or {}
@@ -395,4 +402,27 @@ def play(handle, stream, stype, sid):
 
     _attach_subtitles(list_item, behavior_hints, stype, sid)
 
+    return url, list_item
+
+
+def play(handle, stream, stype, sid):
+    """Resolve `stream` and hand it to Kodi via `setResolvedUrl` - the
+    classical GetDirectory play path (action=play)."""
+    _url, list_item = _resolve_playable_item(stream, stype, sid)
+    if list_item is None:
+        xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())
+        return
     xbmcplugin.setResolvedUrl(handle, True, list_item)
+
+
+def play_direct(stream, stype, sid):
+    """Resolve `stream` and hand it DIRECTLY to `xbmc.Player()` - the
+    custom-window path (`lib.ui.streamswindow`), where there is no
+    `ADDON_HANDLE`/GetDirectory call to satisfy. Returns True if
+    playback was started, False on a resolution failure (already
+    notified by `_resolve_playable_item`)."""
+    url, list_item = _resolve_playable_item(stream, stype, sid)
+    if list_item is None:
+        return False
+    xbmc.Player().play(url, list_item)
+    return True

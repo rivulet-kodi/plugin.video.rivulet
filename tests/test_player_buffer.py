@@ -819,3 +819,35 @@ def test_setting_int_never_raises_when_getsetting_raises(kodi_stubs, monkeypatch
 
     monkeypatch.setattr(kodi_stubs.env.addon, 'getSetting', boom)
     assert kodi_stubs.compat.setting_int('buffer_mb', 20) == 20
+
+
+# --- play_direct(): the custom-window direct-play path (lib.ui.streamswindow),
+# --- sharing _resolve_playable_item() with play() above - only the final
+# --- disposition differs (xbmc.Player().play() vs xbmcplugin.setResolvedUrl())
+
+
+def test_play_direct_successful_resolution_starts_player_and_returns_true(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    result = kodi_stubs.player.play_direct({'url': 'https://example.com/a.mp4'}, 'movie', 'tt50')
+
+    assert result is True
+    assert len(env.player_play_calls) == 1
+    url, list_item = env.player_play_calls[0]
+    assert url == 'https://example.com/a.mp4'
+    assert list_item.path == 'https://example.com/a.mp4'
+    assert env.resolved == []  # play_direct never touches xbmcplugin.setResolvedUrl()
+
+
+def test_play_direct_failed_resolution_returns_false_without_starting_player(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    # An empty resolve_stream() result is a resolution failure ("no url"),
+    # the same honest-failure path play()'s own tests exercise.
+    _ServerScript(resolve_url=None).install(monkeypatch, kodi_stubs.player)
+
+    result = kodi_stubs.player.play_direct({'url': 'https://example.com/a.mp4'}, 'movie', 'tt51')
+
+    assert result is False
+    assert env.player_play_calls == []
+    assert env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]

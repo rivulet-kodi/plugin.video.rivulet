@@ -30,7 +30,7 @@ from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
     'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.router',
-    'lib.ui.infowindow', 'lib.ui.searchwindow',
+    'lib.ui.infowindow', 'lib.ui.detailwindow', 'lib.ui.searchwindow',
 )
 
 
@@ -192,9 +192,8 @@ def test_open_search_no_results_notifies_and_returns_false(load_searchwindow, mo
 # ---------------------------------------------------------------------------
 
 
-def test_open_search_selection_falls_back_to_classical_meta_and_returns_true(load_searchwindow, monkeypatch):
+def test_open_search_selection_opens_detail_and_returns_its_result(load_searchwindow, monkeypatch):
     ctx = load_searchwindow(dialog_inputs=['batman'])
-    ctx.router.BASE_URL = 'plugin://plugin.video.rivulet/'
     searchwindow = ctx.searchwindow
     descriptor = {
         'transportUrl': 't1',
@@ -203,18 +202,22 @@ def test_open_search_selection_falls_back_to_classical_meta_and_returns_true(loa
     chosen = {'id': 'tt9', 'name': 'Batman', 'type': 'movie'}
     _wire_data_layer(searchwindow, _FakeStore(addons=[descriptor]), _FakeAddonClient({'t1': [chosen]}))
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: chosen)
+    captured = {}
+
+    def fake_open_detail(stype, sid):
+        captured['args'] = (stype, sid)
+        return True
+
+    monkeypatch.setattr(ctx.detailwindow, 'open_detail', fake_open_detail)
 
     result = searchwindow.open_search()
 
     assert result is True
-    assert ctx.env.executed_builtins == [
-        'Container.Update(plugin://plugin.video.rivulet/?action=meta&type=movie&id=tt9)'
-    ]
+    assert captured['args'] == ('movie', 'tt9')
 
 
 def test_open_search_selection_without_any_type_falls_back_to_movie(load_searchwindow, monkeypatch):
     ctx = load_searchwindow(dialog_inputs=['batman'])
-    ctx.router.BASE_URL = 'plugin://plugin.video.rivulet/'
     searchwindow = ctx.searchwindow
     descriptor = {
         'transportUrl': 't1',
@@ -225,13 +228,18 @@ def test_open_search_selection_without_any_type_falls_back_to_movie(load_searchw
     raw_result = {'id': 'tt9', 'name': 'Mystery'}
     _wire_data_layer(searchwindow, _FakeStore(addons=[descriptor]), _FakeAddonClient({'t1': [raw_result]}))
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: metas[0])
+    captured = {}
+
+    def fake_open_detail(stype, sid):
+        captured['args'] = (stype, sid)
+        return True
+
+    monkeypatch.setattr(ctx.detailwindow, 'open_detail', fake_open_detail)
 
     result = searchwindow.open_search()
 
     assert result is True
-    assert ctx.env.executed_builtins == [
-        'Container.Update(plugin://plugin.video.rivulet/?action=meta&type=movie&id=tt9)'
-    ]
+    assert captured['args'] == ('movie', 'tt9')
 
 
 def test_open_search_no_selection_returns_false_without_fallback(load_searchwindow, monkeypatch):

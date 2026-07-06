@@ -40,7 +40,17 @@ def make_xbmc(env, info_labels=None):
             abort = env.monitor_abort
             return bool(abort(env.monitor_abort_calls)) if callable(abort) else bool(abort)
 
+    class Player:
+        """Stand-in for `xbmc.Player()`: records every `.play(url, listitem)`
+        call `lib.ui.player.play_direct()` makes on it - the custom-window
+        direct-play path (no ADDON_HANDLE/xbmcplugin.setResolvedUrl
+        involved)."""
+
+        def play(self, item='', listitem=None, windowed=False, startpos=-1):
+            env.player_play_calls.append((item, listitem))
+
     module.Monitor = Monitor
+    module.Player = Player
     return module
 
 

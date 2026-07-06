@@ -1,15 +1,10 @@
 """open_search(): prompt a query, then show the aggregated results
 directly in the coverflow overlay (`lib.ui.infowindow`) - Rivulet's
 custom replacement for the classical `search()` directory action.
-
-Picking a title has no custom detail screen yet, so it falls back to
-the classical `meta` directory (see `lib.ui.catalogpicker`'s module
-docstring for why this pattern exists) and signals its caller to close
-too.
+Picking a title opens `lib.ui.detailwindow` for it.
 """
 from lib.store import Store
 from lib.stremio.addons import AddonClient, AddonError, iter_catalogs
-from lib.ui.uicommon import fallback_to_classical
 
 
 def open_search():
@@ -47,5 +42,5 @@ def open_search():
     if not selected:
         return False
 
-    fallback_to_classical('meta', type=selected.get('type') or 'movie', id=selected.get('id'))
-    return True
+    from lib.ui.detailwindow import open_detail
+    return open_detail(selected.get('type') or 'movie', selected.get('id'))
