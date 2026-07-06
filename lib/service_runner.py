@@ -62,7 +62,7 @@ def http_port_from_url(server_url, default=DEFAULT_HTTP_PORT):
         port = urlparse(server_url).port
     except (ValueError, AttributeError):
         return default
-    return port or default
+    return port if port is not None else default
 
 
 def resolve_binary(explicit_path, addon_data_dir):
@@ -196,11 +196,11 @@ def main():
     log_path = os.path.join(profile_dir, LOG_FILENAME)
 
     def log(level, message):
-        xbmc.log("[{}] {}".format(ADDON_ID, message), level)
+        xbmc.log(f"[{ADDON_ID}] {message}", level)
 
     class ServiceMonitor(xbmc.Monitor):
         def __init__(self):
-            super(ServiceMonitor, self).__init__()
+            super().__init__()
             self.restart_requested = False
             self.enabled = False
             self.binary_setting = ""
@@ -247,7 +247,7 @@ def main():
             else:
                 if (proc.uptime() or 0) >= MIN_STABLE_UPTIME:
                     backoff_idx = 0
-                log(xbmc.LOGWARNING, "embedded server exited (code {}), restarting".format(code))
+                log(xbmc.LOGWARNING, f"embedded server exited (code {code}), restarting")
                 interval = RESTART_BACKOFF[min(backoff_idx, len(RESTART_BACKOFF) - 1)]
                 backoff_idx = min(backoff_idx + 1, len(RESTART_BACKOFF) - 1)
                 proc = None
@@ -271,7 +271,7 @@ def main():
                     interval = MISSING_BINARY_RECHECK_INTERVAL
                 else:
                     notified_missing = False
-                    log(xbmc.LOGINFO, "starting embedded server: {}".format(binary))
+                    log(xbmc.LOGINFO, f"starting embedded server: {binary}")
                     proc = ServerProcess(binary, monitor.server_url, app_path, log_path)
                     proc.start()
                     interval = HEALTHY_POLL_INTERVAL

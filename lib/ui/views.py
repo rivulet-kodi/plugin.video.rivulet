@@ -15,11 +15,11 @@ import xbmc
 import xbmcgui
 import xbmcplugin
 
+from lib.store import Store
 from lib.stremio import addons as addons_lib
 from lib.stremio import streaminfo
 from lib.stremio.addons import AddonClient, AddonError
 from lib.stremio.api import ApiError, StremioAPI
-from lib.store import Store
 from lib.ui import compat, router
 from lib.ui.compat import L, log, notify, set_video_info
 
@@ -522,7 +522,7 @@ def addons():
             li.addContextMenuItems([(L(30011), 'RunPlugin(%s)' % remove_url)])
             items.append((remove_url, li, False))
         else:
-            items.append((router.url_for('discover'), li, False))
+            items.append((router.url_for('discover'), li, True))
 
     items.append(_action_item(L(30010), router.url_for('addon_install'), 'DefaultAddonNone.png'))
 
