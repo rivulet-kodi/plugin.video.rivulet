@@ -20,30 +20,32 @@
 
   <rect x="16" y="16" width="992" height="992" rx="224" fill="url(#bg)"/>
 
-  <g filter="url(#glow)" fill="none" stroke="url(#flow)" stroke-linecap="round">
-    <path d="M 255 250
-             C 430 290, 390 450, 460 520
-             C 480 545, 494 562, 500 580"
-          stroke-width="46"/>
-    <path d="M 255 910
-             C 430 870, 390 710, 460 640
-             C 480 615, 494 598, 500 580"
-          stroke-width="38"/>
-  </g>
+  <g transform="translate(-17,-67)">
+    <g filter="url(#glow)" fill="none" stroke="url(#flow)" stroke-linecap="round">
+      <path d="M 255 250
+               C 430 290, 390 450, 460 520
+               C 480 545, 494 562, 500 580"
+            stroke-width="46"/>
+      <path d="M 255 910
+               C 430 870, 390 710, 460 640
+               C 480 615, 494 598, 500 580"
+            stroke-width="38"/>
+    </g>
 
-  <!-- play-button triangle; left edge centered on the junction -->
-  <g filter="url(#glow)">
-    <path d="M 500 452
-             Q 500 580 500 708
-             Q 504 742 536 726
-             L 806 612
-             Q 836 580 806 548
-             L 536 434
-             Q 504 418 500 452 Z"
-          fill="url(#flow)"/>
+    <!-- play-button triangle; left edge centered on the junction -->
+    <g filter="url(#glow)">
+      <path d="M 500 452
+               Q 500 580 500 708
+               Q 504 742 536 726
+               L 806 612
+               Q 836 580 806 548
+               L 536 434
+               Q 504 418 500 452 Z"
+            fill="url(#flow)"/>
+    </g>
+    <circle cx="500" cy="580" r="22" fill="#38bdf8"/>
+    <circle cx="500" cy="580" r="11" fill="#e0f7ff"/>
+    <circle cx="255" cy="250" r="14" fill="#99f6e4" opacity="0.95"/>
+    <circle cx="255" cy="910" r="12" fill="#99f6e4" opacity="0.85"/>
   </g>
-  <circle cx="500" cy="580" r="22" fill="#38bdf8"/>
-  <circle cx="500" cy="580" r="11" fill="#e0f7ff"/>
-  <circle cx="255" cy="250" r="14" fill="#99f6e4" opacity="0.95"/>
-  <circle cx="255" cy="910" r="12" fill="#99f6e4" opacity="0.85"/>
 </svg>
