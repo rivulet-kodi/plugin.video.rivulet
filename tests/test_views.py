@@ -26,7 +26,7 @@ from lib.stremio.addons import AddonError
 from lib.stremio.api import ApiError
 from tests.kodistubs import install_kodi_stubs
 
-_RELOAD_MODULE_NAMES = ('lib.ui.compat', 'lib.ui.router', 'lib.ui.views')
+_RELOAD_MODULE_NAMES = ('lib.ui.compat', 'lib.ui.router', 'lib.ui.views', 'lib.ui.infowindow')
 
 
 # ---------------------------------------------------------------------------
@@ -40,9 +40,10 @@ def load_views():
     info_labels=None, dialog_inputs=None, dialog_yesno=None,
     localized=None)` installs fresh stubs (via
     tests.kodistubs.install_kodi_stubs) reloading lib.ui.compat/
-    lib.ui.router/lib.ui.views, and returns a namespace with `.views`,
-    `.compat`, `.router`, and `.env` (the call recorder). Every call is
-    torn down automatically, in reverse order, at test end.
+    lib.ui.router/lib.ui.views/lib.ui.infowindow, and returns a namespace
+    with `.views`, `.compat`, `.router`, `.infowindow`, and `.env` (the
+    call recorder). Every call is torn down automatically, in reverse
+    order, at test end.
     """
     with contextlib.ExitStack() as stack:
         def _load(addon_info=None, settings=None, info_labels=None, dialog_inputs=None,
@@ -560,6 +561,26 @@ def test_discover_lists_catalogs_across_addons_with_art_and_url_fallbacks(load_v
     assert ctx.env.end_of_directory[-1]['succeeded'] is True
 
 
+def test_discover_rows_carry_showcase_context_menu_item(load_views):
+    ctx = load_views()
+    views, router = ctx.views, ctx.router
+    transport = 'https://x.example/manifest.json'
+    descriptor = {
+        'transportUrl': transport,
+        'manifest': {
+            'id': 'org.x', 'name': 'Addon X',
+            'catalogs': [{'type': 'movie', 'id': 'top', 'name': 'Top Movies'}],
+        },
+    }
+    _wire_data_layer(views, FakeStore(addons=[descriptor]), FakeAddonClient())
+
+    views.discover()
+
+    _, li, _ = ctx.env.directory_items[-1]['items'][0]
+    expected_url = router.url_for('showcase', transport=transport, type='movie', id='top')
+    assert li.context_menu_items == [('STR30026', 'RunPlugin(%s)' % expected_url)]
+
+
 # ---------------------------------------------------------------------------
 # catalog() - error/empty/pagination edge cases
 # ---------------------------------------------------------------------------
@@ -683,6 +704,100 @@ def test_meta_item_maps_year_runtime_rating_and_skips_missing_fields(load_views)
     assert 'setPlotOutline' not in li_bare.info_tag.calls
     assert 'clearlogo' not in li_bare.art
     assert li_bare.getLabel() == 'Bare Meta   [0.0]'
+
+
+# ---------------------------------------------------------------------------
+# showcase()
+# ---------------------------------------------------------------------------
+
+
+def test_showcase_opens_overlay_with_catalog_metas_and_updates_container_on_selection(load_views, monkeypatch):
+    ctx = load_views()
+    views, router = ctx.views, ctx.router
+    transport = 'https://addon-a.example/manifest.json'
+    descriptor = {'transportUrl': transport, 'manifest': {'id': 'org.a', 'catalogs': []}, 'flags': {}}
+    metas = [
+        {'id': 'tt1', 'name': 'One', 'type': 'movie'},
+        {'id': 'tt2', 'name': 'Two', 'type': 'series'},
+    ]
+    _wire_data_layer(views, FakeStore(addons=[descriptor]), FakeAddonClient(catalog_result=metas))
+    captured = {}
+
+    def fake_open_showcase(passed_metas):
+        captured['metas'] = passed_metas
+        return metas[1]
+
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', fake_open_showcase)
+
+    views.showcase(transport, 'movie', 'top')
+
+    assert captured['metas'] == metas
+    assert ctx.env.executed_builtins == [
+        'Container.Update(%s)' % router.url_for('meta', type='series', id='tt2')
+    ]
+
+
+def test_showcase_selected_meta_without_type_falls_back_to_catalog_type(load_views, monkeypatch):
+    ctx = load_views()
+    views, router = ctx.views, ctx.router
+    transport = 'https://addon-a.example/manifest.json'
+    descriptor = {'transportUrl': transport, 'manifest': {'id': 'org.a', 'catalogs': []}, 'flags': {}}
+    metas = [{'id': 'tt9', 'name': 'No Type'}]
+    _wire_data_layer(views, FakeStore(addons=[descriptor]), FakeAddonClient(catalog_result=metas))
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda passed_metas: metas[0])
+
+    views.showcase(transport, 'movie', 'top')
+
+    assert ctx.env.executed_builtins == [
+        'Container.Update(%s)' % router.url_for('meta', type='movie', id='tt9')
+    ]
+
+
+def test_showcase_closed_without_selection_does_not_update_container(load_views, monkeypatch):
+    ctx = load_views()
+    views = ctx.views
+    transport = 'https://addon-a.example/manifest.json'
+    descriptor = {'transportUrl': transport, 'manifest': {'id': 'org.a', 'catalogs': []}, 'flags': {}}
+    metas = [{'id': 'tt1', 'name': 'One', 'type': 'movie'}]
+    _wire_data_layer(views, FakeStore(addons=[descriptor]), FakeAddonClient(catalog_result=metas))
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda passed_metas: None)
+
+    views.showcase(transport, 'movie', 'top')
+
+    assert ctx.env.executed_builtins == []
+
+
+def test_showcase_empty_catalog_notifies_and_never_opens_overlay(load_views, monkeypatch):
+    ctx = load_views()
+    views = ctx.views
+    transport = 'https://addon-a.example/manifest.json'
+    descriptor = {'transportUrl': transport, 'manifest': {'id': 'org.a', 'catalogs': []}, 'flags': {}}
+    _wire_data_layer(views, FakeStore(addons=[descriptor]), FakeAddonClient(catalog_result=[]))
+    opened = []
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda passed_metas: opened.append(passed_metas))
+
+    views.showcase(transport, 'movie', 'top')
+
+    assert opened == []
+    assert ctx.env.notifications[-1][1] == 'STR30030'
+    assert ctx.env.executed_builtins == []
+
+
+def test_showcase_addon_error_notifies_and_never_opens_overlay(load_views, monkeypatch):
+    ctx = load_views()
+    views = ctx.views
+    transport = 'https://addon-a.example/manifest.json'
+    descriptor = {'transportUrl': transport, 'manifest': {'id': 'org.a', 'catalogs': []}, 'flags': {}}
+    client = FakeAddonClient(catalog_results={transport: AddonError('upstream timeout')})
+    _wire_data_layer(views, FakeStore(addons=[descriptor]), client)
+    opened = []
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda passed_metas: opened.append(passed_metas))
+
+    views.showcase(transport, 'movie', 'top')
+
+    assert opened == []
+    assert ctx.env.notifications[-1][1] == 'upstream timeout'
+    assert ctx.env.executed_builtins == []
 
 
 # ---------------------------------------------------------------------------

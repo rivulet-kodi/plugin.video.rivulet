@@ -80,6 +80,9 @@ def run():
         'catalog': lambda p: views.catalog(
             p.get('transport'), p.get('type'), p.get('id'), p.get('extra')
         ),
+        'showcase': lambda p: views.showcase(
+            p.get('transport'), p.get('type'), p.get('id'), p.get('extra')
+        ),
         'search': lambda p: views.search(),
         'meta': lambda p: views.meta(p.get('type'), p.get('id')),
         'videos': lambda p: views.videos(p.get('type'), p.get('id'), p.get('season')),

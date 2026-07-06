@@ -270,6 +270,11 @@ DISPATCH_CASES = [
         ('catalog', ('http://x/manifest.json', 'movie', 'tt1', 'skip=2'), {}),
         id='catalog',
     ),
+    pytest.param(
+        {'action': 'showcase', 'transport': 'http://x/manifest.json', 'type': 'movie', 'id': 'tt1', 'extra': 'skip=2'},
+        ('showcase', ('http://x/manifest.json', 'movie', 'tt1', 'skip=2'), {}),
+        id='showcase',
+    ),
     pytest.param({'action': 'search'}, ('search', (), {}), id='search'),
     pytest.param(
         {'action': 'meta', 'type': 'series', 'id': 'tt2'},

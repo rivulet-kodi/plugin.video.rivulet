@@ -313,6 +313,10 @@ def discover():
         if logo:
             art.update({'icon': logo, 'thumb': logo})
         li.setArt(art)
+        showcase_url = router.url_for(
+            'showcase', transport=transport_url, type=catalog.get('type'), id=catalog.get('id')
+        )
+        li.addContextMenuItems([(L(30026), 'RunPlugin(%s)' % showcase_url)])
         url = router.url_for(
             'catalog', transport=transport_url, type=catalog.get('type'), id=catalog.get('id')
         )
@@ -322,13 +326,21 @@ def discover():
     xbmcplugin.endOfDirectory(handle)
 
 
+def _fetch_catalog(transport, ctype, cid, extra=None):
+    """Fetch one catalog's metas via the shared AddonClient - the exact
+    call catalog() and showcase() both build their listing/overlay from.
+    Raises AddonError on failure; callers decide how to surface it
+    (catalog() ends the directory as failed, showcase() notifies)."""
+    client = _get_client()
+    return client.catalog(transport, ctype, cid, extra=extra)
+
+
 @_safe_listing
 def catalog(transport, ctype, cid, extra=None):
     handle = router.ADDON_HANDLE
     store = _get_store()
-    client = _get_client()
     try:
-        metas = client.catalog(transport, ctype, cid, extra=extra)
+        metas = _fetch_catalog(transport, ctype, cid, extra)
     except AddonError as exc:
         log('views.catalog: %s %s/%s failed: %r' % (transport, ctype, cid, exc), xbmc.LOGERROR)
         notify(str(exc))
@@ -359,6 +371,34 @@ def catalog(transport, ctype, cid, extra=None):
     xbmcplugin.addDirectoryItems(handle, items, len(items))
     xbmcplugin.setContent(handle, _content_for_type(ctype))
     xbmcplugin.endOfDirectory(handle)
+
+
+def showcase(transport, ctype, cid, extra=None):
+    """RunPlugin action (Discover's "Showcase" context-menu item): open a
+    fullscreen coverflow overlay (lib.ui.infowindow.ShowcaseWindow) over
+    one catalog's metas - fetched exactly like catalog() - and, if the
+    user picks a title, navigate the current directory there.
+
+    A one-shot side effect, not a directory listing: unlike catalog() it
+    never touches xbmcplugin, so it is deliberately not @_safe_listing.
+    """
+    try:
+        metas = _fetch_catalog(transport, ctype, cid, extra)
+    except AddonError as exc:
+        log('views.showcase: %s %s/%s failed: %r' % (transport, ctype, cid, exc), xbmc.LOGERROR)
+        notify(str(exc))
+        return
+
+    if not metas:
+        notify(L(30030))
+        return
+
+    from lib.ui.infowindow import open_showcase
+    selected = open_showcase(metas)
+    if selected:
+        xbmc.executebuiltin('Container.Update(%s)' % router.url_for(
+            'meta', type=selected.get('type') or ctype, id=selected.get('id')
+        ))
 
 
 @_safe_listing

@@ -146,7 +146,10 @@ class FakeListItem:
     mutations (test_views.py's directory-listing assertions) as well as
     the `path`/subtitles/mimetype/content_lookup fields
     `lib.ui.player.play()` sets on the item it hands to
-    `xbmcplugin.setResolvedUrl()` (test_player_buffer.py).
+    `xbmcplugin.setResolvedUrl()` (test_player_buffer.py). `getProperty()`
+    reads a property back, mirroring real `xbmcgui.ListItem` - needed by
+    `lib.ui.infowindow.ShowcaseWindow`, which reads the `fanart`/
+    `position` Properties back off the coverflow's focused/selected item.
     """
 
     def __init__(self, label='', label2='', path='', offscreen=False):
@@ -174,6 +177,9 @@ class FakeListItem:
 
     def setProperty(self, key, value):
         self.properties[key] = value
+
+    def getProperty(self, key):
+        return self.properties.get(key, '')
 
     def setInfo(self, kind, info):
         assert kind == 'video'

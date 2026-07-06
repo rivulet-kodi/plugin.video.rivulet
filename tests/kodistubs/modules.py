@@ -84,8 +84,76 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
         def close(self):
             env.dialog_closed_count += 1
 
+    class FakeWindowControl:
+        """Stand-in for one WindowXMLDialog control (`getControl(id)`'s
+        return value): records addItems()/setImage()/setVisible() calls.
+        `getSelectedItem()` returns `self.items[self.selected_index]`
+        (default 0) - a test scripts a scroll position by setting
+        `.selected_index` before calling onAction()/onClick()."""
+
+        def __init__(self):
+            self.items = []
+            self.image = None
+            self.visible = True
+            self.selected_index = 0
+
+        def addItems(self, items):
+            self.items.extend(items)
+
+        def setImage(self, image):
+            self.image = image
+
+        def setVisible(self, visible):
+            self.visible = visible
+
+        def getSelectedItem(self):
+            if not self.items:
+                return None
+            return self.items[self.selected_index]
+
+    class FakeAction:
+        """Stand-in for `xbmcgui.Action`: only `getId()` is used by
+        `lib.ui.infowindow.ShowcaseWindow.onAction()`; a test builds one
+        directly (`xbmcgui.Action(action_id)`) to drive it."""
+
+        def __init__(self, action_id):
+            self._id = action_id
+
+        def getId(self):
+            return self._id
+
+    class WindowXMLDialog:
+        """Stand-in for `xbmcgui.WindowXMLDialog`: enough surface to
+        construct `lib.ui.infowindow.ShowcaseWindow` and drive its
+        onInit()/onClick()/onAction() directly from a test. No real
+        window ever opens - doModal() only counts calls; a test drives
+        the modal's effect (e.g. a click) itself before/around it."""
+
+        def __init__(self, *args, **kwargs):
+            self._controls = {}
+            self._focus_id = None
+            self.modal_calls = 0
+            self.closed = False
+
+        def getControl(self, control_id):
+            return self._controls.setdefault(control_id, FakeWindowControl())
+
+        def setFocusId(self, control_id):
+            self._focus_id = control_id
+
+        def getFocusId(self):
+            return self._focus_id
+
+        def doModal(self):
+            self.modal_calls += 1
+
+        def close(self):
+            self.closed = True
+
     module.Dialog = Dialog
     module.DialogProgress = DialogProgress
+    module.WindowXMLDialog = WindowXMLDialog
+    module.Action = FakeAction
     return module
 
 
