@@ -54,6 +54,10 @@ IDLE_POLL_INTERVAL = 2.0
 HEALTHY_POLL_INTERVAL = 2.0
 EXTERNAL_RECHECK_INTERVAL = 10.0
 MISSING_BINARY_RECHECK_INTERVAL = 5.0
+# After an auto-download completes, recheck almost immediately so the
+# freshly-installed binary is picked up on the very next loop iteration
+# instead of waiting out a full missing-binary recheck cycle.
+POST_DOWNLOAD_RECHECK_INTERVAL = 0.5
 
 
 def http_port_from_url(server_url, default=DEFAULT_HTTP_PORT):
@@ -222,6 +226,7 @@ def main():
     proc = None
     backoff_idx = 0
     notified_missing = False
+    attempted_download = False
 
     while not monitor.abortRequested():
         if monitor.restart_requested:
@@ -232,6 +237,7 @@ def main():
                 proc = None
             backoff_idx = 0
             notified_missing = False
+            attempted_download = False
 
         interval = IDLE_POLL_INTERVAL
 
@@ -260,7 +266,28 @@ def main():
             else:
                 binary = resolve_binary(monitor.binary_setting, profile_dir)
                 if binary is None:
-                    if not notified_missing:
+                    interval = MISSING_BINARY_RECHECK_INTERVAL
+                    if not attempted_download:
+                        attempted_download = True
+                        xbmcgui.Dialog().notification(
+                            addon.getAddonInfo("name"),
+                            addon.getLocalizedString(30069),
+                        )
+                        log(xbmc.LOGINFO, "auto-downloading stremio-server binary")
+                        from lib import serverbin
+
+                        try:
+                            serverbin.install_binary(os.path.join(profile_dir, "bin"))
+                            log(xbmc.LOGINFO, "stremio-server binary download complete")
+                            interval = POST_DOWNLOAD_RECHECK_INTERVAL
+                        except Exception as exc:
+                            log(xbmc.LOGERROR, f"stremio-server binary download failed: {exc}")
+                            xbmcgui.Dialog().notification(
+                                addon.getAddonInfo("name"),
+                                addon.getLocalizedString(30063),
+                                xbmcgui.NOTIFICATION_ERROR,
+                            )
+                    elif not notified_missing:
                         xbmcgui.Dialog().notification(
                             addon.getAddonInfo("name"),
                             addon.getLocalizedString(30031),
@@ -268,7 +295,6 @@ def main():
                         )
                         log(xbmc.LOGERROR, "stremio-server binary not found")
                         notified_missing = True
-                    interval = MISSING_BINARY_RECHECK_INTERVAL
                 else:
                     notified_missing = False
                     log(xbmc.LOGINFO, f"starting embedded server: {binary}")

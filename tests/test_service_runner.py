@@ -23,6 +23,7 @@ import urllib.error
 
 import pytest
 
+import lib.serverbin as serverbin
 import lib.service_runner as service_runner
 from tests.kodistubs import install_kodi_stubs
 
@@ -574,8 +575,12 @@ def test_main_external_server_already_listening_skips_spawn(monkeypatch, tmp_pat
     def resolve_binary_must_not_run(*args, **kwargs):
         pytest.fail('resolve_binary must not run while an external server answers')
 
+    def install_binary_must_not_run(*args, **kwargs):
+        pytest.fail('install_binary must not run while an external server answers')
+
     monkeypatch.setattr(service_runner, 'probe_listening', fake_probe)
     monkeypatch.setattr(service_runner, 'resolve_binary', resolve_binary_must_not_run)
+    monkeypatch.setattr(serverbin, 'install_binary', install_binary_must_not_run)
     factory, spawned = _make_process_factory([])
     monkeypatch.setattr(service_runner, 'ServerProcess', factory)
 
@@ -620,12 +625,88 @@ def test_main_embedded_enabled_binary_found_spawns_and_polls_healthy(monkeypatch
     assert any('shutting down embedded server' in msg for msg, _level in ctx.env.log_calls)
 
 
-# --- (c) embedded enabled + binary missing: notify once, keep rechecking ---
+# --- (c) embedded enabled + binary missing: auto-download once -------------
 
 
-def test_main_embedded_enabled_binary_missing_notifies_once_then_rechecks(monkeypatch, tmp_path):
+def test_main_embedded_enabled_binary_missing_auto_downloads_then_starts(monkeypatch, tmp_path):
+    """The happy path: nothing is running and no binary is resolvable, so
+    the very first "missing" iteration downloads one via
+    `serverbin.install_binary` (into `<profile>/bin`, matching
+    `resolve_binary`'s bundled-bin lookup) instead of just notifying and
+    waiting for a human to intervene. Once `resolve_binary` reports the
+    freshly-installed binary on the next iteration, the server starts
+    normally.
+    """
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+
+    resolve_calls = []
+
+    def fake_resolve_binary(explicit_path, addon_data_dir):
+        resolve_calls.append(addon_data_dir)
+        # Nothing installed yet on the first call; the "installed" binary
+        # is found starting the very next iteration.
+        return None if len(resolve_calls) == 1 else '/opt/bin/stremio-server'
+
+    monkeypatch.setattr(service_runner, 'resolve_binary', fake_resolve_binary)
+
+    install_calls = []
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        install_calls.append(dest_dir)
+        return os.path.join(dest_dir, service_runner.BINARY_NAME)
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
+    factory, spawned = _make_process_factory([{}])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None, None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}) as ctx:
+        service_runner.main()
+
+    # install_binary runs exactly once, straight into <profile>/bin --
+    # exactly where resolve_binary looks for a bundled binary.
+    assert install_calls == [os.path.join(str(tmp_path), 'bin')]
+
+    setup_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30069']
+    assert len(setup_notifications) == 1
+    heading, _message, icon, _time = setup_notifications[0]
+    assert heading == 'Rivulet'
+    assert icon is None  # informational notification, not the error icon
+
+    # First iteration: download succeeds, so the loop rechecks almost
+    # immediately instead of waiting out a full missing-binary cycle.
+    assert intervals[0] == service_runner.POST_DOWNLOAD_RECHECK_INTERVAL
+    # Second iteration: resolve_binary now finds it, the server starts.
+    assert len(spawned) == 1
+    assert spawned[0].binary == '/opt/bin/stremio-server'
+    assert spawned[0].start_calls == 1
+
+    info_logs = [msg for msg, level in ctx.env.log_calls if level == ctx.xbmc.LOGINFO]
+    assert any('auto-downloading stremio-server binary' in msg for msg in info_logs)
+    assert any('download complete' in msg for msg in info_logs)
+
+
+def test_main_embedded_enabled_binary_missing_download_fails_then_notifies_once_and_stops_retrying(
+    monkeypatch, tmp_path
+):
+    """When the one auto-download attempt raises (network down, no release
+    asset for this platform, etc.), main() must not crash, must notify the
+    failure once, and must NOT hammer GitHub again on every subsequent
+    2s/5s poll -- `attempted_download` guards it. Instead it falls back to
+    the pre-existing notify-once-then-recheck behavior, in case a binary
+    is manually dropped into place later.
+    """
     monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
     monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: None)
+
+    install_calls = []
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        install_calls.append(dest_dir)
+        raise serverbin.DownloadError('no network')
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
     factory, spawned = _make_process_factory([])
     monkeypatch.setattr(service_runner, 'ServerProcess', factory)
 
@@ -637,16 +718,77 @@ def test_main_embedded_enabled_binary_missing_notifies_once_then_rechecks(monkey
     assert spawned == []
     assert intervals == [service_runner.MISSING_BINARY_RECHECK_INTERVAL] * 3
 
-    # Notified exactly once across all 3 iterations -- notified_missing
-    # must suppress the repeat, not spam a notification every iteration.
-    assert len(ctx.env.notifications) == 1
-    heading, message, icon, _time = ctx.env.notifications[0]
-    assert heading == 'Rivulet'
-    assert message == 'STR30031'
-    assert icon == 'error'
+    # Attempted exactly once across all 3 iterations, not once per poll.
+    assert install_calls == [os.path.join(str(tmp_path), 'bin')]
+
+    setup_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30069']
+    failed_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30063']
+    missing_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30031']
+    assert len(setup_notifications) == 1
+    assert len(failed_notifications) == 1
+    assert failed_notifications[0][2] == 'error'
+    # After the one failed attempt, the loop falls back to the original
+    # notify-once "binary not found" behavior for the remaining iterations.
+    assert len(missing_notifications) == 1
+    assert missing_notifications[0][2] == 'error'
 
     error_logs = [msg for msg, level in ctx.env.log_calls if level == ctx.xbmc.LOGERROR]
-    assert error_logs == ['[plugin.video.rivulet] stremio-server binary not found']
+    assert any('download failed' in msg for msg in error_logs)
+    assert f'[{service_runner.ADDON_ID}] stremio-server binary not found' in error_logs
+
+
+def test_main_settings_changed_resets_attempted_download_guard_for_retry(monkeypatch, tmp_path):
+    """A settings change resets `attempted_download` (alongside
+    `notified_missing`/`backoff_idx`) so a user who fixes whatever made the
+    first download fail (e.g. flips a proxy setting, or just wants Kodi to
+    try again) gets a fresh attempt without restarting the whole service.
+    """
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+
+    install_calls = []
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        install_calls.append(dest_dir)
+        if len(install_calls) == 1:
+            raise serverbin.DownloadError('first attempt fails')
+        return os.path.join(dest_dir, service_runner.BINARY_NAME)
+
+    def fake_resolve_binary(explicit_path, addon_data_dir):
+        # Only "sees" a binary once the second install call has succeeded.
+        return None if len(install_calls) < 2 else '/opt/bin/stremio-server'
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
+    monkeypatch.setattr(service_runner, 'resolve_binary', fake_resolve_binary)
+    factory, spawned = _make_process_factory([{}])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    env_box = {}
+
+    def trigger_settings_change(monitor):
+        env_box['env'].addon.settings['server_url'] = 'http://127.0.0.1:9999'
+        monitor.onSettingsChanged()
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, trigger_settings_change, None, None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}) as ctx:
+        env_box['env'] = ctx.env
+        service_runner.main()
+
+    # Two separate install attempts: the first (pre-settings-change) fails,
+    # the second (post-settings-change) succeeds -- proving the guard was
+    # reset rather than permanently latched after one failure.
+    assert install_calls == [os.path.join(str(tmp_path), 'bin')] * 2
+    assert len(spawned) == 1
+    assert spawned[0].binary == '/opt/bin/stremio-server'
+
+    setup_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30069']
+    failed_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30063']
+    missing_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30031']
+    assert len(setup_notifications) == 2  # one per download attempt
+    assert len(failed_notifications) == 1  # only the first attempt failed
+    # notified_missing also got a chance to fire, between the failed
+    # attempt and the settings change that reset it.
+    assert len(missing_notifications) == 1
 
 
 # --- (d) crash-restart backoff progression + stable-uptime reset -----------
@@ -811,10 +953,16 @@ def test_main_aborts_immediately_before_the_loop_body_ever_runs(monkeypatch, tmp
 def test_main_settings_changed_with_no_running_server_resets_state_without_crashing(monkeypatch, tmp_path):
     """The restart_requested handling's `if proc is not None` guard must
     actually gate the stop()/log call -- a settings change while nothing
-    is running (binary still missing) must reset backoff_idx/
-    notified_missing without touching a None proc."""
+    is running (binary still missing, download still failing) must reset
+    backoff_idx/notified_missing/attempted_download without touching a
+    None proc."""
     monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
     monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: None)  # binary missing throughout
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        raise serverbin.DownloadError('still no network')
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
     factory, spawned = _make_process_factory([])
     monkeypatch.setattr(service_runner, 'ServerProcess', factory)
 
@@ -824,10 +972,11 @@ def test_main_settings_changed_with_no_running_server_resets_state_without_crash
         env_box['env'].addon.settings['server_binary'] = '/new/path'
         monitor.onSettingsChanged()
 
-    # iter1: binary missing -> notifies once. The step fires during
-    # iter2's wait, signaling a settings change while proc is still None.
-    # iter3: binary still missing -> notified_missing was reset by the
-    # settings-changed handling, so it notifies again.
+    # iter1: binary missing -> auto-download attempted and fails. The step
+    # fires during iter2's wait, signaling a settings change while proc is
+    # still None. iter3: binary still missing -> attempted_download/
+    # notified_missing were reset by the settings-changed handling, so a
+    # second download is attempted (and also fails).
     intervals = []
     wait = _scripted_wait(intervals, [None, change_binary_setting_and_signal, None])
     with _main_env(tmp_path, wait, settings={'server_enable': True}) as ctx:
@@ -835,5 +984,13 @@ def test_main_settings_changed_with_no_running_server_resets_state_without_crash
         service_runner.main()  # must not crash trying to stop() a None proc
 
     assert spawned == []
-    assert len(ctx.env.notifications) == 2
+    setup_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30069']
+    failed_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30063']
+    missing_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30031']
+    # Two separate download attempts (one per settings "generation"), each
+    # failing -- proving attempted_download really was reset, not just
+    # notified_missing.
+    assert len(setup_notifications) == 2
+    assert len(failed_notifications) == 2
+    assert len(missing_notifications) == 1
     assert not any('settings changed, restarting' in msg for msg, _level in ctx.env.log_calls)

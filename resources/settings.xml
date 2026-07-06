@@ -19,7 +19,7 @@
             <group id="1">
                 <setting id="server_enable" type="boolean" label="30103">
                     <level>0</level>
-                    <default>false</default>
+                    <default>true</default>
                     <control type="toggle"/>
                 </setting>
                 <setting id="server_binary" type="path" label="30104">

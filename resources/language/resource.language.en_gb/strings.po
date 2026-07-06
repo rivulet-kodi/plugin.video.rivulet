@@ -200,6 +200,10 @@ msgctxt "#30068"
 msgid "Failed to install advancedsettings.xml"
 msgstr ""
 
+msgctxt "#30069"
+msgid "Setting up streaming server…"
+msgstr ""
+
 msgctxt "#30080"
 msgid "Preparing stream"
 msgstr ""
