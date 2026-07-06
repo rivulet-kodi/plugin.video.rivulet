@@ -68,12 +68,22 @@ class BaseWindow(xbmcgui.WindowXMLDialog):
 
 def fallback_to_classical(action, **params):
     """Temporary bridge for screens with no custom-window replacement yet:
-    navigate Kodi's Home container to the classical plugin directory for
-    `action` (see `lib.ui.router.url_for`). Callers should close every
-    custom window in their call chain afterwards (conventionally: return
-    True from an `open_*()` function and have its caller close too) so
-    the classical directory - which lands on Kodi's Home container,
-    behind our modal stack - actually becomes visible.
+    open the classical plugin directory for `action` (see
+    `lib.ui.router.url_for`) in Kodi's Videos window. Callers should
+    close every custom window in their call chain afterwards
+    (conventionally: return True from an `open_*()` function and have
+    its caller close too).
+
+    Uses `ActivateWindow(Videos, ...)`, NOT `Container.Update(...)`:
+    our custom windows are modal dialogs overlaying whatever screen was
+    active before the addon launched (often not a video directory at
+    all), so there is no existing compatible container for
+    Container.Update to target - it fails outright
+    ("GetDirectory - Error getting ..."/"CGUIMediaWindow::GetDirectory(...)
+    failed", confirmed against a real device's kodi.log).
+    ActivateWindow(Videos, url) instead explicitly opens a fresh Videos
+    window at `url`, the standard way to jump into a plugin directory
+    from a non-container context (a dialog, a script, anywhere).
     """
     from lib.ui import router
-    xbmc.executebuiltin('Container.Update(%s)' % router.url_for(action, **params))
+    xbmc.executebuiltin('ActivateWindow(Videos,%s)' % router.url_for(action, **params))

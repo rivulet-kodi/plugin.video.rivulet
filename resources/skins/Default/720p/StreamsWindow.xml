@@ -25,7 +25,7 @@
                 <focusedlayout height="60">
                     <control type="image"><width>1100</width><height>60</height><texture colordiffuse="33FFFFFF">white.png</texture></control>
                     <control type="label"><left>10</left><width>1080</width><height>60</height><font>font13</font><textcolor>FFFFFFFF</textcolor><aligny>center</aligny>
-                        <label>[B]$INFO[ListItem.Label][/B]</label>
+                        <label>$INFO[ListItem.Label]</label>
                     </control>
                 </focusedlayout>
             </control>

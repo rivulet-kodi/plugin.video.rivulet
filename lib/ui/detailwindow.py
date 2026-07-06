@@ -1,18 +1,17 @@
-"""DetailWindow: one title's playable content - Rivulet's custom
-replacement for the classical `meta()`/`videos()` directories.
+"""DetailWindow: one series title's episode list - Rivulet's custom
+replacement for the classical `videos()` directory.
 
-A movie (no `videos` array) shows a single "Play" row; a series shows
-every episode flattened across seasons ("SxEE. Title", Specials last).
-Picking either opens `lib.ui.streamswindow.open_streams()` for that
-(stype, id). Fetches the full meta via the same
-`lib.ui.views._fetch_meta` every classical view already uses (the
-catalog/search coverflow's meta objects are abbreviated - no `videos` -
-so a fresh fetch is required here, not a reuse of the picked item).
-
-A richer layout (poster/plot/cast alongside the episode list) is a
-follow-up; v1 intentionally keeps to what the existing test fakes
-support (background art + a list), matching `HomeWindow`/
-`CatalogPickerWindow`'s structure.
+A movie has nothing to pick here - there is only one thing to do with
+it, play it - so `open_detail()` skips this window entirely for a title
+with no `videos` and opens `lib.ui.streamswindow.open_streams()`
+directly (confirmed on a real device: a DetailWindow showing a single
+"Play" row was a pointless extra step for every movie). Only a series
+(which has episodes to choose from) actually shows this window: every
+episode flattened across seasons ("SxEE. Title", Specials last).
+Fetches the full meta via the same `lib.ui.views._fetch_meta` every
+classical view already uses (the catalog/search coverflow's meta
+objects are abbreviated - no `videos` - so a fresh fetch is required
+here, not a reuse of the picked item).
 """
 import xbmcgui
 
@@ -20,10 +19,6 @@ from lib.ui.uicommon import BACK_ACTIONS, open_window
 
 BACKGROUND = 30000
 LIST = 30002
-
-#: Sentinel row id for a movie's single "Play" row (an episode's row id
-#: is always its real Stremio video id, which is never this string).
-PLAY_ROW_ID = '__play__'
 
 
 def _episode_rows(videos):
@@ -45,24 +40,24 @@ def _episode_rows(videos):
 
 
 class DetailWindow(xbmcgui.WindowXMLDialog):
-    """See module docstring. Built/run via `open_detail()`."""
+    """See module docstring. Built/run via `open_detail()` - only for a
+    series (a title with episodes); a movie never reaches this window."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.meta = {}
-        self.stype = 'movie'
+        self.stype = 'series'
         self.rows = []
         self.should_close_caller = False
 
     def start(self, meta, stype):
-        """doModal() showing `meta`'s (already-fetched, full) content.
-        Returns True if playback started somewhere down the chain (the
-        caller should also close)."""
+        """doModal() showing `meta`'s episode list. Returns True if
+        playback started somewhere down the chain (the caller should
+        also close)."""
         self.meta = meta or {}
         self.stype = stype
         self.should_close_caller = False
-        videos = self.meta.get('videos') or []
-        self.rows = _episode_rows(videos) if videos else [(PLAY_ROW_ID, 'Play')]
+        self.rows = _episode_rows(self.meta.get('videos'))
         self.doModal()
         return self.should_close_caller
 
@@ -90,8 +85,7 @@ class DetailWindow(xbmcgui.WindowXMLDialog):
         focused = self.getControl(LIST).getSelectedItem()
         if focused is None:
             return
-        row_id = focused.getProperty('row_id')
-        sid = self.meta.get('id') if row_id == PLAY_ROW_ID else row_id
+        sid = focused.getProperty('row_id')
 
         from lib.ui.streamswindow import open_streams
         if open_streams(self.stype, sid, poster=self.meta.get('poster')):
@@ -100,8 +94,9 @@ class DetailWindow(xbmcgui.WindowXMLDialog):
 
 
 def open_detail(stype, sid):
-    """Fetch (stype, sid)'s full meta and show its detail/episode list;
-    opens StreamsWindow on a pick. Returns True if playback started
+    """Fetch (stype, sid)'s full meta. A movie (no `videos`) has nothing
+    to pick, so it opens StreamsWindow directly; a series opens this
+    window first to pick an episode. Returns True if playback started
     somewhere down the chain (the caller should also close)."""
     import xbmc
 
@@ -112,6 +107,10 @@ def open_detail(stype, sid):
     if not meta_obj:
         notify(L(30030))
         return False
+
+    from lib.ui.streamswindow import open_streams
+    if not meta_obj.get('videos'):
+        return open_streams(stype, sid, poster=meta_obj.get('poster'))
 
     log('detailwindow: opening DetailWindow for %s/%s' % (stype, sid), xbmc.LOGINFO)
     try:

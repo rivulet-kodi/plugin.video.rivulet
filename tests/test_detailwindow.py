@@ -134,7 +134,7 @@ def test_oninit_background_fallback_chain(load_detailwindow, meta, expected_key)
     ctx = load_detailwindow()
     win = _make_window(ctx.detailwindow)
     win.meta = meta
-    win.rows = [(ctx.detailwindow.PLAY_ROW_ID, 'Play')]
+    win.rows = [('v1', '1x01. Ep One')]
 
     win.onInit()
 
@@ -155,20 +155,6 @@ def test_oninit_builds_one_item_per_row_with_row_id_property_for_a_series(load_d
     assert [item.getLabel() for item in items] == ['1x01. Pilot', '1x02. Second']
     assert [item.getProperty('row_id') for item in items] == ['v1', 'v2']
     assert win.getFocusId() == picker.LIST
-
-
-def test_oninit_builds_a_single_play_row_for_a_movie(load_detailwindow):
-    ctx = load_detailwindow()
-    picker = ctx.detailwindow
-    win = _make_window(picker)
-    win.meta = {}
-    win.rows = [(picker.PLAY_ROW_ID, 'Play')]
-
-    win.onInit()
-
-    items = win.getControl(picker.LIST).items
-    assert [item.getLabel() for item in items] == ['Play']
-    assert [item.getProperty('row_id') for item in items] == [picker.PLAY_ROW_ID]
 
 
 # ---------------------------------------------------------------------------
@@ -224,26 +210,6 @@ def test_onclick_list_with_no_focused_item_does_not_crash(load_detailwindow, mon
     assert calls == []
 
 
-def test_onclick_play_row_uses_the_titles_own_id_as_sid(load_detailwindow, monkeypatch):
-    ctx = load_detailwindow()
-    picker = ctx.detailwindow
-    meta = {'id': 'tt1', 'poster': 'https://x/poster.jpg'}
-    win = _window_with_focused_row(picker, meta, 'movie', picker.PLAY_ROW_ID)
-    captured = {}
-
-    def fake_open_streams(stype, sid, poster=None):
-        captured['args'] = (stype, sid, poster)
-        return False
-
-    monkeypatch.setattr(ctx.streamswindow, 'open_streams', fake_open_streams)
-
-    win.onClick(picker.LIST)
-
-    assert captured['args'] == ('movie', 'tt1', 'https://x/poster.jpg')
-    assert win.should_close_caller is False
-    assert win.closed is False
-
-
 def test_onclick_episode_row_uses_the_episodes_own_id_as_sid_not_the_titles(load_detailwindow, monkeypatch):
     ctx = load_detailwindow()
     picker = ctx.detailwindow
@@ -267,7 +233,7 @@ def test_onclick_episode_row_uses_the_episodes_own_id_as_sid_not_the_titles(load
 def test_onclick_stays_open_when_open_streams_returns_false(load_detailwindow, monkeypatch):
     ctx = load_detailwindow()
     picker = ctx.detailwindow
-    win = _window_with_focused_row(picker, {'id': 'tt1'}, 'movie', picker.PLAY_ROW_ID)
+    win = _window_with_focused_row(picker, {'id': 'tt1'}, 'series', 'v1')
     monkeypatch.setattr(ctx.streamswindow, 'open_streams', lambda stype, sid, poster=None: False)
 
     win.onClick(picker.LIST)
@@ -281,13 +247,13 @@ def test_onclick_stays_open_when_open_streams_returns_false(load_detailwindow, m
 # ---------------------------------------------------------------------------
 
 
-def test_start_uses_a_single_play_row_for_a_title_with_no_videos(load_detailwindow):
+def test_start_produces_no_rows_for_a_meta_with_no_videos(load_detailwindow):
     ctx = load_detailwindow()
     win = _make_window(ctx.detailwindow)
 
     result = win.start({'id': 'tt1', 'name': 'A Movie'}, 'movie')
 
-    assert win.rows == [(ctx.detailwindow.PLAY_ROW_ID, 'Play')]
+    assert win.rows == []
     assert win.modal_calls == 1
     assert result is False
 
@@ -323,6 +289,7 @@ def test_start_calls_domodal_and_returns_should_close_caller(load_detailwindow, 
     ctx = load_detailwindow()
     picker = ctx.detailwindow
     win = _make_window(picker)
+    meta = {'id': 'tt1', 'videos': [{'id': 'v1', 'season': 1, 'episode': 1, 'title': 'Ep One'}]}
     monkeypatch.setattr(ctx.streamswindow, 'open_streams', lambda stype, sid, poster=None: True)
 
     # The fake doModal() is a no-op counter; simulate what a real modal event
@@ -338,7 +305,7 @@ def test_start_calls_domodal_and_returns_should_close_caller(load_detailwindow, 
 
     win.doModal = fake_domodal
 
-    result = win.start({'id': 'tt1'}, 'movie')
+    result = win.start(meta, 'series')
 
     assert result is True
     assert win.modal_calls == 1
@@ -366,11 +333,36 @@ def test_open_detail_not_found_notifies_and_returns_false_without_building_a_win
     assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
 
 
-def test_open_detail_found_builds_window_against_skin_path_and_starts_with_the_fetched_meta(
+def test_open_detail_movie_skips_detailwindow_and_opens_streams_directly(
+    load_detailwindow, monkeypatch,
+):
+    ctx = load_detailwindow()
+    meta = {'id': 'tt1', 'name': 'A Movie', 'poster': 'https://x/poster.jpg', 'videos': []}
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: meta)
+    captured = {}
+
+    def _unexpected(*a, **k):
+        raise AssertionError('DetailWindow must never be constructed for a title with no videos')
+
+    monkeypatch.setattr(ctx.detailwindow, 'DetailWindow', _unexpected)
+
+    def fake_open_streams(stype, sid, poster=None):
+        captured['args'] = (stype, sid, poster)
+        return True
+
+    monkeypatch.setattr(ctx.streamswindow, 'open_streams', fake_open_streams)
+
+    result = ctx.detailwindow.open_detail('movie', 'tt1')
+
+    assert result is True
+    assert captured['args'] == ('movie', 'tt1', 'https://x/poster.jpg')
+
+
+def test_open_detail_series_builds_window_against_skin_path_and_starts_with_the_fetched_meta(
     load_detailwindow, monkeypatch,
 ):
     ctx = load_detailwindow(addon_info={'path': '/addon/path'})
-    meta = {'id': 'tt1', 'name': 'One', 'videos': []}
+    meta = {'id': 'tt1', 'name': 'One', 'videos': [{'id': 'v1', 'season': 1, 'episode': 1}]}
     monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: meta)
     captured = {}
 
@@ -385,8 +377,8 @@ def test_open_detail_found_builds_window_against_skin_path_and_starts_with_the_f
 
     monkeypatch.setattr(ctx.detailwindow, 'DetailWindow', RecordingWindow)
 
-    result = ctx.detailwindow.open_detail('movie', 'tt1')
+    result = ctx.detailwindow.open_detail('series', 'tt1')
 
     assert result is True
     assert captured['init_args'] == ('DetailWindow.xml', '/addon/path', 'Default', '720p')
-    assert captured['start_args'] == (meta, 'movie')
+    assert captured['start_args'] == (meta, 'series')

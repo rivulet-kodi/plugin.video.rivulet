@@ -145,7 +145,7 @@ def test_fallback_to_classical_updates_the_container_with_an_action_only_url(loa
     ctx.uicommon.fallback_to_classical('library')
 
     assert ctx.env.executed_builtins == [
-        'Container.Update(plugin://plugin.video.rivulet/?action=library)'
+        'ActivateWindow(Videos,plugin://plugin.video.rivulet/?action=library)'
     ]
 
 
@@ -156,5 +156,5 @@ def test_fallback_to_classical_forwards_params_into_the_url(load_uicommon):
     ctx.uicommon.fallback_to_classical('meta', type='movie', id='tt123')
 
     assert ctx.env.executed_builtins == [
-        'Container.Update(plugin://plugin.video.rivulet/?action=meta&type=movie&id=tt123)'
+        'ActivateWindow(Videos,plugin://plugin.video.rivulet/?action=meta&type=movie&id=tt123)'
     ]

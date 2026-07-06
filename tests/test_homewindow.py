@@ -241,7 +241,7 @@ def test_onclick_library_always_closes_and_falls_back_to_classical_directory(loa
 
     assert win.closed is True
     assert ctx.env.executed_builtins == [
-        'Container.Update(plugin://plugin.video.rivulet/?action=library)'
+        'ActivateWindow(Videos,plugin://plugin.video.rivulet/?action=library)'
     ]
 
 
@@ -254,7 +254,7 @@ def test_onclick_addons_always_closes_and_falls_back_to_classical_directory(load
 
     assert win.closed is True
     assert ctx.env.executed_builtins == [
-        'Container.Update(plugin://plugin.video.rivulet/?action=addons)'
+        'ActivateWindow(Videos,plugin://plugin.video.rivulet/?action=addons)'
     ]
 
 
