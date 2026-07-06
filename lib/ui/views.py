@@ -140,18 +140,23 @@ def _find_manifest(store, transport_url):
     return None
 
 
-def _decorate_label(name, year=None, rating=None):
-    """Render a catalog/search row label as BBCode, mirroring the
-    reference addon's `typo()` decoration style: "Name [COLOR grey]
-    (Year)[/COLOR] [COLOR gold]Rating[/COLOR]". Either suffix is omitted
-    when its value is falsy.
+def _decorate_label(name, date=None, rating=None):
+    """Render a catalog/search row label as "Name   [date]   [rating]",
+    mirroring the reference addon's (Stream4Me) showcase style: the
+    premiered date and the rating in square brackets, spaced apart, plain
+    text (the skin colours the header). The date is dropped when unknown;
+    the rating always shows, defaulting to 0.0 -- matching the reference,
+    which renders [0.0] for an unrated title.
     """
-    label = name
-    if year:
-        label = '%s [COLOR grey](%s)[/COLOR]' % (label, year)
-    if rating:
-        label = '%s [COLOR gold]%s[/COLOR]' % (label, rating)
-    return label
+    parts = [name]
+    if date:
+        parts.append('[%s]' % date)
+    try:
+        rating_val = float(rating)
+    except (TypeError, ValueError):
+        rating_val = 0.0
+    parts.append('[%.1f]' % rating_val)
+    return '   '.join(parts)
 
 
 def _meta_item(meta, ctype=None):
@@ -160,7 +165,8 @@ def _meta_item(meta, ctype=None):
     name = meta.get('name') or meta.get('id') or '?'
     year = _extract_year(meta.get('releaseInfo') or meta.get('released'))
     rating = meta.get('imdbRating')
-    li = xbmcgui.ListItem(label=_decorate_label(name, year, rating))
+    date = _date_only(meta.get('released')) or meta.get('releaseInfo')
+    li = xbmcgui.ListItem(label=_decorate_label(name, date, rating))
 
     poster = meta.get('poster')
     logo = meta.get('logo')

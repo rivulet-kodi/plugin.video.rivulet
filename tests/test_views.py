@@ -670,7 +670,7 @@ def test_meta_item_maps_year_runtime_rating_and_skips_missing_fields(load_views)
     assert li_full.info_tag.calls.get('setWriters') == ['Jonathan Nolan']
     assert li_full.info_tag.calls.get('setPlotOutline') == 'Mankind was born on Earth.'
     assert li_full.art['clearlogo'] == 'https://x.example/logo.png'
-    assert li_full.getLabel() == 'Full Meta [COLOR grey](2014)[/COLOR] [COLOR gold]8.6[/COLOR]'
+    assert li_full.getLabel() == 'Full Meta   [2014-2020]   [8.6]'
 
     _, li_bare, _ = items[1]
     assert 'setYear' not in li_bare.info_tag.calls
@@ -682,7 +682,7 @@ def test_meta_item_maps_year_runtime_rating_and_skips_missing_fields(load_views)
     assert 'setWriters' not in li_bare.info_tag.calls
     assert 'setPlotOutline' not in li_bare.info_tag.calls
     assert 'clearlogo' not in li_bare.art
-    assert li_bare.getLabel() == 'Bare Meta'
+    assert li_bare.getLabel() == 'Bare Meta   [0.0]'
 
 
 # ---------------------------------------------------------------------------
@@ -746,7 +746,7 @@ def test_search_aggregates_labelled_results_and_skips_addon_errors(load_views):
     assert len(items) == 1
     _, li, is_folder = items[0]
     assert is_folder is True
-    assert li.getLabel() == '[Addon B] Batman'
+    assert li.getLabel() == '[Addon B] Batman   [0.0]'
     assert ctx.env.content[-1][1] == 'videos'
 
 
