@@ -16,6 +16,7 @@ from lib.ui.uicommon import BACK_ACTIONS, fallback_to_classical, open_window
 
 BACKGROUND = 30000
 LIST = 30002
+STATUS_LABEL = 30005  # plain text label; set at runtime via setLabel(), not a skin <label>
 
 #: (localized-string id, action) - mirrors lib.ui.views.home()'s item set.
 _MENU = (
@@ -27,8 +28,19 @@ _MENU = (
 )
 
 
+#: Per-row subtitle text (HomeWindow.xml's dimmer second label per row) -
+#: plain literal strings; no matching string ids exist for this copy.
+_SUBTITLES = {
+    'discover': 'Browse catalogs from your installed addons',
+    'search': 'Search across every installed addon',
+    'library': 'Your saved titles',
+    'addons': 'Manage installed Stremio addons',
+    'settings': 'Configure Rivulet',
+}
+
+
 def _menu_items(show_library):
-    from lib.ui.compat import L
+    from lib.ui.compat import L, addon_media_path
 
     items = []
     for string_id, action in _MENU:
@@ -36,8 +48,25 @@ def _menu_items(show_library):
             continue
         item = xbmcgui.ListItem(L(string_id))
         item.setProperty('action', action)
+        item.setArt({'icon': addon_media_path('%s.png' % action)})
+        item.setProperty('subtitle', _SUBTITLES[action])
         items.append(item)
     return items
+
+
+def _status_text(auth):
+    """Render HomeWindow's top status line from the same `get_auth()`
+    result onInit() already fetched for `show_library`: mirrors
+    `lib.ui.views.addons()`'s exact "Logged in as <email/name/?>" wording
+    and string id (30022) so the two screens read identically; there is
+    no matching string id for the logged-out case, so it stays a plain
+    literal."""
+    from lib.ui.compat import L
+
+    if not auth:
+        return 'Not logged in'
+    user = auth.get('user') or {}
+    return L(30022) % (user.get('email') or user.get('name') or '?')
 
 
 class HomeWindow(xbmcgui.WindowXMLDialog):
@@ -47,9 +76,10 @@ class HomeWindow(xbmcgui.WindowXMLDialog):
         from lib.store import Store
         from lib.ui.compat import addon_fanart, addon_profile_dir
 
-        show_library = bool(Store(addon_profile_dir()).get_auth())
+        auth = Store(addon_profile_dir()).get_auth()
         self.getControl(BACKGROUND).setImage(addon_fanart())
-        self.getControl(LIST).addItems(_menu_items(show_library))
+        self.getControl(LIST).addItems(_menu_items(bool(auth)))
+        self.getControl(STATUS_LABEL).setLabel(_status_text(auth))
         self.setFocusId(LIST)
 
     def onAction(self, action):

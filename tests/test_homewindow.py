@@ -48,18 +48,23 @@ class _FakeStore:
 
 @pytest.fixture
 def load_homewindow():
-    """Factory fixture: `load_homewindow(addon_info=None)` installs fresh
-    stubs (via tests.kodistubs.install_kodi_stubs) reloading lib.ui.compat/
-    lib.ui.uicommon/lib.ui.router/lib.ui.homewindow/lib.ui.catalogpicker/
-    lib.ui.searchwindow, and returns a namespace with `.homewindow`,
-    `.compat`, `.router`, `.catalogpicker`, `.searchwindow`, and `.env`.
+    """Factory fixture: `load_homewindow(addon_info=None, localized=None)`
+    installs fresh stubs (via tests.kodistubs.install_kodi_stubs) reloading
+    lib.ui.compat/lib.ui.uicommon/lib.ui.router/lib.ui.homewindow/
+    lib.ui.catalogpicker/lib.ui.searchwindow, and returns a namespace with
+    `.homewindow`, `.compat`, `.router`, `.catalogpicker`, `.searchwindow`,
+    and `.env`. `localized` overrides FakeAddon's default 'STR<id>' string
+    marker - needed for string id 30022 ("Logged in as %s"), which
+    HomeWindow's status label formats with `%`, exactly like
+    `lib.ui.views.addons()` does for its logout-row label.
     Every call is torn down automatically, in reverse order, at test end.
     """
     with contextlib.ExitStack() as stack:
-        def _load(addon_info=None):
+        def _load(addon_info=None, localized=None):
             return stack.enter_context(install_kodi_stubs(
                 reload=_RELOAD_MODULE_NAMES,
                 addon_info=addon_info,
+                localized=localized,
             ))
 
         yield _load
@@ -93,6 +98,20 @@ def test_menu_items_includes_library_when_show_library_true(load_homewindow):
     assert [item.getLabel() for item in items] == [
         'STR30000', 'STR30001', 'STR30002', 'STR30003', 'STR30004',
     ]
+    assert [item.art['icon'] for item in items] == [
+        ctx.compat.addon_media_path('discover.png'),
+        ctx.compat.addon_media_path('search.png'),
+        ctx.compat.addon_media_path('library.png'),
+        ctx.compat.addon_media_path('addons.png'),
+        ctx.compat.addon_media_path('settings.png'),
+    ]
+    assert [item.getProperty('subtitle') for item in items] == [
+        'Browse catalogs from your installed addons',
+        'Search across every installed addon',
+        'Your saved titles',
+        'Manage installed Stremio addons',
+        'Configure Rivulet',
+    ]
 
 
 def test_menu_items_omits_library_when_show_library_false(load_homewindow):
@@ -104,12 +123,41 @@ def test_menu_items_omits_library_when_show_library_false(load_homewindow):
 
 
 # ---------------------------------------------------------------------------
+# _status_text()
+# ---------------------------------------------------------------------------
+
+
+def test_status_text_reports_email_when_authenticated_with_email(load_homewindow):
+    ctx = load_homewindow(localized={30022: 'Logged in as %s'})
+
+    text = ctx.homewindow._status_text({'authKey': 'x', 'user': {'email': 'me@example.com', 'name': 'Me'}})
+
+    assert text == 'Logged in as me@example.com'
+
+
+def test_status_text_falls_back_to_name_when_email_is_absent(load_homewindow):
+    ctx = load_homewindow(localized={30022: 'Logged in as %s'})
+
+    text = ctx.homewindow._status_text({'authKey': 'x', 'user': {'name': 'Me'}})
+
+    assert text == 'Logged in as Me'
+
+
+def test_status_text_reports_not_logged_in_when_auth_is_none(load_homewindow):
+    ctx = load_homewindow()
+
+    text = ctx.homewindow._status_text(None)
+
+    assert text == 'Not logged in'
+
+
+# ---------------------------------------------------------------------------
 # HomeWindow.onInit()
 # ---------------------------------------------------------------------------
 
 
 def test_oninit_shows_library_row_when_authenticated(load_homewindow, monkeypatch):
-    ctx = load_homewindow()
+    ctx = load_homewindow(localized={30022: 'Logged in as %s'})
     monkeypatch.setattr(store_module, 'Store', lambda *a, **k: _FakeStore(auth={'authKey': 'x'}))
     win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '720p')
 
@@ -118,6 +166,7 @@ def test_oninit_shows_library_row_when_authenticated(load_homewindow, monkeypatc
     actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
     assert actions == ['discover', 'search', 'library', 'addons', 'settings']
     assert win.getControl(ctx.homewindow.BACKGROUND).image == ctx.compat.ADDON_FANART
+    assert win.getControl(ctx.homewindow.STATUS_LABEL).label == 'Logged in as ?'
     assert win.getFocusId() == ctx.homewindow.LIST
 
 
@@ -130,6 +179,29 @@ def test_oninit_hides_library_row_when_not_authenticated(load_homewindow, monkey
 
     actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
     assert 'library' not in actions
+    assert win.getControl(ctx.homewindow.STATUS_LABEL).label == 'Not logged in'
+
+
+def test_oninit_sets_status_label_to_email_when_authenticated_with_email(load_homewindow, monkeypatch):
+    ctx = load_homewindow(localized={30022: 'Logged in as %s'})
+    auth = {'authKey': 'x', 'user': {'email': 'me@example.com', 'name': 'Me'}}
+    monkeypatch.setattr(store_module, 'Store', lambda *a, **k: _FakeStore(auth=auth))
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '720p')
+
+    win.onInit()
+
+    assert win.getControl(ctx.homewindow.STATUS_LABEL).label == 'Logged in as me@example.com'
+
+
+def test_oninit_sets_status_label_to_name_when_email_is_absent(load_homewindow, monkeypatch):
+    ctx = load_homewindow(localized={30022: 'Logged in as %s'})
+    auth = {'authKey': 'x', 'user': {'name': 'Me'}}
+    monkeypatch.setattr(store_module, 'Store', lambda *a, **k: _FakeStore(auth=auth))
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '720p')
+
+    win.onInit()
+
+    assert win.getControl(ctx.homewindow.STATUS_LABEL).label == 'Logged in as Me'
 
 
 # ---------------------------------------------------------------------------

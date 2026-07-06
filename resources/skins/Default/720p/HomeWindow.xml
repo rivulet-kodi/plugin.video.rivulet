@@ -17,18 +17,30 @@
             <control type="label"><left>90</left><top>80</top><width>600</width><height>60</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
                 <label>Rivulet</label>
             </control>
+            <control type="label" id="30005">
+                <left>90</left><top>144</top><width>600</width><height>30</height><font>font12</font><textcolor>FF999999</textcolor>
+                <label></label>
+            </control>
             <control type="list" id="30002">
-                <left>90</left><top>200</top><width>600</width><height>420</height>
+                <left>90</left><top>200</top><width>600</width><height>450</height>
                 <onleft>30002</onleft><onright>30002</onright>
-                <itemlayout height="70">
-                    <control type="label"><left>10</left><width>580</width><height>70</height><font>font13</font><textcolor>FFAAAAAA</textcolor><aligny>center</aligny>
+                <itemlayout height="90">
+                    <control type="image"><left>10</left><top>21</top><width>48</width><height>48</height><texture>$INFO[ListItem.Icon]</texture><aspectratio>keep</aspectratio></control>
+                    <control type="label"><left>74</left><top>14</top><width>516</width><height>30</height><font>font13</font><textcolor>FFAAAAAA</textcolor><aligny>center</aligny>
                         <label>$INFO[ListItem.Label]</label>
                     </control>
+                    <control type="label"><left>74</left><top>48</top><width>516</width><height>26</height><font>font12</font><textcolor>FF888888</textcolor><aligny>center</aligny>
+                        <label>$INFO[ListItem.Property(subtitle)]</label>
+                    </control>
                 </itemlayout>
-                <focusedlayout height="70">
-                    <control type="image"><width>600</width><height>70</height><texture colordiffuse="33FFFFFF">white.png</texture></control>
-                    <control type="label"><left>10</left><width>580</width><height>70</height><font>font13</font><textcolor>FFFFFFFF</textcolor><aligny>center</aligny>
+                <focusedlayout height="90">
+                    <control type="image"><width>600</width><height>90</height><texture colordiffuse="33FFFFFF">white.png</texture></control>
+                    <control type="image"><left>10</left><top>21</top><width>48</width><height>48</height><texture>$INFO[ListItem.Icon]</texture><aspectratio>keep</aspectratio></control>
+                    <control type="label"><left>74</left><top>14</top><width>516</width><height>30</height><font>font13</font><textcolor>FFFFFFFF</textcolor><aligny>center</aligny>
                         <label>[B]$INFO[ListItem.Label][/B]</label>
+                    </control>
+                    <control type="label"><left>74</left><top>48</top><width>516</width><height>26</height><font>font12</font><textcolor>FFCCCCCC</textcolor><aligny>center</aligny>
+                        <label>$INFO[ListItem.Property(subtitle)]</label>
                     </control>
                 </focusedlayout>
             </control>
