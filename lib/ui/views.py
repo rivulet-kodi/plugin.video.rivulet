@@ -381,6 +381,8 @@ def showcase(transport, ctype, cid, extra=None):
 
     A one-shot side effect, not a directory listing: unlike catalog() it
     never touches xbmcplugin, so it is deliberately not @_safe_listing.
+    Any overlay/skin failure is logged and surfaced as a notification
+    rather than vanishing silently.
     """
     try:
         metas = _fetch_catalog(transport, ctype, cid, extra)
@@ -393,8 +395,15 @@ def showcase(transport, ctype, cid, extra=None):
         notify(L(30030))
         return
 
-    from lib.ui.infowindow import open_showcase
-    selected = open_showcase(metas)
+    log('views.showcase: opening coverflow for %s/%s (%d items)' % (ctype, cid, len(metas)), xbmc.LOGINFO)
+    try:
+        from lib.ui.infowindow import open_showcase
+        selected = open_showcase(metas)
+    except Exception as exc:  # a skin/UI failure must surface, not vanish
+        log('views.showcase: overlay failed to open: %r' % (exc,), xbmc.LOGERROR)
+        notify(L(30032))
+        return
+
     if selected:
         xbmc.executebuiltin('Container.Update(%s)' % router.url_for(
             'meta', type=selected.get('type') or ctype, id=selected.get('id')
