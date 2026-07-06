@@ -305,6 +305,7 @@ DISPATCH_CASES = [
     # 'open_settings') - only the view function it dispatches to is named
     # open_settings(). See final report re: the assignment's naming.
     pytest.param({'action': 'settings'}, ('open_settings', (), {}), id='settings-calls-open_settings'),
+    pytest.param({'action': 'sync_addons_now'}, ('sync_addons_now', (), {}), id='sync_addons_now'),
 ]
 
 

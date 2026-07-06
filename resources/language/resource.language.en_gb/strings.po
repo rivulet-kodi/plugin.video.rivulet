@@ -96,6 +96,18 @@ msgctxt "#30032"
 msgid "Something went wrong"
 msgstr ""
 
+msgctxt "#30034"
+msgid "Addons synced"
+msgstr ""
+
+msgctxt "#30035"
+msgid "Addon sync failed"
+msgstr ""
+
+msgctxt "#30036"
+msgid "Sync addons now"
+msgstr ""
+
 msgctxt "#30040"
 msgid "Next page"
 msgstr ""

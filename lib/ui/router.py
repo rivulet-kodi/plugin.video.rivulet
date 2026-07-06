@@ -97,6 +97,7 @@ def run():
         'settings': lambda p: views.open_settings(),
         'server_download': lambda p: _download_server_binary(),
         'advancedsettings_install': lambda p: _install_advancedsettings(),
+        'sync_addons_now': lambda p: views.sync_addons_now(),
     }
 
     handler = dispatch.get(action, dispatch['home'])

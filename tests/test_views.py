@@ -1681,7 +1681,7 @@ def test_login_api_error_notifies_failure_without_storing_auth(load_views):
     assert 'Container.Refresh' not in ctx.env.executed_builtins
 
 
-def test_login_success_merges_protected_addons_with_remote_collection(load_views):
+def test_login_success_merges_all_local_addons_with_remote_collection_and_pushes_back(load_views):
     ctx = load_views(dialog_inputs=['me@example.com', 'hunter2'], localized={30022: 'Logged in as %s'})
     views = ctx.views
     protected = {'transportUrl': 'https://official.example/manifest.json', 'flags': {'protected': True}}
@@ -1697,7 +1697,12 @@ def test_login_success_merges_protected_addons_with_remote_collection(load_views
     views.login()
 
     assert store.auth_set_calls == [login_result]
-    assert store.addons_set_calls == [[protected, remote_new]]
+    # union, not filter: the local community addon must survive login (it
+    # previously got silently dropped - only protected+remote survived).
+    assert store.addons_set_calls == [[protected, community, remote_new]]
+    # and the merged (now-complete) list is pushed straight back up, so an
+    # addon installed before ever logging in reaches the account immediately.
+    assert api.addon_collection_set_calls == [(login_result['authKey'], [protected, community, remote_new])]
     assert ctx.env.notifications[-1][1] == 'Logged in as me@example.com'
     assert 'Container.Refresh' in ctx.env.executed_builtins
 
@@ -1717,6 +1722,49 @@ def test_login_success_keeps_existing_addons_when_remote_sync_fails(load_views):
     assert store.addons_set_calls == []
     assert 'Container.Refresh' in ctx.env.executed_builtins
 
+
+def test_sync_addons_now_success_notifies_synced(load_views):
+    ctx = load_views()
+    views = ctx.views
+    auth = {'authKey': 'abc123'}
+    store = FakeStore(addons=[{'transportUrl': 't1', 'flags': {}}], auth=auth)
+    api = FakeStremioAPI()
+    _wire_data_layer(views, store, FakeAddonClient())
+    _wire_api(views, api)
+
+    views.sync_addons_now()
+
+    assert api.addon_collection_set_calls == [(auth['authKey'], store.get_addons())]
+    assert ctx.env.notifications[-1][1] == 'STR30034'
+
+
+def test_sync_addons_now_failure_notifies_failed(load_views):
+    ctx = load_views()
+    views = ctx.views
+    auth = {'authKey': 'abc123'}
+    store = FakeStore(addons=[{'transportUrl': 't1', 'flags': {}}], auth=auth)
+    api = FakeStremioAPI(addon_collection_set_error=ApiError('sync down'))
+    _wire_data_layer(views, store, FakeAddonClient())
+    _wire_api(views, api)
+
+    views.sync_addons_now()
+
+    assert len(api.addon_collection_set_calls) == 1
+    assert ctx.env.notifications[-1][1] == 'STR30035'
+
+
+def test_sync_addons_now_not_logged_in_notifies_login_prompt(load_views):
+    ctx = load_views()
+    views = ctx.views
+    store = FakeStore(auth=None)
+    api = FakeStremioAPI()
+    _wire_data_layer(views, store, FakeAddonClient())
+    _wire_api(views, api)
+
+    views.sync_addons_now()
+
+    assert api.addon_collection_set_calls == []
+    assert ctx.env.notifications[-1][1] == 'STR30020'
 
 def test_logout_without_auth_is_a_noop(load_views):
     ctx = load_views()

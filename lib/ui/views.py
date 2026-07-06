@@ -643,18 +643,40 @@ def addons():
     xbmcplugin.endOfDirectory(handle)
 
 
-def _sync_addons_if_logged_in(store):
+def _sync_addons_if_logged_in(store, notify_success=False):
     """Best-effort push of the local addon collection back to Stremio's
-    remote sync API when the user is logged in. Mirrors login()'s own
-    remote-fetch failure handling: a failed push is logged but must
-    never block or fail the local install/remove that triggered it."""
+    remote sync API when the user is logged in. A failed push is
+    notified (not just logged) - previously silent, which made a real
+    failure indistinguishable from "nothing to sync"/"working fine".
+    Never blocks or fails the local install/remove/login that triggered
+    it. Returns True on a successful push (or when there is nothing to
+    do because the user isn't logged in and `notify_success` is False),
+    False on failure."""
     auth = store.get_auth()
     if not auth:
-        return
+        if notify_success:
+            notify(L(30020))
+        return False
     try:
         StremioAPI().addon_collection_set(auth.get('authKey'), store.get_addons())
     except ApiError as exc:
         log('views._sync_addons_if_logged_in: %r' % (exc,), xbmc.LOGERROR)
+        notify(L(30035))
+        return False
+    if notify_success:
+        notify(L(30034))
+    return True
+
+def sync_addons_now():
+    """RunPlugin action (Settings > Account > Sync addons now): force a
+    push of the local addon collection, with explicit feedback either
+    way - unlike the automatic post-install/remove/login push, a
+    manually-triggered sync must confirm success too, not just surface
+    failures."""
+    handle = router.ADDON_HANDLE
+    _sync_addons_if_logged_in(_get_store(), notify_success=True)
+    _finish_action(handle, refresh=False)
+
 
 
 def addon_install():
@@ -734,14 +756,22 @@ def login():
         remote_addons = None
 
     if remote_addons is not None:
-        protected = [a for a in store.get_addons() if (a.get('flags') or {}).get('protected')]
-        seen = {a.get('transportUrl') for a in protected}
-        merged = list(protected)
+        # Union, not filter: EVERY local addon (protected or not) must
+        # survive login. The previous version kept only protected ones,
+        # silently dropping any community addon installed while logged
+        # out - the store's local state must never regress on login.
+        local_addons = store.get_addons()
+        seen = {a.get('transportUrl') for a in local_addons}
+        merged = list(local_addons)
         for descriptor in remote_addons:
             if descriptor.get('transportUrl') not in seen:
                 merged.append(descriptor)
                 seen.add(descriptor.get('transportUrl'))
         store.set_addons(merged)
+        # Push the merged list right back up: closes the gap where an
+        # addon installed before ever logging in would otherwise never
+        # reach the account until its next unrelated install/remove.
+        _sync_addons_if_logged_in(store)
 
     user = result.get('user') or {}
     notify(L(30022) % (user.get('email') or user.get('name') or ''))

@@ -82,6 +82,15 @@
                 </setting>
             </group>
         </category>
+        <category id="account" label="30105">
+            <group id="1">
+                <setting id="sync_addons_now" type="action" label="30036">
+                    <level>0</level>
+                    <data>RunPlugin(plugin://plugin.video.rivulet/?action=sync_addons_now)</data>
+                    <control type="button" format="action"/>
+                </setting>
+            </group>
+        </category>
         <category id="subtitles" label="30050">
             <group id="1">
                 <setting id="subs_enable" type="boolean" label="30051">
