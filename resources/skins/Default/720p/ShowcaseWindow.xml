@@ -28,9 +28,27 @@
                 <scrolltime tween="cubic" easing="out">300</scrolltime>
                 <onup>30003</onup>
                 <itemlayout width="180">
-                    <control type="image"><top>370</top><left>0</left><width>180</width><height>270</height><texture>$INFO[ListItem.Property(thumbnail)]</texture><aspectratio>scale</aspectratio><bordersize>10</bordersize></control>
+                    <control type="image">
+                        <top>360</top><left>0</left><width>180</width><height>245</height>
+                        <texture colordiffuse="CCFFFFFF">$INFO[ListItem.Property(thumbnail)]</texture>
+                        <aspectratio>scale</aspectratio>
+                    </control>
+                    <control type="label">
+                        <top>608</top><left>0</left><width>180</width><height>20</height>
+                        <font>font10</font><textcolor>CCFFFFFF</textcolor><align>center</align>
+                        <label>$INFO[ListItem.Label]</label>
+                    </control>
                 </itemlayout>
-                <focusedlayout width="427">
+                <focusedlayout width="380">
+                    <control type="image">
+                        <top>66</top><left>-4</left><width>388</width><height>568</height>
+                        <texture colordiffuse="FF3AA0FF">white.png</texture>
+                    </control>
+                    <control type="image">
+                        <top>70</top><left>0</left><width>380</width><height>560</height>
+                        <texture>$INFO[ListItem.Property(thumbnail)]</texture>
+                        <aspectratio>scale</aspectratio>
+                    </control>
                     <control type="textbox"><left>447</left><top>10</top><width>783</width><height>34</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
                         <label>[B]$INFO[ListItem.Label][/B] [COLOR FFAAAAAA]$INFO[ListItem.Property(year)][/COLOR] [COLOR FFE5A00D]$INFO[ListItem.Property(rating)][/COLOR]</label>
                         <align>left</align><aligny>center</aligny>
@@ -41,7 +59,6 @@
                     <control type="textbox"><left>447</left><top>92</top><width>783</width><height>250</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
                         <label>$INFO[ListItem.Property(plot)]</label><autoscroll time="3000" delay="3000" repeat="3000">true</autoscroll><align>left</align>
                     </control>
-                    <control type="image"><bottom>0</bottom><left>0</left><width>427</width><height>640</height><texture>$INFO[ListItem.Property(thumbnail)]</texture><aspectratio>scale</aspectratio><bordersize>10</bordersize></control>
                 </focusedlayout>
             </control>
             <control type="button" id="30003">

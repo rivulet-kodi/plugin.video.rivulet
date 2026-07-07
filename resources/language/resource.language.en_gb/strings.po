@@ -116,6 +116,10 @@ msgctxt "#30040"
 msgid "Next page"
 msgstr ""
 
+msgctxt "#30041"
+msgid "Streams"
+msgstr ""
+
 msgctxt "#30100"
 msgid "General"
 msgstr ""

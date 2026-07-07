@@ -35,8 +35,8 @@ class CatalogPickerWindow(xbmcgui.WindowXMLDialog):
     def _make_item(self, index, manifest, catalog):
         addon_name = manifest.get('name', '?')
         catalog_name = catalog.get('name') or catalog.get('id')
-        label = '%s: %s (%s)' % (addon_name, catalog_name, catalog.get('type'))
-        item = xbmcgui.ListItem(label)
+        catalog_type = catalog.get('type')
+        item = xbmcgui.ListItem(label=catalog_name, label2='%s \u00b7 %s' % (addon_name, catalog_type))
         item.setProperty('position', str(index))
         return item
 

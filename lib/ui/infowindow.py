@@ -4,8 +4,13 @@ Ports the reference addon's `platformcode/xbmc_info_window.py::InfoWindow`
 (`resources/skins/Default/720p/InfoWindow.xml`) to Rivulet/Stremio metas:
 `lib.ui.views.showcase()` opens it with one already-fetched catalog page,
 the user scrolls a horizontal poster coverflow (the fanart background
-updates to match the focused item), and picking a poster returns that
-meta to the caller so `views.showcase()` can navigate there.
+updates to match the focused item). Picking a movie poster jumps
+straight to `lib.ui.streamswindow.open_streams()` (a movie has nothing
+else to pick, same shortcut `lib.ui.detailwindow.open_detail()` takes -
+see that module's docstring) using this poster's own title/art, no
+extra meta fetch; picking anything else (a series) returns that meta to
+the caller so it can navigate there (`views.showcase()`,
+`searchwindow.open_search()`, ...).
 
 Control ids mirror the reference addon's InfoWindow 1:1 (see
 `ShowcaseWindow.xml`):
@@ -29,6 +34,11 @@ CLOSE = 30003
 # Back/Nav-Back, PreviousMenu/Esc, Backspace - any of these closes the
 # overlay without a selection, same as the reference InfoWindow.
 _BACK_ACTIONS = frozenset({9, 10, 92})
+
+# ACTION_SHOW_INFO ("info" button) has nothing to show beyond what the
+# focused poster's own focusedlayout already renders (title/genre/plot)
+# - swallow it rather than let it fall through to back-action handling.
+_INFO_ACTION = 11
 
 
 def _item_properties(meta):
@@ -95,16 +105,45 @@ class ShowcaseWindow(xbmcgui.WindowXMLDialog):
             focused = self.getControl(SELECT).getSelectedItem()
             if focused is not None:
                 self.getControl(BACKGROUND).setImage(focused.getProperty('fanart'))
-        if action.getId() in _BACK_ACTIONS:
+        action_id = action.getId()
+        if action_id == _INFO_ACTION:
+            return
+        if action_id in _BACK_ACTIONS:
             self.close()
 
     def onClick(self, control_id):
         if control_id == SELECT:
             focused = self.getControl(SELECT).getSelectedItem()
-            self.selected = self.metas[int(focused.getProperty('position'))]
+            if focused is None:
+                return
+            meta = self.metas[int(focused.getProperty('position'))]
+            if meta.get('type') == 'movie' and meta.get('id'):
+                self._play_movie(meta)
+                self.close()
+                return
+            self.selected = meta
             self.close()
         elif control_id == CLOSE:
             self.close()
+
+    def _play_movie(self, meta):
+        """A movie has nothing left to pick beyond what this poster
+        already shows - jump straight to StreamsWindow with its own
+        title/art (no extra meta fetch, unlike the DetailWindow path a
+        series still needs - see `lib.ui.detailwindow.open_detail`).
+        This fully handles the click itself, so `self.selected` stays
+        None: every caller's own `if selected: ...` branch is a no-op,
+        same as the user closing the overlay without picking anything."""
+        from lib.ui.streamswindow import open_streams
+
+        poster = meta.get('poster')
+        fanart = meta.get('background') or meta.get('logo') or poster
+        open_streams(
+            meta.get('type'), meta.get('id'),
+            poster=poster,
+            heading=meta.get('name') or meta.get('id') or '',
+            art={'poster': poster, 'fanart': fanart},
+        )
 
 
 def open_showcase(metas):

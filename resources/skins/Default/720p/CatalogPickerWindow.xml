@@ -11,24 +11,43 @@
             <animation type="WindowClose" reversible="false">
                 <effect type="fade" start="100" end="0" time="160" />
             </animation>
-            <control type="image"><width>1280</width><height>720</height><texture colordiffuse="FF141414">white.png</texture></control>
-            <control type="label"><left>90</left><top>80</top><width>900</width><height>60</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
-                <label>Discover</label>
+            <control type="image"><width>1280</width><height>720</height><texture colordiffuse="FF0F1214">white.png</texture></control>
+            <control type="label"><left>60</left><top>40</top><width>700</width><height>40</height><font>font14</font><textcolor>FF3AA0FF</textcolor>
+                <label>DISCOVER</label>
+            </control>
+            <control type="label"><right>60</right><bottom>40</bottom><width>300</width><height>30</height><font>font12</font><textcolor>AAFFFFFF</textcolor><align>right</align>
+                <label>$INFO[Container(30002).CurrentItem]/$INFO[Container(30002).NumItems]</label>
             </control>
             <control type="list" id="30002">
-                <left>90</left><top>200</top><width>1100</width><height>440</height>
+                <left>40</left><top>110</top><width>1140</width><height>520</height>
                 <onleft>30002</onleft><onright>30002</onright>
-                <itemlayout height="60">
-                    <control type="label"><left>10</left><width>1080</width><height>60</height><font>font13</font><textcolor>FFAAAAAA</textcolor><aligny>center</aligny>
+                <pagecontrol>30010</pagecontrol>
+                <itemlayout height="72">
+                    <control type="label"><left>20</left><top>10</top><width>1080</width><height>30</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
                         <label>$INFO[ListItem.Label]</label>
                     </control>
+                    <control type="label"><left>20</left><top>44</top><width>1080</width><height>24</height><font>font12</font><textcolor>80FFFFFF</textcolor>
+                        <label>$INFO[ListItem.Label2]</label>
+                    </control>
                 </itemlayout>
-                <focusedlayout height="60">
-                    <control type="image"><width>1100</width><height>60</height><texture colordiffuse="33FFFFFF">white.png</texture></control>
-                    <control type="label"><left>10</left><width>1080</width><height>60</height><font>font13</font><textcolor>FFFFFFFF</textcolor><aligny>center</aligny>
+                <focusedlayout height="72">
+                    <control type="image"><width>1140</width><height>72</height><texture colordiffuse="28FFFFFF">white.png</texture></control>
+                    <control type="image"><width>4</width><height>72</height><texture colordiffuse="FF3AA0FF">white.png</texture></control>
+                    <control type="label"><left>20</left><top>10</top><width>1080</width><height>30</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
                         <label>[B]$INFO[ListItem.Label][/B]</label>
                     </control>
+                    <control type="label"><left>20</left><top>44</top><width>1080</width><height>24</height><font>font12</font><textcolor>CCFFFFFF</textcolor>
+                        <label>$INFO[ListItem.Label2]</label>
+                    </control>
                 </focusedlayout>
+            </control>
+            <control type="scrollbar" id="30010">
+                <left>1190</left><top>110</top><width>14</width><height>520</height>
+                <texturesliderbar colordiffuse="33FFFFFF">white.png</texturesliderbar>
+                <textureslidernib colordiffuse="FF3AA0FF">white.png</textureslidernib>
+                <textureslidernibfocus colordiffuse="FF3AA0FF">white.png</textureslidernibfocus>
+                <showonepage>false</showonepage>
+                <orientation>vertical</orientation>
             </control>
         </control>
     </controls>

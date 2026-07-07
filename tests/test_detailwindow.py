@@ -85,10 +85,10 @@ def test_episode_rows_orders_specials_last_despite_lowest_season_number(load_det
 
 
 @pytest.mark.parametrize('video,expected_label', [
-    ({'id': 'v1', 'season': 1, 'episode': 3, 'title': 'The Title'}, '1x03. The Title'),
-    ({'id': 'v2', 'title': 'No Season Info'}, '0x00. No Season Info'),
-    ({'id': 'v3', 'season': 2, 'episode': 5, 'name': 'Fallback Name'}, '2x05. Fallback Name'),
-    ({'id': 'v4', 'season': 1, 'episode': 1}, '1x01. v4'),
+    ({'id': 'v1', 'season': 1, 'episode': 3, 'title': 'The Title'}, 'S01E03 \u00b7 The Title'),
+    ({'id': 'v2', 'title': 'No Season Info'}, 'S00E00 \u00b7 No Season Info'),
+    ({'id': 'v3', 'season': 2, 'episode': 5, 'name': 'Fallback Name'}, 'S02E05 \u00b7 Fallback Name'),
+    ({'id': 'v4', 'season': 1, 'episode': 1}, 'S01E01 \u00b7 v4'),
 ], ids=['title', 'missing-season-and-episode-default-to-zero', 'title-missing-falls-back-to-name',
         'title-and-name-missing-falls-back-to-id'])
 def test_episode_rows_label_format_and_title_fallback_chain(load_detailwindow, video, expected_label):
@@ -108,7 +108,7 @@ def test_episode_rows_filters_out_videos_without_an_id(load_detailwindow):
 
     rows = ctx.detailwindow._episode_rows(videos)
 
-    assert rows == [('v1', '1x02. Has Id')]
+    assert rows == [('v1', 'S01E02 \u00b7 Has Id')]
 
 
 @pytest.mark.parametrize('videos', [[], None], ids=['empty-list', 'none'])
@@ -134,7 +134,7 @@ def test_oninit_background_fallback_chain(load_detailwindow, meta, expected_key)
     ctx = load_detailwindow()
     win = _make_window(ctx.detailwindow)
     win.meta = meta
-    win.rows = [('v1', '1x01. Ep One')]
+    win.rows = [('v1', 'S01E01 \u00b7 Ep One')]
 
     win.onInit()
 
@@ -147,12 +147,12 @@ def test_oninit_builds_one_item_per_row_with_row_id_property_for_a_series(load_d
     picker = ctx.detailwindow
     win = _make_window(picker)
     win.meta = {}
-    win.rows = [('v1', '1x01. Pilot'), ('v2', '1x02. Second')]
+    win.rows = [('v1', 'S01E01 \u00b7 Pilot'), ('v2', 'S01E02 \u00b7 Second')]
 
     win.onInit()
 
     items = win.getControl(picker.LIST).items
-    assert [item.getLabel() for item in items] == ['1x01. Pilot', '1x02. Second']
+    assert [item.getLabel() for item in items] == ['S01E01 \u00b7 Pilot', 'S01E02 \u00b7 Second']
     assert [item.getProperty('row_id') for item in items] == ['v1', 'v2']
     assert win.getFocusId() == picker.LIST
 
@@ -217,7 +217,7 @@ def test_onclick_episode_row_uses_the_episodes_own_id_as_sid_not_the_titles(load
     win = _window_with_focused_row(picker, meta, 'series', 'tt1:1:2')
     captured = {}
 
-    def fake_open_streams(stype, sid, poster=None):
+    def fake_open_streams(stype, sid, poster=None, heading='', art=None):
         captured['args'] = (stype, sid)
         return True
 
@@ -230,11 +230,43 @@ def test_onclick_episode_row_uses_the_episodes_own_id_as_sid_not_the_titles(load
     assert win.closed is True
 
 
+def test_onclick_passes_episode_heading_and_show_art_to_open_streams(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+    win = _make_window(picker)
+    meta = {
+        'id': 'tt1', 'name': 'Some Show',
+        'poster': 'https://x/poster.jpg', 'background': 'https://x/fanart.jpg',
+    }
+    win.start(
+        {**meta, 'videos': [{'id': 'v1', 'season': 1, 'episode': 2, 'title': 'The Title'}]},
+        'series',
+    )
+    win.getControl(picker.LIST).selected_index = 0
+    captured = {}
+
+    def fake_open_streams(stype, sid, poster=None, heading='', art=None):
+        captured['heading'] = heading
+        captured['art'] = art
+        return False
+
+    monkeypatch.setattr(ctx.streamswindow, 'open_streams', fake_open_streams)
+
+    win.onInit()
+    win.onClick(picker.LIST)
+
+    assert captured['heading'] == 'Some Show \u2013 S01E02 The Title'
+    assert captured['art'] == {'poster': 'https://x/poster.jpg', 'fanart': 'https://x/fanart.jpg'}
+
+
 def test_onclick_stays_open_when_open_streams_returns_false(load_detailwindow, monkeypatch):
     ctx = load_detailwindow()
     picker = ctx.detailwindow
     win = _window_with_focused_row(picker, {'id': 'tt1'}, 'series', 'v1')
-    monkeypatch.setattr(ctx.streamswindow, 'open_streams', lambda stype, sid, poster=None: False)
+    monkeypatch.setattr(
+        ctx.streamswindow, 'open_streams',
+        lambda stype, sid, poster=None, heading='', art=None: False,
+    )
 
     win.onClick(picker.LIST)
 
@@ -271,7 +303,7 @@ def test_start_flattens_videos_into_episode_rows_for_a_series(load_detailwindow)
 
     win.start(meta, 'series')
 
-    assert win.rows == [('v1', '1x01. Ep One'), ('v2', '1x02. Ep Two')]
+    assert win.rows == [('v1', 'S01E01 \u00b7 Ep One'), ('v2', 'S01E02 \u00b7 Ep Two')]
 
 
 def test_start_resets_should_close_caller_on_each_call(load_detailwindow):
@@ -290,7 +322,7 @@ def test_start_calls_domodal_and_returns_should_close_caller(load_detailwindow, 
     picker = ctx.detailwindow
     win = _make_window(picker)
     meta = {'id': 'tt1', 'videos': [{'id': 'v1', 'season': 1, 'episode': 1, 'title': 'Ep One'}]}
-    monkeypatch.setattr(ctx.streamswindow, 'open_streams', lambda stype, sid, poster=None: True)
+    monkeypatch.setattr(ctx.streamswindow, 'open_streams', lambda stype, sid, poster=None, heading='', art=None: True)
 
     # The fake doModal() is a no-op counter; simulate what a real modal event
     # loop would drive around it (onInit(), the user picking the only row),
@@ -346,8 +378,10 @@ def test_open_detail_movie_skips_detailwindow_and_opens_streams_directly(
 
     monkeypatch.setattr(ctx.detailwindow, 'DetailWindow', _unexpected)
 
-    def fake_open_streams(stype, sid, poster=None):
+    def fake_open_streams(stype, sid, poster=None, heading='', art=None):
         captured['args'] = (stype, sid, poster)
+        captured['heading'] = heading
+        captured['art'] = art
         return True
 
     monkeypatch.setattr(ctx.streamswindow, 'open_streams', fake_open_streams)
@@ -356,6 +390,8 @@ def test_open_detail_movie_skips_detailwindow_and_opens_streams_directly(
 
     assert result is True
     assert captured['args'] == ('movie', 'tt1', 'https://x/poster.jpg')
+    assert captured['heading'] == 'A Movie'
+    assert captured['art'] == {'poster': 'https://x/poster.jpg', 'fanart': 'https://x/poster.jpg'}
 
 
 def test_open_detail_series_builds_window_against_skin_path_and_starts_with_the_fetched_meta(
@@ -425,7 +461,7 @@ def test_open_detail_movie_success_wraps_the_fetch_in_a_busy_dialog(
     ctx = load_detailwindow()
     meta = {'id': 'tt1', 'name': 'A Movie', 'poster': 'https://x/poster.jpg', 'videos': []}
     monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: meta)
-    monkeypatch.setattr(ctx.streamswindow, 'open_streams', lambda stype, sid, poster=None: True)
+    monkeypatch.setattr(ctx.streamswindow, 'open_streams', lambda stype, sid, poster=None, heading='', art=None: True)
 
     result = ctx.detailwindow.open_detail('movie', 'tt1')
 
@@ -443,7 +479,7 @@ def test_open_detail_movie_closes_the_busy_dialog_before_opening_streams(
     monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: meta)
     captured = {}
 
-    def fake_open_streams(stype, sid, poster=None):
+    def fake_open_streams(stype, sid, poster=None, heading='', art=None):
         captured['dialog_closed_count'] = ctx.env.dialog_closed_count
         return True
 

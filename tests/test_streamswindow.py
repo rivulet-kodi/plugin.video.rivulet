@@ -24,6 +24,15 @@ tests/test_catalogpicker.py drives CatalogPickerWindow: the fake
 WindowXMLDialog.doModal() is a no-op counter, and getControl()/setFocusId()
 are plain in-memory fakes. StreamsWindow.xml's actual skin rendering is
 Kodi-skin-engine-only and is NOT, and cannot be, exercised by this suite.
+
+`StreamsWindow`/`open_streams()` also take optional `heading`/`art`
+context kwargs (empty/`None` by default, so every pre-existing call
+site keeps working unchanged) - see this file's onInit()/start()/
+open_streams() tests below for the heading-fallback, background/
+poster-panel art precedence, and kwarg-forwarding coverage. The
+addonerror tests near the end also cover open_streams()'s log-noise
+fix: a single failing addon logs one DEBUG line (never ERROR), and at
+most one aggregate WARNING summarizes the whole fetch.
 """
 import contextlib
 
@@ -96,7 +105,7 @@ def _make_window(streamswindow_mod):
 # ---------------------------------------------------------------------------
 
 
-def test_oninit_builds_label_from_format_label_for_full_metadata(load_streamswindow):
+def test_oninit_builds_two_line_row_stripping_addon_from_line_one_into_label2(load_streamswindow):
     ctx = load_streamswindow()
     win = _make_window(ctx.streamswindow)
     info = {
@@ -107,11 +116,11 @@ def test_oninit_builds_label_from_format_label_for_full_metadata(load_streamswin
 
     win.onInit()
 
-    items = win.getControl(ctx.streamswindow.LIST).items
-    assert items[0].getLabel() == (
-        '[COLOR lime]1080p[/COLOR] [B]WEB-DL[/B] x265 HDR10 \u00b7 2.1 GB \u00b7 S42 \u00b7 '
-        '[COLOR gray]AddonA[/COLOR]'
+    item = win.getControl(ctx.streamswindow.LIST).items[0]
+    assert item.getLabel() == (
+        '[COLOR lime]1080p[/COLOR] [B]WEB-DL[/B] x265 HDR10 \u00b7 2.1 GB \u00b7 S42'
     )
+    assert item.label2 == 'AddonA'
 
 
 def test_oninit_falls_back_to_raw_text_stripping_cr_and_lf_when_format_label_is_empty(load_streamswindow):
@@ -126,7 +135,9 @@ def test_oninit_falls_back_to_raw_text_stripping_cr_and_lf_when_format_label_is_
 
     win.onInit()
 
-    assert win.getControl(ctx.streamswindow.LIST).items[0].getLabel() == 'Some Raw Title  Line2'
+    item = win.getControl(ctx.streamswindow.LIST).items[0]
+    assert item.getLabel() == 'Some Raw Title  Line2'
+    assert item.label2 == ''
 
 
 def test_oninit_falls_back_to_question_mark_when_no_label_material_is_available(load_streamswindow):
@@ -136,7 +147,25 @@ def test_oninit_falls_back_to_question_mark_when_no_label_material_is_available(
 
     win.onInit()
 
-    assert win.getControl(ctx.streamswindow.LIST).items[0].getLabel() == '?'
+    item = win.getControl(ctx.streamswindow.LIST).items[0]
+    assert item.getLabel() == '?'
+    assert item.label2 == ''
+
+
+def test_oninit_addon_only_info_falls_back_to_question_mark_on_line1_but_keeps_addon_on_line2(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    # No resolution/source/codec/hdr/size_text/seeders -> format_label(...,
+    # include_addon=False) returns '' regardless of 'addon' being set, so
+    # line 1 falls back to '?' -- but the addon name still surfaces, on
+    # line 2, where the two-line row now dedicates it.
+    win.pairs = [({'addon': 'AddonA'}, {'url': 'https://a.example/a.mp4'})]
+
+    win.onInit()
+
+    item = win.getControl(ctx.streamswindow.LIST).items[0]
+    assert item.getLabel() == '?'
+    assert item.label2 == 'AddonA'
 
 
 def test_oninit_sets_position_property_in_pair_order_and_focuses_the_list(load_streamswindow):
@@ -165,6 +194,66 @@ def test_oninit_background_uses_poster_or_falls_back_to_addon_fanart(load_stream
 
     expected = ctx.compat.addon_fanart() if expect_fanart else poster
     assert win.getControl(ctx.streamswindow.BACKGROUND).image == expected
+
+
+def test_oninit_heading_defaults_to_generic_streams_title_uppercased_when_omitted(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = []
+
+    win.onInit()
+
+    # L(30041) isn't configured in the fake localized-string map, so it
+    # resolves to the deterministic 'STR30041' marker (see FakeAddon) -
+    # already all-uppercase, so .upper() is a no-op here, but this still
+    # exercises the exact code path a real 'Streams' string would.
+    assert win.getControl(ctx.streamswindow.HEADING).label == 'STR30041'
+
+
+def test_oninit_heading_uses_the_supplied_title_uppercased(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = []
+    win.heading = 'Breaking Bad \u2013 S01E01 Pilot'
+
+    win.onInit()
+
+    assert win.getControl(ctx.streamswindow.HEADING).label == 'BREAKING BAD \u2013 S01E01 PILOT'
+
+
+def test_oninit_art_fanart_drives_background_and_art_poster_drives_the_side_panel(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = []
+    win.poster = 'https://x/legacy-poster.jpg'
+    win.art = {'poster': 'https://x/art-poster.jpg', 'fanart': 'https://x/art-fanart.jpg'}
+
+    win.onInit()
+
+    assert win.getControl(ctx.streamswindow.BACKGROUND).image == 'https://x/art-fanart.jpg'
+    assert win.getControl(ctx.streamswindow.POSTER).image == 'https://x/art-poster.jpg'
+
+
+def test_oninit_art_poster_drives_background_when_no_fanart_is_supplied(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = []
+    win.art = {'poster': 'https://x/art-poster.jpg'}
+
+    win.onInit()
+
+    assert win.getControl(ctx.streamswindow.BACKGROUND).image == 'https://x/art-poster.jpg'
+    assert win.getControl(ctx.streamswindow.POSTER).image == 'https://x/art-poster.jpg'
+
+
+def test_oninit_poster_panel_is_cleared_when_neither_art_nor_legacy_poster_is_supplied(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = []
+
+    win.onInit()
+
+    assert win.getControl(ctx.streamswindow.POSTER).image == ''
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +397,28 @@ def test_start_with_pairs_calls_domodal_and_returns_played(load_streamswindow, m
     assert win.modal_calls == 1
 
 
+def test_start_forwards_heading_and_art_onto_the_window(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    pairs = [({'raw': 'A'}, {'url': 'https://a.example/a.mp4'})]
+
+    win.start(pairs, 'movie', 'tt1', heading='My Title', art={'poster': 'P', 'fanart': 'F'})
+
+    assert win.heading == 'My Title'
+    assert win.art == {'poster': 'P', 'fanart': 'F'}
+
+
+def test_start_defaults_heading_and_art_when_omitted(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    pairs = [({'raw': 'A'}, {'url': 'https://a.example/a.mp4'})]
+
+    win.start(pairs, 'movie', 'tt1')
+
+    assert win.heading == ''
+    assert win.art is None
+
+
 # ---------------------------------------------------------------------------
 # open_streams()
 # ---------------------------------------------------------------------------
@@ -334,7 +445,7 @@ def test_open_streams_filters_unsupported_addons_and_forwards_aggregate_to_the_w
     captured = {}
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
             captured['args'] = (pairs, stype, sid, poster)
             return True
 
@@ -347,6 +458,36 @@ def test_open_streams_filters_unsupported_addons_and_forwards_aggregate_to_the_w
     assert (stype, sid, poster) == ('movie', 'tt1', 'https://x/poster.jpg')
     assert [s for _info, s in pairs] == [stream]
     assert result is True
+
+
+def test_open_streams_forwards_heading_and_art_to_the_window(load_streamswindow, monkeypatch):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    supported = {
+        'transportUrl': 't-supported',
+        'manifest': {'name': 'Supported', 'resources': ['stream'], 'types': ['movie']},
+    }
+    stream = {'url': 'https://a.example/a.mp4'}
+    client = _FakeAddonClient({'t-supported': [stream]})
+    _wire_data_layer(sw, _FakeStore(addons=[supported]), client)
+    captured = {}
+
+    class RecordingWindow(sw.StreamsWindow):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+            captured['heading'] = heading
+            captured['art'] = art
+            return True
+
+    monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+
+    result = sw.open_streams(
+        'movie', 'tt1', heading='Some Movie',
+        art={'poster': 'https://x/p.jpg', 'fanart': 'https://x/f.jpg'},
+    )
+
+    assert result is True
+    assert captured['heading'] == 'Some Movie'
+    assert captured['art'] == {'poster': 'https://x/p.jpg', 'fanart': 'https://x/f.jpg'}
 
 
 def test_open_streams_window_is_closed_exactly_once_when_start_raises(load_streamswindow, monkeypatch):
@@ -371,7 +512,7 @@ def test_open_streams_window_is_closed_exactly_once_when_start_raises(load_strea
             self.close_calls += 1
             super().close()
 
-        def start(self, pairs, stype, sid, poster=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
             # Stands in for a crash inside onInit()/onAction() while the
             # modal loop is running - self.close() (the window's own,
             # normal-path close) never gets a chance to run.
@@ -390,6 +531,7 @@ def test_open_streams_window_is_closed_exactly_once_when_start_raises(load_strea
 
 def test_open_streams_addonerror_is_logged_and_skipped_not_fatal(load_streamswindow, monkeypatch):
     ctx = load_streamswindow()
+    import xbmc
     sw = ctx.streamswindow
     failing = {
         'transportUrl': 't-fail',
@@ -405,7 +547,7 @@ def test_open_streams_addonerror_is_logged_and_skipped_not_fatal(load_streamswin
     captured = {}
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
             captured['pairs'] = pairs
             return True
 
@@ -416,6 +558,76 @@ def test_open_streams_addonerror_is_logged_and_skipped_not_fatal(load_streamswin
     assert result is True
     assert [call[0] for call in client.calls] == ['t-fail', 't-ok']
     assert [s for _info, s in captured['pairs']] == [ok_stream]
+    # The failing addon must never hit ERROR (that was the noisy old
+    # behavior) - one DEBUG line naming it, plus exactly one aggregate
+    # WARNING summarizing the fetch, and nothing else at WARNING/ERROR.
+    assert not [lvl for _msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGERROR]
+    debug_msgs = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGDEBUG]
+    assert any('t-fail' in msg and 'upstream down' in msg for msg in debug_msgs)
+    warnings = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGWARNING]
+    assert len(warnings) == 1
+    assert 'streamswindow: 1 addon(s) failed' in warnings[0]
+
+
+def test_open_streams_multiple_addon_failures_still_log_a_single_aggregate_warning(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    import xbmc
+    sw = ctx.streamswindow
+    fail_a = {
+        'transportUrl': 't-fail-a',
+        'manifest': {'name': 'FailA', 'resources': ['stream'], 'types': ['movie']},
+    }
+    fail_b = {
+        'transportUrl': 't-fail-b',
+        'manifest': {'name': 'FailB', 'resources': ['stream'], 'types': ['movie']},
+    }
+    working = {
+        'transportUrl': 't-ok',
+        'manifest': {'name': 'Working', 'resources': ['stream'], 'types': ['movie']},
+    }
+    ok_stream = {'url': 'https://a.example/a.mp4'}
+    client = _FakeAddonClient({
+        't-fail-a': AddonError('boom a'), 't-fail-b': AddonError('boom b'), 't-ok': [ok_stream],
+    })
+    _wire_data_layer(sw, _FakeStore(addons=[fail_a, fail_b, working]), client)
+
+    class RecordingWindow(sw.StreamsWindow):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+            return True
+
+    monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+
+    result = sw.open_streams('movie', 'tt1')
+
+    assert result is True
+    debug_msgs = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGDEBUG]
+    assert sum(1 for msg in debug_msgs if 't-fail-a' in msg) == 1
+    assert sum(1 for msg in debug_msgs if 't-fail-b' in msg) == 1
+    warnings = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGWARNING]
+    assert len(warnings) == 1
+    assert 'streamswindow: 2 addon(s) failed' in warnings[0]
+    assert not [lvl for _msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGERROR]
+
+
+def test_open_streams_addon_failure_debug_message_is_a_single_line(load_streamswindow):
+    ctx = load_streamswindow()
+    import xbmc
+    sw = ctx.streamswindow
+    failing = {
+        'transportUrl': 't-fail',
+        'manifest': {'name': 'Failing', 'resources': ['stream'], 'types': ['movie']},
+    }
+    client = _FakeAddonClient({'t-fail': AddonError('line one\r\nline two')})
+    _wire_data_layer(sw, _FakeStore(addons=[failing]), client)
+
+    result = sw.open_streams('movie', 'tt1')
+
+    assert result is False  # the only addon failed -> no streams at all
+    debug_msgs = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGDEBUG]
+    assert any('line one  line two' in msg for msg in debug_msgs)
+    assert all('\n' not in msg and '\r' not in msg for msg in debug_msgs)
 
 
 def test_open_streams_no_results_notifies_and_returns_false_without_building_a_window(
@@ -463,7 +675,7 @@ def test_open_streams_reads_stream_sort_setting_and_applies_it_to_final_order(lo
     captured = {}
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
             captured['pairs'] = pairs
             return True
 
@@ -522,7 +734,7 @@ def test_open_streams_busy_dialog_reports_progress_and_skips_unsupported_addons(
     captured = {}
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
             captured['pairs'] = pairs
             return True
 
@@ -566,7 +778,7 @@ def test_open_streams_cancelled_mid_loop_keeps_partial_results_and_closes_dialog
     captured = {}
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
             captured['pairs'] = pairs
             return True
 

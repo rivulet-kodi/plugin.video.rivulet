@@ -7,7 +7,12 @@ lib.ui.infowindow imports xbmcgui at module scope (`class ShowcaseWindow
 (xbmcgui.WindowXMLDialog)`), so even `_item_properties()` - a pure
 function that touches no xbmc API itself - needs the module imported
 fresh against the fake xbmcgui (via `load_infowindow`) before it is
-reachable at all.
+reachable at all. `ShowcaseWindow.onClick()` also lazily `from
+lib.ui.streamswindow import open_streams` for its movie shortcut (a
+movie has nothing left to pick once you're already looking at its
+poster - see that module's docstring), so `load_infowindow` reloads
+`lib.ui.streamswindow` alongside it and the tests below that exercise
+that path monkeypatch `ctx.streamswindow.open_streams` directly.
 
 ShowcaseWindow's onInit()/onClick()/onAction() are called directly here,
 never through a real modal event loop: tests/kodistubs's fake
@@ -15,8 +20,8 @@ WindowXMLDialog.doModal() is a no-op counter, and getControl()/
 setFocusId()/getFocusId() are plain in-memory fakes (see
 tests/kodistubs/modules.py's make_xbmcgui). This exercises 100% of the
 controller *logic* (item building, focus-driven background swaps, back
-actions, selection-by-position, the empty-metas short-circuit) with
-none of the *visual* rendering.
+actions, the info-key no-op, the movie shortcut, selection-by-position,
+the empty-metas short-circuit) with none of the *visual* rendering.
 
 ShowcaseWindow.xml's actual skin rendering - the coverflow's fixedlist/
 focusedlayout geometry, the fanart crossfade, the WindowOpen/WindowClose
@@ -30,7 +35,7 @@ import pytest
 
 from tests.kodistubs import install_kodi_stubs
 
-_RELOAD_MODULE_NAMES = ('lib.ui.compat', 'lib.ui.infowindow')
+_RELOAD_MODULE_NAMES = ('lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.streamswindow', 'lib.ui.infowindow')
 
 
 @pytest.fixture
@@ -262,6 +267,20 @@ def test_onaction_non_back_action_does_not_close(load_infowindow):
     assert win.closed is False
 
 
+def test_onaction_info_key_is_a_noop_and_does_not_close_the_window(load_infowindow):
+    ctx = load_infowindow()
+    infowindow = ctx.infowindow
+    import xbmcgui
+    win = infowindow.ShowcaseWindow('ShowcaseWindow.xml', '/addon/path', 'Default', '720p')
+    win.metas = [_make_meta('tt1', 'One')]
+    win.onInit()
+
+    win.onAction(xbmcgui.Action(11))  # ACTION_SHOW_INFO
+
+    assert win.closed is False
+    assert win.selected is None
+
+
 # ---------------------------------------------------------------------------
 # ShowcaseWindow.onClick() - selection-by-position / close button
 # ---------------------------------------------------------------------------
@@ -270,7 +289,10 @@ def test_onaction_non_back_action_does_not_close(load_infowindow):
 def test_onclick_select_records_focused_meta_by_position_and_closes(load_infowindow):
     ctx = load_infowindow()
     infowindow = ctx.infowindow
-    metas = [_make_meta('tt1', 'One'), _make_meta('tt2', 'Two'), _make_meta('tt3', 'Three')]
+    metas = [
+        _make_meta('tt1', 'One', mtype='series'), _make_meta('tt2', 'Two', mtype='series'),
+        _make_meta('tt3', 'Three', mtype='series'),
+    ]
     win = infowindow.ShowcaseWindow('ShowcaseWindow.xml', '/addon/path', 'Default', '720p')
     win.metas = list(metas)
     win.onInit()
@@ -308,6 +330,80 @@ def test_onclick_unknown_control_id_is_ignored(load_infowindow):
     assert win.closed is False
 
 
+def test_onclick_select_with_movie_opens_streams_directly_with_heading_and_art(
+    load_infowindow, monkeypatch,
+):
+    ctx = load_infowindow()
+    infowindow = ctx.infowindow
+    meta = _make_meta(
+        'tt1', 'A Movie', mtype='movie',
+        poster='https://x/poster.jpg', background='https://x/fanart.jpg',
+    )
+    win = infowindow.ShowcaseWindow('ShowcaseWindow.xml', '/addon/path', 'Default', '720p')
+    win.metas = [meta]
+    win.onInit()
+    captured = {}
+
+    def fake_open_streams(stype, sid, poster=None, heading='', art=None):
+        captured['args'] = (stype, sid)
+        captured['poster'] = poster
+        captured['heading'] = heading
+        captured['art'] = art
+        return True
+
+    monkeypatch.setattr(ctx.streamswindow, 'open_streams', fake_open_streams)
+
+    win.onClick(infowindow.SELECT)
+
+    assert captured['args'] == ('movie', 'tt1')
+    assert captured['poster'] == 'https://x/poster.jpg'
+    assert captured['heading'] == 'A Movie'
+    assert captured['art'] == {'poster': 'https://x/poster.jpg', 'fanart': 'https://x/fanart.jpg'}
+    # Fully handled internally - nothing left for the caller (open_showcase())
+    # to act on, same as closing the overlay without picking anything.
+    assert win.selected is None
+    assert win.closed is True
+
+
+def test_onclick_select_with_movie_falls_back_to_logo_then_poster_for_fanart(
+    load_infowindow, monkeypatch,
+):
+    ctx = load_infowindow()
+    infowindow = ctx.infowindow
+    meta = _make_meta('tt1', 'A Movie', mtype='movie', poster='https://x/poster.jpg', logo='https://x/logo.png')
+    win = infowindow.ShowcaseWindow('ShowcaseWindow.xml', '/addon/path', 'Default', '720p')
+    win.metas = [meta]
+    win.onInit()
+    captured = {}
+    monkeypatch.setattr(
+        ctx.streamswindow, 'open_streams',
+        lambda stype, sid, poster=None, heading='', art=None: captured.update(art=art) or True,
+    )
+
+    win.onClick(infowindow.SELECT)
+
+    assert captured['art'] == {'poster': 'https://x/poster.jpg', 'fanart': 'https://x/logo.png'}
+
+
+def test_onclick_select_with_non_movie_type_does_not_open_streams(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    infowindow = ctx.infowindow
+    meta = _make_meta('tt1', 'A Show', mtype='series')
+    win = infowindow.ShowcaseWindow('ShowcaseWindow.xml', '/addon/path', 'Default', '720p')
+    win.metas = [meta]
+    win.onInit()
+
+    def _unexpected(*args, **kwargs):
+        raise AssertionError('a series must not take the movie shortcut')
+
+    monkeypatch.setattr(ctx.streamswindow, 'open_streams', _unexpected)
+
+    win.onClick(infowindow.SELECT)
+
+    assert win.selected == meta
+    assert win.closed is True
+
+
 # ---------------------------------------------------------------------------
 # ShowcaseWindow.start() - the doModal()/empty-metas contract
 # ---------------------------------------------------------------------------
@@ -338,7 +434,7 @@ def test_start_with_none_metas_returns_none_without_domodal(load_infowindow):
 def test_start_with_metas_calls_domodal_and_returns_the_selected_meta(load_infowindow):
     ctx = load_infowindow()
     infowindow = ctx.infowindow
-    metas = [_make_meta('tt1', 'One'), _make_meta('tt2', 'Two')]
+    metas = [_make_meta('tt1', 'One', mtype='series'), _make_meta('tt2', 'Two', mtype='series')]
     win = infowindow.ShowcaseWindow('ShowcaseWindow.xml', '/addon/path', 'Default', '720p')
 
     # The fake doModal() is a no-op counter; simulate what a real modal

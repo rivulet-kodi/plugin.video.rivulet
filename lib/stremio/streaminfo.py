@@ -271,15 +271,19 @@ _RESOLUTION_COLORS = {
 }
 
 
-def format_label(info):
+def format_label(info, include_addon=True):
     """Build the single-line BBcode label shown in the streams view.
 
     ``[COLOR <c>]<res>[/COLOR] [B]<source>[/B] <codec/hdr> \u00b7 <size> \u00b7
-    S<seeders> \u00b7 [COLOR gray]<addon>[/COLOR]`` -- any empty part (and its
-    separator) is dropped so e.g. a stream with no detected source or HDR
-    tags doesn't leave dangling '· ·' gaps. Every input already passed
+    S<seeders>[ \u00b7 [COLOR gray]<addon>[/COLOR]]`` -- any empty part (and
+    its separator) is dropped so e.g. a stream with no detected source or
+    HDR tags doesn't leave dangling '· ·' gaps. Every input already passed
     through clean_text() via parse_stream(), so the result never contains
     a newline.
+
+    `include_addon=False` drops the trailing addon segment entirely -
+    used by `lib.ui.streamswindow.StreamsWindow`'s two-line row, which
+    renders the addon/provider name on its own second line instead.
     """
     info = info or {}
 
@@ -299,7 +303,7 @@ def format_label(info):
     seeders = info.get('seeders')
     if seeders is not None:
         tail_bits.append('S%s' % seeders)
-    if info.get('addon'):
+    if include_addon and info.get('addon'):
         tail_bits.append('[COLOR gray]%s[/COLOR]' % info['addon'])
     tail = ' \u00b7 '.join(tail_bits)
 

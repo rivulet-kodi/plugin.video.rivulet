@@ -84,9 +84,10 @@ def test_oninit_builds_one_item_per_catalog_with_label_and_position(load_catalog
     win.onInit()
 
     items = win.getControl(picker.LIST).items
-    assert [item.getLabel() for item in items] == [
-        'Addon A: Top (movie)',
-        '?: series-catalog (series)',
+    assert [item.getLabel() for item in items] == ['Top', 'series-catalog']
+    assert [item.label2 for item in items] == [
+        'Addon A \u00b7 movie',
+        '? \u00b7 series',
     ]
     assert [item.getProperty('position') for item in items] == ['0', '1']
     assert win.getFocusId() == picker.LIST
