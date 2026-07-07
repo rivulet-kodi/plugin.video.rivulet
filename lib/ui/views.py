@@ -769,10 +769,62 @@ def sync_addons_now():
     push of the local addon collection, with explicit feedback either
     way - unlike the automatic post-install/remove/login push, a
     manually-triggered sync must confirm success too, not just surface
-    failures."""
+    failures. Also refreshes every installed addon's cached manifest
+    from its own transportUrl first (see `_refresh_addon_manifests`), so
+    a freshly-updated local manifest set - not a stale install-time
+    snapshot - is what gets pushed to the account."""
     handle = router.ADDON_HANDLE
-    _sync_addons_if_logged_in(_get_store(), notify_success=True)
+    store = _get_store()
+    _refresh_addon_manifests(store, _get_client())
+    _sync_addons_if_logged_in(store, notify_success=True)
     _finish_action(handle, refresh=False)
+
+
+def _refresh_addon_manifests(store, client):
+    """Best-effort refresh of every installed addon's cached manifest from
+    its own transportUrl, so catalog/resource/logo/version changes the
+    remote addon makes after install time eventually reach the local
+    cache instead of staying stale forever - previously the only fix was
+    to manually remove and reinstall the addon. Mirrors
+    `_sync_addons_if_logged_in`'s best-effort philosophy: one addon being
+    briefly unreachable (`AddonError`) or returning a manifest too
+    malformed to use (no `id`) never aborts refreshing the others and
+    never disturbs that addon's last-known-good cached manifest.
+    Persisted via `Store.update_addons` (never a raw `get_addons()` +
+    `set_addons()` pair) so the write stays safe against a concurrent
+    `default.py` process changing addons.json at the same time.
+    """
+    descriptors = store.get_addons()
+    if not descriptors:
+        return
+
+    def _fetch(descriptor):
+        transport_url = descriptor.get('transportUrl')
+        if not transport_url:
+            return None
+        try:
+            return client.manifest(transport_url)
+        except AddonError as exc:
+            log('views._refresh_addon_manifests: %s failed: %r' % (transport_url, exc), xbmc.LOGWARNING)
+            return None
+
+    fetched = _map_addons(_fetch, descriptors)
+    refreshed = {}
+    for descriptor, manifest in zip(descriptors, fetched):
+        if manifest and manifest.get('id') and manifest != descriptor.get('manifest'):
+            refreshed[descriptor.get('transportUrl')] = manifest
+
+    if not refreshed:
+        return
+
+    def _apply(addons):
+        return [
+            dict(addon, manifest=refreshed[addon.get('transportUrl')])
+            if addon.get('transportUrl') in refreshed else addon
+            for addon in addons
+        ]
+
+    store.update_addons(_apply)
 
 
 

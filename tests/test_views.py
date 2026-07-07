@@ -81,6 +81,7 @@ class FakeStore:
         self.installed = []          # [(transport_url, manifest), ...]
         self.auth_set_calls = []     # [auth_dict_or_None, ...]
         self.addons_set_calls = []   # [[descriptor, ...], ...]
+        self.update_addons_calls = []  # [transform, ...]
 
     def get_addons(self):
         return self._addons
@@ -115,7 +116,11 @@ class FakeStore:
         `transform(current_addons)` and persist the result via set_addons -
         no actual concurrency/retry to simulate here (FakeStore is
         single-threaded, in-memory), just the same call shape callers rely
-        on (login()'s merge closure)."""
+        on (login()'s merge closure / views._refresh_addon_manifests).
+        Records each call in `update_addons_calls` so tests can prove a
+        write went through this CAS-safe path rather than a raw
+        `set_addons()`."""
+        self.update_addons_calls.append(transform)
         new_addons = transform(self._addons)
         self.set_addons(new_addons)
         return new_addons
@@ -124,10 +129,13 @@ class FakeStore:
 class FakeAddonClient:
     """Fake `lib.stremio.addons.AddonClient`. `catalog_result` is the
     single-addon default every existing catalog()/search() test relies
-    on; `catalog_results`/`stream_results`/`meta_results` (transport_url
-    -> list-or-Exception) let a test script different addons differently
-    - a dict value that is an Exception instance is raised instead of
-    returned, standing in for a network/manifest failure.
+    on; `catalog_results`/`stream_results`/`meta_results`/`manifest_results`
+    (transport_url -> value-or-Exception) let a test script different
+    addons differently - a dict value that is an Exception instance is
+    raised instead of returned, standing in for a network/manifest
+    failure. `manifest_result`/`manifest_error` remain as the single
+    catch-all default for `manifest()` when a transport_url has no entry
+    in `manifest_results`.
 
     `delays` (transport_url -> seconds) makes catalog()/streams()/meta()
     call time.sleep() before returning/raising, for tests proving the
@@ -138,13 +146,15 @@ class FakeAddonClient:
     """
 
     def __init__(self, catalog_result=None, stream_results=None, catalog_results=None,
-                 meta_results=None, manifest_result=None, manifest_error=None, delays=None):
+                 meta_results=None, manifest_result=None, manifest_error=None,
+                 manifest_results=None, delays=None):
         self._catalog_result = catalog_result if catalog_result is not None else []
         self._catalog_results = catalog_results or {}
         self._stream_results = stream_results or {}
         self._meta_results = meta_results or {}
         self._manifest_result = manifest_result
         self._manifest_error = manifest_error
+        self._manifest_results = manifest_results or {}
         self._delays = delays or {}
         self.manifest_calls = []
 
@@ -176,6 +186,11 @@ class FakeAddonClient:
 
     def manifest(self, url):
         self.manifest_calls.append(url)
+        if url in self._manifest_results:
+            result = self._manifest_results[url]
+            if isinstance(result, Exception):
+                raise result
+            return result
         if self._manifest_error is not None:
             raise self._manifest_error
         return self._manifest_result
@@ -1963,6 +1978,93 @@ def test_sync_addons_now_not_logged_in_notifies_login_prompt(load_views):
 
     assert api.addon_collection_set_calls == []
     assert ctx.env.notifications[-1][1] == 'STR30020'
+
+
+def test_refresh_addon_manifests_updates_changed_manifest_via_update_addons(load_views):
+    """A remote manifest that differs from the cached one is persisted
+    through Store.update_addons() (CAS-safe), never a raw set_addons()."""
+    ctx = load_views()
+    views = ctx.views
+    transport = 'https://a.example/manifest.json'
+    old_manifest = {'id': 'org.a', 'version': '1.0.0', 'catalogs': []}
+    new_manifest = {'id': 'org.a', 'version': '2.0.0', 'catalogs': [{'type': 'movie', 'id': 'top'}]}
+    descriptor = {'transportUrl': transport, 'manifest': old_manifest, 'flags': {}}
+    store = FakeStore(addons=[descriptor])
+    client = FakeAddonClient(manifest_results={transport: new_manifest})
+
+    views._refresh_addon_manifests(store, client)
+
+    assert store.get_addons()[0]['manifest'] == new_manifest
+    assert len(store.update_addons_calls) == 1
+
+
+def test_refresh_addon_manifests_keeps_cached_manifest_on_fetch_failure_and_continues(load_views):
+    """One addon's manifest fetch raising AddonError keeps its previous
+    cached manifest untouched and does not prevent the other installed
+    addons from being refreshed - same best-effort philosophy as
+    `_sync_addons_if_logged_in`. A descriptor missing `transportUrl`
+    entirely (malformed data) is skipped rather than blowing up the
+    whole refresh."""
+    ctx = load_views()
+    views = ctx.views
+    failing_transport = 'https://broken.example/manifest.json'
+    ok_transport = 'https://ok.example/manifest.json'
+    failing_manifest = {'id': 'org.broken', 'version': '1.0.0'}
+    old_ok_manifest = {'id': 'org.ok', 'version': '1.0.0'}
+    new_ok_manifest = {'id': 'org.ok', 'version': '1.1.0'}
+    failing_descriptor = {'transportUrl': failing_transport, 'manifest': failing_manifest, 'flags': {}}
+    ok_descriptor = {'transportUrl': ok_transport, 'manifest': old_ok_manifest, 'flags': {}}
+    no_transport_descriptor = {'manifest': {'id': 'org.malformed'}, 'flags': {}}
+    store = FakeStore(addons=[failing_descriptor, ok_descriptor, no_transport_descriptor])
+    client = FakeAddonClient(manifest_results={
+        failing_transport: AddonError('upstream timeout'),
+        ok_transport: new_ok_manifest,
+    })
+
+    views._refresh_addon_manifests(store, client)
+
+    addons_by_transport = {a.get('transportUrl'): a for a in store.get_addons()}
+    assert addons_by_transport[failing_transport]['manifest'] == failing_manifest
+    assert addons_by_transport[ok_transport]['manifest'] == new_ok_manifest
+    assert addons_by_transport[None]['manifest'] == {'id': 'org.malformed'}
+    assert set(client.manifest_calls) == {failing_transport, ok_transport}
+    assert len(store.update_addons_calls) == 1
+
+
+def test_sync_addons_now_refreshes_manifests_before_pushing_to_account(load_views):
+    """sync_addons_now() must refresh installed addons' cached manifests
+    before pushing the (now up-to-date) local collection to the account -
+    otherwise a freshly-changed remote manifest wouldn't make it into the
+    same sync run that triggered the refresh."""
+    ctx = load_views()
+    views = ctx.views
+    auth = {'authKey': 'abc123'}
+    transport = 'https://a.example/manifest.json'
+    descriptor = {'transportUrl': transport, 'manifest': {'id': 'org.a', 'version': '1.0.0'}, 'flags': {}}
+    store = FakeStore(addons=[descriptor], auth=auth)
+    new_manifest = {'id': 'org.a', 'version': '2.0.0'}
+    calls = []
+
+    class TrackingClient(FakeAddonClient):
+        def manifest(self, url):
+            calls.append('manifest')
+            return super().manifest(url)
+
+    class TrackingAPI(FakeStremioAPI):
+        def addon_collection_set(self, auth_key, addons):
+            calls.append('push')
+            return super().addon_collection_set(auth_key, addons)
+
+    client = TrackingClient(manifest_results={transport: new_manifest})
+    api = TrackingAPI()
+    _wire_data_layer(views, store, client)
+    _wire_api(views, api)
+
+    views.sync_addons_now()
+
+    assert calls == ['manifest', 'push']
+    # the push must see the freshly-refreshed manifest, not the stale one
+    assert api.addon_collection_set_calls[0][1][0]['manifest'] == new_manifest
 
 def test_logout_without_auth_is_a_noop(load_views):
     ctx = load_views()
