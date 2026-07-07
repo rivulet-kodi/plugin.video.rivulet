@@ -12,6 +12,17 @@ JSON files live under ``data_dir``:
 Writes are atomic (write to a temp file, then ``os.replace``) so a crash or
 power loss never leaves a half-written JSON file behind. A corrupt file on
 read is tolerated and treated the same as a missing one.
+
+Kodi can run multiple ``default.py`` OS processes concurrently (e.g. the
+user keeps navigating while a slow addon-install action is still
+mid-flight), so a naive read-modify-write on addons.json can silently
+lose whichever process's write happens first. :meth:`Store.update_addons`
+(used by :meth:`Store.install_addon`/:meth:`Store.remove_addon`) guards
+against this with a portable optimistic-concurrency/compare-and-swap
+retry -- no ``fcntl``/``msvcrt`` OS-specific locking, since this addon
+also runs on Windows and Android. ``auth.json`` has no such
+read-modify-write pattern (every write either replaces it wholesale or
+clears it), so it does not need this.
 """
 
 import json
@@ -663,15 +674,49 @@ def _atomic_write(path, data):
         raise
 
 
-def _read_json(path, default):
-    """Read JSON from ``path``, tolerating a missing or corrupt file."""
-    if not os.path.isfile(path):
-        return default
+def _read_raw(path):
+    """Return the exact on-disk text of ``path``, or ``None`` if it is
+    missing or unreadable.
+
+    Reading the raw text once and parsing that exact string (rather than
+    reading the file twice) guarantees a parsed value and its before/after
+    fingerprint always describe identical bytes -- which
+    ``Store.update_addons`` relies on to tell a concurrent writer's change
+    apart from its own read.
+    """
     try:
         with open(path) as fh:
-            return json.load(fh)
-    except (ValueError, OSError):
+            return fh.read()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _parse_json(raw, default):
+    """Parse ``raw`` JSON text, tolerating ``None`` or corrupt content."""
+    if raw is None:
         return default
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return default
+
+
+def _read_json(path, default):
+    """Read JSON from ``path``, tolerating a missing or corrupt file."""
+    return _parse_json(_read_raw(path), default)
+
+
+class ConcurrentUpdateError(RuntimeError):
+    """Raised when a JSON store file keeps changing underneath a retried
+    read-modify-write update.
+
+    Kodi can invoke ``default.py`` as separate concurrent OS processes
+    (e.g. the user navigates again while an addon-install ``RunPlugin``
+    action is still mid-flight); if two such processes race to update the
+    same file, :meth:`Store.update_addons` raises this after exhausting
+    its retries instead of silently discarding whichever write happened
+    first.
+    """
 
 
 class Store:
@@ -701,37 +746,107 @@ class Store:
     def set_addons(self, addons):
         _atomic_write(self._addons_path, list(addons))
 
+    def update_addons(self, transform, max_attempts=3):
+        """Safely read-modify-write the addon list against concurrent writers.
+
+        Kodi can run ``default.py`` as separate concurrent OS processes, so
+        a plain ``get_addons()`` + mutate + ``set_addons()`` sequence can
+        silently lose whichever write happens first if two processes
+        interleave (last-writer-wins, no detection). This instead:
+
+        1. Reads addons.json fresh (seeding :data:`DEFAULT_ADDONS` if it is
+           missing/corrupt, same as :meth:`get_addons`).
+        2. Calls ``transform(current_addons)``, which must return the new
+           list to persist -- or ``current_addons`` itself/an equal list to
+           mean "no change needed", in which case nothing is written.
+        3. Immediately before the atomic replace, re-reads the raw file and
+           compares it byte-for-byte to what was read in step 1. If it
+           still matches, writes; if it changed -- another process won the
+           race -- retries the whole cycle from step 1 against the new
+           content it left behind, up to ``max_attempts`` times.
+
+        ``transform`` must not mutate ``current_addons`` in place -- return
+        a new list (or the exact same object, completely unchanged) so the
+        "did anything change" comparison above stays meaningful.
+
+        This is optimistic-concurrency/compare-and-swap, not an OS lock: it
+        needs no platform-specific API (``fcntl``/``msvcrt``), which matters
+        because this addon runs on Linux, Windows, Android and macOS. The
+        trade-off is a small residual race between the final compare and
+        the rename, but that shrinks the original window -- the entire
+        read..transform..write cycle, which for a caller like
+        :meth:`install_addon` includes a network fetch -- down to a few
+        in-process microseconds around an already-atomic ``os.replace``.
+
+        Raises :class:`ConcurrentUpdateError` if every attempt collides.
+        Any exception raised by ``transform`` itself (e.g. the
+        protected-addon refusal in :meth:`remove_addon`) propagates
+        immediately, without retrying.
+        """
+        attempt = 0
+        while True:
+            attempt += 1
+            baseline_raw = _read_raw(self._addons_path)
+            current = _parse_json(baseline_raw, None)
+            if not isinstance(current, list):
+                current = [dict(addon) for addon in DEFAULT_ADDONS]
+            new_value = transform(current)
+            if new_value == current and baseline_raw is not None:
+                return current
+            if _read_raw(self._addons_path) == baseline_raw:
+                self.set_addons(new_value)
+                return new_value
+            if attempt >= max_attempts:
+                raise ConcurrentUpdateError(
+                    "could not update %s after %d attempts: another "
+                    "process kept writing it concurrently"
+                    % (ADDONS_FILENAME, max_attempts)
+                )
+            # Another process changed addons.json since our read above;
+            # loop around and retry the whole read+transform against the
+            # fresh content it left behind.
+
     def install_addon(self, transport_url, manifest):
-        """Add or replace the addon descriptor for ``transport_url``."""
-        addons = [
-            addon
-            for addon in self.get_addons()
-            if addon.get("transportUrl") != transport_url
-        ]
-        addons.append(
-            {"transportUrl": transport_url, "manifest": manifest, "flags": {}}
-        )
-        self.set_addons(addons)
+        """Add or replace the addon descriptor for ``transport_url``.
+
+        Safe against a concurrent ``default.py`` process modifying
+        addons.json at the same time -- see :meth:`update_addons`.
+        """
+        def _install(addons):
+            filtered = [
+                addon
+                for addon in addons
+                if addon.get("transportUrl") != transport_url
+            ]
+            filtered.append(
+                {"transportUrl": transport_url, "manifest": manifest, "flags": {}}
+            )
+            return filtered
+
+        self.update_addons(_install)
 
     def remove_addon(self, transport_url):
         """Remove the addon descriptor for ``transport_url``.
 
         Raises :class:`ValueError` if the addon is flagged ``protected``
         (the built-in official addons); no-ops if it is not installed.
+
+        Safe against a concurrent ``default.py`` process modifying
+        addons.json at the same time -- see :meth:`update_addons`.
         """
-        addons = self.get_addons()
-        target = next(
-            (a for a in addons if a.get("transportUrl") == transport_url), None
-        )
-        if target is None:
-            return
-        if target.get("flags", {}).get("protected"):
-            raise ValueError(
-                "cannot remove protected addon: %s" % transport_url
+        def _remove(addons):
+            target = next(
+                (a for a in addons if a.get("transportUrl") == transport_url), None
             )
-        self.set_addons(
-            [a for a in addons if a.get("transportUrl") != transport_url]
-        )
+            if target is None:
+                return addons
+            if target.get("flags", {}).get("protected"):
+                raise ValueError(
+                    "cannot remove protected addon: %s" % transport_url
+                )
+            return [a for a in addons if a.get("transportUrl") != transport_url]
+
+        self.update_addons(_remove)
 
     # -- auth --------------------------------------------------------------
 
@@ -741,7 +856,14 @@ class Store:
         return auth if isinstance(auth, dict) else None
 
     def set_auth(self, auth):
-        """Persist the auth state, or clear it when ``auth`` is ``None``."""
+        """Persist the auth state, or clear it when ``auth`` is ``None``.
+
+        Unlike the addons list, auth.json is never read-modify-written --
+        every caller either replaces it wholesale with a fresh login result
+        or clears it on logout -- so there is no lost-update race to guard
+        against here and no need for :meth:`Store.update_addons`-style
+        compare-and-swap retries.
+        """
         if auth is None:
             try:
                 os.remove(self._auth_path)
