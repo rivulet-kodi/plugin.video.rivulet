@@ -324,9 +324,18 @@ def test_install_binary_finds_binary_nested_in_a_safe_subdirectory(tmp_path, mon
     _set_platform(monkeypatch, "Linux", "x86_64")
     binary_content = b"nested-binary"
     archive_bytes = _make_tar_gz({"dist/stremio-server": binary_content})
-    release = {"assets": [_asset("stremio-server_Linux_x86_64.tar.gz", len(archive_bytes))]}
+    asset_name = "stremio-server_Linux_x86_64.tar.gz"
+    correct_checksum = hashlib.sha256(archive_bytes).hexdigest()
+    release = {
+        "assets": [
+            _asset(asset_name, len(archive_bytes)),
+            _asset("checksums.txt", 0),
+        ],
+    }
+    checksums_text = "%s  %s\n" % (correct_checksum, asset_name)
 
     fake_requests.queue_get(_json_response(release))
+    fake_requests.queue_get(_text_response(checksums_text))
     fake_requests.queue_get(_StreamResponse(archive_bytes))
 
     result_path = install_binary(str(tmp_path))
@@ -359,12 +368,67 @@ def test_install_binary_checksum_mismatch_raises_download_error(tmp_path, monkey
     assert not (tmp_path / "stremio-server").exists()
 
 
+def test_install_binary_raises_download_error_when_checksums_asset_missing(
+        tmp_path, monkeypatch, fake_requests):
+    """A release that omits checksums.txt entirely must fail closed instead
+    of silently installing an unverified binary."""
+    _set_platform(monkeypatch, "Linux", "x86_64")
+    asset_name = "stremio-server_Linux_x86_64.tar.gz"
+    release = {"assets": [_asset(asset_name, 123)]}
+
+    fake_requests.queue_get(_json_response(release))
+
+    with pytest.raises(DownloadError, match="missing checksums"):
+        install_binary(str(tmp_path))
+
+    # No archive download (or anything else) should have been attempted.
+    assert len(fake_requests.calls) == 1
+    assert not (tmp_path / "stremio-server").exists()
+    assert not (tmp_path / ".stremio-server.part").exists()
+
+
+def test_install_binary_raises_download_error_when_asset_not_listed_in_checksums(
+        tmp_path, monkeypatch, fake_requests):
+    """checksums.txt exists but doesn't mention this platform's asset -- also
+    a fail-closed refusal, not a silent unverified install."""
+    _set_platform(monkeypatch, "Linux", "x86_64")
+    asset_name = "stremio-server_Linux_x86_64.tar.gz"
+    release = {
+        "assets": [
+            _asset(asset_name, 123),
+            _asset("checksums.txt", 0),
+        ],
+    }
+    # Lists a checksum for a different asset only.
+    checksums_text = "%s  %s\n" % ("a" * 64, "stremio-server_Darwin_arm64.tar.gz")
+
+    fake_requests.queue_get(_json_response(release))
+    fake_requests.queue_get(_text_response(checksums_text))
+
+    with pytest.raises(DownloadError, match="does not list a checksum"):
+        install_binary(str(tmp_path))
+
+    # No archive download should have been attempted.
+    assert len(fake_requests.calls) == 2
+    assert not (tmp_path / "stremio-server").exists()
+    assert not (tmp_path / ".stremio-server.part").exists()
+
+
 def test_install_binary_rejects_path_traversal_member_names(tmp_path, monkeypatch, fake_requests):
     _set_platform(monkeypatch, "Linux", "x86_64")
     archive_bytes = _make_tar_gz({"../stremio-server": b"malicious-payload"})
-    release = {"assets": [_asset("stremio-server_Linux_x86_64.tar.gz", len(archive_bytes))]}
+    asset_name = "stremio-server_Linux_x86_64.tar.gz"
+    correct_checksum = hashlib.sha256(archive_bytes).hexdigest()
+    release = {
+        "assets": [
+            _asset(asset_name, len(archive_bytes)),
+            _asset("checksums.txt", 0),
+        ],
+    }
+    checksums_text = "%s  %s\n" % (correct_checksum, asset_name)
 
     fake_requests.queue_get(_json_response(release))
+    fake_requests.queue_get(_text_response(checksums_text))
     fake_requests.queue_get(_StreamResponse(archive_bytes))
 
     with pytest.raises(DownloadError, match="missing"):
@@ -391,9 +455,18 @@ def test_install_binary_progress_cb_exception_aborts_and_cleans_up_partial_file(
         tmp_path, monkeypatch, fake_requests):
     _set_platform(monkeypatch, "Linux", "x86_64")
     archive_bytes = _make_tar_gz({"stremio-server": b"some-bytes"})
-    release = {"assets": [_asset("stremio-server_Linux_x86_64.tar.gz", len(archive_bytes))]}
+    asset_name = "stremio-server_Linux_x86_64.tar.gz"
+    correct_checksum = hashlib.sha256(archive_bytes).hexdigest()
+    release = {
+        "assets": [
+            _asset(asset_name, len(archive_bytes)),
+            _asset("checksums.txt", 0),
+        ],
+    }
+    checksums_text = "%s  %s\n" % (correct_checksum, asset_name)
 
     fake_requests.queue_get(_json_response(release))
+    fake_requests.queue_get(_text_response(checksums_text))
     fake_requests.queue_get(_StreamResponse(archive_bytes))
 
     def cancel(done, total):

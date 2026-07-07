@@ -233,6 +233,14 @@ def install_binary(dest_dir, progress_cb=None):
     `progress_cb(done_bytes, total_bytes)` is called for every chunk written
     during the archive download (total_bytes is None if unknown); it may
     raise (e.g. DownloadError on user cancel) to abort the download cleanly.
+
+    Checksum verification against the release's checksums.txt asset is
+    mandatory: a release missing checksums.txt, or whose checksums.txt does
+    not list this platform's asset, is refused rather than installed
+    unverified -- otherwise a compromised release (hijacked CI/CD,
+    compromised maintainer credentials, or a malicious fork a user was
+    tricked into pointing at) could ship a backdoored binary that installs,
+    and later runs, with no integrity check at all.
     Raises DownloadError (or its NoAssetError subclass) on any failure.
     """
     os_name, arch = platform_key()
@@ -246,10 +254,16 @@ def install_binary(dest_dir, progress_cb=None):
     if not download_url:
         raise DownloadError("release asset %r has no download URL" % asset_name)
 
-    expected_sha256 = None
     checksums_asset = _find_checksums_asset(release)
-    if checksums_asset is not None:
-        expected_sha256 = _lookup_checksum(checksums_asset, asset_name)
+    if checksums_asset is None:
+        raise DownloadError(
+            "release is missing %s; refusing to install an unverified binary"
+            % CHECKSUMS_ASSET_NAME)
+    expected_sha256 = _lookup_checksum(checksums_asset, asset_name)
+    if not expected_sha256:
+        raise DownloadError(
+            "%s does not list a checksum for %s; refusing to install an "
+            "unverified binary" % (CHECKSUMS_ASSET_NAME, asset_name))
 
     os.makedirs(dest_dir, exist_ok=True)
     archive_path = os.path.join(dest_dir, ".stremio-server" + PART_SUFFIX)
@@ -257,7 +271,7 @@ def install_binary(dest_dir, progress_cb=None):
     try:
         digest = _download_to_file(download_url, archive_path, progress_cb, asset.get("size"))
 
-        if expected_sha256 and digest.lower() != expected_sha256.lower():
+        if digest.lower() != expected_sha256.lower():
             raise DownloadError("checksum mismatch for %s" % asset_name)
 
         target_name = _target_member_name(os_name)
