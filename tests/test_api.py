@@ -7,6 +7,7 @@ Request/response shapes cross-checked against stremio-core auth unit tests.
 No network access - `fake_requests` patches the real `requests.post`.
 """
 import pytest
+import requests
 
 from lib.stremio.api import ApiError, StremioAPI
 
@@ -50,13 +51,46 @@ def test_login_error_envelope_raises_api_error(fake_requests):
     with pytest.raises(ApiError) as excinfo:
         api.login("a@b.com", "wrong")
     assert "User not found" in str(excinfo.value)
+    # A 200-OK JSON error envelope carries no HTTP-status signal -- the
+    # undocumented numeric `code` must never be treated as an auth signal.
+    assert excinfo.value.status_code is None
+    assert excinfo.value.is_auth_error is False
 
 
 def test_login_http_error_status_raises_api_error(fake_requests):
     fake_requests.queue_post(_http_error(500))
     api = make_api()
-    with pytest.raises(ApiError):
+    with pytest.raises(ApiError) as excinfo:
         api.login("a@b.com", "hunter2")
+    assert excinfo.value.status_code == 500
+    assert excinfo.value.is_auth_error is False
+
+
+def test_login_http_error_401_sets_status_code_and_is_auth_error(fake_requests):
+    fake_requests.queue_post(_http_error(401))
+    api = make_api()
+    with pytest.raises(ApiError) as excinfo:
+        api.login("a@b.com", "hunter2")
+    assert excinfo.value.status_code == 401
+    assert excinfo.value.is_auth_error is True
+
+
+def test_login_http_error_403_sets_status_code_and_is_auth_error(fake_requests):
+    fake_requests.queue_post(_http_error(403))
+    api = make_api()
+    with pytest.raises(ApiError) as excinfo:
+        api.login("a@b.com", "hunter2")
+    assert excinfo.value.status_code == 403
+    assert excinfo.value.is_auth_error is True
+
+
+def test_connection_failure_has_no_status_code_and_is_not_auth_error(fake_requests):
+    fake_requests.queue_post(requests.exceptions.ConnectionError("connection refused"))
+    api = make_api()
+    with pytest.raises(ApiError) as excinfo:
+        api.login("a@b.com", "hunter2")
+    assert excinfo.value.status_code is None
+    assert excinfo.value.is_auth_error is False
 
 
 # --- logout ------------------------------------------------------------

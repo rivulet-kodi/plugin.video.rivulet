@@ -748,7 +748,14 @@ def _sync_addons_if_logged_in(store, notify_success=False):
     Never blocks or fails the local install/remove/login that triggered
     it. Returns True on a successful push (or when there is nothing to
     do because the user isn't logged in and `notify_success` is False),
-    False on failure."""
+    False on failure.
+
+    A failure whose `ApiError.is_auth_error` is true (401/403 - the
+    authKey itself was invalidated server-side, not a transient blip)
+    additionally clears the stored auth via `store.set_auth(None)`, since
+    retrying the same dead key can never succeed; the next user-facing
+    screen (Library, Addons, Settings > Account) then correctly shows
+    "not logged in" instead of repeating this failure forever."""
     auth = store.get_auth()
     if not auth:
         if notify_success:
@@ -758,6 +765,15 @@ def _sync_addons_if_logged_in(store, notify_success=False):
         StremioAPI().addon_collection_set(auth.get('authKey'), store.get_addons())
     except ApiError as exc:
         log('views._sync_addons_if_logged_in: %r' % (exc,), xbmc.LOGERROR)
+        if exc.is_auth_error:
+            # Clear the dead authKey so the next user-facing screen (Library,
+            # Addons, Settings > Account) shows "not logged in" instead of
+            # retrying the same bad token forever. Reuse the existing
+            # generic failure notification below rather than library()'s
+            # dedicated re-login prompt: this also runs from background
+            # install/remove/login paths, where a "session expired" popup
+            # would be out of context.
+            store.set_auth(None)
         notify(L(30035))
         return False
     if notify_success:
@@ -967,6 +983,9 @@ def library():
             entries = StremioAPI().datastore_get(auth.get('authKey'), collection='libraryItem', all=True)
         except ApiError as exc:
             log('views.library: datastore_get failed: %r' % (exc,), xbmc.LOGERROR)
+            if exc.is_auth_error:
+                store.set_auth(None)
+                notify(L(30085))
             entries = []
         for entry in entries or []:
             if entry.get('removed'):

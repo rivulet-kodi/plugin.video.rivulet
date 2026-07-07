@@ -23,12 +23,31 @@ class ApiError(Exception):
     Covers both explicit ``{"error": ...}`` responses from the server and
     network-level failures (timeout, connection refused, malformed JSON),
     so callers only ever need to catch one exception type.
+
+    ``status_code`` carries the HTTP status of the response that triggered
+    ``response.raise_for_status()`` (e.g. 401/403 for an ``authKey`` that
+    was invalidated server-side). It's ``None`` for connection-level
+    failures (timeout, DNS, refused) and for JSON-decode errors, neither of
+    which has an HTTP response to read a status from. The JSON error
+    envelope's own ``code`` field is a raw, undocumented ``u64`` on the
+    wire (see module docstring) and is deliberately NOT folded into
+    ``status_code``/``is_auth_error`` below.
     """
 
-    def __init__(self, message, code=None):
+    def __init__(self, message, code=None, status_code=None):
         super().__init__(message)
         self.message = message
         self.code = code
+        self.status_code = status_code
+
+    @property
+    def is_auth_error(self):
+        """True when the HTTP status says the ``authKey`` itself is no
+        longer valid (401 Unauthorized / 403 Forbidden) rather than a
+        transient network/server problem -- the conventional REST signal
+        for "this credential is no longer valid", regardless of the JSON
+        body's own (undocumented) error scheme."""
+        return self.status_code in (401, 403)
 
 
 class StremioAPI:
@@ -47,7 +66,8 @@ class StremioAPI:
             response.raise_for_status()
             data = response.json()
         except requests.exceptions.RequestException as exc:
-            raise ApiError(str(exc))
+            status_code = exc.response.status_code if exc.response is not None else None
+            raise ApiError(str(exc), status_code=status_code)
         except ValueError as exc:
             raise ApiError("invalid API response: %s" % exc)
 

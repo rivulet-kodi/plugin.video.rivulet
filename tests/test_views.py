@@ -2156,13 +2156,79 @@ def test_library_datastore_error_yields_empty_listing(load_views):
     ctx = load_views()
     views = ctx.views
     auth = {'authKey': 'abc'}
-    _wire_data_layer(views, FakeStore(auth=auth), FakeAddonClient())
+    store = FakeStore(auth=auth)
+    _wire_data_layer(views, store, FakeAddonClient())
     _wire_api(views, FakeStremioAPI(datastore_error=ApiError('down')))
 
     views.library()
 
     assert ctx.env.directory_items[-1]['items'] == []
     assert any('down' in msg for msg, _level in ctx.env.log_calls)
+    # A generic/network failure is transient - it must never log the user
+    # out from under them.
+    assert store.auth_set_calls == []
+
+
+def test_library_auth_error_clears_auth_and_notifies_relogin(load_views):
+    """A 401/403 from datastore_get() means the stored authKey itself is
+    dead (password changed / logged in elsewhere / server-side expiry) -
+    library() must clear it and tell the user to log back in, not just
+    silently degrade to an empty listing forever."""
+    ctx = load_views()
+    views = ctx.views
+    auth = {'authKey': 'abc'}
+    store = FakeStore(auth=auth)
+    _wire_data_layer(views, store, FakeAddonClient())
+    _wire_api(views, FakeStremioAPI(datastore_error=ApiError('unauthorized', status_code=401)))
+
+    views.library()
+
+    assert ctx.env.directory_items[-1]['items'] == []
+    assert store.auth_set_calls == [None]
+    assert ctx.env.notifications[-1][1] == 'STR30085'
+
+
+# ---------------------------------------------------------------------------
+# _sync_addons_if_logged_in() - auth-error handling
+# ---------------------------------------------------------------------------
+
+
+def test_sync_addons_if_logged_in_auth_error_clears_stale_auth(load_views):
+    """Same 401/403 detection as library(), but this path also runs from
+    background install/remove/login flows - it clears the dead authKey (so
+    the next screen shows "not logged in") without popping a dedicated
+    re-login prompt of its own; the existing generic sync-failed
+    notification already covers surfacing the failure."""
+    ctx = load_views()
+    views = ctx.views
+    auth = {'authKey': 'abc123'}
+    store = FakeStore(addons=[{'transportUrl': 't1', 'flags': {}}], auth=auth)
+    api = FakeStremioAPI(addon_collection_set_error=ApiError('forbidden', status_code=403))
+    _wire_data_layer(views, store, FakeAddonClient())
+    _wire_api(views, api)
+
+    result = views._sync_addons_if_logged_in(store)
+
+    assert result is False
+    assert store.auth_set_calls == [None]
+    assert ctx.env.notifications[-1][1] == 'STR30035'
+
+
+def test_sync_addons_if_logged_in_generic_error_does_not_clear_auth(load_views):
+    """A transient/network failure must not log the user out."""
+    ctx = load_views()
+    views = ctx.views
+    auth = {'authKey': 'abc123'}
+    store = FakeStore(addons=[{'transportUrl': 't1', 'flags': {}}], auth=auth)
+    api = FakeStremioAPI(addon_collection_set_error=ApiError('sync down'))
+    _wire_data_layer(views, store, FakeAddonClient())
+    _wire_api(views, api)
+
+    result = views._sync_addons_if_logged_in(store)
+
+    assert result is False
+    assert store.auth_set_calls == []
+    assert ctx.env.notifications[-1][1] == 'STR30035'
 
 
 # ---------------------------------------------------------------------------

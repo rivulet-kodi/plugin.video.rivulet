@@ -239,3 +239,7 @@ msgstr ""
 msgctxt "#30084"
 msgid "No peers available for this stream"
 msgstr ""
+
+msgctxt "#30085"
+msgid "Session expired - please log in again"
+msgstr ""
