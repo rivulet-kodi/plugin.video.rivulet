@@ -404,6 +404,43 @@ def test_open_showcase_resolves_addon_path_and_delegates_to_start(load_infowindo
     assert result == metas[0]
 
 
+def test_open_showcase_closes_the_window_exactly_once_and_reraises_when_start_raises(
+    load_infowindow, monkeypatch,
+):
+    ctx = load_infowindow(addon_info={'path': '/addon/path'})
+    infowindow = ctx.infowindow
+    metas = [_make_meta('tt1', 'One')]
+    captured = {}
+
+    class ExplodingWindow(infowindow.ShowcaseWindow):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.close_calls = 0
+            captured['window'] = self
+
+        def close(self):
+            self.close_calls += 1
+            super().close()
+
+        def start(self, passed_metas):
+            # Stands in for a crash inside onInit()/onAction() while the
+            # modal loop is running - self.close() (the window's own,
+            # normal-path close) never gets a chance to run. Every caller
+            # (catalogpicker._open_catalog, searchwindow.open_search,
+            # views.showcase/search) already wraps open_showcase() in its
+            # own try/except, so the exception must keep propagating here.
+            raise RuntimeError('coverflow blew up')
+
+    monkeypatch.setattr(infowindow, 'ShowcaseWindow', ExplodingWindow)
+
+    with pytest.raises(RuntimeError, match='coverflow blew up'):
+        infowindow.open_showcase(metas)
+
+    win = captured['window']
+    assert win.close_calls == 1
+    assert win.closed is True
+
+
 def test_open_showcase_with_empty_metas_returns_none(load_infowindow):
     ctx = load_infowindow(addon_info={'path': '/addon/path'})
     assert ctx.infowindow.open_showcase([]) is None

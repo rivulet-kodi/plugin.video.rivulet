@@ -138,12 +138,31 @@ _ACTIONS = {
 
 
 def open_home():
-    """Build and run the HomeWindow modal; blocks until the user exits."""
+    """Build and run the HomeWindow modal; blocks until the user exits.
+
+    default.py wraps this call in its own try/except and falls back to the
+    classical home directory on ANY exception, so an exception raised here
+    must keep propagating unchanged - this only logs it for diagnostics and
+    guarantees the window is closed (it may not have had a chance to
+    self-close, e.g. if onInit() or doModal() itself raised) before
+    re-raising."""
     import xbmc
 
     from lib.ui.compat import log
 
     log('homewindow: opening HomeWindow', xbmc.LOGINFO)
     win = open_window(HomeWindow, 'HomeWindow.xml')
-    win.doModal()
+    try:
+        win.doModal()
+    except Exception as exc:  # default.py's caller falls back to classical home
+        log('homewindow: HomeWindow failed: %r' % (exc,), xbmc.LOGERROR)
+        raise
+    finally:
+        # A normal return means HomeWindow already closed itself; close()
+        # again here is a safe no-op. Only a raised exception makes this
+        # the window's one chance to close.
+        try:
+            win.close()
+        except Exception:
+            pass
     log('homewindow: HomeWindow closed', xbmc.LOGINFO)

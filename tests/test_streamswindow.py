@@ -349,6 +349,45 @@ def test_open_streams_filters_unsupported_addons_and_forwards_aggregate_to_the_w
     assert result is True
 
 
+def test_open_streams_window_is_closed_exactly_once_when_start_raises(load_streamswindow, monkeypatch):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    supported = {
+        'transportUrl': 't-supported',
+        'manifest': {'name': 'Supported', 'resources': ['stream'], 'types': ['movie']},
+    }
+    stream = {'url': 'https://a.example/a.mp4'}
+    client = _FakeAddonClient({'t-supported': [stream]})
+    _wire_data_layer(sw, _FakeStore(addons=[supported]), client)
+    captured = {}
+
+    class ExplodingWindow(sw.StreamsWindow):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.close_calls = 0
+            captured['window'] = self
+
+        def close(self):
+            self.close_calls += 1
+            super().close()
+
+        def start(self, pairs, stype, sid, poster=None):
+            # Stands in for a crash inside onInit()/onAction() while the
+            # modal loop is running - self.close() (the window's own,
+            # normal-path close) never gets a chance to run.
+            raise RuntimeError('onInit blew up')
+
+    monkeypatch.setattr(sw, 'StreamsWindow', ExplodingWindow)
+
+    result = sw.open_streams('movie', 'tt1')
+
+    assert result is False
+    win = captured['window']
+    assert win.close_calls == 1
+    assert win.closed is True
+    assert ctx.env.notifications == [('Rivulet', 'STR30032', 'info', 4000)]
+
+
 def test_open_streams_addonerror_is_logged_and_skipped_not_fatal(load_streamswindow, monkeypatch):
     ctx = load_streamswindow()
     sw = ctx.streamswindow

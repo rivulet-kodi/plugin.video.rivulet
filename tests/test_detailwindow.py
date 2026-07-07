@@ -384,6 +384,41 @@ def test_open_detail_series_builds_window_against_skin_path_and_starts_with_the_
     assert captured['start_args'] == (meta, 'series')
 
 
+def test_open_detail_series_window_is_closed_exactly_once_when_start_raises(
+    load_detailwindow, monkeypatch,
+):
+    ctx = load_detailwindow(addon_info={'path': '/addon/path'})
+    meta = {'id': 'tt1', 'name': 'One', 'videos': [{'id': 'v1', 'season': 1, 'episode': 1}]}
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: meta)
+    captured = {}
+
+    class ExplodingWindow(ctx.detailwindow.DetailWindow):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.close_calls = 0
+            captured['window'] = self
+
+        def close(self):
+            self.close_calls += 1
+            super().close()
+
+        def start(self, meta_obj, stype):
+            # Stands in for a crash inside onInit()/onAction() while the
+            # modal loop is running - self.close() (the window's own,
+            # normal-path close) never gets a chance to run.
+            raise RuntimeError('onInit blew up')
+
+    monkeypatch.setattr(ctx.detailwindow, 'DetailWindow', ExplodingWindow)
+
+    result = ctx.detailwindow.open_detail('series', 'tt1')
+
+    assert result is False
+    win = captured['window']
+    assert win.close_calls == 1
+    assert win.closed is True
+    assert ctx.env.notifications == [('Rivulet', 'STR30032', 'info', 4000)]
+
+
 def test_open_detail_movie_success_wraps_the_fetch_in_a_busy_dialog(
     load_detailwindow, monkeypatch,
 ):

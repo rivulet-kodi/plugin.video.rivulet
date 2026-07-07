@@ -120,6 +120,7 @@ def open_streams(stype, sid, poster=None):
     pairs = streaminfo.sort_streams(pairs, key=sort_key)
 
     log('streamswindow: opening StreamsWindow (%d streams)' % len(pairs), xbmc.LOGINFO)
+    win = None
     try:
         win = open_window(StreamsWindow, 'StreamsWindow.xml')
         return win.start(pairs, stype, sid, poster=poster)
@@ -127,3 +128,15 @@ def open_streams(stype, sid, poster=None):
         log('streamswindow: window failed to open: %r' % (exc,), xbmc.LOGERROR)
         notify(L(30032))
         return False
+    finally:
+        # A normal return means StreamsWindow already closed itself (its
+        # own onAction/onClick calls self.close()) before .start() returned
+        # - but an exception raised from WITHIN .start() (onInit(), or a
+        # callback mid-doModal()) skips that self-close entirely. Close
+        # unconditionally here so no exit path leaves a zombie modal
+        # window behind; closing an already-closed window is a safe no-op.
+        if win is not None:
+            try:
+                win.close()
+            except Exception:
+                pass

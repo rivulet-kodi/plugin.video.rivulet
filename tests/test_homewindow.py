@@ -363,3 +363,38 @@ def test_open_home_builds_the_window_against_the_skin_path_and_blocks_on_domodal
 
     assert captured['init_args'] == ('HomeWindow.xml', '/addon/path', 'Default', '720p')
     assert captured['instance'].modal_calls == 1
+
+
+def test_open_home_closes_the_window_exactly_once_and_reraises_when_domodal_raises(
+    load_homewindow, monkeypatch,
+):
+    ctx = load_homewindow(addon_info={'path': '/addon/path'})
+    captured = {}
+
+    class ExplodingWindow(ctx.homewindow.HomeWindow):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.close_calls = 0
+            captured['window'] = self
+
+        def close(self):
+            self.close_calls += 1
+            super().close()
+
+        def doModal(self):
+            # Stands in for a crash inside onInit() while the modal loop is
+            # running - self.close() (the window's own, normal-path close)
+            # never gets a chance to run.
+            raise RuntimeError('onInit blew up')
+
+    monkeypatch.setattr(ctx.homewindow, 'HomeWindow', ExplodingWindow)
+
+    # default.py wraps open_home() itself and falls back to the classical
+    # home directory on ANY exception - that contract requires the
+    # exception to keep propagating unchanged, not be swallowed here.
+    with pytest.raises(RuntimeError, match='onInit blew up'):
+        ctx.homewindow.open_home()
+
+    win = captured['window']
+    assert win.close_calls == 1
+    assert win.closed is True

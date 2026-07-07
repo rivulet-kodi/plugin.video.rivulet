@@ -110,8 +110,19 @@ class ShowcaseWindow(xbmcgui.WindowXMLDialog):
 def open_showcase(metas):
     """Build and run a ShowcaseWindow over `metas`; returns the selected
     meta dict, or None if the user closed the overlay without picking one
-    (or `metas` was empty)."""
+    (or `metas` was empty). Every caller already wraps this call in its own
+    try/except (catalogpicker._open_catalog, searchwindow.open_search,
+    views.showcase/search) and logs+notifies on failure, so an exception
+    from .start() keeps propagating unchanged here - this only guarantees
+    the window is closed first (it may not have had a chance to self-close,
+    e.g. if onInit() or a mid-modal callback raised)."""
     from lib.ui.compat import ADDON
     path = ADDON.getAddonInfo('path')
     win = ShowcaseWindow('ShowcaseWindow.xml', path, 'Default', '720p')
-    return win.start(metas)
+    try:
+        return win.start(metas)
+    finally:
+        try:
+            win.close()
+        except Exception:
+            pass

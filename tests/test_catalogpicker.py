@@ -413,3 +413,41 @@ def test_open_catalog_picker_opens_window_with_discovered_catalogs(load_catalogp
     assert captured['catalogs'] == [
         ('https://a.example/manifest.json', descriptor['manifest'], {'id': 'top', 'type': 'movie'}),
     ]
+
+
+def test_open_catalog_picker_window_is_closed_exactly_once_when_start_raises(
+    load_catalogpicker, monkeypatch,
+):
+    ctx = load_catalogpicker(addon_info={'path': '/addon/path'})
+    descriptor = {
+        'transportUrl': 'https://a.example/manifest.json',
+        'manifest': {'name': 'Addon A', 'catalogs': [{'id': 'top', 'type': 'movie'}]},
+    }
+    monkeypatch.setattr(store_module, 'Store', lambda *a, **k: _FakeStore(addons=[descriptor]))
+    captured = {}
+
+    class ExplodingWindow(ctx.catalogpicker.CatalogPickerWindow):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.close_calls = 0
+            captured['window'] = self
+
+        def close(self):
+            self.close_calls += 1
+            super().close()
+
+        def start(self, catalogs):
+            # Stands in for a crash inside onInit()/onAction() while the
+            # modal loop is running - self.close() (the window's own,
+            # normal-path close) never gets a chance to run.
+            raise RuntimeError('onInit blew up')
+
+    monkeypatch.setattr(ctx.catalogpicker, 'CatalogPickerWindow', ExplodingWindow)
+
+    result = ctx.catalogpicker.open_catalog_picker()
+
+    assert result is False
+    win = captured['window']
+    assert win.close_calls == 1
+    assert win.closed is True
+    assert ctx.env.notifications == [('Rivulet', 'STR30032', 'info', 4000)]
