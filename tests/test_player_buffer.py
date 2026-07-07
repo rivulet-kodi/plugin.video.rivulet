@@ -32,6 +32,19 @@ buffer now streams the FRONT directly via ServerClient.iter_front() and
 only proceeds once _HEADER_MIN_BYTES (512 KiB) of front data is actually
 obtained; a torrent that never yields usable front data now fails honestly
 (string 30084, resolves False) instead of handing Kodi a doomed URL.
+
+STAGED-DIALOG REWORK: the "Preparing stream" DialogProgress used to be
+three independent, untruthful pieces - `_wait_for_server()` and
+`_prebuffer_torrent()` each created/closed their own dialog (so a stream
+that hit both could flash two in a row), the connect-wait dialog's
+message was the FAILURE string (30031) shown WHILE still trying, and the
+metadata-wait percent was a flat, meaningless 0%. `_resolve_playable_item`
+now owns ONE dialog for the whole resolve, threaded through every helper,
+ticking real, monotonic stage bands: connect 0-10%, resolve ~15%,
+metadata 20-35%, engine warm ~38%, buffer 40-100% (the only stage with a
+real bytes-obtained/target ratio). Buffering also gains a live,
+best-effort speed/peers second line (same `/create` poll the metadata
+stage already used) so a 2s retry pause is never silent.
 """
 import pytest
 
@@ -51,8 +64,14 @@ def kodi_stubs():
     `kodi_stubs.env.addon.settings[...]`/`env.cancel`/`env.monitor_abort`
     after setup rather than via fixture arguments. Restored exactly at
     teardown so no other test file ever sees the stubs.
+
+    `localized` supplies a real `%d`/`%d` template for #30090 ("attempt
+    %d of %d") - lib.ui.player formats it with `%`, and the default
+    'STR30090' fallback (see tests/kodistubs/fakes.py's
+    `_DEFAULT_LOCALIZED` docstring) has no placeholders to receive the
+    args.
     """
-    with install_kodi_stubs(reload=_RELOADED_MODULES) as ctx:
+    with install_kodi_stubs(reload=_RELOADED_MODULES, localized={30090: 'attempt %d of %d'}) as ctx:
         yield ctx
 
 
@@ -179,8 +198,11 @@ def test_buffer_disabled_skips_engine_and_resolves_immediately(kodi_stubs, monke
 
     assert script.create_engine_calls == []
     assert script.iter_front_calls == []
-    assert env.dialog_created == []
-    assert env.dialog_closed_count == 0
+    # A dialog IS still created/closed for the connect+resolve stages -
+    # only the torrent-specific engine warm/metadata/buffer stages are
+    # skipped by buffer_enable=False.
+    assert env.dialog_created == [('STR30080', 'Example Movie')]
+    assert env.dialog_closed_count == 1
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (1, True)
     assert list_item.path == 'http://server/x/0'
@@ -200,12 +222,13 @@ def test_happy_path_streams_front_to_target_then_resolves_true(kodi_stubs, monke
 
     kodi_stubs.player.play(2, _torrent_stream(fileIdx=0), 'movie', 'tt2')
 
-    assert script.create_engine_calls == [INFO_HASH]
+    assert script.create_engine_calls == [INFO_HASH, INFO_HASH]  # engine warm + one buffering stats poll
     assert script.iter_front_calls == [(INFO_HASH, 0, DEFAULT_TARGET_BYTES)]
     assert env.dialog_created == [('STR30080', 'Example Movie')]
-    # percent = min(100, got * 100 // target); pinned by the exact byte
-    # counts above so a flipped clamp/off-by-one reddens this.
-    assert [percent for percent, _ in env.dialog_updates] == [50, 100]
+    # percent = 40 + got * 60 // target; pinned by the exact byte counts
+    # above so a flipped clamp/off-by-one reddens this. Filtered to the
+    # buffer band (>=40) since resolve/engine-warm ticks precede it.
+    assert [percent for percent, _ in env.dialog_updates if percent >= 40] == [70, 100]
     assert env.dialog_closed_count == 1
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (2, True)
@@ -245,7 +268,7 @@ def test_cancel_via_dialog_iscanceled_resolves_false(kodi_stubs, monkeypatch):
 
     kodi_stubs.player.play(3, _torrent_stream(fileIdx=0), 'movie', 'tt3')
 
-    assert script.create_engine_calls == [INFO_HASH]
+    assert script.create_engine_calls == []  # cancelled right after resolving, before any torrent network call
     assert script.iter_front_calls == []  # cancelled before the first front-read attempt
     assert env.dialog_closed_count == 1
     handle, succeeded, list_item = _resolved_one(env)
@@ -313,7 +336,7 @@ def test_engine_warm_exception_is_nonfatal_front_streaming_still_proceeds(kodi_s
 
     kodi_stubs.player.play(6, _torrent_stream(fileIdx=0), 'movie', 'tt6')
 
-    assert script.create_engine_calls == [INFO_HASH]  # warm was attempted
+    assert script.create_engine_calls == [INFO_HASH, INFO_HASH]  # warm attempted + one buffering stats poll (both fail)
     assert any(level == kodi_stubs.player.xbmc.LOGWARNING for _, level in env.log_calls)
     assert script.iter_front_calls == [(INFO_HASH, 0, DEFAULT_TARGET_BYTES)]  # AND front streaming proceeded
     assert env.dialog_closed_count == 1
@@ -341,7 +364,7 @@ def test_iter_front_exception_every_attempt_times_out_notifies_30084(kodi_stubs,
 
     kodi_stubs.player.play(7, _torrent_stream(fileIdx=0), 'movie', 'tt7')
 
-    assert script.create_engine_calls == [INFO_HASH]
+    assert script.create_engine_calls == [INFO_HASH] * 61  # warm + one buffering stats poll per front attempt
     assert len(script.iter_front_calls) == 60
     assert any(level == kodi_stubs.player.xbmc.LOGWARNING for _, level in env.log_calls)
     assert [msg for _, msg, _, _ in env.notifications] == ['STR30084']
@@ -455,7 +478,7 @@ def test_files_array_without_guessed_idx_picks_largest_file_and_streams_it(kodi_
 
     kodi_stubs.player.play(11, stream, 'movie', 'tt11')
 
-    assert script.create_engine_calls == [INFO_HASH]  # resolved on the very first /create poll
+    assert script.create_engine_calls == [INFO_HASH, INFO_HASH]  # resolved on the very first /create poll + one buffering stats poll
     assert script.torrent_url_calls == [(INFO_HASH, 1, tuple(stream['announce']))]
     assert script.iter_front_calls == [(INFO_HASH, 1, DEFAULT_TARGET_BYTES)]  # streams the largest file's index
     handle, succeeded, list_item = _resolved_one(env)
@@ -482,10 +505,13 @@ def test_metadata_arrives_on_third_create_poll(kodi_stubs, monkeypatch):
 
     kodi_stubs.player.play(12, stream, 'movie', 'tt12')
 
-    assert len(script.create_engine_calls) == 3
+    assert len(script.create_engine_calls) == 4  # 3 metadata polls + 1 buffering stats poll
     assert env.monitor_abort_calls == 2  # one wait after each of the first two unresolved polls
-    # metadata-wait phase shows an indeterminate 0% while no file is picked yet
-    assert [percent for percent, _ in env.dialog_updates[:2]] == [0, 0]
+    # metadata-wait phase now ticks 20-35% with the live attempt count
+    # (was an indeterminate 0%); filter by the stage-line marker so the
+    # new resolve-stage tick ahead of it doesn't shift indices.
+    metadata_updates = [percent for percent, message in env.dialog_updates if 'STR30088' in message]
+    assert metadata_updates == [20, 21]
     assert script.torrent_url_calls == [(INFO_HASH, 1, tuple(stream['announce']))]
     assert script.iter_front_calls == [(INFO_HASH, 1, DEFAULT_TARGET_BYTES)]  # continues with the shared, not reset, budget
     handle, succeeded, list_item = _resolved_one(env)
@@ -510,23 +536,76 @@ def test_cancel_during_metadata_wait_resolves_false(kodi_stubs, monkeypatch):
     assert list_item.path == ''
 
 
-# --- non-torrent streams never engage pre-buffer ---------------------------
+def test_cancel_partway_through_metadata_wait_resolves_false(kodi_stubs, monkeypatch):
+    """A cancel that arrives mid-metadata-wait (not from the very start)
+    must still be honored by `_await_file_idx`'s OWN loop check, not just
+    caught earlier by the resolve-stage/prebuffer-entry guards above it.
+    Keyed off a stable observable (polls so far) rather than a raw
+    iscanceled() call count, so it stays correct regardless of exactly
+    how many other cancel checks run before the metadata loop.
+    """
+    env = kodi_stubs.env
+    script = _ServerScript(create_engine_result={}).install(monkeypatch, kodi_stubs.player)
+    env.cancel = lambda: len(script.create_engine_calls) >= 2
+
+    kodi_stubs.player.play(13, _torrent_stream(), 'movie', 'tt13b')  # fileIdx missing -> UNKNOWN_FILE_IDX
+
+    assert len(script.create_engine_calls) == 2  # polled twice, cancelled before a third
+    assert script.iter_front_calls == []
+    assert env.dialog_closed_count == 1
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (13, False)
+    assert list_item.path == ''
 
 
-def test_non_torrent_stream_never_engages_prebuffer(kodi_stubs, monkeypatch):
+# --- non-torrent / non-buffered streams: still get real, if brief, feedback
+
+
+def test_non_torrent_stream_shows_resolve_feedback_then_closes_without_prebuffer(kodi_stubs, monkeypatch):
+    """A fully direct stream (no `_SERVER_DEPENDENT_KEYS` entry at all, so
+    not even the connect stage applies) still gets the shared dialog's
+    Resolving stage - no longer the old zero-feedback path - and torrent
+    pre-buffer still never engages.
+    """
     env = kodi_stubs.env
     script = _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
 
     kodi_stubs.player.play(10, {'url': 'https://example.com/a.mp4'}, 'movie', 'tt10')
 
-    assert script.is_available_calls == 0  # 'url' isn't a _SERVER_DEPENDENT_KEYS entry
+    assert script.is_available_calls == 0  # 'url' isn't a _SERVER_DEPENDENT_KEYS entry - no connect stage
     assert script.create_engine_calls == []
     assert script.iter_front_calls == []
-    assert env.dialog_created == []
-    assert env.dialog_closed_count == 0
+    assert env.dialog_created == [('STR30080', '')]  # title falls back to '' - stream has no title/filename
+    assert [percent for percent, _ in env.dialog_updates] == [15]  # resolve stage only
+    assert env.dialog_closed_count == 1
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (10, True)
     assert list_item.path == 'https://example.com/a.mp4'
+
+
+def test_server_dependent_non_torrent_stream_shows_connect_and_resolve_stages(kodi_stubs, monkeypatch):
+    """A server-dependent stream with no `infoHash` (e.g. a `ytId` stream)
+    waits for the server (connect stage) and shows the resolve stage, but
+    never engages torrent pre-buffering - `_prebuffer_torrent` is gated
+    strictly on `infoHash`, unlike the connect wait above it.
+    """
+    env = kodi_stubs.env
+    script = _ServerScript(
+        available_results=[False, True],
+        resolve_url='http://server/yt/xyz',
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(40, {'ytId': 'xyz', 'title': 'A YouTube Video'}, 'movie', 'tt40')
+
+    assert script.is_available_calls == 2  # one miss, then up
+    assert script.create_engine_calls == []
+    assert script.iter_front_calls == []
+    percents = [percent for percent, _ in env.dialog_updates]
+    assert percents == [2, 15]  # one connect tick (min(10, 1*10//5)), then the fixed resolve tick
+    assert env.dialog_closed_count == 1
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (40, True)
+    assert list_item.path == 'http://server/yt/xyz'
 
 
 # --- ListItem hardening: setContentLookup/setMimeType/video-info (seek-exit fix) -
@@ -627,7 +706,7 @@ def test_buffer_enable_missing_key_defaults_on_and_streams_front(kodi_stubs, mon
 
     kodi_stubs.player.play(14, _torrent_stream(fileIdx=0), 'movie', 'tt14')
 
-    assert script.create_engine_calls == [INFO_HASH]  # engine WAS warmed: pre-buffer ran
+    assert script.create_engine_calls == [INFO_HASH, INFO_HASH]  # engine warm + one buffering stats poll: pre-buffer ran
     assert script.iter_front_calls == [(INFO_HASH, 0, DEFAULT_TARGET_BYTES)]  # AND streamed - not skipped
     assert env.dialog_created == [('STR30080', 'Example Movie')]
     assert env.dialog_closed_count == 1
@@ -639,7 +718,9 @@ def test_buffer_enable_missing_key_defaults_on_and_streams_front(kodi_stubs, mon
 def test_buffer_enable_raw_false_string_still_skips(kodi_stubs, monkeypatch):
     """An explicit user "off" (settings.xml -> raw getSetting() == 'false')
     must still disable pre-buffering - only a missing/unreadable value
-    defaults ON, never an explicit off.
+    defaults ON, never an explicit off. The shared dialog still shows its
+    connect/resolve feedback (created once, by `_resolve_playable_item`)
+    even though the torrent-specific buffering stage never runs.
     """
     env = kodi_stubs.env
     env.addon.settings['buffer_enable'] = 'false'
@@ -649,8 +730,8 @@ def test_buffer_enable_raw_false_string_still_skips(kodi_stubs, monkeypatch):
 
     assert script.create_engine_calls == []
     assert script.iter_front_calls == []
-    assert env.dialog_created == []
-    assert env.dialog_closed_count == 0
+    assert env.dialog_created == [('STR30080', 'Example Movie')]
+    assert env.dialog_closed_count == 1
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (15, True)
     assert list_item.path == 'http://server/x/0'
@@ -717,6 +798,7 @@ def test_server_available_immediately_no_wait_dialog(kodi_stubs, monkeypatch):
     kodi_stubs.player.play(20, _torrent_stream(fileIdx=0), 'movie', 'tt20')
 
     assert script.is_available_calls == 1  # single probe, no wait loop
+    assert not any('STR30086' in message for _, message in env.dialog_updates)  # connect stage never ticks
     handle, succeeded, _ = _resolved_one(env)
     assert (handle, succeeded) == (20, True)
 
@@ -762,6 +844,112 @@ def test_server_wait_cancelled_resolves_false(kodi_stubs, monkeypatch):
     assert script.create_engine_calls == []
     handle, succeeded, _ = _resolved_one(env)
     assert (handle, succeeded) == (23, False)
+
+
+def test_single_dialog_spans_connect_wait_and_prebuffer(kodi_stubs, monkeypatch):
+    """Guards the core rework: ONE DialogProgress must be created/closed
+    for the whole resolve, even when both the connect-wait AND the
+    torrent pre-buffer stages run in the same flow (previously each
+    helper created and closed its own dialog, so this combination could
+    show two in a row).
+    """
+    env = kodi_stubs.env
+    _ServerScript(
+        available_results=[False, True],
+        resolve_url='http://server/x/0',
+        iter_front_attempts=[[600_000]],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(41, _torrent_stream(fileIdx=0), 'movie', 'tt41')
+
+    assert env.dialog_created == [('STR30080', 'Example Movie')]  # created exactly once
+    assert env.dialog_closed_count == 1  # closed exactly once, not once per helper
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (41, True)
+    assert list_item.path == 'http://server/x/0'
+
+
+def test_stage_percents_progress_monotonically_connect_to_buffer(kodi_stubs, monkeypatch):
+    """The whole staged dialog must read as real forward progress: connect
+    (0-10%) -> resolve (15%) -> metadata (20-35%) -> buffer (40-100%),
+    never regressing.
+    """
+    env = kodi_stubs.env
+    _ServerScript(
+        available_results=[False, True],
+        resolve_url='http://server/x/-1',
+        create_engine_results=[{'peers': 1}, {'files': [{'length': 900}]}],
+        iter_front_attempts=[[DEFAULT_TARGET_BYTES // 2, DEFAULT_TARGET_BYTES // 2]],
+        torrent_url_result='http://server/x/1',
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(42, _torrent_stream(), 'movie', 'tt42')  # fileIdx missing -> metadata wait engages
+
+    percents = [percent for percent, _ in env.dialog_updates]
+    assert percents == sorted(percents)  # never regresses
+    assert percents[0] <= 10  # starts in the connect band
+    assert 40 <= percents[-1] <= 100  # ends in the buffer band
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (42, True)
+    assert list_item.path == 'http://server/x/1'
+
+
+def test_cancel_partway_through_buffering_loop_resolves_false(kodi_stubs, monkeypatch):
+    """A cancel that arrives mid-buffering (after some attempts already
+    ran) must be honored by the front-priming loop's OWN check, not just
+    caught earlier by the resolve-stage/prebuffer-entry guards above it.
+    Keyed off a stable observable (attempts so far) rather than a raw
+    iscanceled() call count.
+    """
+    env = kodi_stubs.env
+    script = _ServerScript(
+        iter_front_attempts=[[100]],  # always short of the header floor -> always retries
+    ).install(monkeypatch, kodi_stubs.player)
+    env.cancel = lambda: len(script.iter_front_calls) >= 2
+
+    kodi_stubs.player.play(3, _torrent_stream(fileIdx=0), 'movie', 'tt3c')
+
+    assert len(script.iter_front_calls) == 2  # two attempts ran, cancelled before a third
+    assert env.dialog_closed_count == 1
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (3, False)
+
+
+def test_cancel_after_resolve_for_non_torrent_stream_resolves_false(kodi_stubs, monkeypatch):
+    """A cancel that lands right after `resolve_stream()` returns (before
+    any torrent-specific work would even apply) must still be honored -
+    the Resolving stage is cancellable for every stream, torrent or not.
+    """
+    env = kodi_stubs.env
+    env.cancel = True
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    result = kodi_stubs.player.play_direct({'url': 'https://example.com/a.mp4'}, 'movie', 'tt60')
+
+    assert result is False
+    assert env.player_play_calls == []
+    assert env.dialog_closed_count == 1
+
+
+def test_buffer_stats_poll_exception_is_best_effort_and_does_not_abort(kodi_stubs, monkeypatch):
+    """The live stats poll powering the buffering dialog's second line
+    must be pure best-effort: a failure there is cosmetic only and must
+    never break the front-priming loop itself.
+    """
+    env = kodi_stubs.env
+    script = _ServerScript(
+        resolve_url='http://server/x/0',
+        create_engine_error=RuntimeError('stats boom'),
+        iter_front_attempts=[[600_000]],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(43, _torrent_stream(fileIdx=0), 'movie', 'tt43')
+
+    assert any('buffer stats poll failed' in msg for msg, _ in env.log_calls)
+    assert script.iter_front_calls == [(INFO_HASH, 0, DEFAULT_TARGET_BYTES)]  # front streaming still ran
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (43, True)
+    assert list_item.path == 'http://server/x/0'
 
 
 # --- compat.setting_bool()/setting_int(): raw-string parsing, never raises -

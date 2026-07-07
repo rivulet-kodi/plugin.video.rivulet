@@ -44,10 +44,18 @@ def make_xbmc(env, info_labels=None):
         """Stand-in for `xbmc.Player()`: records every `.play(url, listitem)`
         call `lib.ui.player.play_direct()` makes on it - the custom-window
         direct-play path (no ADDON_HANDLE/xbmcplugin.setResolvedUrl
-        involved)."""
+        involved). `isPlaying()` answers from `env.player_is_playing`
+        (plain bool, or a callable taking the 1-based call count - same
+        convention as `Monitor.waitForAbort()`/`env.monitor_abort` above),
+        for `lib.ui.streamswindow._wait_for_playback_end()`'s poll loop."""
 
         def play(self, item='', listitem=None, windowed=False, startpos=-1):
             env.player_play_calls.append((item, listitem))
+
+        def isPlaying(self):
+            env.player_is_playing_calls += 1
+            playing = env.player_is_playing
+            return bool(playing(env.player_is_playing_calls)) if callable(playing) else bool(playing)
 
     module.Monitor = Monitor
     module.Player = Player

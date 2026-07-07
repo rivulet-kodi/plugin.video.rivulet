@@ -33,6 +33,19 @@ poster-panel art precedence, and kwarg-forwarding coverage. The
 addonerror tests near the end also cover open_streams()'s log-noise
 fix: a single failing addon logs one DEBUG line (never ERROR), and at
 most one aggregate WARNING summarizes the whole fetch.
+
+`open_streams()` no longer returns True after a played pick - it reopens
+a fresh StreamsWindow over the SAME already-fetched pairs once playback
+ends (see `_wait_for_playback_end()`) and keeps looping, only ever
+returning False. The tests near the end cover both sides of that:
+`_wait_for_playback_end()` itself directly, via its `player=`/`monitor=`
+injection points (tiny local `_ScriptedPlayer`/`_ScriptedMonitor` fakes,
+independent of tests/kodistubs), and `open_streams()`'s end-to-end
+reopen behavior through the real installed `xbmc.Player()`/
+`xbmc.Monitor()` fakes, scripted via the `ctx.env.player_is_playing`
+knob (tests/kodistubs/modules.py's `Player.isPlaying()` - same
+plain-bool-or-1-based-callable convention as `ctx.env.cancel`/
+`ctx.env.monitor_abort`).
 """
 import contextlib
 
@@ -450,6 +463,10 @@ def test_open_streams_filters_unsupported_addons_and_forwards_aggregate_to_the_w
             return True
 
     monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+    # open_streams() now round-trips after a played start() - stub the wait
+    # helper to "no reopen" (as if the user backed out immediately) so this
+    # stays a single-iteration test of aggregate forwarding.
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: False)
 
     result = sw.open_streams('movie', 'tt1', poster='https://x/poster.jpg')
 
@@ -457,7 +474,7 @@ def test_open_streams_filters_unsupported_addons_and_forwards_aggregate_to_the_w
     pairs, stype, sid, poster = captured['args']
     assert (stype, sid, poster) == ('movie', 'tt1', 'https://x/poster.jpg')
     assert [s for _info, s in pairs] == [stream]
-    assert result is True
+    assert result is False
 
 
 def test_open_streams_forwards_heading_and_art_to_the_window(load_streamswindow, monkeypatch):
@@ -479,13 +496,16 @@ def test_open_streams_forwards_heading_and_art_to_the_window(load_streamswindow,
             return True
 
     monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+    # See test_open_streams_filters_unsupported_addons_and_forwards_aggregate_to_the_window
+    # - stub the round-trip wait so a played start() ends the call here.
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: False)
 
     result = sw.open_streams(
         'movie', 'tt1', heading='Some Movie',
         art={'poster': 'https://x/p.jpg', 'fanart': 'https://x/f.jpg'},
     )
 
-    assert result is True
+    assert result is False
     assert captured['heading'] == 'Some Movie'
     assert captured['art'] == {'poster': 'https://x/p.jpg', 'fanart': 'https://x/f.jpg'}
 
@@ -552,10 +572,13 @@ def test_open_streams_addonerror_is_logged_and_skipped_not_fatal(load_streamswin
             return True
 
     monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+    # Not testing the round-trip here - stub it away (see
+    # test_open_streams_filters_unsupported_addons_and_forwards_aggregate_to_the_window).
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: False)
 
     result = sw.open_streams('movie', 'tt1')
 
-    assert result is True
+    assert result is False
     assert [call[0] for call in client.calls] == ['t-fail', 't-ok']
     assert [s for _info, s in captured['pairs']] == [ok_stream]
     # The failing addon must never hit ERROR (that was the noisy old
@@ -598,10 +621,11 @@ def test_open_streams_multiple_addon_failures_still_log_a_single_aggregate_warni
             return True
 
     monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: False)
 
     result = sw.open_streams('movie', 'tt1')
 
-    assert result is True
+    assert result is False
     debug_msgs = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGDEBUG]
     assert sum(1 for msg in debug_msgs if 't-fail-a' in msg) == 1
     assert sum(1 for msg in debug_msgs if 't-fail-b' in msg) == 1
@@ -680,6 +704,10 @@ def test_open_streams_reads_stream_sort_setting_and_applies_it_to_final_order(lo
             return True
 
     monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+    # A played start() would otherwise round-trip forever (RecordingWindow
+    # always returns True) - stub it away; this test only cares about sort
+    # order, not the round-trip loop.
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: False)
 
     # Default setting ('' -> 'quality'): resolution tier wins over seeders.
     sw.open_streams('movie', 'tt1')
@@ -739,10 +767,11 @@ def test_open_streams_busy_dialog_reports_progress_and_skips_unsupported_addons(
             return True
 
     monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: False)
 
     result = sw.open_streams('movie', 'tt1')
 
-    assert result is True
+    assert result is False
     assert [call[0] for call in client.calls] == ['t-alpha', 't-beta']
     assert [s for _info, s in captured['pairs']] == [alpha_stream, beta_stream]
     assert ctx.env.dialog_created == [('STR30033', '')]
@@ -783,10 +812,11 @@ def test_open_streams_cancelled_mid_loop_keeps_partial_results_and_closes_dialog
             return True
 
     monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: False)
 
     result = sw.open_streams('movie', 'tt1')
 
-    assert result is True
+    assert result is False
     assert [call[0] for call in client.calls] == ['t-alpha']  # beta never queried
     assert [s for _info, s in captured['pairs']] == [alpha_stream]  # partial results kept
     assert ctx.env.dialog_closed_count == 1
@@ -816,3 +846,296 @@ def test_open_streams_cancelled_before_first_addon_falls_back_to_no_results(
     assert result is False
     assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
     assert ctx.env.dialog_closed_count == 1
+
+
+# ---------------------------------------------------------------------------
+# _wait_for_playback_end() - the injectable poll-loop helper open_streams()
+# uses to decide when it's safe to reopen the picker after a played pick.
+# Exercised directly here via its player=/monitor= injection points; the
+# open_streams() round-trip section further below re-exercises the SAME
+# helper through the real installed xbmc.Player()/xbmc.Monitor() fakes to
+# prove the production wiring - not just the helper in isolation - reopens
+# correctly.
+# ---------------------------------------------------------------------------
+
+
+class _ScriptedPlayer:
+    """Minimal `xbmc.Player`-shaped fake for direct `_wait_for_playback_end()`
+    tests: `is_playing` is a plain bool, or a callable taking the 1-based
+    call count (mirrors tests/kodistubs' `env.monitor_abort` convention).
+    `.calls` records every `isPlaying()` poll."""
+
+    def __init__(self, is_playing):
+        self._is_playing = is_playing
+        self.calls = 0
+
+    def isPlaying(self):
+        self.calls += 1
+        playing = self._is_playing
+        return bool(playing(self.calls)) if callable(playing) else bool(playing)
+
+
+class _ScriptedMonitor:
+    """Minimal `xbmc.Monitor`-shaped fake: `abort` is a plain bool, or a
+    callable taking the 1-based call count. `.calls` records every
+    `waitForAbort()` poll."""
+
+    def __init__(self, abort=False):
+        self._abort = abort
+        self.calls = 0
+
+    def waitForAbort(self, timeout=None):
+        self.calls += 1
+        abort = self._abort
+        return bool(abort(self.calls)) if callable(abort) else bool(abort)
+
+
+def test_wait_for_playback_end_polls_until_playing_starts_then_until_it_stops(load_streamswindow):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    # call 1: not yet playing; calls 2-3: playing; call 4: stopped.
+    player = _ScriptedPlayer(is_playing=lambda n: n in (2, 3))
+    monitor = _ScriptedMonitor(abort=False)
+
+    result = sw._wait_for_playback_end(player=player, monitor=monitor, start_timeout=5.0, tick=0.1)
+
+    assert result is True
+    assert player.calls == 4
+    assert monitor.calls == 2  # one abort check per tick that didn't already end the wait
+
+
+def test_wait_for_playback_end_returns_true_when_playback_never_starts_within_timeout(load_streamswindow):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    player = _ScriptedPlayer(is_playing=False)  # never starts
+    monitor = _ScriptedMonitor(abort=False)
+
+    result = sw._wait_for_playback_end(player=player, monitor=monitor, start_timeout=1.0, tick=0.5)
+
+    assert result is True  # nothing left to wait out - safe to reopen anyway
+    assert player.calls == 2  # int(1.0 / 0.5) start-wait attempts
+    assert monitor.calls == 2
+
+
+def test_wait_for_playback_end_returns_false_immediately_on_monitor_abort_before_playing(load_streamswindow):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    player = _ScriptedPlayer(is_playing=False)
+    monitor = _ScriptedMonitor(abort=True)  # aborts on the very first poll
+
+    result = sw._wait_for_playback_end(player=player, monitor=monitor, start_timeout=20.0, tick=0.5)
+
+    assert result is False
+    assert player.calls == 1
+    assert monitor.calls == 1  # stopped on the very first abort check, not the full budget
+
+
+def test_wait_for_playback_end_returns_false_immediately_on_monitor_abort_while_playing(load_streamswindow):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    player = _ScriptedPlayer(is_playing=True)  # already playing on the very first check
+    monitor = _ScriptedMonitor(abort=True)
+
+    result = sw._wait_for_playback_end(player=player, monitor=monitor, start_timeout=20.0, tick=0.5)
+
+    assert result is False
+    assert player.calls == 2  # loop1's break, then loop2's own isPlaying() check
+    assert monitor.calls == 1  # loop2's first abort check ends the wait immediately
+
+
+def test_wait_for_playback_end_swallows_an_exception_and_returns_false(load_streamswindow):
+    ctx = load_streamswindow()
+    import xbmc
+    sw = ctx.streamswindow
+
+    class _ExplodingPlayer:
+        def isPlaying(self):
+            raise RuntimeError('boom')
+
+    result = sw._wait_for_playback_end(
+        player=_ExplodingPlayer(), monitor=_ScriptedMonitor(), start_timeout=1.0, tick=0.5,
+    )
+
+    assert result is False
+    warnings = [(msg, lvl) for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGWARNING]
+    assert len(warnings) == 1
+    assert 'boom' in warnings[0][0]
+
+
+# ---------------------------------------------------------------------------
+# open_streams() - the post-playback reopen round trip. Uses the SAME
+# xbmc.Player()/xbmc.Monitor() fakes every other test in this file gets from
+# tests/kodistubs, scripted via ctx.env.player_is_playing (mirrors
+# ctx.env.cancel/ctx.env.monitor_abort's plain-bool-or-1-based-callable
+# convention - see tests/kodistubs/modules.py's Player.isPlaying()), to
+# prove the PRODUCTION wiring - not just the _wait_for_playback_end() unit
+# above - actually reopens (or doesn't) at the right moments. Exact
+# player_is_playing_calls/monitor_abort_calls counts below were verified
+# against the real implementation, not hand-derived.
+# ---------------------------------------------------------------------------
+
+
+def _wire_single_supported_addon(sw, stream=None):
+    """Wires exactly one supported addon returning one `stream` (default a
+    generic movie url) - the minimal aggregate the round-trip tests below
+    need; they exercise the reopen mechanics, not aggregation, so every
+    detail here is deliberately arbitrary/interchangeable. Returns
+    `(client, stream)` so a test can assert on `client.calls`."""
+    stream = stream or {'url': 'https://a.example/a.mp4'}
+    supported = {
+        'transportUrl': 't-supported',
+        'manifest': {'name': 'Supported', 'resources': ['stream'], 'types': ['movie']},
+    }
+    client = _FakeAddonClient({'t-supported': [stream]})
+    _wire_data_layer(sw, _FakeStore(addons=[supported]), client)
+    return client, stream
+
+
+def test_open_streams_reopens_with_the_same_pairs_after_a_played_round_trip_then_returns_false(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    client, stream = _wire_single_supported_addon(sw)
+    start_calls = []
+
+    class RecordingWindow(sw.StreamsWindow):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+            start_calls.append((pairs, stype, sid, poster, heading, art))
+            return len(start_calls) == 1  # plays the first time, backs out of the reopened window
+
+    monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+    ctx.env.player_is_playing = lambda n: n <= 2  # "playing" for 2 polls, then stopped
+
+    result = sw.open_streams('movie', 'tt1', heading='Some Movie', art={'poster': 'https://x/p.jpg'})
+
+    assert result is False
+    assert len(start_calls) == 2
+    assert start_calls[0] == start_calls[1]  # reopened with the SAME pairs/heading/art/poster
+    assert start_calls[0][0] is start_calls[1][0]  # not just equal - the identical pairs list
+    assert len(client.calls) == 1  # addon streams were fetched only once, never re-fetched
+    assert [s for _info, s in start_calls[0][0]] == [stream]
+
+
+def test_open_streams_user_cancel_on_first_window_returns_false_without_waiting_or_reopening(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    _wire_single_supported_addon(sw)
+    start_calls = []
+
+    class RecordingWindow(sw.StreamsWindow):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+            start_calls.append(1)
+            return False  # user backed out without picking anything
+
+    monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+
+    result = sw.open_streams('movie', 'tt1')
+
+    assert result is False
+    assert len(start_calls) == 1  # no reopen
+    assert ctx.env.player_is_playing_calls == 0  # the wait helper was never even entered
+    assert ctx.env.monitor_abort_calls == 0
+
+
+def test_open_streams_reopens_even_when_playback_never_starts_within_the_timeout(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    _wire_single_supported_addon(sw)
+    start_calls = []
+
+    class RecordingWindow(sw.StreamsWindow):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+            start_calls.append(1)
+            return len(start_calls) == 1  # "played" once, then the reopened window backs out
+
+    monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+    # ctx.env.player_is_playing defaults to False forever - Kodi's player
+    # never actually reports playing, exhausting _wait_for_playback_end()'s
+    # default 20s/0.5s start-wait budget.
+
+    result = sw.open_streams('movie', 'tt1')
+
+    assert result is False
+    assert len(start_calls) == 2  # reopened despite playback never starting
+    assert ctx.env.player_is_playing_calls == 40  # int(20.0 / 0.5) start-wait attempts
+    assert ctx.env.monitor_abort_calls == 41  # 40 start-wait ticks + the settle pause
+
+
+def test_open_streams_monitor_abort_before_playing_returns_false_without_reopening(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    _wire_single_supported_addon(sw)
+    start_calls = []
+
+    class RecordingWindow(sw.StreamsWindow):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+            start_calls.append(1)
+            return True  # must never be reached a second time
+
+    monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+    ctx.env.monitor_abort = True  # Kodi shutting down - aborts the very first poll
+
+    result = sw.open_streams('movie', 'tt1')
+
+    assert result is False
+    assert len(start_calls) == 1  # no reopen
+    assert ctx.env.monitor_abort_calls == 1
+
+
+def test_open_streams_monitor_abort_while_playing_returns_false_without_reopening(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    _wire_single_supported_addon(sw)
+    start_calls = []
+
+    class RecordingWindow(sw.StreamsWindow):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+            start_calls.append(1)
+            return True
+
+    monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+    ctx.env.player_is_playing = True  # already playing from the very first check
+    ctx.env.monitor_abort = True
+
+    result = sw.open_streams('movie', 'tt1')
+
+    assert result is False
+    assert len(start_calls) == 1  # no reopen
+    assert ctx.env.monitor_abort_calls == 1
+
+
+def test_open_streams_monitor_abort_during_settle_pause_returns_false_without_reopening(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    _wire_single_supported_addon(sw)
+    start_calls = []
+
+    class RecordingWindow(sw.StreamsWindow):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+            start_calls.append(1)
+            return True  # must never be reached a second time
+
+    monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+    # Playing only on the very first poll, then stopped - _wait_for_playback_end()
+    # itself never touches the monitor at all (loop1 breaks immediately, loop2's
+    # own isPlaying() check is already False) - so the ONE waitForAbort() call
+    # below is unambiguously the post-wait settle pause's own.
+    ctx.env.player_is_playing = lambda n: n == 1
+    ctx.env.monitor_abort = True
+
+    result = sw.open_streams('movie', 'tt1')
+
+    assert result is False
+    assert len(start_calls) == 1  # no reopen - shutdown safety on the settle pause too
+    assert ctx.env.monitor_abort_calls == 1
