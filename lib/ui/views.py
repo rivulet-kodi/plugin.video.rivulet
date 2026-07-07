@@ -16,7 +16,7 @@ import xbmc
 import xbmcgui
 import xbmcplugin
 
-from lib.store import Store
+from lib.store import ConcurrentUpdateError, Store
 from lib.stremio import addons as addons_lib
 from lib.stremio import streaminfo
 from lib.stremio.addons import AddonClient, AddonError
@@ -853,22 +853,31 @@ def login():
         remote_addons = None
 
     if remote_addons is not None:
-        # Union, not filter: EVERY local addon (protected or not) must
-        # survive login. The previous version kept only protected ones,
-        # silently dropping any community addon installed while logged
-        # out - the store's local state must never regress on login.
-        local_addons = store.get_addons()
-        seen = {a.get('transportUrl') for a in local_addons}
-        merged = list(local_addons)
-        for descriptor in remote_addons:
-            if descriptor.get('transportUrl') not in seen:
-                merged.append(descriptor)
-                seen.add(descriptor.get('transportUrl'))
-        store.set_addons(merged)
-        # Push the merged list right back up: closes the gap where an
-        # addon installed before ever logging in would otherwise never
-        # reach the account until its next unrelated install/remove.
-        _sync_addons_if_logged_in(store)
+        def _merge_with_remote(local_addons):
+            # Union, not filter: EVERY local addon (protected or not) must
+            # survive login. The previous version kept only protected ones,
+            # silently dropping any community addon installed while logged
+            # out - the store's local state must never regress on login.
+            # Re-run against a freshly-read `local_addons` on every retry
+            # (see Store.update_addons), so a concurrent install/remove
+            # racing this login is merged rather than clobbered.
+            seen = {a.get('transportUrl') for a in local_addons}
+            merged = list(local_addons)
+            for descriptor in remote_addons:
+                if descriptor.get('transportUrl') not in seen:
+                    merged.append(descriptor)
+                    seen.add(descriptor.get('transportUrl'))
+            return merged
+
+        try:
+            store.update_addons(_merge_with_remote)
+        except ConcurrentUpdateError as exc:
+            log('views.login: addon merge failed: %r' % (exc,), xbmc.LOGERROR)
+        else:
+            # Push the merged list right back up: closes the gap where an
+            # addon installed before ever logging in would otherwise never
+            # reach the account until its next unrelated install/remove.
+            _sync_addons_if_logged_in(store)
 
     user = result.get('user') or {}
     notify(L(30022) % (user.get('email') or user.get('name') or ''))

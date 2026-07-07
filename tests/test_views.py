@@ -110,6 +110,16 @@ class FakeStore:
         self.addons_set_calls.append(addons)
         self._addons = addons
 
+    def update_addons(self, transform, max_attempts=3):
+        """Matches the real Store.update_addons(transform) contract: call
+        `transform(current_addons)` and persist the result via set_addons -
+        no actual concurrency/retry to simulate here (FakeStore is
+        single-threaded, in-memory), just the same call shape callers rely
+        on (login()'s merge closure)."""
+        new_addons = transform(self._addons)
+        self.set_addons(new_addons)
+        return new_addons
+
 
 class FakeAddonClient:
     """Fake `lib.stremio.addons.AddonClient`. `catalog_result` is the
