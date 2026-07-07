@@ -18,6 +18,7 @@ emoji-laden Stream.title/name text into the addon's single-line labels.
 """
 import contextlib
 import sys
+import time
 from urllib.parse import parse_qsl, urlparse
 
 import pytest
@@ -117,31 +118,47 @@ class FakeAddonClient:
     -> list-or-Exception) let a test script different addons differently
     - a dict value that is an Exception instance is raised instead of
     returned, standing in for a network/manifest failure.
+
+    `delays` (transport_url -> seconds) makes catalog()/streams()/meta()
+    call time.sleep() before returning/raising, for tests proving the
+    addon fan-out in lib.ui.views runs concurrently rather than one
+    addon at a time - time.sleep() releases the GIL, so several fake
+    calls made from a real ThreadPoolExecutor genuinely overlap the same
+    way blocking socket I/O would.
     """
 
     def __init__(self, catalog_result=None, stream_results=None, catalog_results=None,
-                 meta_results=None, manifest_result=None, manifest_error=None):
+                 meta_results=None, manifest_result=None, manifest_error=None, delays=None):
         self._catalog_result = catalog_result if catalog_result is not None else []
         self._catalog_results = catalog_results or {}
         self._stream_results = stream_results or {}
         self._meta_results = meta_results or {}
         self._manifest_result = manifest_result
         self._manifest_error = manifest_error
+        self._delays = delays or {}
         self.manifest_calls = []
 
+    def _delay(self, transport_url):
+        seconds = self._delays.get(transport_url)
+        if seconds:
+            time.sleep(seconds)
+
     def catalog(self, transport, ctype, cid, extra=None):
+        self._delay(transport)
         result = self._catalog_results.get(transport, self._catalog_result)
         if isinstance(result, Exception):
             raise result
         return result
 
     def streams(self, transport_url, stype, sid):
+        self._delay(transport_url)
         result = self._stream_results.get(transport_url, [])
         if isinstance(result, Exception):
             raise result
         return result
 
     def meta(self, transport_url, stype, sid):
+        self._delay(transport_url)
         result = self._meta_results.get(transport_url)
         if isinstance(result, Exception):
             raise result
@@ -921,6 +938,54 @@ def test_search_no_matching_catalogs_notifies_empty_result(load_views):
     assert ctx.env.end_of_directory[-1]['succeeded'] is False
 
 
+def test_search_addon_fanout_runs_concurrently_not_sequentially(load_views, monkeypatch):
+    """5 addons that each take ~0.2s to answer (simulating slow network
+    I/O) would serialize to ~1s under the old one-addon-at-a-time loop;
+    fanned out over the thread pool this should land close to a single
+    addon's 0.2s. The 0.6s threshold leaves generous slack on both sides
+    (well below the ~1s sequential sum, well above the ~0.2s expected
+    fanned-out time) to avoid CI flakiness.
+    """
+    ctx = load_views(dialog_inputs=['batman'])
+    views = ctx.views
+    delay = 0.2
+    num_addons = 5
+    descriptors = []
+    catalog_results = {}
+    delays = {}
+    for i in range(num_addons):
+        transport = 'https://addon%d.example/manifest.json' % i
+        descriptors.append({
+            'transportUrl': transport,
+            'manifest': {
+                'id': 'org.addon%d' % i, 'name': 'Addon %d' % i,
+                'catalogs': [{'type': 'movie', 'id': 'search', 'extra': [{'name': 'search'}]}],
+            },
+            'flags': {},
+        })
+        catalog_results[transport] = [{'id': 'tt%d' % i, 'name': 'Batman %d' % i, 'type': 'movie'}]
+        delays[transport] = delay
+    client = FakeAddonClient(catalog_results=catalog_results, delays=delays)
+    _wire_data_layer(views, FakeStore(addons=descriptors), client)
+
+    captured = {}
+
+    def fake_open_showcase(metas):
+        captured['metas'] = metas
+        return None
+
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', fake_open_showcase)
+
+    start = time.monotonic()
+    views.search()
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 0.6, (
+        'search() took %.2fs for %d addons at %.2fs each - looks sequential, not fanned out'
+        % (elapsed, num_addons, delay)
+    )
+    assert len(captured['metas']) == num_addons
+
 # ---------------------------------------------------------------------------
 # meta() / _fetch_meta() / _ordered_seasons()
 # ---------------------------------------------------------------------------
@@ -1025,6 +1090,88 @@ def test_fetch_meta_skips_addon_returning_no_usable_result(load_views):
     assert ctx.env.content[-1][1] == 'seasons'
     assert len(ctx.env.directory_items[-1]['items']) == 1
 
+
+def test_fetch_meta_returns_without_waiting_for_a_slower_addon(load_views):
+    """The first-listed (preferred) addon is the slow one; a second addon
+    answers almost immediately with an equally usable result. The old
+    sequential loop would have blocked on the first addon before ever
+    trying the second; the concurrent version must return as soon as the
+    fast addon answers instead of waiting out the slow one's delay.
+    """
+    ctx = load_views()
+    views = ctx.views
+    descriptor_slow = {
+        'transportUrl': 't-slow',
+        'manifest': {'id': 'org.slow', 'resources': ['meta'], 'types': ['series'], 'idPrefixes': ['tt']},
+    }
+    descriptor_fast = {
+        'transportUrl': 't-fast',
+        'manifest': {'id': 'org.fast', 'resources': ['meta'], 'types': ['series'], 'idPrefixes': ['tt']},
+    }
+    slow_delay = 2.0  # would dominate the test's wall-clock time if ever awaited
+    client = FakeAddonClient(
+        meta_results={
+            't-slow': {
+                'id': 'tt1', 'name': 'Slow Show', 'type': 'series',
+                'videos': [{'season': 1, 'episode': 1, 'id': 'ep1'}],
+            },
+            't-fast': {
+                'id': 'tt1', 'name': 'Fast Show', 'type': 'series',
+                'videos': [{'season': 1, 'episode': 1, 'id': 'ep1'}],
+            },
+        },
+        delays={'t-slow': slow_delay},
+    )
+    # descriptor_slow is listed FIRST (the preferred addon), but it is the
+    # slow one - _fetch_meta must not serialize behind it.
+    _wire_data_layer(views, FakeStore(addons=[descriptor_slow, descriptor_fast]), client)
+
+    start = time.monotonic()
+    views.meta('series', 'tt1')
+    elapsed = time.monotonic() - start
+
+    assert elapsed < slow_delay * 0.5, (
+        'meta() took %.2fs - looks like it waited on the slow addon instead of the fast one' % elapsed
+    )
+    assert ctx.env.content[-1][1] == 'seasons'
+    assert len(ctx.env.directory_items[-1]['items']) == 1
+
+
+def test_fetch_meta_prefers_earlier_addon_when_it_answers_at_least_as_fast(load_views):
+    """When the first-listed (preferred) addon is not the straggler, the
+    old sequential "first hit in store.get_addons() order wins" behavior
+    is fully preserved: a slower second addon's answer must lose even
+    though it is also usable.
+    """
+    ctx = load_views()
+    views = ctx.views
+    descriptor_first = {
+        'transportUrl': 't-first',
+        'manifest': {'id': 'org.first', 'resources': ['meta'], 'types': ['series'], 'idPrefixes': ['tt']},
+    }
+    descriptor_second = {
+        'transportUrl': 't-second',
+        'manifest': {'id': 'org.second', 'resources': ['meta'], 'types': ['series'], 'idPrefixes': ['tt']},
+    }
+    client = FakeAddonClient(
+        meta_results={
+            't-first': {
+                'id': 'tt1', 'name': 'First Wins', 'type': 'series',
+                'videos': [{'season': 1, 'episode': 1, 'id': 'ep1'}],
+            },
+            't-second': {
+                'id': 'tt1', 'name': 'Second Loses', 'type': 'series',
+                'videos': [{'season': 1, 'episode': 1, 'id': 'ep1'}],
+            },
+        },
+        delays={'t-second': 0.3},
+    )
+    _wire_data_layer(views, FakeStore(addons=[descriptor_first, descriptor_second]), client)
+
+    views.meta('series', 'tt1')
+
+    li = ctx.env.directory_items[-1]['items'][0][1]
+    assert li.info_tag.calls.get('setTvShowTitle') == 'First Wins'
 
 def test_meta_series_orders_seasons_specials_last_with_poster_fallback_fanart(load_views):
     ctx = load_views()
@@ -1298,6 +1445,47 @@ def test_stream_item_size_property_falls_back_to_parsed_text_size(load_views, mo
     expected_size_bytes = int(round(4.39 * 1024 ** 3))
     assert li.properties.get('size') == str(expected_size_bytes)
 
+
+def test_streams_addon_fanout_runs_concurrently_not_sequentially(load_views, monkeypatch):
+    """5 addons that each take ~0.2s to answer (simulating slow network
+    I/O) would serialize to ~1s under the old one-addon-at-a-time loop;
+    fanned out over the thread pool this should land close to a single
+    addon's 0.2s. The 0.6s threshold leaves generous slack on both sides
+    (well below the ~1s sequential sum, well above the ~0.2s expected
+    fanned-out time) to avoid CI flakiness.
+    """
+    monkeypatch.setattr(sys, 'argv', ['default.py'])
+    ctx = load_views()
+    views = ctx.views
+    delay = 0.2
+    num_addons = 5
+    descriptors = []
+    stream_results = {}
+    delays = {}
+    for i in range(num_addons):
+        transport = 't%d' % i
+        descriptors.append({
+            'transportUrl': transport,
+            'manifest': {
+                'id': 'org.addon%d' % i, 'name': 'Addon %d' % i,
+                'resources': ['stream'], 'types': ['movie'], 'idPrefixes': ['tt'],
+            },
+            'flags': {},
+        })
+        stream_results[transport] = [_stream(name='Release %d' % i, info_hash='hash%d' % i)]
+        delays[transport] = delay
+    client = FakeAddonClient(stream_results=stream_results, delays=delays)
+    _wire_data_layer(views, FakeStore(addons=descriptors), client)
+
+    start = time.monotonic()
+    views.streams('movie', 'tt1234567', poster='p.jpg', title='T')
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 0.6, (
+        'streams() took %.2fs for %d addons at %.2fs each - looks sequential, not fanned out'
+        % (elapsed, num_addons, delay)
+    )
+    assert len(ctx.env.directory_items[-1]['items']) == num_addons
 
 # ---------------------------------------------------------------------------
 # addons()

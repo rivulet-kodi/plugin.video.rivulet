@@ -8,6 +8,7 @@ _finish_action() instead.
 """
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import wraps
 from urllib.parse import parse_qsl
 
@@ -30,6 +31,15 @@ _STORE = None
 _CLIENT = None
 
 
+#: Cap on concurrent addon HTTP calls per fan-out (search()/streams()/
+#: _fetch_meta()) - bounded so a user with dozens of installed addons
+#: doesn't spawn dozens of threads at once. Each AddonClient call still
+#: carries its own 15s timeout; this only lets that timeout run
+#: concurrently across addons instead of serializing N of them one
+#: after another.
+_MAX_ADDON_WORKERS = 8
+
+
 def _get_store():
     global _STORE
     if _STORE is None:
@@ -42,6 +52,25 @@ def _get_client():
     if _CLIENT is None:
         _CLIENT = AddonClient()
     return _CLIENT
+
+
+def _map_addons(fn, items):
+    """Call `fn(item)` once per item in `items`, fanned out across a small
+    bounded thread pool instead of one call at a time, and return the
+    results in the same order as `items` - a drop-in replacement for
+    `[fn(item) for item in items]` that keeps N addons' worth of blocking
+    HTTP calls (each with its own 15s timeout) from serializing behind
+    each other. `fn` is expected to catch its own `AddonError` (log it,
+    return a falsy sentinel) so one addon's failure can never abort the
+    others - that per-addon try/except still runs, just inside whichever
+    worker thread executes it.
+    """
+    if not items:
+        return []
+    if len(items) == 1:
+        return [fn(items[0])]
+    with ThreadPoolExecutor(max_workers=min(len(items), _MAX_ADDON_WORKERS)) as pool:
+        return list(pool.map(fn, items))
 
 
 def _safe_listing(view):
@@ -246,21 +275,76 @@ def _stream_item(info, stream, stype, sid, poster=None, title=None, logo=None):
 def _fetch_meta(stype, sid):
     """Aggregate meta across every installed addon supporting it for
     (stype, sid); Stremio addons commonly disagree on coverage, so the
-    first addon to return a usable object wins."""
+    first addon to return a usable object wins.
+
+    Every eligible addon is queried concurrently rather than one at a
+    time - each is a blocking HTTP call with its own 15s timeout, so a
+    sequential loop over N addons could stall the UI for up to N x 15s.
+    We return the instant a usable result is ready instead of waiting
+    for every addon to answer.
+
+    Preference order: the old sequential loop always returned the first
+    addon (in store.get_addons() order) with a usable result, since it
+    never even called later addons once one hit. With real concurrency
+    every eligible addon is called up front, so that exact guarantee is
+    no longer possible in general - but we still prefer the earliest
+    addon among whichever have *already* answered by the time we check
+    (a cheap, non-blocking snapshot), so if the winning addon is at
+    least as fast as the others, the result is identical to before. If
+    the earliest-preference addon happens to be the slow one, a faster
+    later addon wins instead of blocking on it - strict list-order
+    preference is sacrificed on purpose in that case, since waiting on
+    the slowest addon ahead of one that already answered is exactly the
+    freeze this function exists to avoid. Addons still in flight when we
+    return are abandoned, not cancelled (Future.cancel() only works
+    before a thread starts running) - they keep running to completion or
+    their own 15s timeout in a background thread we no longer wait on.
+    """
     store = _get_store()
     client = _get_client()
-    for descriptor in store.get_addons():
-        manifest = descriptor.get('manifest') or {}
-        if not addons_lib.addon_supports(manifest, 'meta', stype, sid):
-            continue
+    targets = [
+        descriptor for descriptor in store.get_addons()
+        if addons_lib.addon_supports(descriptor.get('manifest') or {}, 'meta', stype, sid)
+    ]
+    if not targets:
+        return None
+
+    def _fetch_one(descriptor):
+        transport_url = descriptor.get('transportUrl')
         try:
-            result = client.meta(descriptor.get('transportUrl'), stype, sid)
+            return client.meta(transport_url, stype, sid)
         except AddonError as exc:
-            log('views._fetch_meta: %s failed: %r' % (descriptor.get('transportUrl'), exc), xbmc.LOGERROR)
-            continue
-        if result:
-            return result
-    return None
+            log('views._fetch_meta: %s failed: %r' % (transport_url, exc), xbmc.LOGWARNING)
+            return None
+
+    if len(targets) == 1:
+        return _fetch_one(targets[0])
+
+    pool = ThreadPoolExecutor(max_workers=min(len(targets), _MAX_ADDON_WORKERS))
+    futures = []
+    try:
+        futures = [pool.submit(_fetch_one, descriptor) for descriptor in targets]
+        index_of = {future: index for index, future in enumerate(futures)}
+        for future in as_completed(futures):
+            if future.result() is None:
+                continue
+            winner = future
+            # Only promotes to a future that has *already* finished (a
+            # non-blocking .done() check) - never waits on one still running.
+            for other in futures:
+                if (index_of[other] < index_of[winner] and other.done()
+                        and other.result() is not None):
+                    winner = other
+            return winner.result()
+        return None
+    finally:
+        # Drop any addon call that never got a worker thread (only
+        # possible when len(targets) > _MAX_ADDON_WORKERS); already-running
+        # calls are left to finish in the background. wait=False so this
+        # cleanup never blocks the caller on a straggler.
+        for future in futures:
+            future.cancel()
+        pool.shutdown(wait=False)
 
 
 def _ordered_seasons(videos):
@@ -420,13 +504,19 @@ def search():
 
     store = _get_store()
     client = _get_client()
-    metas = []
-    for transport_url, _manifest, cat in addons_lib.iter_catalogs(store.get_addons(), extra_required='search'):
+    catalog_targets = list(addons_lib.iter_catalogs(store.get_addons(), extra_required='search'))
+
+    def _fetch_catalog_result(target):
+        transport_url, _manifest, cat = target
         try:
-            results = client.catalog(transport_url, cat.get('type'), cat.get('id'), extra=[('search', query)])
+            return client.catalog(transport_url, cat.get('type'), cat.get('id'), extra=[('search', query)])
         except AddonError as exc:
-            log('views.search: %s failed: %r' % (transport_url, exc), xbmc.LOGERROR)
-            continue
+            log('views.search: %s failed: %r' % (transport_url, exc), xbmc.LOGWARNING)
+            return None
+
+    metas = []
+    fetched = _map_addons(_fetch_catalog_result, catalog_targets)
+    for (_transport_url, _manifest, cat), results in zip(catalog_targets, fetched):
         for meta_obj in results or []:
             meta_obj['type'] = meta_obj.get('type') or cat.get('type')
             metas.append(meta_obj)
@@ -570,18 +660,25 @@ def streams(stype, sid, poster=None, title=None):
 
     store = _get_store()
     client = _get_client()
+    targets = [
+        descriptor for descriptor in store.get_addons()
+        if addons_lib.addon_supports(descriptor.get('manifest') or {}, 'stream', stype, sid)
+    ]
+
+    def _fetch_streams(descriptor):
+        transport_url = descriptor.get('transportUrl')
+        try:
+            return client.streams(transport_url, stype, sid)
+        except AddonError as exc:
+            log('views.streams: %s failed: %r' % (transport_url, exc), xbmc.LOGWARNING)
+            return None
+
     pairs = []
     logos = {}
-    for descriptor in store.get_addons():
+    for descriptor, results in zip(targets, _map_addons(_fetch_streams, targets)):
+        if results is None:
+            continue
         manifest = descriptor.get('manifest') or {}
-        transport_url = descriptor.get('transportUrl')
-        if not addons_lib.addon_supports(manifest, 'stream', stype, sid):
-            continue
-        try:
-            results = client.streams(transport_url, stype, sid)
-        except AddonError as exc:
-            log('views.streams: %s failed: %r' % (transport_url, exc), xbmc.LOGERROR)
-            continue
         addon_name = manifest.get('name', '?')
         logos.setdefault(streaminfo.clean_text(addon_name), manifest.get('logo'))
         for stream in results or []:
