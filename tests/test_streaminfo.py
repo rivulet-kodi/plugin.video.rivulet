@@ -5,10 +5,12 @@ Stream protocol objects (stremio-protocol-spec.md #3) and AIOStreams-style
 addon output (multi-line, emoji-decorated name/title/description).
 """
 import re
+import time
 
 import pytest
 
 from lib.stremio.streaminfo import (
+    _MAX_TEXT_LEN,
     clean_text,
     format_label,
     format_plot,
@@ -127,6 +129,34 @@ def test_clean_text_keeps_cjk():
 
 def test_clean_text_handles_empty_and_none_like_input():
     assert clean_text("") == ""
+
+
+def test_clean_text_truncates_huge_input_and_returns_promptly():
+    # A malicious/broken addon is semi-trusted, arbitrary user-installed
+    # code and can hand us an unbounded title/description. clean_text()
+    # must not scale its work (junk-char scan + whitespace regex) with
+    # input size -- truncate first, then clean the truncated result.
+    huge = "Stream Title " * 400_000  # ~5.2 MB
+    start = time.monotonic()
+    result = clean_text(huge)
+    elapsed = time.monotonic() - start
+    assert len(result) <= _MAX_TEXT_LEN
+    # Generous ceiling: a regex/scan blowup regression would take orders
+    # of magnitude longer than a bounded ~4000-char clean ever could.
+    assert elapsed < 2.0
+
+
+def test_clean_text_truncation_mid_emoji_sequence_does_not_raise():
+    # Multi-codepoint ZWJ emoji sequence repeated well past the cap. Python
+    # string slicing operates on code points, so truncating mid-sequence
+    # can never raise or produce an invalid str -- confirm that holds and
+    # that the junk-stripping pass still runs cleanly on whatever partial
+    # sequence is left dangling at the cut point.
+    family_emoji = "\U0001F468\u200D\U0001F469\u200D\U0001F467\u200D\U0001F466"
+    huge = ("Movie " + family_emoji + " ") * 2000
+    result = clean_text(huge)  # must not raise
+    assert len(result) <= _MAX_TEXT_LEN
+    assert "Movie" in result
 
 
 # --- parse_stream ----------------------------------------------------------
@@ -257,6 +287,32 @@ def test_parse_stream_seeders_standalone_s_colon_format():
 
 def test_parse_stream_seeders_absent_is_none():
     stream = {"name": "x", "title": "", "description": "no seed info here", "behaviorHints": {}}
+    info = parse_stream(stream)
+    assert info["seeders"] is None
+
+
+def test_parse_stream_seeders_after_unit_absurdly_large_is_none():
+    # Crafted/broken addon example from the confirmed gap: a huge digit run
+    # right after a size unit must not propagate as a literal giant int
+    # that would sort/display as nonsense.
+    stream = {
+        "name": "x",
+        "title": "",
+        "description": "GB 99999999999999999999 seeders",
+        "behaviorHints": {},
+    }
+    info = parse_stream(stream)
+    assert info["seeders"] is None
+
+
+def test_parse_stream_seeders_labeled_absurdly_large_is_none():
+    # Same sanity ceiling applies to the more-reliable labeled-pattern path.
+    stream = {
+        "name": "x",
+        "title": "",
+        "description": "Seeds: 99999999999999999999",
+        "behaviorHints": {},
+    }
     info = parse_stream(stream)
     assert info["seeders"] is None
 

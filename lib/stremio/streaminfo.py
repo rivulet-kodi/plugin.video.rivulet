@@ -37,6 +37,16 @@ _JUNK_SINGLES = frozenset([0xFE0F])  # variation selector-16 (emoji style)
 
 _WHITESPACE_RE = re.compile(r'\s+')
 
+# Hard cap on input length, applied BEFORE any of the regex/iteration work
+# below runs. A Stremio addon is semi-trusted, arbitrary user-installed
+# code -- a malicious or simply broken one can hand us a title/description
+# of unbounded size, and every extra character costs a linear scan plus a
+# regex substitution for no benefit: Kodi's ListItem label has a practical
+# on-screen display limit far below this cap, so nothing past it would
+# ever usefully render anyway. Comfortably above any real stream title or
+# multi-line AIOStreams-style description, well below "adversarial input".
+_MAX_TEXT_LEN = 4000
+
 
 def _is_junk_codepoint(cp):
     if cp > 0xFFFF:
@@ -56,10 +66,17 @@ def clean_text(s):
     punctuation and CJK/Cyrillic/etc. text untouched -- only the specific
     junk ranges above and anything outside the BMP are removed. Any run
     of whitespace, including embedded newlines, collapses to one space.
+
+    Input longer than `_MAX_TEXT_LEN` is truncated up front, before any
+    regex pass runs, so a hostile/broken addon can't burn CPU cleaning a
+    huge string. Truncation is on code points (never mid-surrogate), so
+    it can't land inside a multi-codepoint emoji sequence in a way that
+    raises -- worst case a partial glyph gets filtered out below anyway.
     """
     if not s:
         return ''
-    filtered = ''.join(ch for ch in str(s) if not _is_junk_codepoint(ord(ch)))
+    truncated = str(s)[:_MAX_TEXT_LEN]
+    filtered = ''.join(ch for ch in truncated if not _is_junk_codepoint(ord(ch)))
     return _WHITESPACE_RE.sub(' ', filtered).strip()
 
 
@@ -120,6 +137,13 @@ _SEEDS_LABELED_PATTERNS = (
 _SEEDS_AFTER_UNIT_RE = re.compile(
     r'(?:gb|mb|kb|tb|mbps|kbps|kb/s|mb/s|gbps)\b\D{0,8}?(\d+)\b', re.I
 )
+
+# Sanity ceiling for a parsed seeder count. Python ints are arbitrary
+# precision, so a crafted string like "GB 99999999999999999999 seeders"
+# won't crash -- it'll just produce a number that sorts/displays as
+# nonsense. No real torrent swarm gets anywhere near this many seeders,
+# so treat anything above it as unparseable rather than a literal value.
+_MAX_PLAUSIBLE_SEEDERS = 1_000_000
 
 
 def _first_nonempty_line(text):
@@ -188,10 +212,12 @@ def _parse_seeders(text):
     for pattern in _SEEDS_LABELED_PATTERNS:
         match = pattern.search(text)
         if match:
-            return int(match.group(1))
+            seeders = int(match.group(1))
+            return seeders if seeders <= _MAX_PLAUSIBLE_SEEDERS else None
     matches = list(_SEEDS_AFTER_UNIT_RE.finditer(text))
     if matches:
-        return int(matches[-1].group(1))
+        seeders = int(matches[-1].group(1))
+        return seeders if seeders <= _MAX_PLAUSIBLE_SEEDERS else None
     return None
 
 
