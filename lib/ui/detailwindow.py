@@ -7,9 +7,9 @@ with no `videos` and opens `lib.ui.streamswindow.open_streams()`
 directly (confirmed on a real device: a DetailWindow showing a single
 "Play" row was a pointless extra step for every movie). Only a series
 (which has episodes to choose from) actually shows this window: every
-episode flattened across seasons ("S01E02 · Title", Specials last;
-season-tab grouping is intentionally out of scope - see the class
-docstring). Fetches the full meta via the same `lib.ui.views._fetch_meta`
+episode grouped by season ("S01E02 · Title", Specials last) behind a
+season-selector bar (see the class docstring for the single-season
+fallback). Fetches the full meta via the same `lib.ui.views._fetch_meta`
 every classical view already uses (the catalog/search coverflow's meta
 objects are abbreviated - no `videos` - so a fresh fetch is required
 here, not a reuse of the picked item).
@@ -28,6 +28,12 @@ BACKGROUND = 30000
 POSTER = 30004
 HEADING = 30005
 LIST = 30002
+SEASON_BAR = 30007
+
+#: ACTION_MOVE_LEFT / ACTION_MOVE_RIGHT - navigating the season bar
+#: (id SEASON_BAR) with either fires onAction() while it still has focus;
+#: that is this module's cue to check whether the selected season moved.
+_SEASON_NAV_ACTIONS = frozenset({1, 2})
 
 
 def _ordered_videos(videos):
@@ -58,6 +64,30 @@ def _episode_rows(videos):
     into `(id, label)` pairs for `DetailWindow`'s list - pure, so it is
     trivially unit-testable on its own."""
     return [(video.get('id'), _episode_label(video)) for video in _ordered_videos(videos)]
+
+
+def _season_label(season):
+    """'Season N' for season N >= 1, 'Specials' for season 0 - the two
+    label shapes DetailWindow.xml's season bar (`SEASON_BAR`/30007)
+    shows."""
+    return 'Season %d' % season if season else 'Specials'
+
+
+def _group_by_season(videos):
+    """Group `_ordered_videos(videos)` into per-season buckets, preserving
+    the season-0-last order `_ordered_videos()` already establishes.
+    Returns a list of `(season, label, videos)` tuples, one per distinct
+    season, in season-bar order - pure, so it is trivially unit-testable
+    on its own."""
+    groups = []
+    index_by_season = {}
+    for video in _ordered_videos(videos):
+        season = video.get('season') or 0
+        if season not in index_by_season:
+            index_by_season[season] = len(groups)
+            groups.append((season, _season_label(season), []))
+        groups[index_by_season[season]][2].append(video)
+    return groups
 
 
 def _episode_properties(video):
@@ -101,8 +131,11 @@ def _show_art(meta):
 class DetailWindow(xbmcgui.WindowXMLDialog):
     """See module docstring. Built/run via `open_detail()` - only for a
     series (a title with episodes); a movie never reaches this window.
-    Deliberately a single flat list (no per-season tabs/grouping - out
-    of scope here; every episode across every season is one row)."""
+    Every episode is grouped by season behind a season-selector bar
+    (`SEASON_BAR`/30007) that only ever shows when there is more than one
+    season to switch between - a single-season (or season-less) title
+    hides the bar and shows every episode in one flat list, exactly like
+    before season grouping existed."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -111,6 +144,8 @@ class DetailWindow(xbmcgui.WindowXMLDialog):
         self.rows = []
         self.videos = []
         self._video_by_id = {}
+        self.season_groups = []
+        self.season_index = 0
         self.should_close_caller = False
 
     def start(self, meta, stype):
@@ -123,8 +158,84 @@ class DetailWindow(xbmcgui.WindowXMLDialog):
         self.videos = _ordered_videos(self.meta.get('videos'))
         self.rows = [(video.get('id'), _episode_label(video)) for video in self.videos]
         self._video_by_id = {video.get('id'): video for video in self.videos}
+        self.season_groups = _group_by_season(self.meta.get('videos'))
+        self.season_index = self._default_season_index()
         self.doModal()
         return self.should_close_caller
+
+    def _default_season_index(self):
+        """Index into `self.season_groups` of the first non-Specials
+        season, or 0 (Specials) if that is the only season present."""
+        for index, (season, _label, _videos) in enumerate(self.season_groups):
+            if season != 0:
+                return index
+        return 0
+
+    def _active_videos(self):
+        """Videos the episode list (`LIST`) should currently show: every
+        episode when there is nothing to group (0 or 1 season - today's
+        flat-list behaviour, unchanged byte-for-byte), else just the
+        active season's slice of `self.season_groups`."""
+        if len(self.season_groups) <= 1:
+            return self.videos
+        return self.season_groups[self.season_index][2]
+
+    def _build_episode_items(self, videos):
+        """One `xbmcgui.ListItem` per video in `videos` - `row_id`
+        property plus `_episode_properties()`'s thumb/line2 - the
+        row-building logic the initial populate and every season switch
+        both reuse, factored out so either can build from any video
+        subset."""
+        items = []
+        for video in videos:
+            item = xbmcgui.ListItem(_episode_label(video))
+            item.setProperty('row_id', video.get('id'))
+            for key, value in _episode_properties(video).items():
+                item.setProperty(key, value)
+            items.append(item)
+        return items
+
+    def _populate_episode_list(self, videos):
+        """Replace `LIST`'s contents with `videos`' rows and reset the
+        selection to the top - used for the initial populate and for
+        every season switch alike."""
+        control = self.getControl(LIST)
+        control.reset()
+        control.addItems(self._build_episode_items(videos))
+        control.selectItem(0)
+
+    def _build_season_bar(self):
+        """Populate `SEASON_BAR` once, in bar order, each item's `season`
+        property holding its season number as a string. Hidden via
+        `setVisible(False)` whenever there is nothing to switch between
+        (0 or 1 season) so the flat list behaves exactly as it did before
+        season grouping existed."""
+        control = self.getControl(SEASON_BAR)
+        control.reset()
+        if len(self.season_groups) <= 1:
+            control.setVisible(False)
+            return
+        items = []
+        for season, label, _videos in self.season_groups:
+            item = xbmcgui.ListItem(label)
+            item.setProperty('season', str(season))
+            items.append(item)
+        control.addItems(items)
+        control.setVisible(True)
+        control.selectItem(self.season_index)
+
+    def _sync_season_from_bar(self):
+        """If `SEASON_BAR`'s selected position has moved since the last
+        sync, repopulate `LIST` with the newly-selected season's episodes
+        and remember the new position. A no-op with 0/1 season groups
+        (the bar is hidden) or when the position hasn't actually moved."""
+        if len(self.season_groups) <= 1:
+            return
+        position = self.getControl(SEASON_BAR).getSelectedPosition()
+        if position == self.season_index or not 0 <= position < len(self.season_groups):
+            return
+        self.season_index = position
+        self._populate_episode_list(self._active_videos())
 
     def onInit(self):
         from lib.ui.compat import addon_fanart
@@ -134,21 +245,22 @@ class DetailWindow(xbmcgui.WindowXMLDialog):
         self.getControl(POSTER).setImage(self.meta.get('poster') or '')
         self.getControl(HEADING).setLabel((self.meta.get('name') or self.meta.get('id') or '').upper())
 
-        items = []
-        for row_id, label in self.rows:
-            item = xbmcgui.ListItem(label)
-            item.setProperty('row_id', row_id)
-            for key, value in _episode_properties(self._video_by_id.get(row_id)).items():
-                item.setProperty(key, value)
-            items.append(item)
-        self.getControl(LIST).addItems(items)
+        self._build_season_bar()
+        self._populate_episode_list(self._active_videos())
         self.setFocusId(LIST)
 
     def onAction(self, action):
-        if action.getId() in BACK_ACTIONS:
+        action_id = action.getId()
+        if action_id in _SEASON_NAV_ACTIONS and self.getFocusId() == SEASON_BAR:
+            self._sync_season_from_bar()
+        if action_id in BACK_ACTIONS:
             self.close()
 
     def onClick(self, control_id):
+        if control_id == SEASON_BAR:
+            self._sync_season_from_bar()
+            self.setFocusId(LIST)
+            return
         if control_id != LIST:
             return
         focused = self.getControl(LIST).getSelectedItem()

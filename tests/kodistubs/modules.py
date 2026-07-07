@@ -100,7 +100,10 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
         setLabel() calls. `getSelectedItem()` returns
         `self.items[self.selected_index]` (default 0) - a test scripts a
         scroll position by setting `.selected_index` before calling
-        onAction()/onClick()."""
+        onAction()/onClick(). `reset()`/`selectItem()`/`getSelectedPosition()`
+        stand in for `ControlList`'s same-named methods (added for
+        DetailWindow's season bar - a control repopulated/re-selected at
+        runtime, unlike every other fake user of this class so far)."""
 
         def __init__(self):
             self.items = []
@@ -111,6 +114,9 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
 
         def addItems(self, items):
             self.items.extend(items)
+
+        def reset(self):
+            self.items = []
 
         def setImage(self, image):
             self.image = image
@@ -125,6 +131,12 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
             if not self.items:
                 return None
             return self.items[self.selected_index]
+
+        def selectItem(self, position):
+            self.selected_index = position
+
+        def getSelectedPosition(self):
+            return self.selected_index if self.items else -1
 
     class FakeAction:
         """Stand-in for `xbmcgui.Action`: only `getId()` is used by

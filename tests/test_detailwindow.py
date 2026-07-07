@@ -1,7 +1,8 @@
-"""Tests for lib.ui.detailwindow: `_episode_rows()` and `DetailWindow`,
-Rivulet's custom replacement for the classical `meta()`/`videos()`
-directories, exercised against the shared fake xbmc/xbmcgui stubs in
-tests/kodistubs (no real Kodi runtime, no network).
+"""Tests for lib.ui.detailwindow: `_episode_rows()`/`_group_by_season()`
+and `DetailWindow` (including its season-selector bar, id `SEASON_BAR`/
+30007), Rivulet's custom replacement for the classical `meta()`/
+`videos()` directories, exercised against the shared fake xbmc/xbmcgui
+stubs in tests/kodistubs (no real Kodi runtime, no network).
 
 lib.ui.detailwindow imports xbmcgui and lib.ui.uicommon at module scope;
 `DetailWindow.onClick()` lazily `from lib.ui.streamswindow import
@@ -119,6 +120,40 @@ def test_episode_rows_empty_or_none_input_returns_empty_list(load_detailwindow, 
 
 
 # ---------------------------------------------------------------------------
+# _group_by_season() - pure per-season bucketing for the season bar (30007)
+# ---------------------------------------------------------------------------
+
+
+def test_group_by_season_orders_seasons_specials_last_and_labels_them(load_detailwindow):
+    ctx = load_detailwindow()
+    videos = [
+        {'id': 'v-2x01', 'season': 2, 'episode': 1},
+        {'id': 'v-1x01', 'season': 1, 'episode': 1},
+        {'id': 'v-special', 'season': 0, 'episode': 1},
+        {'id': 'v-1x02', 'season': 1, 'episode': 2},
+    ]
+
+    groups = ctx.detailwindow._group_by_season(videos)
+
+    assert [label for _season, label, _videos in groups] == ['Season 1', 'Season 2', 'Specials']
+    assert [video['id'] for video in groups[0][2]] == ['v-1x01', 'v-1x02']
+    assert [video['id'] for video in groups[1][2]] == ['v-2x01']
+    assert [video['id'] for video in groups[2][2]] == ['v-special']
+
+
+def test_group_by_season_single_season_yields_one_group(load_detailwindow):
+    ctx = load_detailwindow()
+    videos = [
+        {'id': 'v1', 'season': 1, 'episode': 1},
+        {'id': 'v2', 'season': 1, 'episode': 2},
+    ]
+
+    groups = ctx.detailwindow._group_by_season(videos)
+
+    assert [(season, label) for season, label, _videos in groups] == [(1, 'Season 1')]
+
+
+# ---------------------------------------------------------------------------
 # DetailWindow.onInit() - background fallback + row building
 # ---------------------------------------------------------------------------
 
@@ -134,7 +169,6 @@ def test_oninit_background_fallback_chain(load_detailwindow, meta, expected_key)
     ctx = load_detailwindow()
     win = _make_window(ctx.detailwindow)
     win.meta = meta
-    win.rows = [('v1', 'S01E01 \u00b7 Ep One')]
 
     win.onInit()
 
@@ -146,8 +180,13 @@ def test_oninit_builds_one_item_per_row_with_row_id_property_for_a_series(load_d
     ctx = load_detailwindow()
     picker = ctx.detailwindow
     win = _make_window(picker)
-    win.meta = {}
-    win.rows = [('v1', 'S01E01 \u00b7 Pilot'), ('v2', 'S01E02 \u00b7 Second')]
+    win.start({
+        'id': 'tt1',
+        'videos': [
+            {'id': 'v1', 'season': 1, 'episode': 1, 'title': 'Pilot'},
+            {'id': 'v2', 'season': 1, 'episode': 2, 'title': 'Second'},
+        ],
+    }, 'series')
 
     win.onInit()
 
@@ -155,6 +194,66 @@ def test_oninit_builds_one_item_per_row_with_row_id_property_for_a_series(load_d
     assert [item.getLabel() for item in items] == ['S01E01 \u00b7 Pilot', 'S01E02 \u00b7 Second']
     assert [item.getProperty('row_id') for item in items] == ['v1', 'v2']
     assert win.getFocusId() == picker.LIST
+    # A single season is exactly the pre-season-bar flat-list case: 30007
+    # stays hidden, every episode is one row - unchanged, byte-for-byte.
+    assert win.getControl(picker.SEASON_BAR).visible is False
+
+
+def test_oninit_builds_season_bar_and_defaults_to_the_first_non_special_season(load_detailwindow):
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+    win = _make_window(picker)
+    win.start({
+        'id': 'tt1',
+        'videos': [
+            {'id': 'v-2x01', 'season': 2, 'episode': 1, 'title': 'S2E1'},
+            {'id': 'v-1x01', 'season': 1, 'episode': 1, 'title': 'S1E1'},
+            {'id': 'v-1x02', 'season': 1, 'episode': 2, 'title': 'S1E2'},
+            {'id': 'v-special', 'season': 0, 'episode': 1, 'title': 'Special'},
+        ],
+    }, 'series')
+
+    win.onInit()
+
+    bar = win.getControl(picker.SEASON_BAR)
+    assert bar.visible is True
+    assert [item.getLabel() for item in bar.items] == ['Season 1', 'Season 2', 'Specials']
+    assert [item.getProperty('season') for item in bar.items] == ['1', '2', '0']
+    assert win.season_index == 0
+    list_row_ids = [item.getProperty('row_id') for item in win.getControl(picker.LIST).items]
+    assert list_row_ids == ['v-1x01', 'v-1x02']
+
+
+def test_oninit_defaults_to_specials_when_that_is_the_only_season(load_detailwindow):
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+    win = _make_window(picker)
+    win.start({
+        'id': 'tt1',
+        'videos': [
+            {'id': 'v-special-1', 'season': 0, 'episode': 1, 'title': 'Special One'},
+            {'id': 'v-special-2', 'season': 0, 'episode': 2, 'title': 'Special Two'},
+        ],
+    }, 'series')
+
+    win.onInit()
+
+    assert win.getControl(picker.SEASON_BAR).visible is False
+    assert win.season_index == 0
+    list_row_ids = [item.getProperty('row_id') for item in win.getControl(picker.LIST).items]
+    assert list_row_ids == ['v-special-1', 'v-special-2']
+
+
+def test_oninit_hides_season_bar_when_there_are_no_episodes(load_detailwindow):
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+    win = _make_window(picker)
+    win.start({'id': 'tt1'}, 'movie')
+
+    win.onInit()
+
+    assert win.getControl(picker.SEASON_BAR).visible is False
+    assert win.getControl(picker.LIST).items == []
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +280,55 @@ def test_onaction_non_back_action_does_not_close(load_detailwindow):
     win.onAction(xbmcgui.Action(1))
 
     assert win.closed is False
+
+
+def test_onaction_season_move_repopulates_episode_list_and_resets_selection(load_detailwindow):
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+    import xbmcgui
+    win = _make_window(picker)
+    win.start({
+        'id': 'tt1',
+        'videos': [
+            {'id': 'v-1x01', 'season': 1, 'episode': 1, 'title': 'S1E1'},
+            {'id': 'v-2x01', 'season': 2, 'episode': 1, 'title': 'S2E1'},
+            {'id': 'v-2x02', 'season': 2, 'episode': 2, 'title': 'S2E2'},
+        ],
+    }, 'series')
+    win.onInit()
+    assert win.season_index == 0  # defaults to Season 1
+
+    list_control = win.getControl(picker.LIST)
+    list_control.selected_index = 1  # scrolled to episode 2 before switching away
+    win.setFocusId(picker.SEASON_BAR)
+    win.getControl(picker.SEASON_BAR).selected_index = 1  # Kodi already moved the bar right
+
+    win.onAction(xbmcgui.Action(2))  # ACTION_MOVE_RIGHT
+
+    assert win.season_index == 1
+    assert [item.getProperty('row_id') for item in list_control.items] == ['v-2x01', 'v-2x02']
+    assert list_control.selected_index == 0
+
+
+def test_onaction_season_nav_without_focus_on_the_bar_does_not_repopulate(load_detailwindow):
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+    import xbmcgui
+    win = _make_window(picker)
+    win.start({
+        'id': 'tt1',
+        'videos': [
+            {'id': 'v-1x01', 'season': 1, 'episode': 1, 'title': 'S1E1'},
+            {'id': 'v-2x01', 'season': 2, 'episode': 1, 'title': 'S2E1'},
+        ],
+    }, 'series')
+    win.onInit()
+    win.setFocusId(picker.LIST)  # focus stayed on the episode list itself
+    win.getControl(picker.SEASON_BAR).selected_index = 1
+
+    win.onAction(xbmcgui.Action(2))  # ACTION_MOVE_RIGHT
+
+    assert win.season_index == 0
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +420,63 @@ def test_onclick_stays_open_when_open_streams_returns_false(load_detailwindow, m
 
     assert win.should_close_caller is False
     assert win.closed is False
+
+
+def test_onclick_season_bar_switches_season_and_moves_focus_to_episode_list(load_detailwindow):
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+    win = _make_window(picker)
+    win.start({
+        'id': 'tt1',
+        'videos': [
+            {'id': 'v-1x01', 'season': 1, 'episode': 1, 'title': 'S1E1'},
+            {'id': 'v-2x01', 'season': 2, 'episode': 1, 'title': 'S2E1'},
+        ],
+    }, 'series')
+    win.onInit()
+    win.getControl(picker.SEASON_BAR).selected_index = 1
+
+    win.onClick(picker.SEASON_BAR)
+
+    assert win.season_index == 1
+    assert [item.getProperty('row_id') for item in win.getControl(picker.LIST).items] == ['v-2x01']
+    assert win.getFocusId() == picker.LIST
+
+
+def test_onclick_episode_in_non_default_season_resolves_via_video_by_id_across_seasons(
+    load_detailwindow, monkeypatch,
+):
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+    win = _make_window(picker)
+    meta = {
+        'id': 'tt1', 'name': 'Some Show',
+        'poster': 'https://x/poster.jpg', 'background': 'https://x/fanart.jpg',
+        'videos': [
+            {'id': 'v-1x01', 'season': 1, 'episode': 1, 'title': 'S1 Ep'},
+            {'id': 'v-2x01', 'season': 2, 'episode': 1, 'title': 'S2 Ep'},
+        ],
+    }
+    win.start(meta, 'series')
+    win.onInit()
+    win.getControl(picker.SEASON_BAR).selected_index = 1
+    win.onClick(picker.SEASON_BAR)  # switch to Season 2, focus moves to the episode list
+    win.getControl(picker.LIST).selected_index = 0
+    captured = {}
+
+    def fake_open_streams(stype, sid, poster=None, heading='', art=None):
+        captured['sid'] = sid
+        captured['heading'] = heading
+        captured['art'] = art
+        return False
+
+    monkeypatch.setattr(ctx.streamswindow, 'open_streams', fake_open_streams)
+
+    win.onClick(picker.LIST)
+
+    assert captured['sid'] == 'v-2x01'
+    assert captured['heading'] == 'Some Show \u2013 S02E01 S2 Ep'
+    assert captured['art'] == {'poster': 'https://x/poster.jpg', 'fanart': 'https://x/fanart.jpg'}
 
 
 # ---------------------------------------------------------------------------
