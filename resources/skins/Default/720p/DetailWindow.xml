@@ -17,7 +17,7 @@
 
             <control type="label" id="30005">
                 <left>60</left><top>40</top><width>900</width><height>40</height>
-                <font>font14</font><textcolor>FF3AA0FF</textcolor><aligny>center</aligny>
+                <font>font14</font><textcolor>FF38BDF8</textcolor><aligny>center</aligny>
                 <label></label>
             </control>
 
@@ -52,7 +52,7 @@
                     </control>
                     <control type="image">
                         <top>36</top><width>150</width><height>4</height>
-                        <texture colordiffuse="FF3AA0FF">white.png</texture>
+                        <texture colordiffuse="FF38BDF8">white.png</texture>
                     </control>
                 </focusedlayout>
             </control>
@@ -73,7 +73,7 @@
                 </itemlayout>
                 <focusedlayout height="76">
                     <control type="image"><width>900</width><height>76</height><texture colordiffuse="28FFFFFF">white.png</texture></control>
-                    <control type="image"><width>4</width><height>76</height><texture colordiffuse="FF3AA0FF">white.png</texture></control>
+                    <control type="image"><width>4</width><height>76</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
                     <control type="image"><left>12</left><top>10</top><width>100</width><height>56</height><texture>$INFO[ListItem.Property(thumb)]</texture><aspectratio>scale</aspectratio></control>
                     <control type="label"><left>128</left><top>10</top><width>752</width><height>34</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
                         <label>$INFO[ListItem.Label]</label>
@@ -90,8 +90,8 @@
                 <orientation>vertical</orientation>
                 <showonepage>false</showonepage>
                 <texturesliderbackground colordiffuse="20FFFFFF">white.png</texturesliderbackground>
-                <texturesliderbar colordiffuse="FF3AA0FF">white.png</texturesliderbar>
-                <texturesliderbarfocus colordiffuse="FF3AA0FF">white.png</texturesliderbarfocus>
+                <texturesliderbar colordiffuse="FF38BDF8">white.png</texturesliderbar>
+                <texturesliderbarfocus colordiffuse="FF38BDF8">white.png</texturesliderbarfocus>
             </control>
 
             <control type="label">
@@ -99,6 +99,8 @@
                 <font>font12</font><textcolor>AAFFFFFF</textcolor><align>right</align>
                 <label>$INFO[Container(30002).CurrentItem]/$INFO[Container(30002).NumItems]</label>
             </control>
+            <control type="image"><left>60</left><top>662</top><width>26</width><height>26</height><texture>logo.png</texture><aspectratio>keep</aspectratio></control>
+            <control type="label"><left>94</left><top>662</top><width>200</width><height>26</height><font>font12</font><textcolor>55FFFFFF</textcolor><aligny>center</aligny><label>RIVULET</label></control>
         </control>
     </controls>
 </window>

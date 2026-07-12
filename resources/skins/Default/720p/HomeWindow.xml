@@ -14,11 +14,10 @@
             <control type="image"><width>1280</width><height>720</height><texture colordiffuse="FF141414">white.png</texture></control>
             <control type="image" id="30000"><width>1280</width><height>720</height><texture colordiffuse="FF3A3A3A"></texture><aspectratio>scale</aspectratio></control>
             <control type="image"><width>1280</width><height>720</height><texture colordiffuse="CC000000">white.png</texture></control>
-            <control type="label"><left>90</left><top>80</top><width>600</width><height>60</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
-                <label>Rivulet</label>
-            </control>
+            <control type="image"><left>90</left><top>76</top><width>52</width><height>52</height><texture>logo.png</texture><aspectratio>keep</aspectratio></control>
+            <control type="label"><left>156</left><top>76</top><width>500</width><height>52</height><font>font14</font><textcolor>FFFFFFFF</textcolor><aligny>center</aligny><label>[B]RIVULET[/B]</label></control>
             <control type="label" id="30005">
-                <left>90</left><top>144</top><width>600</width><height>30</height><font>font12</font><textcolor>FF999999</textcolor>
+                <left>156</left><top>144</top><width>600</width><height>30</height><font>font12</font><textcolor>FF999999</textcolor>
                 <label></label>
             </control>
             <control type="list" id="30002">
