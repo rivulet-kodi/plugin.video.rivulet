@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.rivulet" name="Rivulet" version="0.4.10" provider-name="M0Rf30">
+<addon id="plugin.video.rivulet" name="Rivulet" version="0.4.11" provider-name="M0Rf30">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" version="2.22.0"/>
@@ -12,7 +12,10 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse Discover and Search catalogs, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote stremio-server-go streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.4.10:
+    <news>v0.4.11:
+- Fix: playback now takes the screen immediately - video no longer starts hidden behind the menu until you press Back.
+- Fix: stopping playback no longer briefly spawns a duplicate Home screen.
+v0.4.10:
 - Fix: an addon that's briefly unavailable no longer freezes the UI - streams/search now query addons in parallel instead of one at a time.
 - Fix: an expired Stremio session now prompts a clean re-login instead of silently failing.
 - Fix: installed addons' info now refreshes automatically instead of going stale forever.
