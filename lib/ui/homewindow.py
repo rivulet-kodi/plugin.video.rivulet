@@ -4,15 +4,16 @@ over the addon's fanart; picking a row opens the next screen as a
 nested modal (see `lib.ui.uicommon`'s module docstring for the
 navigation model this and every other custom screen shares).
 
-Library/Add-ons management have no custom screen yet, so they fall back
-to the classical Kodi directory via `lib.ui.uicommon.fallback_to_classical`
-(and close HomeWindow first, since there is no nested window to draw over
-it in that case - see `_open_library`/`_open_addons`). Settings opens
-Kodi's own native settings dialog, which is not worth replacing.
+Discover/Search/Library each draw a nested modal over Home and only
+close it once their own selection chain reaches playback (see
+`_open_discover`/`_open_search`/`_open_library`); Add-ons has no
+playback path of its own, so Home always stays open behind it (see
+`_open_addons`). Settings opens Kodi's own native settings dialog,
+which is not worth replacing.
 """
 import xbmcgui
 
-from lib.ui.uicommon import BACK_ACTIONS, fallback_to_classical, open_window
+from lib.ui.uicommon import BACK_ACTIONS, open_window
 
 BACKGROUND = 30000
 LIST = 30002
@@ -69,7 +70,7 @@ def _status_text(auth):
     return L(30022) % (user.get('email') or user.get('name') or '?')
 
 
-class HomeWindow(xbmcgui.WindowXML):
+class HomeWindow(xbmcgui.WindowXMLDialog):
     """See module docstring. Built/run via `open_home()`."""
 
     def onInit(self):
@@ -112,15 +113,14 @@ def _open_search(window):
 
 
 def _open_library(window):
-    # No custom screen yet: close Home (nothing custom left to show over
-    # it) and drop back to the classical directory.
-    window.close()
-    fallback_to_classical('library')
+    from lib.ui.librarywindow import open_library
+    if open_library():
+        window.close()
 
 
 def _open_addons(window):
-    window.close()
-    fallback_to_classical('addons')
+    from lib.ui.addonswindow import open_addons
+    open_addons()
 
 
 def _open_settings(window):

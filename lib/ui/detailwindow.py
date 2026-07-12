@@ -128,7 +128,7 @@ def _show_art(meta):
     return {'poster': poster, 'fanart': fanart}
 
 
-class DetailWindow(xbmcgui.WindowXML):
+class DetailWindow(xbmcgui.WindowXMLDialog):
     """See module docstring. Built/run via `open_detail()` - only for a
     series (a title with episodes); a movie never reaches this window.
     Every episode is grouped by season behind a season-selector bar
@@ -273,7 +273,7 @@ class DetailWindow(xbmcgui.WindowXML):
         if open_streams(
             self.stype, sid, poster=self.meta.get('poster'),
             heading=_episode_heading(self.meta.get('name') or self.meta.get('id') or '', video),
-            art=_show_art(self.meta),
+            art=_show_art(self.meta), meta=self.meta,
         ):
             self.should_close_caller = True
             self.close()
@@ -300,7 +300,7 @@ def open_detail(stype, sid):
         return open_streams(
             stype, sid, poster=meta_obj.get('poster'),
             heading=meta_obj.get('name') or meta_obj.get('id') or '',
-            art=_show_art(meta_obj),
+            art=_show_art(meta_obj), meta=meta_obj,
         )
 
     log('detailwindow: opening DetailWindow for %s/%s' % (stype, sid), xbmc.LOGINFO)

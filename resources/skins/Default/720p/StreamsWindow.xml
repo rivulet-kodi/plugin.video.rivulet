@@ -5,6 +5,7 @@
     <controls>
         <control type="group">
             <left>0</left><top>0</top>
+            <visible>!Player.HasVideo</visible>
             <animation type="WindowOpen" reversible="false">
                 <effect type="fade" delay="0" end="100" time="200" />
             </animation>
@@ -24,6 +25,11 @@
             <control type="image" id="30004">
                 <left>60</left><top>110</top><width>180</width><height>270</height>
                 <texture></texture><aspectratio>scale</aspectratio>
+            </control>
+
+            <control type="textbox" id="30008">
+                <left>60</left><top>396</top><width>180</width><height>220</height>
+                <font>font12</font><textcolor>99FFFFFF</textcolor>
             </control>
 
             <control type="list" id="30002">

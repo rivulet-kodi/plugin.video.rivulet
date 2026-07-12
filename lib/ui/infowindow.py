@@ -63,7 +63,7 @@ def _item_properties(meta):
     }
 
 
-class ShowcaseWindow(xbmcgui.WindowXML):
+class ShowcaseWindow(xbmcgui.WindowXMLDialog):
     """Fullscreen coverflow modal (`ShowcaseWindow.xml`). Build/run it via
     `open_showcase()` below rather than constructing it directly."""
 
@@ -142,7 +142,7 @@ class ShowcaseWindow(xbmcgui.WindowXML):
             meta.get('type'), meta.get('id'),
             poster=poster,
             heading=meta.get('name') or meta.get('id') or '',
-            art={'poster': poster, 'fanart': fanart},
+            art={'poster': poster, 'fanart': fanart}, meta=meta,
         )
 
 

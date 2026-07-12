@@ -5,6 +5,7 @@
     <controls>
         <control type="group">
             <left>0</left><top>0</top>
+            <visible>!Player.HasVideo</visible>
             <animation type="WindowOpen" reversible="false">
                 <effect type="slide" start="0,100" end="0,0" delay="160" time="160" />
                 <effect type="fade" delay="160" end="100" time="100" />
@@ -67,6 +68,8 @@
                 <texturenofocus colordiffuse="80FFFFFF">close.png</texturenofocus>
                 <ondown>30002</ondown>
             </control>
+            <control type="image"><left>0</left><top>0</top><width>64</width><height>720</height><texture flipx="true">fade_edge.png</texture></control>
+            <control type="image"><left>1216</left><top>0</top><width>64</width><height>720</height><texture>fade_edge.png</texture></control>
             <control type="image"><left>60</left><top>662</top><width>26</width><height>26</height><texture>logo.png</texture><aspectratio>keep</aspectratio></control>
             <control type="label"><left>94</left><top>662</top><width>200</width><height>26</height><font>font12</font><textcolor>55FFFFFF</textcolor><aligny>center</aligny><label>RIVULET</label></control>
         </control>

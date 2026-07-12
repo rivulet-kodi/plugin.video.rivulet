@@ -91,7 +91,7 @@ def open_window(window_cls, xml_name, *args, **kwargs):
     return window_cls(xml_name, addon_skin_path(), 'Default', '720p', *args, **kwargs)
 
 
-class BaseWindow(xbmcgui.WindowXML):
+class BaseWindow(xbmcgui.WindowXMLDialog):
     """Common `onAction` back-handling for a simple (non-coverflow) modal
     screen: any of `BACK_ACTIONS` closes the window. Screens with extra
     per-focus behaviour (e.g. the coverflow's background swap) should

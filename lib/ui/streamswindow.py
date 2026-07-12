@@ -31,6 +31,12 @@ Both default to "nothing supplied" (`''`/`None`) so a bare `poster=`
 kwarg, or no context at all, keeps every pre-existing call site working
 unchanged: an empty heading falls back to a generic localized "Streams"
 title, and no `art` simply means the side poster panel stays empty.
+
+`meta` is a similar optional caller-context kwarg - the same Stremio
+meta dict `DetailWindow`/`ShowcaseWindow`/`open_detail()` already have in
+hand - rendered read-only into the side info panel (year/runtime/
+rating/genres, plus a single-provider dedupe note); omitted or `None`
+leaves that panel empty exactly like today.
 """
 import xbmcgui
 
@@ -43,9 +49,10 @@ BACKGROUND = 30000
 LIST = 30002
 POSTER = 30004
 HEADING = 30005
+INFO_PANEL = 30008
 
 
-class StreamsWindow(xbmcgui.WindowXML):
+class StreamsWindow(xbmcgui.WindowXMLDialog):
     """See module docstring. Built/run via `open_streams()`."""
 
     def __init__(self, *args, **kwargs):
@@ -56,20 +63,22 @@ class StreamsWindow(xbmcgui.WindowXML):
         self.poster = None
         self.heading = ''
         self.art = None
+        self.meta = None
         self.played = False
 
-    def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+    def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
         """doModal() showing `pairs` (a list of `(info, stream)` as
         `lib.stremio.streaminfo.parse_stream`/`sort_streams` produce).
-        `heading`/`art` are the optional caller-context kwargs described
-        in the module docstring. Returns True if playback started (the
-        caller should also close)."""
+        `heading`/`art`/`meta` are the optional caller-context kwargs
+        described in the module docstring. Returns True if playback started
+        (the caller should also close)."""
         self.pairs = list(pairs or [])
         self.stype = stype
         self.sid = sid
         self.poster = poster
         self.heading = heading or ''
         self.art = art
+        self.meta = meta
         self.played = False
         if not self.pairs:
             return False
@@ -85,16 +94,34 @@ class StreamsWindow(xbmcgui.WindowXML):
         self.getControl(POSTER).setImage(art.get('poster') or self.poster or '')
         self.getControl(HEADING).setLabel((self.heading or L(30041)).upper())
 
+        providers = {info.get('addon') for info, _stream in self.pairs if info.get('addon')}
+        single_provider = next(iter(providers)) if len(providers) == 1 else None
+
         items = []
         for index, (info, _stream) in enumerate(self.pairs):
             line1 = streaminfo.format_label(info, include_addon=False) or info.get('raw') or '?'
             line1 = line1.replace('\r', ' ').replace('\n', ' ')
-            line2 = (info.get('addon') or '').replace('\r', ' ').replace('\n', ' ')
+            line2 = '' if single_provider else (info.get('addon') or '').replace('\r', ' ').replace('\n', ' ')
             item = xbmcgui.ListItem(line1, label2=line2)
             item.setProperty('position', str(index))
             items.append(item)
         self.getControl(LIST).addItems(items)
         self.setFocusId(LIST)
+
+        meta = self.meta or {}
+        year = str(meta.get('releaseInfo') or meta.get('year') or '').rstrip('-')
+        runtime = meta.get('runtime') or ''
+        top_line = ' \u00b7 '.join(part for part in (year, runtime) if part)
+        lines = [top_line] if top_line else []
+        rating = meta.get('imdbRating')
+        if rating:
+            lines.append('\u2605 %s' % rating)
+        genres = (meta.get('genres') or [])[:3]
+        if genres:
+            lines.append(' / '.join(genres))
+        if single_provider:
+            lines.append('via %s' % single_provider)
+        self.getControl(INFO_PANEL).setText('\n'.join(lines))
 
     def onAction(self, action):
         if action.getId() in BACK_ACTIONS:
@@ -173,14 +200,14 @@ def _wait_for_playback_end(player=None, monitor=None, start_timeout=20.0, tick=0
         return False
 
 
-def open_streams(stype, sid, poster=None, heading='', art=None):
+def open_streams(stype, sid, poster=None, heading='', art=None, meta=None):
     """Fetch+sort every installed addon's streams for (stype, sid) and
-    show them; a pick resolves+plays directly. `heading`/`art` are
+    show them; a pick resolves+plays directly. `heading`/`art`/`meta` are
     forwarded to `StreamsWindow.start()` unchanged (see the module
     docstring).
 
     Once a pick plays, this reopens a fresh `StreamsWindow` over the
-    SAME `pairs`/`heading`/`art`/`poster` once playback ends (see
+    SAME `pairs`/`heading`/`art`/`meta`/`poster` once playback ends (see
     `_wait_for_playback_end()`) rather than returning - see the module
     docstring for why this means the function now only ever returns
     False."""
@@ -239,7 +266,7 @@ def open_streams(stype, sid, poster=None, heading='', art=None):
         win = None
         try:
             win = open_window(StreamsWindow, 'StreamsWindow.xml')
-            played = win.start(pairs, stype, sid, poster=poster, heading=heading, art=art)
+            played = win.start(pairs, stype, sid, poster=poster, heading=heading, art=art, meta=meta)
         except Exception as exc:  # a skin/UI failure must surface, not vanish
             log('streamswindow: window failed to open: %r' % (exc,), xbmc.LOGERROR)
             notify(L(30032))
