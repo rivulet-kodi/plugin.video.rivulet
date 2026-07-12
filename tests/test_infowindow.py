@@ -344,7 +344,7 @@ def test_onclick_select_with_movie_opens_streams_directly_with_heading_and_art(
     win.onInit()
     captured = {}
 
-    def fake_open_streams(stype, sid, poster=None, heading='', art=None):
+    def fake_open_streams(stype, sid, poster=None, heading='', art=None, meta=None):
         captured['args'] = (stype, sid)
         captured['poster'] = poster
         captured['heading'] = heading
@@ -377,7 +377,7 @@ def test_onclick_select_with_movie_falls_back_to_logo_then_poster_for_fanart(
     captured = {}
     monkeypatch.setattr(
         ctx.streamswindow, 'open_streams',
-        lambda stype, sid, poster=None, heading='', art=None: captured.update(art=art) or True,
+        lambda stype, sid, poster=None, heading='', art=None, meta=None: captured.update(art=art) or True,
     )
 
     win.onClick(infowindow.SELECT)

@@ -125,7 +125,10 @@ def test_oninit_builds_two_line_row_stripping_addon_from_line_one_into_label2(lo
         'resolution': '1080p', 'source': 'WEB-DL', 'codec': 'x265', 'hdr': ['HDR10'],
         'size_text': '2.1 GB', 'seeders': 42, 'addon': 'AddonA',
     }
-    win.pairs = [(info, {'url': 'https://a.example/a.mp4'})]
+    # A second pair from a different addon keeps this a multi-provider
+    # case, so the single-provider label2 dedupe (see below) doesn't
+    # mask what this test is actually about: per-row label1/label2 text.
+    win.pairs = [(info, {'url': 'https://a.example/a.mp4'}), ({'addon': 'AddonB'}, {})]
 
     win.onInit()
 
@@ -172,7 +175,10 @@ def test_oninit_addon_only_info_falls_back_to_question_mark_on_line1_but_keeps_a
     # include_addon=False) returns '' regardless of 'addon' being set, so
     # line 1 falls back to '?' -- but the addon name still surfaces, on
     # line 2, where the two-line row now dedicates it.
-    win.pairs = [({'addon': 'AddonA'}, {'url': 'https://a.example/a.mp4'})]
+    # A second pair from a different addon keeps this a multi-provider
+    # case, so the single-provider label2 dedupe (see below) doesn't
+    # mask what this test is actually about: per-row label1/label2 text.
+    win.pairs = [({'addon': 'AddonA'}, {'url': 'https://a.example/a.mp4'}), ({'addon': 'AddonB'}, {})]
 
     win.onInit()
 
@@ -268,6 +274,79 @@ def test_oninit_poster_panel_is_cleared_when_neither_art_nor_legacy_poster_is_su
 
     assert win.getControl(ctx.streamswindow.POSTER).image == ''
 
+
+# ---------------------------------------------------------------------------
+# StreamsWindow.onInit() - info panel (INFO_PANEL/30008): year/runtime/
+# rating/genres built from `self.meta`, plus the single-provider dedupe
+# that blanks every row's label2 and appends a trailing 'via <addon>' line
+# once every pair came from the same addon.
+# ---------------------------------------------------------------------------
+
+
+def test_oninit_meta_renders_year_runtime_rating_and_genres_into_the_info_panel(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.meta = {
+        'releaseInfo': '2015-', 'runtime': '48 min', 'imdbRating': '8.7',
+        'genres': ['Drama', 'Crime', 'Thriller', 'Extra'],
+    }
+    # Two distinct addons -> no single-provider dedupe, isolating this to
+    # the meta-driven lines alone.
+    win.pairs = [({'addon': 'AddonA'}, {}), ({'addon': 'AddonB'}, {})]
+
+    win.onInit()
+
+    assert win.getControl(ctx.streamswindow.INFO_PANEL).text == (
+        '2015 \u00b7 48 min\n\u2605 8.7\nDrama / Crime / Thriller'
+    )
+
+
+def test_oninit_single_provider_blanks_every_label2_and_appends_via_line(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.meta = None
+    win.pairs = [
+        ({'addon': 'AddonA', 'raw': 'A'}, {}),
+        ({'addon': 'AddonA', 'raw': 'B'}, {}),
+    ]
+
+    win.onInit()
+
+    items = win.getControl(ctx.streamswindow.LIST).items
+    assert [item.label2 for item in items] == ['', '']
+    assert win.getControl(ctx.streamswindow.INFO_PANEL).text == 'via AddonA'
+
+
+def test_oninit_multiple_providers_keep_label2_and_skip_the_via_line(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.meta = {'runtime': '90 min'}
+    win.pairs = [
+        ({'addon': 'AddonA', 'raw': 'A'}, {}),
+        ({'addon': 'AddonB', 'raw': 'B'}, {}),
+    ]
+
+    win.onInit()
+
+    items = win.getControl(ctx.streamswindow.LIST).items
+    assert [item.label2 for item in items] == ['AddonA', 'AddonB']
+    assert win.getControl(ctx.streamswindow.INFO_PANEL).text == '90 min'
+
+
+def test_oninit_no_meta_and_multiple_providers_leaves_the_info_panel_empty(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.meta = None
+    win.pairs = [
+        ({'addon': 'AddonA', 'raw': 'A'}, {}),
+        ({'addon': 'AddonB', 'raw': 'B'}, {}),
+    ]
+
+    win.onInit()
+
+    assert win.getControl(ctx.streamswindow.INFO_PANEL).text == ''
+    items = win.getControl(ctx.streamswindow.LIST).items
+    assert [item.label2 for item in items] == ['AddonA', 'AddonB']
 
 # ---------------------------------------------------------------------------
 # StreamsWindow.onAction()
@@ -410,18 +489,20 @@ def test_start_with_pairs_calls_domodal_and_returns_played(load_streamswindow, m
     assert win.modal_calls == 1
 
 
-def test_start_forwards_heading_and_art_onto_the_window(load_streamswindow):
+def test_start_forwards_heading_art_and_meta_onto_the_window(load_streamswindow):
     ctx = load_streamswindow()
     win = _make_window(ctx.streamswindow)
     pairs = [({'raw': 'A'}, {'url': 'https://a.example/a.mp4'})]
+    meta = {'name': 'A Movie', 'runtime': '90 min'}
 
-    win.start(pairs, 'movie', 'tt1', heading='My Title', art={'poster': 'P', 'fanart': 'F'})
+    win.start(pairs, 'movie', 'tt1', heading='My Title', art={'poster': 'P', 'fanart': 'F'}, meta=meta)
 
     assert win.heading == 'My Title'
     assert win.art == {'poster': 'P', 'fanart': 'F'}
+    assert win.meta == meta
 
 
-def test_start_defaults_heading_and_art_when_omitted(load_streamswindow):
+def test_start_defaults_heading_art_and_meta_when_omitted(load_streamswindow):
     ctx = load_streamswindow()
     win = _make_window(ctx.streamswindow)
     pairs = [({'raw': 'A'}, {'url': 'https://a.example/a.mp4'})]
@@ -430,6 +511,7 @@ def test_start_defaults_heading_and_art_when_omitted(load_streamswindow):
 
     assert win.heading == ''
     assert win.art is None
+    assert win.meta is None
 
 
 # ---------------------------------------------------------------------------
@@ -458,7 +540,7 @@ def test_open_streams_filters_unsupported_addons_and_forwards_aggregate_to_the_w
     captured = {}
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
             captured['args'] = (pairs, stype, sid, poster)
             return True
 
@@ -477,7 +559,7 @@ def test_open_streams_filters_unsupported_addons_and_forwards_aggregate_to_the_w
     assert result is False
 
 
-def test_open_streams_forwards_heading_and_art_to_the_window(load_streamswindow, monkeypatch):
+def test_open_streams_forwards_heading_art_and_meta_to_the_window(load_streamswindow, monkeypatch):
     ctx = load_streamswindow()
     sw = ctx.streamswindow
     supported = {
@@ -490,9 +572,10 @@ def test_open_streams_forwards_heading_and_art_to_the_window(load_streamswindow,
     captured = {}
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
             captured['heading'] = heading
             captured['art'] = art
+            captured['meta'] = meta
             return True
 
     monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
@@ -503,11 +586,13 @@ def test_open_streams_forwards_heading_and_art_to_the_window(load_streamswindow,
     result = sw.open_streams(
         'movie', 'tt1', heading='Some Movie',
         art={'poster': 'https://x/p.jpg', 'fanart': 'https://x/f.jpg'},
+        meta={'name': 'Some Movie', 'runtime': '90 min'},
     )
 
     assert result is False
     assert captured['heading'] == 'Some Movie'
     assert captured['art'] == {'poster': 'https://x/p.jpg', 'fanart': 'https://x/f.jpg'}
+    assert captured['meta'] == {'name': 'Some Movie', 'runtime': '90 min'}
 
 
 def test_open_streams_window_is_closed_exactly_once_when_start_raises(load_streamswindow, monkeypatch):
@@ -532,7 +617,7 @@ def test_open_streams_window_is_closed_exactly_once_when_start_raises(load_strea
             self.close_calls += 1
             super().close()
 
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
             # Stands in for a crash inside onInit()/onAction() while the
             # modal loop is running - self.close() (the window's own,
             # normal-path close) never gets a chance to run.
@@ -567,7 +652,7 @@ def test_open_streams_addonerror_is_logged_and_skipped_not_fatal(load_streamswin
     captured = {}
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
             captured['pairs'] = pairs
             return True
 
@@ -617,7 +702,7 @@ def test_open_streams_multiple_addon_failures_still_log_a_single_aggregate_warni
     _wire_data_layer(sw, _FakeStore(addons=[fail_a, fail_b, working]), client)
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
             return True
 
     monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
@@ -699,7 +784,7 @@ def test_open_streams_reads_stream_sort_setting_and_applies_it_to_final_order(lo
     captured = {}
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
             captured['pairs'] = pairs
             return True
 
@@ -762,7 +847,7 @@ def test_open_streams_busy_dialog_reports_progress_and_skips_unsupported_addons(
     captured = {}
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
             captured['pairs'] = pairs
             return True
 
@@ -807,7 +892,7 @@ def test_open_streams_cancelled_mid_loop_keeps_partial_results_and_closes_dialog
     captured = {}
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
             captured['pairs'] = pairs
             return True
 
@@ -1000,19 +1085,21 @@ def test_open_streams_reopens_with_the_same_pairs_after_a_played_round_trip_then
     start_calls = []
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
-            start_calls.append((pairs, stype, sid, poster, heading, art))
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
+            start_calls.append((pairs, stype, sid, poster, heading, art, meta))
             return len(start_calls) == 1  # plays the first time, backs out of the reopened window
 
     monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
     ctx.env.player_is_playing = lambda n: n <= 2  # "playing" for 2 polls, then stopped
+    meta = {'name': 'Some Movie', 'runtime': '90 min'}
 
-    result = sw.open_streams('movie', 'tt1', heading='Some Movie', art={'poster': 'https://x/p.jpg'})
+    result = sw.open_streams('movie', 'tt1', heading='Some Movie', art={'poster': 'https://x/p.jpg'}, meta=meta)
 
     assert result is False
     assert len(start_calls) == 2
-    assert start_calls[0] == start_calls[1]  # reopened with the SAME pairs/heading/art/poster
+    assert start_calls[0] == start_calls[1]  # reopened with the SAME pairs/heading/art/meta/poster
     assert start_calls[0][0] is start_calls[1][0]  # not just equal - the identical pairs list
+    assert start_calls[0][6] is meta is start_calls[1][6]  # meta threaded through unchanged, same object
     assert len(client.calls) == 1  # addon streams were fetched only once, never re-fetched
     assert [s for _info, s in start_calls[0][0]] == [stream]
 
@@ -1026,7 +1113,7 @@ def test_open_streams_user_cancel_on_first_window_returns_false_without_waiting_
     start_calls = []
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
             start_calls.append(1)
             return False  # user backed out without picking anything
 
@@ -1049,7 +1136,7 @@ def test_open_streams_reopens_even_when_playback_never_starts_within_the_timeout
     start_calls = []
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
             start_calls.append(1)
             return len(start_calls) == 1  # "played" once, then the reopened window backs out
 
@@ -1075,7 +1162,7 @@ def test_open_streams_monitor_abort_before_playing_returns_false_without_reopeni
     start_calls = []
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
             start_calls.append(1)
             return True  # must never be reached a second time
 
@@ -1098,7 +1185,7 @@ def test_open_streams_monitor_abort_while_playing_returns_false_without_reopenin
     start_calls = []
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
             start_calls.append(1)
             return True
 
@@ -1122,7 +1209,7 @@ def test_open_streams_monitor_abort_during_settle_pause_returns_false_without_re
     start_calls = []
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
             start_calls.append(1)
             return True  # must never be reached a second time
 

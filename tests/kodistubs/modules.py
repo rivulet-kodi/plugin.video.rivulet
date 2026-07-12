@@ -105,7 +105,7 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
     class FakeWindowControl:
         """Stand-in for one WindowXML control (`getControl(id)`'s
         return value): records addItems()/setImage()/setVisible()/
-        setLabel() calls. `getSelectedItem()` returns
+        setLabel()/setText() calls. `getSelectedItem()` returns
         `self.items[self.selected_index]` (default 0) - a test scripts a
         scroll position by setting `.selected_index` before calling
         onAction()/onClick(). `reset()`/`selectItem()`/`getSelectedPosition()`
@@ -119,6 +119,7 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
             self.visible = True
             self.selected_index = 0
             self.label = None
+            self.text = None
 
         def addItems(self, items):
             self.items.extend(items)
@@ -134,6 +135,9 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
 
         def setLabel(self, label):
             self.label = label
+
+        def setText(self, text):
+            self.text = text
 
         def getSelectedItem(self):
             if not self.items:

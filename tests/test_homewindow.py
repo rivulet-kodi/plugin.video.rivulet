@@ -5,14 +5,18 @@ network).
 
 lib.ui.homewindow imports xbmcgui and lib.ui.uicommon at module scope, so
 load_homewindow reloads lib.ui.compat/lib.ui.uicommon/lib.ui.router/
-lib.ui.homewindow fresh together. HomeWindow.onClick()'s 'discover'/'search'
-handlers lazily `from lib.ui.catalogpicker import open_catalog_picker` /
-`from lib.ui.searchwindow import open_search` at call time, so
-lib.ui.catalogpicker/lib.ui.searchwindow are reloaded too (same reason
-tests/test_views.py reloads lib.ui.infowindow: to get a handle - `ctx.
-catalogpicker`/`ctx.searchwindow` - whose functions this file monkeypatches,
-and to have install_kodi_stubs clean their sys.modules entries back up at
-teardown so no later test file observes them bound to a dead test's fakes).
+lib.ui.homewindow fresh together. HomeWindow.onClick()'s 'discover'/
+'search'/'library'/'addons' handlers lazily `from lib.ui.catalogpicker
+import open_catalog_picker` / `from lib.ui.searchwindow import
+open_search` / `from lib.ui.librarywindow import open_library` / `from
+lib.ui.addonswindow import open_addons` at call time, so
+lib.ui.catalogpicker/lib.ui.searchwindow/lib.ui.librarywindow/
+lib.ui.addonswindow are reloaded too (same reason tests/test_views.py
+reloads lib.ui.infowindow: to get a handle - `ctx.catalogpicker`/`ctx.
+searchwindow`/`ctx.librarywindow`/`ctx.addonswindow` - whose functions
+this file monkeypatches, and to have install_kodi_stubs clean their
+sys.modules entries back up at teardown so no later test file observes
+them bound to a dead test's fakes).
 
 HomeWindow.onInit()/onClick()/onAction() are called directly here, never
 through a real modal event loop, exactly like tests/test_infowindow.py drives
@@ -30,8 +34,8 @@ import lib.store as store_module
 from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
-    'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.router',
-    'lib.ui.homewindow', 'lib.ui.catalogpicker', 'lib.ui.searchwindow',
+    'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.router', 'lib.ui.homewindow',
+    'lib.ui.catalogpicker', 'lib.ui.searchwindow', 'lib.ui.librarywindow', 'lib.ui.addonswindow',
 )
 
 
@@ -304,30 +308,36 @@ def test_onclick_search_stays_open_when_open_search_returns_false(load_homewindo
     assert win.closed is False
 
 
-def test_onclick_library_always_closes_and_falls_back_to_classical_directory(load_homewindow):
+def test_onclick_library_closes_when_open_library_returns_true(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    ctx.router.BASE_URL = 'plugin://plugin.video.rivulet/'
+    monkeypatch.setattr(ctx.librarywindow, 'open_library', lambda: True)
     win = _window_with_focused_action(ctx.homewindow, 'library')
 
     win.onClick(ctx.homewindow.LIST)
 
     assert win.closed is True
-    assert ctx.env.executed_builtins == [
-        'ActivateWindow(Videos,plugin://plugin.video.rivulet/?action=library)'
-    ]
 
 
-def test_onclick_addons_always_closes_and_falls_back_to_classical_directory(load_homewindow):
+def test_onclick_library_stays_open_when_open_library_returns_false(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    ctx.router.BASE_URL = 'plugin://plugin.video.rivulet/'
+    monkeypatch.setattr(ctx.librarywindow, 'open_library', lambda: False)
+    win = _window_with_focused_action(ctx.homewindow, 'library')
+
+    win.onClick(ctx.homewindow.LIST)
+
+    assert win.closed is False
+
+
+def test_onclick_addons_never_closes_home(load_homewindow, monkeypatch):
+    ctx = load_homewindow()
+    calls = []
+    monkeypatch.setattr(ctx.addonswindow, 'open_addons', lambda: calls.append(1))
     win = _window_with_focused_action(ctx.homewindow, 'addons')
 
     win.onClick(ctx.homewindow.LIST)
 
-    assert win.closed is True
-    assert ctx.env.executed_builtins == [
-        'ActivateWindow(Videos,plugin://plugin.video.rivulet/?action=addons)'
-    ]
+    assert calls == [1]
+    assert win.closed is False
 
 
 def test_onclick_settings_opens_native_settings_without_closing(load_homewindow):

@@ -365,7 +365,7 @@ def test_onclick_episode_row_uses_the_episodes_own_id_as_sid_not_the_titles(load
     win = _window_with_focused_row(picker, meta, 'series', 'tt1:1:2')
     captured = {}
 
-    def fake_open_streams(stype, sid, poster=None, heading='', art=None):
+    def fake_open_streams(stype, sid, poster=None, heading='', art=None, meta=None):
         captured['args'] = (stype, sid)
         return True
 
@@ -393,7 +393,7 @@ def test_onclick_passes_episode_heading_and_show_art_to_open_streams(load_detail
     win.getControl(picker.LIST).selected_index = 0
     captured = {}
 
-    def fake_open_streams(stype, sid, poster=None, heading='', art=None):
+    def fake_open_streams(stype, sid, poster=None, heading='', art=None, meta=None):
         captured['heading'] = heading
         captured['art'] = art
         return False
@@ -413,7 +413,7 @@ def test_onclick_stays_open_when_open_streams_returns_false(load_detailwindow, m
     win = _window_with_focused_row(picker, {'id': 'tt1'}, 'series', 'v1')
     monkeypatch.setattr(
         ctx.streamswindow, 'open_streams',
-        lambda stype, sid, poster=None, heading='', art=None: False,
+        lambda stype, sid, poster=None, heading='', art=None, meta=None: False,
     )
 
     win.onClick(picker.LIST)
@@ -464,7 +464,7 @@ def test_onclick_episode_in_non_default_season_resolves_via_video_by_id_across_s
     win.getControl(picker.LIST).selected_index = 0
     captured = {}
 
-    def fake_open_streams(stype, sid, poster=None, heading='', art=None):
+    def fake_open_streams(stype, sid, poster=None, heading='', art=None, meta=None):
         captured['sid'] = sid
         captured['heading'] = heading
         captured['art'] = art
@@ -527,7 +527,7 @@ def test_start_calls_domodal_and_returns_should_close_caller(load_detailwindow, 
     picker = ctx.detailwindow
     win = _make_window(picker)
     meta = {'id': 'tt1', 'videos': [{'id': 'v1', 'season': 1, 'episode': 1, 'title': 'Ep One'}]}
-    monkeypatch.setattr(ctx.streamswindow, 'open_streams', lambda stype, sid, poster=None, heading='', art=None: True)
+    monkeypatch.setattr(ctx.streamswindow, 'open_streams', lambda stype, sid, poster=None, heading='', art=None, meta=None: True)
 
     # The fake doModal() is a no-op counter; simulate what a real modal event
     # loop would drive around it (onInit(), the user picking the only row),
@@ -583,7 +583,7 @@ def test_open_detail_movie_skips_detailwindow_and_opens_streams_directly(
 
     monkeypatch.setattr(ctx.detailwindow, 'DetailWindow', _unexpected)
 
-    def fake_open_streams(stype, sid, poster=None, heading='', art=None):
+    def fake_open_streams(stype, sid, poster=None, heading='', art=None, meta=None):
         captured['args'] = (stype, sid, poster)
         captured['heading'] = heading
         captured['art'] = art
@@ -666,7 +666,7 @@ def test_open_detail_movie_success_wraps_the_fetch_in_a_busy_dialog(
     ctx = load_detailwindow()
     meta = {'id': 'tt1', 'name': 'A Movie', 'poster': 'https://x/poster.jpg', 'videos': []}
     monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: meta)
-    monkeypatch.setattr(ctx.streamswindow, 'open_streams', lambda stype, sid, poster=None, heading='', art=None: True)
+    monkeypatch.setattr(ctx.streamswindow, 'open_streams', lambda stype, sid, poster=None, heading='', art=None, meta=None: True)
 
     result = ctx.detailwindow.open_detail('movie', 'tt1')
 
@@ -684,7 +684,7 @@ def test_open_detail_movie_closes_the_busy_dialog_before_opening_streams(
     monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: meta)
     captured = {}
 
-    def fake_open_streams(stype, sid, poster=None, heading='', art=None):
+    def fake_open_streams(stype, sid, poster=None, heading='', art=None, meta=None):
         captured['dialog_closed_count'] = ctx.env.dialog_closed_count
         return True
 
