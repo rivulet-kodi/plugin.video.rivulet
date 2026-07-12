@@ -4,7 +4,7 @@ exercised against the shared fake xbmc/xbmcgui stubs in tests/kodistubs
 (no real Kodi runtime, no network).
 
 lib.ui.infowindow imports xbmcgui at module scope (`class ShowcaseWindow
-(xbmcgui.WindowXMLDialog)`), so even `_item_properties()` - a pure
+(xbmcgui.WindowXML)`), so even `_item_properties()` - a pure
 function that touches no xbmc API itself - needs the module imported
 fresh against the fake xbmcgui (via `load_infowindow`) before it is
 reachable at all. `ShowcaseWindow.onClick()` also lazily `from
@@ -16,7 +16,7 @@ that path monkeypatch `ctx.streamswindow.open_streams` directly.
 
 ShowcaseWindow's onInit()/onClick()/onAction() are called directly here,
 never through a real modal event loop: tests/kodistubs's fake
-WindowXMLDialog.doModal() is a no-op counter, and getControl()/
+WindowXML.doModal() is a no-op counter, and getControl()/
 setFocusId()/getFocusId() are plain in-memory fakes (see
 tests/kodistubs/modules.py's make_xbmcgui). This exercises 100% of the
 controller *logic* (item building, focus-driven background swaps, back

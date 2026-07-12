@@ -128,7 +128,7 @@ def _show_art(meta):
     return {'poster': poster, 'fanart': fanart}
 
 
-class DetailWindow(xbmcgui.WindowXMLDialog):
+class DetailWindow(xbmcgui.WindowXML):
     """See module docstring. Built/run via `open_detail()` - only for a
     series (a title with episodes); a movie never reaches this window.
     Every episode is grouped by season behind a season-selector bar

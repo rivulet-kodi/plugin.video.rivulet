@@ -1,4 +1,4 @@
-"""Shared helpers for Rivulet's custom `WindowXMLDialog` screens.
+"""Shared helpers for Rivulet's custom `WindowXML` screens.
 
 Rivulet's UI is moving from Kodi directory listings to a small stack of
 fullscreen custom windows (`HomeWindow`, `ShowcaseWindow`/coverflow,
@@ -27,7 +27,9 @@ Navigation model: each screen is a blocking `doModal()` call. "Forward"
 navigation is a screen's onClick calling another screen's `open_*()`
 helper (which blocks until that screen closes); "back" is simply that
 inner call returning, so nested doModal() calls form a navigation stack
-for free - no separate router/state machine needed.
+for free - no separate router/state machine needed. These are plain
+windows, not dialogs, so Kodi's fullscreen video window renders alone
+during playback and the topmost screen is restored when playback ends.
 """
 import contextlib
 
@@ -75,7 +77,7 @@ def busy_dialog(heading, message=''):
 
 
 def addon_skin_path():
-    """Return the addon's own install path, the `cwd` a `WindowXMLDialog`
+    """Return the addon's own install path, the `cwd` a `WindowXML`
     resolves its `resources/skins/<skin>/<res>/<xml>` from."""
     from lib.ui.compat import ADDON
     return ADDON.getAddonInfo('path')
@@ -89,7 +91,7 @@ def open_window(window_cls, xml_name, *args, **kwargs):
     return window_cls(xml_name, addon_skin_path(), 'Default', '720p', *args, **kwargs)
 
 
-class BaseWindow(xbmcgui.WindowXMLDialog):
+class BaseWindow(xbmcgui.WindowXML):
     """Common `onAction` back-handling for a simple (non-coverflow) modal
     screen: any of `BACK_ACTIONS` closes the window. Screens with extra
     per-focus behaviour (e.g. the coverflow's background swap) should

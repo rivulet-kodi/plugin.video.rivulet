@@ -103,7 +103,7 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
             env.dialog_closed_count += 1
 
     class FakeWindowControl:
-        """Stand-in for one WindowXMLDialog control (`getControl(id)`'s
+        """Stand-in for one WindowXML control (`getControl(id)`'s
         return value): records addItems()/setImage()/setVisible()/
         setLabel() calls. `getSelectedItem()` returns
         `self.items[self.selected_index]` (default 0) - a test scripts a
@@ -157,12 +157,13 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
         def getId(self):
             return self._id
 
-    class WindowXMLDialog:
-        """Stand-in for `xbmcgui.WindowXMLDialog`: enough surface to
-        construct `lib.ui.infowindow.ShowcaseWindow` and drive its
-        onInit()/onClick()/onAction() directly from a test. No real
-        window ever opens - doModal() only counts calls; a test drives
-        the modal's effect (e.g. a click) itself before/around it."""
+    class WindowXML:
+        """Stand-in for `xbmcgui.WindowXML` (and `WindowXMLDialog`):
+        enough surface to construct `lib.ui.infowindow.ShowcaseWindow`
+        and drive its onInit()/onClick()/onAction() directly from a
+        test. No real window ever opens - doModal() only counts calls;
+        a test drives the modal's effect (e.g. a click) itself
+        before/around it."""
 
         def __init__(self, *args, **kwargs):
             self._controls = {}
@@ -187,7 +188,8 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
 
     module.Dialog = Dialog
     module.DialogProgress = DialogProgress
-    module.WindowXMLDialog = WindowXMLDialog
+    module.WindowXML = WindowXML
+    module.WindowXMLDialog = WindowXML
     module.Action = FakeAction
     return module
 

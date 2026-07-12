@@ -69,7 +69,7 @@ def _status_text(auth):
     return L(30022) % (user.get('email') or user.get('name') or '?')
 
 
-class HomeWindow(xbmcgui.WindowXMLDialog):
+class HomeWindow(xbmcgui.WindowXML):
     """See module docstring. Built/run via `open_home()`."""
 
     def onInit(self):

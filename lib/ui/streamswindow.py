@@ -45,7 +45,7 @@ POSTER = 30004
 HEADING = 30005
 
 
-class StreamsWindow(xbmcgui.WindowXMLDialog):
+class StreamsWindow(xbmcgui.WindowXML):
     """See module docstring. Built/run via `open_streams()`."""
 
     def __init__(self, *args, **kwargs):

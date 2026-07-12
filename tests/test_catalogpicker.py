@@ -15,7 +15,7 @@ way tests/test_views.py reloads lib.ui.infowindow to get a handle
 CatalogPickerWindow.onInit()/onClick()/onAction()/_open_catalog() are called
 directly here, never through a real modal event loop, exactly like
 tests/test_infowindow.py drives ShowcaseWindow: the fake
-WindowXMLDialog.doModal() is a no-op counter, and getControl()/setFocusId()
+WindowXML.doModal() is a no-op counter, and getControl()/setFocusId()
 are plain in-memory fakes. CatalogPickerWindow.xml's actual skin rendering is
 Kodi-skin-engine-only and is NOT, and cannot be, exercised by this suite.
 """

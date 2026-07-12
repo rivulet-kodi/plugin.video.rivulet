@@ -12,7 +12,7 @@ from lib.ui.uicommon import BACK_ACTIONS, busy_dialog, open_window
 LIST = 30002
 
 
-class CatalogPickerWindow(xbmcgui.WindowXMLDialog):
+class CatalogPickerWindow(xbmcgui.WindowXML):
     """See module docstring. Built/run via `open_catalog_picker()`."""
 
     def __init__(self, *args, **kwargs):

@@ -1,12 +1,12 @@
 """Tests for lib.ui.uicommon: the shared helpers every custom
-`WindowXMLDialog` screen (`HomeWindow`, `CatalogPickerWindow`, the coverflow,
+`WindowXML` screen (`HomeWindow`, `CatalogPickerWindow`, the coverflow,
 ...) builds on - `BACK_ACTIONS`, `dismiss_busy_dialog()`, `addon_skin_path()`,
 `open_window()`, `BaseWindow`, and `fallback_to_classical()` - exercised
 against the shared fake xbmc/xbmcgui stubs in tests/kodistubs (no real Kodi
 runtime, no network).
 
 lib.ui.uicommon imports xbmc/xbmcgui at module scope (`class BaseWindow
-(xbmcgui.WindowXMLDialog)`, `xbmc.executebuiltin(...)` inside
+(xbmcgui.WindowXML)`, `xbmc.executebuiltin(...)` inside
 dismiss_busy_dialog()/fallback_to_classical()), so load_uicommon reloads it
 fresh each call alongside lib.ui.compat (addon_skin_path()'s `ADDON`) and
 lib.ui.router (fallback_to_classical()'s lazy `from lib.ui import router`) -
