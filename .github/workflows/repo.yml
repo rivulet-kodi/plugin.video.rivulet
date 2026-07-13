@@ -44,6 +44,8 @@ jobs:
           if repo_dir.exists():
               shutil.rmtree(repo_dir)
           repo_dir.mkdir(parents=True)
+          shutil.copytree("site", repo_dir, dirs_exist_ok=True)
+
 
           addons_root = ET.Element("addons")
 
