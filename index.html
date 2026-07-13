@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en" style="color-scheme:dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0c1226">
+<title>Rivulet — a Kodi client for the Stremio add-on protocol</title>
+<meta name="description" content="Rivulet is a Kodi video add-on that reimplements the Stremio client experience: catalogs, add-on management, stream resolution and playback, with one-click auto-updates.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='11' fill='%230c1226'/%3E%3Cpath d='M9 7l8 5-8 5z' fill='%2338bdf8'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#0a0e1a;--bg2:#0c1226;--panel:#101a33;--panel-2:#0d1630;
+  --border:#1e2b4d;--border-hi:#2a3a63;
+  --text:#e7ecf7;--text-dim:#94a3c4;--text-faint:#5b6b8e;
+  --c1:#2dd4bf;--c2:#38bdf8;--c3:#6366f1;
+  --flow:linear-gradient(115deg,var(--c1),var(--c2) 55%,var(--c3));
+  --flow-soft:linear-gradient(115deg,color-mix(in srgb,var(--c1) 18%,transparent),color-mix(in srgb,var(--c2) 14%,transparent));
+  --radius:18px;--radius-sm:10px;
+  --shadow:0 20px 60px -20px rgb(0 0 0 / 0.6);
+  --ease:cubic-bezier(.2,.8,.2,1);
+  --space:clamp(3rem,6vw,6rem);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;background:radial-gradient(ellipse 120% 60% at 50% -10%,#132248,var(--bg) 55%) fixed;
+  color:var(--text);font:400 16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+img,svg{display:block;max-width:100%}
+a{color:inherit}
+h1,h2,h3{margin:0 0 .5em;line-height:1.15;letter-spacing:-.02em}
+h2{font-size:clamp(1.6rem,3.4vw,2.4rem)}
+h3{font-size:1.15rem}
+p{margin:0 0 1em;color:var(--text-dim)}
+.wrap{max-width:1120px;margin-inline:auto;padding-inline:clamp(1.25rem,4vw,2.5rem)}
+.eyebrow{
+  display:inline-flex;align-items:center;gap:.5em;font-size:.8rem;font-weight:600;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--c2);margin-bottom:1em;
+}
+.eyebrow::before{content:"";width:.5em;height:.5em;border-radius:50%;background:var(--flow)}
+
+/* icon sprite defs, reused via <use> */
+.sprite{position:absolute;width:0;height:0;overflow:hidden}
+
+.icon{width:1em;height:1em}
+.icon-flow{stroke:var(--c2)}
+
+/* nav */
+header.site{
+  position:sticky;top:0;z-index:20;backdrop-filter:blur(14px) saturate(140%);
+  background:color-mix(in srgb,var(--bg) 78%,transparent);border-bottom:1px solid var(--border);
+}
+.nav{display:flex;align-items:center;justify-content:space-between;padding-block:.9rem;gap:1rem}
+.brand{display:flex;align-items:center;gap:.6rem;font-weight:700;font-size:1.05rem;text-decoration:none}
+.brand svg{width:30px;height:30px}
+.nav-links{display:flex;gap:1.75rem;font-size:.92rem;color:var(--text-dim)}
+.nav-links a{text-decoration:none;transition:color .15s var(--ease)}
+.nav-links a:hover,.nav-links a:focus-visible{color:var(--text)}
+.nav-cta{display:flex;align-items:center;gap:.75rem}
+#nav-toggle,.burger{display:none}
+
+.btn{
+  display:inline-flex;align-items:center;gap:.5em;padding:.7em 1.3em;border-radius:999px;
+  font-weight:600;font-size:.92rem;text-decoration:none;border:1px solid transparent;
+  transition:transform .18s var(--ease),box-shadow .18s var(--ease),background .18s var(--ease);
+  white-space:nowrap;
+}
+.btn:focus-visible{outline:2px solid var(--c2);outline-offset:2px}
+.btn-primary{background:var(--flow);color:#04101f;box-shadow:0 8px 30px -8px color-mix(in srgb,var(--c2) 60%,transparent)}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 14px 36px -8px color-mix(in srgb,var(--c2) 70%,transparent)}
+.btn-ghost{background:color-mix(in srgb,var(--panel) 80%,transparent);border-color:var(--border-hi);color:var(--text)}
+.btn-ghost:hover{background:var(--panel);border-color:var(--c2);transform:translateY(-2px)}
+.btn-sm{padding:.5em 1em;font-size:.82rem}
+
+/* hero */
+.hero{padding-block:clamp(3.5rem,10vw,7rem) var(--space);text-align:center;position:relative}
+.hero::before{
+  content:"";position:absolute;inset:-10% -10% auto -10%;height:520px;z-index:-1;
+  background:radial-gradient(closest-side,color-mix(in srgb,var(--c3) 20%,transparent),transparent 70%);
+  filter:blur(10px);pointer-events:none;
+}
+.hero-mark{width:min(120px,28vw);margin-inline:auto 1.5rem;filter:drop-shadow(0 10px 40px color-mix(in srgb,var(--c2) 35%,transparent))}
+.hero h1{font-size:clamp(2.6rem,7vw,4.5rem);background:var(--flow);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero .lead{max-width:640px;margin-inline:auto;font-size:clamp(1.05rem,2vw,1.25rem);color:var(--text-dim)}
+.hero-cta{display:flex;justify-content:center;gap:1rem;flex-wrap:wrap;margin-top:2rem}
+.hero-note{margin-top:1.75rem;font-size:.85rem;color:var(--text-faint)}
+.badges{display:flex;justify-content:center;gap:.6rem;flex-wrap:wrap;margin-top:1.5rem}
+.badges img{height:20px;border-radius:4px}
+
+section{padding-block:var(--space)}
+.section-head{max-width:640px;margin-bottom:2.5rem}
+.section-head.center{margin-inline:auto;text-align:center}
+
+/* feature grid */
+.grid{display:grid;gap:1.1rem;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+.card{
+  background:linear-gradient(160deg,var(--panel),var(--panel-2));border:1px solid var(--border);
+  border-radius:var(--radius);padding:1.6rem;transition:border-color .2s var(--ease),transform .2s var(--ease);
+}
+.card:hover{border-color:var(--border-hi);transform:translateY(-3px)}
+.card .icon-box{
+  width:44px;height:44px;border-radius:var(--radius-sm);display:grid;place-items:center;
+  background:var(--flow-soft);border:1px solid var(--border-hi);margin-bottom:1rem;
+}
+.card .icon-box svg{width:22px;height:22px}
+.card h3{margin-bottom:.4em}
+.card p{margin:0;font-size:.94rem}
+
+/* install */
+.install-grid{display:grid;gap:1.25rem;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.install-card{
+  border:1px solid var(--border);border-radius:var(--radius);padding:1.75rem;background:var(--panel-2);
+  display:flex;flex-direction:column;
+}
+.install-card.featured{border-color:color-mix(in srgb,var(--c2) 45%,var(--border-hi));box-shadow:var(--shadow);position:relative}
+.tag{
+  align-self:flex-start;font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  padding:.3em .7em;border-radius:999px;background:var(--flow);color:#04101f;margin-bottom:1rem;
+}
+.steps{list-style:none;margin:0 0 1.25rem;padding:0;counter-reset:step;display:flex;flex-direction:column;gap:.85rem}
+.steps li{counter-increment:step;display:flex;gap:.85rem;font-size:.94rem;color:var(--text-dim)}
+.steps li::before{
+  content:counter(step);flex:none;width:1.6em;height:1.6em;border-radius:50%;display:grid;place-items:center;
+  background:var(--panel);border:1px solid var(--border-hi);font-size:.78rem;font-weight:700;color:var(--text);
+}
+.install-card .btn{margin-top:auto;align-self:flex-start}
+
+/* server table */
+.table-wrap{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+table{width:100%;border-collapse:collapse;font-size:.92rem}
+th,td{text-align:left;padding:.9rem 1.1rem;border-bottom:1px solid var(--border);vertical-align:top}
+th{background:var(--panel-2);color:var(--text-faint);font-weight:600;text-transform:uppercase;font-size:.72rem;letter-spacing:.06em}
+tr:last-child td{border-bottom:none}
+td:first-child{white-space:nowrap;font-weight:600;color:var(--c2)}
+code{background:color-mix(in srgb,var(--panel) 70%,transparent);border:1px solid var(--border);border-radius:6px;padding:.15em .45em;font-size:.88em}
+
+/* callout / faq */
+.callout{
+  display:flex;gap:1rem;align-items:flex-start;border:1px solid var(--border-hi);border-radius:var(--radius);
+  padding:1.5rem;background:var(--flow-soft);
+}
+.callout svg{flex:none;width:26px;height:26px;margin-top:.15em}
+.callout p{color:var(--text);margin:0}
+
+.faq-grid{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin-top:2rem}
+.faq-grid h3{font-size:1rem}
+.faq-grid p{font-size:.92rem}
+
+/* footer */
+footer{border-top:1px solid var(--border);padding-block:2.5rem;color:var(--text-faint);font-size:.85rem}
+.foot-row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem}
+.foot-links{display:flex;gap:1.5rem}
+.foot-links a{text-decoration:none;color:var(--text-dim);transition:color .15s var(--ease)}
+.foot-links a:hover{color:var(--text)}
+
+@media (max-width:760px){
+  .nav-links{
+    position:fixed;inset:64px 0 0 auto;width:min(78vw,320px);flex-direction:column;gap:0;
+    background:var(--bg2);border-left:1px solid var(--border);padding:1.5rem;
+    transform:translateX(100%);transition:transform .25s var(--ease);height:100vh;
+  }
+  .nav-links a{padding:.85rem 0;border-bottom:1px solid var(--border);width:100%}
+  .burger{
+    display:grid;place-items:center;width:40px;height:40px;border-radius:var(--radius-sm);
+    border:1px solid var(--border-hi);background:var(--panel);cursor:pointer;
+  }
+  .burger svg{width:18px;height:18px}
+  #nav-toggle:checked ~ header .nav-links{transform:translateX(0)}
+  .nav-cta .btn-ghost{display:none}
+}
+
+/* selection + scrollbar */
+::selection{background:color-mix(in srgb,var(--c2) 45%,transparent);color:#fff}
+::-webkit-scrollbar{width:10px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border-hi);border-radius:99px}
+::-webkit-scrollbar-thumb:hover{background:var(--c2)}
+
+/* HUD corner brackets */
+.hud-corners{position:relative}
+.hud-corners::before,.hud-corners::after{
+  content:"";position:absolute;width:16px;height:16px;pointer-events:none;
+  border:1.5px solid color-mix(in srgb,var(--c2) 75%,transparent);
+}
+.hud-corners::before{top:-10px;left:-10px;border-right:none;border-bottom:none}
+.hud-corners::after{bottom:-10px;right:-10px;border-left:none;border-top:none}
+
+/* ghost outline word behind hero title */
+.hero-ghost{
+  position:absolute;inset:0;top:2rem;display:flex;justify-content:center;align-items:flex-start;
+  font-size:clamp(3.5rem,16vw,11rem);font-weight:800;letter-spacing:-.03em;
+  -webkit-text-stroke:1px var(--border-hi);color:transparent;z-index:-1;
+  user-select:none;line-height:1;
+}
+
+/* scroll-reveal */
+[data-reveal]{opacity:0;transform:translateY(18px);transition:opacity .6s var(--ease),transform .6s var(--ease)}
+[data-reveal].is-visible{opacity:1;transform:none}
+
+/* custom cursor (pointer:fine only) */
+.cursor-dot,.cursor-ring{
+  position:fixed;top:0;left:0;z-index:80;pointer-events:none;border-radius:50%;
+  opacity:0;transition:opacity .2s var(--ease);
+}
+.cursor-dot{width:6px;height:6px;background:var(--c2);box-shadow:0 0 8px color-mix(in srgb,var(--c2) 90%,transparent)}
+.cursor-ring{
+  width:34px;height:34px;border:1px solid color-mix(in srgb,var(--c2) 70%,transparent);
+  transition:opacity .2s var(--ease),background .15s var(--ease);
+}
+@media (pointer:fine){
+  html.has-cursor,html.has-cursor a,html.has-cursor button,html.has-cursor label{cursor:none}
+}
+@media (pointer:coarse),(prefers-reduced-motion:reduce){
+  .cursor-dot,.cursor-ring,.hero-ghost{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  [data-reveal]{opacity:1;transform:none;transition:none}
+}
+</style>
+</head>
+<body>
+<div class="cursor-dot" aria-hidden="true"></div>
+<div class="cursor-ring" aria-hidden="true"></div>
+
+<svg class="sprite" aria-hidden="true">
+  <defs>
+    <linearGradient id="flow" x1="0" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#2dd4bf"/>
+      <stop offset="0.55" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+    <symbol id="i-logo" viewBox="0 0 1024 1024">
+      <g transform="translate(-17,-67)" fill="none" stroke="url(#flow)" stroke-linecap="round">
+        <path d="M255 250C430 290,390 450,460 520C480 545,494 562,500 580" stroke-width="46"/>
+        <path d="M255 910C430 870,390 710,460 640C480 615,494 598,500 580" stroke-width="38"/>
+      </g>
+      <g transform="translate(-17,-67)">
+        <path d="M500 452Q500 580 500 708Q504 742 536 726L806 612Q836 580 806 548L536 434Q504 418 500 452Z" fill="url(#flow)"/>
+        <circle cx="483" cy="513" r="22" fill="#38bdf8"/>
+        <circle cx="483" cy="513" r="11" fill="#e0f7ff"/>
+      </g>
+    </symbol>
+    <symbol id="i-discover" viewBox="0 0 256 256">
+      <circle cx="128" cy="128" r="78" stroke="url(#flow)" stroke-width="14" stroke-linecap="round" fill="none"/>
+      <path d="M158 98 138 148 98 158 118 108Z" fill="url(#flow)"/>
+    </symbol>
+    <symbol id="i-search" viewBox="0 0 256 256">
+      <circle cx="112" cy="112" r="58" stroke="url(#flow)" stroke-width="14" stroke-linecap="round" fill="none"/>
+      <line x1="155" y1="155" x2="200" y2="200" stroke="url(#flow)" stroke-width="14" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-library" viewBox="0 0 256 256">
+      <path d="M88 52 168 52 168 200 128 168 88 200Z" stroke="url(#flow)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </symbol>
+    <symbol id="i-addons" viewBox="0 0 256 256">
+      <path d="M76 96 112 96A18 18 0 1 1 144 96L180 96 180 132A18 18 0 1 0 180 164L180 200 76 200Z" stroke="url(#flow)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </symbol>
+    <symbol id="i-settings" viewBox="0 0 256 256">
+      <path fill-rule="evenodd" fill="url(#flow)" d="M185.3,104.3 188.6,115.1 212.9,114.5 212.9,141.5 188.6,140.9 185.3,151.7 180.0,161.8 197.6,178.5 178.5,197.6 161.8,180.0 151.7,185.3 140.9,188.6 141.5,212.9 114.5,212.9 115.1,188.6 104.3,185.3 94.2,180.0 77.5,197.6 58.4,178.5 76.0,161.8 70.7,151.7 67.4,140.9 43.1,141.5 43.1,114.5 67.4,115.1 70.7,104.3 76.0,94.2 58.4,77.5 77.5,58.4 94.2,76.0 104.3,70.7 115.1,67.4 114.5,43.1 141.5,43.1 140.9,67.4 151.7,70.7 161.8,76.0 178.5,58.4 197.6,77.5 180.0,94.2Z M152,128A24 24 0 1 0 104,128A24 24 0 1 0 152,128Z"/>
+    </symbol>
+    <symbol id="i-subtitles" viewBox="0 0 256 256">
+      <rect x="40" y="70" width="176" height="116" rx="16" stroke="url(#flow)" stroke-width="14" fill="none"/>
+      <line x1="66" y1="118" x2="122" y2="118" stroke="url(#flow)" stroke-width="14" stroke-linecap="round"/>
+      <line x1="140" y1="118" x2="190" y2="118" stroke="url(#flow)" stroke-width="14" stroke-linecap="round"/>
+      <line x1="66" y1="148" x2="150" y2="148" stroke="url(#flow)" stroke-width="14" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-info" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="10" stroke="url(#flow)" stroke-width="2" fill="none"/>
+      <line x1="12" y1="11" x2="12" y2="16.5" stroke="url(#flow)" stroke-width="2.2" stroke-linecap="round"/>
+      <circle cx="12" cy="7.5" r="1.15" fill="url(#flow)"/>
+    </symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24">
+      <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    </symbol>
+  </defs>
+</svg>
+
+<input type="checkbox" id="nav-toggle">
+<header class="site">
+  <nav class="nav wrap">
+    <a class="brand" href="#top"><svg class="icon" viewBox="0 0 1024 1024"><use href="#i-logo"/></svg>Rivulet</a>
+    <label class="burger" for="nav-toggle" aria-label="Toggle navigation"><svg viewBox="0 0 24 24"><use href="#i-menu"/></svg></label>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#install">Install</a>
+      <a href="#server">Streaming server</a>
+      <a href="#faq">FAQ</a>
+    </div>
+    <div class="nav-cta">
+      <a class="btn btn-ghost btn-sm" href="https://github.com/rivulet-kodi/plugin.video.rivulet">GitHub</a>
+      <a class="btn btn-primary btn-sm" href="#install">Install</a>
+    </div>
+  </nav>
+</header>
+
+<main id="top">
+  <section class="hero wrap">
+    <div class="hero-ghost" aria-hidden="true">RIVULET</div>
+    <svg class="hero-mark hud-corners" viewBox="0 0 1024 1024"><use href="#i-logo"/></svg>
+    <div class="eyebrow">Kodi × Stremio protocol</div>
+    <h1>Rivulet</h1>
+    <p class="lead">A Kodi video add-on that reimplements the Stremio client experience — discover and search catalogs, manage add-ons, resolve streams, and play, all from a custom, couch-first UI.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="#install">Install the repository</a>
+      <a class="btn btn-ghost" href="https://github.com/rivulet-kodi/plugin.video.rivulet">View on GitHub</a>
+    </div>
+    <div class="badges">
+      <img src="https://github.com/rivulet-kodi/plugin.video.rivulet/actions/workflows/test.yml/badge.svg" alt="Test workflow status" loading="lazy">
+      <img src="https://img.shields.io/github/v/release/rivulet-kodi/plugin.video.rivulet?label=release&color=38bdf8" alt="Latest release" loading="lazy">
+      <img src="https://img.shields.io/badge/license-MIT-2dd4bf.svg" alt="MIT license" loading="lazy">
+    </div>
+    <p class="hero-note">Rivulet does not host, index or provide any media content — it's a client for third-party Stremio add-ons you install yourself.</p>
+  </section>
+
+  <section id="features" class="wrap">
+    <div class="section-head center">
+      <div class="eyebrow">Why Rivulet</div>
+      <h2>Everything Stremio, at home in Kodi</h2>
+    </div>
+    <div class="grid">
+      <article class="card">
+        <div class="icon-box"><svg viewBox="0 0 256 256"><use href="#i-discover"/></svg></div>
+        <h3>Custom Home/Discover/Search UI</h3>
+        <p>Home, Discover, Search, Detail and Streams screens built for the couch — no dropping to Kodi's classic directory for the parts that matter most.</p>
+      </article>
+      <article class="card">
+        <div class="icon-box"><svg viewBox="0 0 256 256"><use href="#i-addons"/></svg></div>
+        <h3>Add-on manager</h3>
+        <p>Install Stremio add-ons straight from a manifest URL, and remove them again, without ever leaving Kodi.</p>
+      </article>
+      <article class="card">
+        <div class="icon-box"><svg viewBox="0 0 256 256"><use href="#i-search"/></svg></div>
+        <h3>Parallel catalog &amp; stream lookups</h3>
+        <p>A slow or unavailable add-on no longer stalls the rest — catalogs and sources are queried in parallel.</p>
+      </article>
+      <article class="card">
+        <div class="icon-box"><svg viewBox="0 0 256 256"><use href="#i-library"/></svg></div>
+        <h3>Stremio account sync</h3>
+        <p>Log in to keep your add-on collection in sync both ways between Kodi and Stremio.</p>
+      </article>
+      <article class="card">
+        <div class="icon-box"><svg viewBox="0 0 256 256"><use href="#i-subtitles"/></svg></div>
+        <h3>Subtitles out of the box</h3>
+        <p>Pulled from your installed Stremio subtitle add-ons at playback time, OpenSubtitles v3 preinstalled, sorted by your preferred language.</p>
+      </article>
+      <article class="card">
+        <div class="icon-box"><svg viewBox="0 0 256 256"><use href="#i-settings"/></svg></div>
+        <h3>One-click streaming server</h3>
+        <p>Download the right <code>stremio-server-go</code> build for your platform and run it embedded, or point at a server you already run.</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="install" class="wrap">
+    <div class="section-head center">
+      <div class="eyebrow">Get started</div>
+      <h2>Install once, pick your update path</h2>
+    </div>
+    <div class="install-grid">
+      <div class="install-card">
+        <span class="tag" style="background:var(--panel-2);color:var(--text-dim);border:1px solid var(--border-hi)">Manual</span>
+        <h3>Quick install</h3>
+        <ol class="steps">
+          <li>Grab <code>plugin.video.rivulet-&lt;version&gt;.zip</code> from a <a href="https://github.com/rivulet-kodi/plugin.video.rivulet/releases">release</a>.</li>
+          <li>In Kodi: <strong>Settings → Add-ons → Install from zip file</strong> and pick the zip.</li>
+          <li>Open <strong>Rivulet</strong> from the Videos section of the home screen.</li>
+        </ol>
+        <p style="font-size:.85rem">You'll need to repeat this for every future release.</p>
+      </div>
+      <div class="install-card featured">
+        <span class="tag">Recommended — auto-updates</span>
+        <h3>Install the repository</h3>
+        <ol class="steps">
+          <li>Grab <code>repository.rivulet-&lt;version&gt;.zip</code> from a <a href="https://github.com/rivulet-kodi/plugin.video.rivulet/releases">release</a> — just once.</li>
+          <li><strong>Settings → Add-ons → Install from zip file</strong>, same as the plugin itself.</li>
+          <li><strong>Settings → Add-ons → Install from repository → Rivulet Repository → Rivulet.</strong></li>
+          <li>Kodi checks for and installs future Rivulet updates automatically, like any other repository.</li>
+        </ol>
+        <a class="btn btn-primary" href="https://github.com/rivulet-kodi/plugin.video.rivulet/releases">Get the repository zip</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="server" class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">Playback</div>
+      <h2>Streaming server</h2>
+      <p>All playback resolves through a server speaking the same <code>enginefs</code> HTTP API as Stremio's own <code>server.js</code> — <a href="https://github.com/M0Rf30/stremio-server-go">stremio-server-go</a> is a pure-Go, drop-in implementation. Configure it under <strong>Settings → Streaming server</strong>.</p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Setting</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td>Server URL</td><td>Where the streaming server listens. Defaults to <code>http://127.0.0.1:11470</code> — point it at any local or remote <code>stremio-server-go</code> (or official Stremio server) instance.</td></tr>
+          <tr><td>Run embedded server</td><td>The background service spawns and supervises a local <code>stremio-server-go</code> process for the Kodi session, and stops it on shutdown.</td></tr>
+          <tr><td>Server binary path</td><td>The executable to run when embedded. Leave empty to auto-detect from the add-on's <code>bin/</code> folder, then <code>PATH</code>.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:1.5rem">No manual binary install needed — use <strong>Download stremio-server binary</strong> under <strong>Settings → Streaming server</strong> to fetch and integrity-check the right build straight from the <a href="https://github.com/M0Rf30/stremio-server-go/releases">stremio-server-go releases</a>.</p>
+  </section>
+
+  <section id="faq" class="wrap">
+    <div class="section-head center">
+      <div class="eyebrow">Good to know</div>
+      <h2>FAQ &amp; disclaimer</h2>
+    </div>
+    <div class="callout">
+      <svg viewBox="0 0 24 24"><use href="#i-info"/></svg>
+      <p><strong>Rivulet does not host, index or provide any media content.</strong> It's a client for third-party Stremio add-ons that you install yourself, including catalogs, streams and subtitles.</p>
+    </div>
+    <div class="faq-grid">
+      <div>
+        <h3>Do I need a Stremio account?</h3>
+        <p>No — Rivulet works fully anonymously. Logging in is optional and only syncs your installed add-ons with your Stremio account.</p>
+      </div>
+      <div>
+        <h3>Which Kodi versions are supported?</h3>
+        <p>Tested across Python 3.8 through 3.13 — Kodi 19 "Matrix" through current releases.</p>
+      </div>
+      <div>
+        <h3>How do updates work?</h3>
+        <p>Install the <a href="#install">Rivulet Repository</a> once and Kodi handles future updates itself, checking a repo published from every tagged release.</p>
+      </div>
+      <div>
+        <h3>Where do subtitles come from?</h3>
+        <p>From your installed Stremio subtitle add-ons at playback time — OpenSubtitles v3 comes preinstalled.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap">
+  <div class="foot-row">
+    <span>© 2026 Rivulet · Licensed under MIT · Not affiliated with Stremio.</span>
+    <div class="foot-links">
+      <a href="https://github.com/rivulet-kodi/plugin.video.rivulet">GitHub</a>
+      <a href="https://github.com/rivulet-kodi/plugin.video.rivulet/releases">Releases</a>
+      <a href="https://github.com/rivulet-kodi/plugin.video.rivulet/blob/main/addon.xml">License</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+  var reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* scroll-reveal */
+  var targets = document.querySelectorAll(".card,.install-card,.callout,.faq-grid>div,.section-head");
+  if (reduced || !("IntersectionObserver" in window)) {
+    targets.forEach(function(el){ el.classList.add("is-visible"); });
+  } else {
+    targets.forEach(function(el){ el.setAttribute("data-reveal",""); });
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if (e.isIntersecting) { e.target.classList.add("is-visible"); io.unobserve(e.target); }
+      });
+    }, { threshold: 0, rootMargin: "0px 0px 200px 0px" });
+    targets.forEach(function(el){ io.observe(el); });
+    /* safety net: never leave content permanently hidden if the observer
+       misses (fast programmatic scroll, odd viewport, etc). */
+    setTimeout(function(){
+      targets.forEach(function(el){ el.classList.add("is-visible"); });
+      io.disconnect();
+    }, 4000);
+  }
+
+  /* custom cursor */
+  if (reduced || !matchMedia("(pointer: fine)").matches) return;
+  var dot = document.querySelector(".cursor-dot");
+  var ring = document.querySelector(".cursor-ring");
+  if (!dot || !ring) return;
+  document.documentElement.classList.add("has-cursor");
+
+  var mouse = { x: -100, y: -100 };
+  var ringPos = { x: -100, y: -100 };
+  var hover = 0, last = performance.now(), shown = false;
+
+  addEventListener("pointermove", function(e){
+    mouse.x = e.clientX; mouse.y = e.clientY;
+    dot.style.transform = "translate3d(" + (mouse.x - 3) + "px," + (mouse.y - 3) + "px,0)";
+    if (!shown) { shown = true; dot.style.opacity = ring.style.opacity = "1"; }
+  }, { passive: true });
+
+  document.addEventListener("pointerover", function(e){
+    hover = e.target.closest("a,button,label,.card") ? 1 : 0;
+  }, { passive: true });
+
+  addEventListener("blur", function(){ dot.style.opacity = ring.style.opacity = "0"; shown = false; });
+
+  function tick(now){
+    var dt = Math.min(0.05, (now - last) / 1000); last = now;
+    var k = 1 - Math.exp(-14 * dt);
+    ringPos.x += (mouse.x - ringPos.x) * k;
+    ringPos.y += (mouse.y - ringPos.y) * k;
+    var scale = 1 + 0.7 * hover;
+    ring.style.transform = "translate3d(" + (ringPos.x - 17) + "px," + (ringPos.y - 17) + "px,0) scale(" + scale + ")";
+    ring.style.background = hover ? "rgba(56,189,248,.12)" : "transparent";
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
