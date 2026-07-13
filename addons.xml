@@ -1,0 +1,71 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.4.12" provider-name="M0Rf30">
+  <requires>
+    <import addon="xbmc.python" version="3.0.0" />
+    <import addon="script.module.requests" version="2.22.0" />
+  </requires>
+  <extension point="xbmc.python.pluginsource" library="default.py">
+    <provides>video</provides>
+  </extension>
+  <extension point="xbmc.service" library="service.py" start="startup" />
+  <extension point="xbmc.addon.metadata">
+    <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
+    <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse Discover and Search catalogs, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote stremio-server-go streaming server, and optionally sync your addon collection with your Stremio account.</description>
+    <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
+    <news>v0.4.12:
+- New: Library and Add-ons now have their own custom screens (no more dropping to the classical Kodi directory).
+- New: Add-ons screen lets you install from a manifest URL and remove addons directly.
+- New: the streams screen shows year, runtime, rating and genres, and drops repeated provider names when every source is from the same addon.
+- New: Discover's poster wall fades softly at both edges instead of a hard cut.
+- Fix: backing out of a nested screen (Discover, a title's sources, ...) now correctly returns to the previous screen instead of sometimes jumping back to the Home menu.
+v0.4.11:
+- Fix: playback now takes the screen immediately - video no longer starts hidden behind the menu until you press Back.
+- Fix: stopping playback no longer briefly spawns a duplicate Home screen.
+v0.4.10:
+- Fix: an addon that's briefly unavailable no longer freezes the UI - streams/search now query addons in parallel instead of one at a time.
+- Fix: an expired Stremio session now prompts a clean re-login instead of silently failing.
+- Fix: installed addons' info now refreshes automatically instead of going stale forever.
+- Fix: a rare crash could leave a screen stuck open; screens now always close properly.
+- Fix: two addon actions running at the same time could silently lose one of them - now safely retried.
+- Security: the streaming server binary download now always verifies its integrity before installing.
+v0.4.9:
+- Fix: logging in no longer wipes addons you installed while logged out - addon sync is now a proper two-way sync.
+- New: Settings &gt; Account &gt; "Sync addons now" to force and confirm a sync.
+- New: a loading spinner (with progress and cancel) now shows during Search/Discover/Streams lookups instead of a frozen screen.
+- Fix: the app icon's logo graphic is now properly centered.
+v0.4.8:
+- Fix: movies no longer show a pointless "Play" step - pick a movie and go straight to sources.
+- Fix: a stray "[/B]" no longer shows on the top stream row.
+- Fix: Library and Add-ons no longer fail to open from the new Home.
+- Home menu got icons, short descriptions and a login-status line.
+v0.4.7:
+- New: a custom, non-standard Home/Discover/Search/Detail/Streams UI (Library/Add-ons/Settings still classic).
+- Showcase now reports errors (notification + log) instead of failing silently.</news>
+    <platform>all</platform>
+    <license>MIT</license>
+    <website>https://github.com/rivulet-kodi/plugin.video.rivulet</website>
+    <source>https://github.com/rivulet-kodi/plugin.video.rivulet</source>
+    <assets>
+      <icon>resources/icon.png</icon>
+      <fanart>resources/fanart.jpg</fanart>
+    </assets>
+  </extension>
+</addon><addon id="repository.rivulet" name="Rivulet Repository" version="1.0.0" provider-name="M0Rf30">
+  <extension point="xbmc.addon.repository" name="Rivulet Repository">
+    <info compressed="false">https://rivulet-kodi.github.io/plugin.video.rivulet/addons.xml</info>
+    <checksum>https://rivulet-kodi.github.io/plugin.video.rivulet/addons.xml.md5</checksum>
+    <datadir zip="true">https://rivulet-kodi.github.io/plugin.video.rivulet/</datadir>
+  </extension>
+  <extension point="xbmc.addon.metadata">
+    <summary lang="en_GB">Rivulet Repository</summary>
+    <description lang="en_GB">Add this repository to Kodi to install Rivulet and receive automatic updates.</description>
+    <platform>all</platform>
+    <license>MIT</license>
+    <website>https://github.com/rivulet-kodi/plugin.video.rivulet</website>
+    <source>https://github.com/rivulet-kodi/plugin.video.rivulet</source>
+    <assets>
+      <icon>icon.png</icon>
+      <fanart>fanart.jpg</fanart>
+    </assets>
+  </extension>
+</addon></addons>

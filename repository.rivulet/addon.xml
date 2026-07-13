@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="repository.rivulet" name="Rivulet Repository" version="1.0.0" provider-name="M0Rf30">
+  <extension point="xbmc.addon.repository" name="Rivulet Repository">
+    <info compressed="false">https://rivulet-kodi.github.io/plugin.video.rivulet/addons.xml</info>
+    <checksum>https://rivulet-kodi.github.io/plugin.video.rivulet/addons.xml.md5</checksum>
+    <datadir zip="true">https://rivulet-kodi.github.io/plugin.video.rivulet/</datadir>
+  </extension>
+  <extension point="xbmc.addon.metadata">
+    <summary lang="en_GB">Rivulet Repository</summary>
+    <description lang="en_GB">Add this repository to Kodi to install Rivulet and receive automatic updates.</description>
+    <platform>all</platform>
+    <license>MIT</license>
+    <website>https://github.com/rivulet-kodi/plugin.video.rivulet</website>
+    <source>https://github.com/rivulet-kodi/plugin.video.rivulet</source>
+    <assets>
+      <icon>icon.png</icon>
+      <fanart>fanart.jpg</fanart>
+    </assets>
+  </extension>
+</addon>
