@@ -58,7 +58,7 @@ account.
 ## Install
 
 1. Grab `plugin.video.rivulet-<version>.zip` from a
-   [release](https://github.com/rivulet-kodi/plugin.video.rivulet/releases) or from
+   [release](https://github.com/rivulet-kodi/plugin.video.rivulet/releases/latest) or from
    the "Build addon zip" GitHub Actions artifact.
 2. In Kodi: **Settings → Add-ons → Install from zip file** and pick the
    downloaded zip.
@@ -70,7 +70,7 @@ Instead of re-downloading and reinstalling a zip for every release, install
 the repository once:
 
 1. Grab `repository.rivulet-<version>.zip` from a
-   [release](https://github.com/rivulet-kodi/plugin.video.rivulet/releases) or
+   [release](https://github.com/rivulet-kodi/plugin.video.rivulet/releases/latest) or
    from the "Build addon zip" GitHub Actions artifact.
 2. In Kodi: **Settings → Add-ons → Install from zip file** and pick the
    downloaded zip (same as installing the plugin itself).

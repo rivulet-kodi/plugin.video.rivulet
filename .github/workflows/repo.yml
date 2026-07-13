@@ -88,3 +88,16 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./_repo
           publish_branch: gh-pages
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          ASSETS=(_repo/plugin.video.rivulet/plugin.video.rivulet-*.zip _repo/repository.rivulet/repository.rivulet-*.zip)
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${ASSETS[@]}" --repo "${{ github.repository }}" --clobber
+          else
+            gh release create "$TAG" "${ASSETS[@]}" --repo "${{ github.repository }}" --title "$TAG" --generate-notes
+          fi
