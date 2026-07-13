@@ -43,8 +43,8 @@ v0.4.7:
 - Showcase now reports errors (notification + log) instead of failing silently.</news>
     <platform>all</platform>
     <license>MIT</license>
-    <website>https://github.com/M0Rf30/plugin.video.rivulet</website>
-    <source>https://github.com/M0Rf30/plugin.video.rivulet</source>
+    <website>https://github.com/rivulet-kodi/plugin.video.rivulet</website>
+    <source>https://github.com/rivulet-kodi/plugin.video.rivulet</source>
     <assets>
       <icon>resources/icon.png</icon>
       <fanart>resources/fanart.jpg</fanart>

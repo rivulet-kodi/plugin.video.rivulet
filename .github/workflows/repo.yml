@@ -1,0 +1,86 @@
+name: Publish repository
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build repository tree
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import shutil
+          import subprocess
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          ADDONS = {
+              "plugin.video.rivulet": {
+                  "addon_xml": Path("addon.xml"),
+                  "icon": Path("resources/icon.png"),
+                  "fanart": Path("resources/fanart.jpg"),
+                  "archive_ref": "HEAD",
+                  "archive_paths": ["addon.xml", "default.py", "service.py", "resources", "lib"],
+              },
+              "repository.rivulet": {
+                  "addon_xml": Path("repository.rivulet/addon.xml"),
+                  "icon": Path("repository.rivulet/icon.png"),
+                  "fanart": Path("repository.rivulet/fanart.jpg"),
+                  "archive_ref": "HEAD:repository.rivulet",
+                  "archive_paths": [],
+              },
+          }
+
+          repo_dir = Path("_repo")
+          if repo_dir.exists():
+              shutil.rmtree(repo_dir)
+          repo_dir.mkdir(parents=True)
+
+          addons_root = ET.Element("addons")
+
+          for addon_id, info in ADDONS.items():
+              addon_dir = repo_dir / addon_id
+              addon_dir.mkdir(parents=True)
+
+              tree = ET.parse(info["addon_xml"])
+              addon_el = tree.getroot()
+              version = addon_el.get("version")
+              addons_root.append(addon_el)
+
+              shutil.copyfile(info["addon_xml"], addon_dir / "addon.xml")
+              shutil.copyfile(info["icon"], addon_dir / "icon.png")
+              shutil.copyfile(info["fanart"], addon_dir / "fanart.jpg")
+
+              zip_path = addon_dir / f"{addon_id}-{version}.zip"
+              cmd = [
+                  "git", "archive", "--format=zip",
+                  f"--prefix={addon_id}/",
+                  "-o", str(zip_path),
+                  info["archive_ref"],
+              ]
+              if info["archive_paths"]:
+                  cmd += ["--", *info["archive_paths"]]
+              subprocess.run(cmd, check=True)
+
+          addons_xml_path = repo_dir / "addons.xml"
+          ET.ElementTree(addons_root).write(
+              addons_xml_path, encoding="UTF-8", xml_declaration=True
+          )
+
+          digest = hashlib.md5(addons_xml_path.read_bytes()).hexdigest()
+          (repo_dir / "addons.xml.md5").write_text(digest)
+          PY
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_repo
+          publish_branch: gh-pages
