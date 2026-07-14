@@ -82,12 +82,16 @@ class FakeStore:
         self.auth_set_calls = []     # [auth_dict_or_None, ...]
         self.addons_set_calls = []   # [[descriptor, ...], ...]
         self.update_addons_calls = []  # [transform, ...]
+        self.search_queries = []     # [query, ...] - Store.add_search_query() calls
 
     def get_addons(self):
         return self._addons
 
     def get_auth(self):
         return self._auth
+
+    def add_search_query(self, query):
+        self.search_queries.append(query)
 
     def install_addon(self, transport_url, manifest):
         self.installed.append((transport_url, manifest))
@@ -961,6 +965,37 @@ def test_search_no_matching_catalogs_notifies_empty_result(load_views):
     assert ctx.env.directory_items == []
     assert ctx.env.notifications[-1][1] == 'STR30030'
     assert ctx.env.end_of_directory[-1]['succeeded'] is False
+
+
+def test_search_records_query_in_history_regardless_of_result_count(load_views, monkeypatch):
+    """Both search entry points (this classical fallback and the custom
+    SearchWindow) share the same persisted history - a query is worth
+    remembering even when the addon fan-out comes up empty."""
+    ctx = load_views(dialog_inputs=['batman'])
+    views = ctx.views
+    transport = 'https://a.example/manifest.json'
+    descriptor = {
+        'transportUrl': transport,
+        'manifest': {'id': 'org.a', 'catalogs': [{'type': 'movie', 'id': 'search', 'extra': [{'name': 'search'}]}]},
+        'flags': {},
+    }
+    store_with_results = FakeStore(addons=[descriptor])
+    client = FakeAddonClient(catalog_results={transport: [{'id': 'tt1', 'name': 'Batman', 'type': 'movie'}]})
+    _wire_data_layer(views, store_with_results, client)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: None)
+
+    views.search()
+
+    assert store_with_results.search_queries == ['batman']
+
+    ctx2 = load_views(dialog_inputs=['batman'])
+    views2 = ctx2.views
+    store_no_results = FakeStore(addons=[descriptor])
+    _wire_data_layer(views2, store_no_results, FakeAddonClient(catalog_results={transport: []}))
+
+    views2.search()
+
+    assert store_no_results.search_queries == ['batman']
 
 
 def test_search_addon_fanout_runs_concurrently_not_sequentially(load_views, monkeypatch):

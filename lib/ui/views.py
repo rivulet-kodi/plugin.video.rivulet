@@ -503,6 +503,7 @@ def search():
         return
 
     store = _get_store()
+    store.add_search_query(query)
     client = _get_client()
     catalog_targets = list(addons_lib.iter_catalogs(store.get_addons(), extra_required='search'))
 

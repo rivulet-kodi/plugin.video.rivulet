@@ -412,3 +412,79 @@ def test_remove_addon_on_fresh_store_still_seeds_defaults_to_disk(tmp_path):
     assert addons_file.exists()
     on_disk = json.loads(addons_file.read_text())
     assert len(on_disk) == len(DEFAULT_ADDONS)
+
+
+# --- search history ---------------------------------------------------------
+
+
+def test_get_search_history_empty_when_never_set(tmp_path):
+    store = make_store(tmp_path)
+    assert store.get_search_history() == []
+
+
+def test_add_search_query_persists_most_recent_first(tmp_path):
+    store = make_store(tmp_path)
+    store.add_search_query("matrix")
+    store.add_search_query("inception")
+    assert store.get_search_history() == ["inception", "matrix"]
+
+
+def test_add_search_query_dedupes_case_insensitively_and_moves_to_front(tmp_path):
+    store = make_store(tmp_path)
+    store.add_search_query("Matrix")
+    store.add_search_query("inception")
+    store.add_search_query("matrix")
+    assert store.get_search_history() == ["matrix", "inception"]
+
+
+def test_add_search_query_blank_or_whitespace_is_a_noop(tmp_path):
+    store = make_store(tmp_path)
+    store.add_search_query("")
+    store.add_search_query("   ")
+    store.add_search_query(None)
+    assert store.get_search_history() == []
+
+
+def test_add_search_query_strips_whitespace(tmp_path):
+    store = make_store(tmp_path)
+    store.add_search_query("  matrix  ")
+    assert store.get_search_history() == ["matrix"]
+
+
+def test_add_search_query_caps_at_max_search_history(tmp_path):
+    from lib.store import MAX_SEARCH_HISTORY
+    store = make_store(tmp_path)
+    for i in range(MAX_SEARCH_HISTORY + 5):
+        store.add_search_query("query-%d" % i)
+    history = store.get_search_history()
+    assert len(history) == MAX_SEARCH_HISTORY
+    assert history[0] == "query-%d" % (MAX_SEARCH_HISTORY + 4)
+
+
+def test_clear_search_history_removes_all_entries(tmp_path):
+    store = make_store(tmp_path)
+    store.add_search_query("matrix")
+    store.clear_search_history()
+    assert store.get_search_history() == []
+
+
+def test_clear_search_history_on_empty_store_does_not_raise(tmp_path):
+    store = make_store(tmp_path)
+    store.clear_search_history()  # must not raise
+
+
+def test_search_history_persists_across_store_instances(tmp_path):
+    data_dir = tmp_path / "addon_data"
+    store = Store(str(data_dir))
+    store.add_search_query("matrix")
+
+    reopened = Store(str(data_dir))
+    assert reopened.get_search_history() == ["matrix"]
+
+
+def test_corrupt_search_history_json_returns_empty_list_without_raising(tmp_path):
+    data_dir = tmp_path / "addon_data"
+    data_dir.mkdir()
+    (data_dir / "search_history.json").write_text("{not valid json")
+    store = Store(str(data_dir))
+    assert store.get_search_history() == []  # must not raise

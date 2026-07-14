@@ -120,6 +120,26 @@ msgctxt "#30041"
 msgid "Streams"
 msgstr ""
 
+msgctxt "#30042"
+msgid "New search…"
+msgstr ""
+
+msgctxt "#30043"
+msgid "Type a new query"
+msgstr ""
+
+msgctxt "#30044"
+msgid "Clear search history"
+msgstr ""
+
+msgctxt "#30045"
+msgid "Search again"
+msgstr ""
+
+msgctxt "#30046"
+msgid "Remove every saved search?"
+msgstr ""
+
 msgctxt "#30100"
 msgid "General"
 msgstr ""

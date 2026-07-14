@@ -8,6 +8,8 @@ JSON files live under ``data_dir``:
   "flags": {...}}``.
 * ``auth.json`` -- ``{"authKey": ..., "user": {...}}`` when logged in to a
   Stremio account, or absent/``None`` when logged out.
+* ``search_history.json`` -- list of past search query strings, most
+  recent first, capped at :data:`MAX_SEARCH_HISTORY` entries.
 
 Writes are atomic (write to a temp file, then ``os.replace``) so a crash or
 power loss never leaves a half-written JSON file behind. A corrupt file on
@@ -31,6 +33,10 @@ import tempfile
 
 ADDONS_FILENAME = "addons.json"
 AUTH_FILENAME = "auth.json"
+SEARCH_HISTORY_FILENAME = "search_history.json"
+
+#: Most-recent-first cap for the persisted search history list.
+MAX_SEARCH_HISTORY = 15
 
 # Official addon descriptors seeded on first run. Manifests are copied
 # verbatim from the live addons (https://v3-cinemeta.strem.io/manifest.json
@@ -728,6 +734,7 @@ class Store:
             os.makedirs(self.data_dir)
         self._addons_path = os.path.join(self.data_dir, ADDONS_FILENAME)
         self._auth_path = os.path.join(self.data_dir, AUTH_FILENAME)
+        self._search_history_path = os.path.join(self.data_dir, SEARCH_HISTORY_FILENAME)
 
     # -- addons ----------------------------------------------------------
 
@@ -871,3 +878,36 @@ class Store:
                 pass
             return
         _atomic_write(self._auth_path, auth)
+
+    # -- search history ------------------------------------------------------
+
+    def get_search_history(self):
+        """Return past search queries, most recent first."""
+        history = _read_json(self._search_history_path, None)
+        return history if isinstance(history, list) else []
+
+    def add_search_query(self, query):
+        """Record ``query`` at the front of the search history, deduping
+        case-insensitively (an existing entry is moved to the front rather
+        than duplicated) and capping the list at :data:`MAX_SEARCH_HISTORY`.
+        A blank/whitespace-only query is a no-op.
+
+        Like ``auth.json``, this is a plain read-modify-write with no
+        :meth:`update_addons`-style compare-and-swap: a search query is
+        low-stakes, so a lost update under concurrent ``default.py``
+        processes at worst drops or duplicates one history entry, never
+        corrupts the file.
+        """
+        query = (query or "").strip()
+        if not query:
+            return
+        history = [q for q in self.get_search_history() if q.lower() != query.lower()]
+        history.insert(0, query)
+        _atomic_write(self._search_history_path, history[:MAX_SEARCH_HISTORY])
+
+    def clear_search_history(self):
+        """Delete all persisted search history."""
+        try:
+            os.remove(self._search_history_path)
+        except OSError:
+            pass

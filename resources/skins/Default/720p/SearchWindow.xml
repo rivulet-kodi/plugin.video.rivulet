@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<window>
+    <depth>0.52</depth>
+    <coordinates><left>0</left><top>0</top></coordinates>
+    <controls>
+        <control type="group">
+            <left>0</left><top>0</top>
+            <visible>!Player.HasVideo</visible>
+            <animation type="WindowOpen" reversible="false">
+                <effect type="fade" delay="0" end="100" time="200" />
+            </animation>
+            <animation type="WindowClose" reversible="false">
+                <effect type="fade" start="100" end="0" time="160" />
+            </animation>
+            <control type="image"><width>1280</width><height>720</height><texture colordiffuse="FF0F1214">white.png</texture></control>
+            <control type="image"><left>60</left><top>42</top><width>36</width><height>36</height><texture>logo.png</texture><aspectratio>keep</aspectratio></control>
+            <control type="label"><left>108</left><top>40</top><width>700</width><height>40</height><font>font14</font><textcolor>FF38BDF8</textcolor>
+                <label>SEARCH</label>
+            </control>
+            <control type="label"><right>60</right><bottom>40</bottom><width>300</width><height>30</height><font>font12</font><textcolor>AAFFFFFF</textcolor><align>right</align>
+                <label>$INFO[Container(30002).CurrentItem]/$INFO[Container(30002).NumItems]</label>
+            </control>
+            <control type="list" id="30002">
+                <left>40</left><top>110</top><width>1140</width><height>520</height>
+                <onleft>30002</onleft><onright>30002</onright>
+                <pagecontrol>30010</pagecontrol>
+                <itemlayout height="72">
+                    <control type="label"><left>20</left><top>10</top><width>1080</width><height>30</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
+                        <label>$INFO[ListItem.Label]</label>
+                    </control>
+                    <control type="label"><left>20</left><top>44</top><width>1080</width><height>24</height><font>font12</font><textcolor>80FFFFFF</textcolor>
+                        <label>$INFO[ListItem.Label2]</label>
+                    </control>
+                </itemlayout>
+                <focusedlayout height="72">
+                    <control type="image"><width>1140</width><height>72</height><texture colordiffuse="28FFFFFF">white.png</texture></control>
+                    <control type="image"><width>4</width><height>72</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                    <control type="label"><left>20</left><top>10</top><width>1080</width><height>30</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
+                        <label>[B]$INFO[ListItem.Label][/B]</label>
+                    </control>
+                    <control type="label"><left>20</left><top>44</top><width>1080</width><height>24</height><font>font12</font><textcolor>CCFFFFFF</textcolor>
+                        <label>$INFO[ListItem.Label2]</label>
+                    </control>
+                </focusedlayout>
+            </control>
+            <control type="scrollbar" id="30010">
+                <left>1190</left><top>110</top><width>14</width><height>520</height>
+                <texturesliderbar colordiffuse="33FFFFFF">white.png</texturesliderbar>
+                <textureslidernib colordiffuse="FF38BDF8">white.png</textureslidernib>
+                <textureslidernibfocus colordiffuse="FF38BDF8">white.png</textureslidernibfocus>
+                <showonepage>false</showonepage>
+                <orientation>vertical</orientation>
+            </control>
+        </control>
+    </controls>
+</window>
