@@ -1,0 +1,441 @@
+# Kodi Media Center language file
+# Addon Name: Rivulet
+# Addon id: plugin.video.rivulet
+# Addon Provider: M0Rf30
+msgid ""
+msgstr ""
+"Project-Id-Version: plugin.video.rivulet\n"
+"Report-Msgid-Bugs-To: https://github.com/M0Rf30/plugin.video.rivulet/issues\n"
+"POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: M0Rf30\n"
+"Language-Team: Korean (한국어)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: ko_KR\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgctxt "#30000"
+msgid "Discover"
+msgstr "탐색"
+
+msgctxt "#30001"
+msgid "Search"
+msgstr "검색"
+
+msgctxt "#30002"
+msgid "Library"
+msgstr "라이브러리"
+
+msgctxt "#30003"
+msgid "Addons"
+msgstr "애드온"
+
+msgctxt "#30004"
+msgid "Settings"
+msgstr "설정"
+
+msgctxt "#30010"
+msgid "Install addon from URL"
+msgstr "URL에서 애드온 설치"
+
+msgctxt "#30011"
+msgid "Remove addon"
+msgstr "애드온 제거"
+
+msgctxt "#30012"
+msgid "Addon installed"
+msgstr "애드온 설치됨"
+
+msgctxt "#30013"
+msgid "Addon removed"
+msgstr "애드온 제거됨"
+
+msgctxt "#30014"
+msgid "Invalid addon manifest"
+msgstr "잘못된 애드온 매니페스트"
+
+msgctxt "#30020"
+msgid "Login to Stremio"
+msgstr "Stremio에 로그인"
+
+msgctxt "#30021"
+msgid "Logout"
+msgstr "로그아웃"
+
+msgctxt "#30022"
+msgid "Logged in as %s"
+msgstr "%s로 로그인됨"
+
+msgctxt "#30023"
+msgid "Login failed"
+msgstr "로그인 실패"
+
+msgctxt "#30024"
+msgid "Stremio email"
+msgstr "Stremio 이메일"
+
+msgctxt "#30025"
+msgid "Password"
+msgstr "비밀번호"
+
+msgctxt "#30026"
+msgid "Showcase"
+msgstr "쇼케이스"
+
+msgctxt "#30030"
+msgid "No streams found"
+msgstr "스트림을 찾을 수 없음"
+
+msgctxt "#30031"
+msgid "Streaming server unavailable"
+msgstr "스트리밍 서버를 사용할 수 없음"
+
+msgctxt "#30032"
+msgid "Something went wrong"
+msgstr "문제가 발생했습니다"
+
+msgctxt "#30033"
+msgid "Loading…"
+msgstr "불러오는 중…"
+
+msgctxt "#30034"
+msgid "Addons synced"
+msgstr "애드온 동기화됨"
+
+msgctxt "#30035"
+msgid "Addon sync failed"
+msgstr "애드온 동기화 실패"
+
+msgctxt "#30036"
+msgid "Sync addons now"
+msgstr "지금 애드온 동기화"
+
+msgctxt "#30040"
+msgid "Next page"
+msgstr "다음 페이지"
+
+msgctxt "#30041"
+msgid "Streams"
+msgstr "스트림"
+
+msgctxt "#30042"
+msgid "New search…"
+msgstr "새 검색…"
+
+msgctxt "#30043"
+msgid "Type a new query"
+msgstr "새 검색어를 입력하세요"
+
+msgctxt "#30044"
+msgid "Clear search history"
+msgstr "검색 기록 지우기"
+
+msgctxt "#30045"
+msgid "Search again"
+msgstr "다시 검색"
+
+msgctxt "#30046"
+msgid "Remove every saved search?"
+msgstr "저장된 모든 검색을 삭제하시겠습니까?"
+
+msgctxt "#30100"
+msgid "General"
+msgstr "일반"
+
+msgctxt "#30101"
+msgid "Streaming server"
+msgstr "스트리밍 서버"
+
+msgctxt "#30102"
+msgid "Server URL"
+msgstr "서버 URL"
+
+msgctxt "#30103"
+msgid "Run embedded server"
+msgstr "내장 서버 실행"
+
+msgctxt "#30104"
+msgid "Server binary path"
+msgstr "서버 바이너리 경로"
+
+msgctxt "#30105"
+msgid "Account"
+msgstr "계정"
+
+msgctxt "#30050"
+msgid "Subtitles"
+msgstr "자막"
+
+msgctxt "#30051"
+msgid "Enable addon subtitles"
+msgstr "애드온 자막 사용"
+
+msgctxt "#30052"
+msgid "Preferred subtitle language"
+msgstr "선호하는 자막 언어"
+
+msgctxt "#30060"
+msgid "Download stremio-server binary"
+msgstr "stremio-server 바이너리 다운로드"
+
+msgctxt "#30061"
+msgid "Downloading stremio-server"
+msgstr "stremio-server 다운로드 중"
+
+msgctxt "#30062"
+msgid "Server binary installed (%s)"
+msgstr "서버 바이너리 설치됨 (%s)"
+
+msgctxt "#30063"
+msgid "Download failed"
+msgstr "다운로드 실패"
+
+msgctxt "#30064"
+msgid "No release asset for this platform"
+msgstr "이 플랫폼용 릴리스 파일이 없음"
+
+msgctxt "#30070"
+msgid "Playback"
+msgstr "재생"
+
+msgctxt "#30071"
+msgid "Pre-buffer torrents"
+msgstr "토렌트 사전 버퍼링"
+
+msgctxt "#30072"
+msgid "Pre-buffer size (MB)"
+msgstr "사전 버퍼 크기 (MB)"
+
+msgctxt "#30073"
+msgid "Sort streams by"
+msgstr "스트림 정렬 기준"
+
+msgctxt "#30074"
+msgid "Quality"
+msgstr "품질"
+
+msgctxt "#30075"
+msgid "Size"
+msgstr "크기"
+
+msgctxt "#30076"
+msgid "Seeders"
+msgstr "시더"
+
+msgctxt "#30065"
+msgid "Install recommended advancedsettings.xml"
+msgstr "권장 advancedsettings.xml 설치"
+
+msgctxt "#30066"
+msgid "advancedsettings.xml installed - restart Kodi to apply"
+msgstr "advancedsettings.xml 설치됨 - 적용하려면 Kodi를 재시작하세요"
+
+msgctxt "#30067"
+msgid "advancedsettings.xml already exists - merge changes manually"
+msgstr "advancedsettings.xml이 이미 존재함 - 수동으로 변경 사항을 병합하세요"
+
+msgctxt "#30068"
+msgid "Failed to install advancedsettings.xml"
+msgstr "advancedsettings.xml 설치 실패"
+
+msgctxt "#30069"
+msgid "Setting up streaming server…"
+msgstr "스트리밍 서버 설정 중…"
+
+msgctxt "#30080"
+msgid "Preparing stream"
+msgstr "스트림 준비 중"
+
+msgctxt "#30081"
+msgid "Buffering: %s of %s"
+msgstr "버퍼링: %s / %s"
+
+msgctxt "#30082"
+msgid "%s/s — %d peers"
+msgstr "%s/초 — 피어 %d개"
+
+msgctxt "#30083"
+msgid "Buffering timed out, starting anyway"
+msgstr "버퍼링 시간 초과, 그래도 시작함"
+
+msgctxt "#30084"
+msgid "No peers available for this stream"
+msgstr "이 스트림에 사용 가능한 피어가 없음"
+
+msgctxt "#30085"
+msgid "Session expired - please log in again"
+msgstr "세션이 만료되었습니다 - 다시 로그인해 주세요"
+
+msgctxt "#30086"
+msgid "Connecting to streaming server…"
+msgstr "스트리밍 서버에 연결 중…"
+
+msgctxt "#30087"
+msgid "Resolving stream…"
+msgstr "스트림 확인 중…"
+
+msgctxt "#30088"
+msgid "Fetching torrent metadata…"
+msgstr "토렌트 메타데이터 가져오는 중…"
+
+msgctxt "#30089"
+msgid "Warming torrent engine…"
+msgstr "토렌트 엔진 준비 중…"
+
+msgctxt "#30090"
+msgid "attempt %d of %d"
+msgstr "%d/%d번째 시도"
+
+msgctxt "#30110"
+msgid "BitTorrent"
+msgstr "BitTorrent"
+
+msgctxt "#30111"
+msgid "Server resources"
+msgstr "서버 리소스"
+
+msgctxt "#30112"
+msgid "Server proxy"
+msgstr "서버 프록시"
+
+msgctxt "#30113"
+msgid "Server add-ons"
+msgstr "서버 애드온"
+
+msgctxt "#30114"
+msgid "Server diagnostics"
+msgstr "서버 진단"
+
+msgctxt "#30115"
+msgid "BitTorrent listen port"
+msgstr "BitTorrent 수신 포트"
+
+msgctxt "#30116"
+msgid "Peers per torrent"
+msgstr "토렌트당 피어 수"
+
+msgctxt "#30117"
+msgid "Idle torrent timeout (seconds)"
+msgstr "유휴 토렌트 시간 초과 (초)"
+
+msgctxt "#30118"
+msgid "BitTorrent encryption"
+msgstr "BitTorrent 암호화"
+
+msgctxt "#30119"
+msgid "Prefer"
+msgstr "선호"
+
+msgctxt "#30120"
+msgid "Require"
+msgstr "필수"
+
+msgctxt "#30121"
+msgid "Disable"
+msgstr "사용 안 함"
+
+msgctxt "#30122"
+msgid "Anonymous mode"
+msgstr "익명 모드"
+
+msgctxt "#30123"
+msgid "Disable trackers"
+msgstr "트래커 사용 안 함"
+
+msgctxt "#30124"
+msgid "BitTorrent proxy (SOCKS/HTTP URL)"
+msgstr "BitTorrent 프록시 (SOCKS/HTTP URL)"
+
+msgctxt "#30125"
+msgid "Disable WebTorrent/WebRTC peers"
+msgstr "WebTorrent/WebRTC 피어 사용 안 함"
+
+msgctxt "#30126"
+msgid "Max trackers per torrent"
+msgstr "토렌트당 최대 트래커 수"
+
+msgctxt "#30127"
+msgid "Custom tracker list URL"
+msgstr "사용자 지정 트래커 목록 URL"
+
+msgctxt "#30128"
+msgid "Extra DHT bootstrap nodes"
+msgstr "추가 DHT 부트스트랩 노드"
+
+msgctxt "#30129"
+msgid "Memory cache size (MB, 0 = disk only)"
+msgstr "메모리 캐시 크기 (MB, 0 = 디스크만 사용)"
+
+msgctxt "#30130"
+msgid "Soft memory limit (MB, 0 = unlimited)"
+msgstr "소프트 메모리 제한 (MB, 0 = 무제한)"
+
+msgctxt "#30131"
+msgid "Proxy pre-buffer (segments)"
+msgstr "프록시 사전 버퍼 (세그먼트)"
+
+msgctxt "#30132"
+msgid "Proxy segment cache TTL (seconds)"
+msgstr "프록시 세그먼트 캐시 TTL (초)"
+
+msgctxt "#30133"
+msgid "Proxy password"
+msgstr "프록시 비밀번호"
+
+msgctxt "#30134"
+msgid "Proxy IP allow-list"
+msgstr "프록시 IP 허용 목록"
+
+msgctxt "#30135"
+msgid "Proxy public URL"
+msgstr "프록시 공개 URL"
+
+msgctxt "#30136"
+msgid "Proxy upstream URL"
+msgstr "프록시 업스트림 URL"
+
+msgctxt "#30137"
+msgid "Proxy signing secret"
+msgstr "프록시 서명 비밀 키"
+
+msgctxt "#30138"
+msgid "Enable DLNA casting"
+msgstr "DLNA 캐스팅 사용"
+
+msgctxt "#30139"
+msgid "Local IMDB resolution"
+msgstr "로컬 IMDB 확인"
+
+msgctxt "#30140"
+msgid "Metadata addon URL (blank = Cinemeta, \"off\" to disable)"
+msgstr "메타데이터 애드온 URL (공백 = Cinemeta, \"off\"로 비활성화)"
+
+msgctxt "#30141"
+msgid "Bitmagnet indexer URL"
+msgstr "Bitmagnet 인덱서 URL"
+
+msgctxt "#30142"
+msgid "Torznab indexer URL"
+msgstr "Torznab 인덱서 URL"
+
+msgctxt "#30143"
+msgid "Torznab API key"
+msgstr "Torznab API 키"
+
+msgctxt "#30144"
+msgid "Web UI location"
+msgstr "웹 UI 위치"
+
+msgctxt "#30145"
+msgid "HTTPS port (0 = disabled)"
+msgstr "HTTPS 포트 (0 = 사용 안 함)"
+
+msgctxt "#30146"
+msgid "pprof diagnostics address"
+msgstr "pprof 진단 주소"
+
+msgctxt "#30147"
+msgid "Stremio account auth key (HTTPS auto-cert)"
+msgstr "Stremio 계정 인증 키 (HTTPS 자동 인증서)"

@@ -1,0 +1,441 @@
+# Kodi Media Center language file
+# Addon Name: Rivulet
+# Addon id: plugin.video.rivulet
+# Addon Provider: M0Rf30
+msgid ""
+msgstr ""
+"Project-Id-Version: plugin.video.rivulet\n"
+"Report-Msgid-Bugs-To: https://github.com/M0Rf30/plugin.video.rivulet/issues\n"
+"POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: M0Rf30\n"
+"Language-Team: Russian (Русский)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: ru_RU\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgctxt "#30000"
+msgid "Discover"
+msgstr "Обзор"
+
+msgctxt "#30001"
+msgid "Search"
+msgstr "Поиск"
+
+msgctxt "#30002"
+msgid "Library"
+msgstr "Библиотека"
+
+msgctxt "#30003"
+msgid "Addons"
+msgstr "Дополнения"
+
+msgctxt "#30004"
+msgid "Settings"
+msgstr "Настройки"
+
+msgctxt "#30010"
+msgid "Install addon from URL"
+msgstr "Установить дополнение по URL"
+
+msgctxt "#30011"
+msgid "Remove addon"
+msgstr "Удалить дополнение"
+
+msgctxt "#30012"
+msgid "Addon installed"
+msgstr "Дополнение установлено"
+
+msgctxt "#30013"
+msgid "Addon removed"
+msgstr "Дополнение удалено"
+
+msgctxt "#30014"
+msgid "Invalid addon manifest"
+msgstr "Неверный манифест дополнения"
+
+msgctxt "#30020"
+msgid "Login to Stremio"
+msgstr "Вход в Stremio"
+
+msgctxt "#30021"
+msgid "Logout"
+msgstr "Выйти"
+
+msgctxt "#30022"
+msgid "Logged in as %s"
+msgstr "Вход выполнен как %s"
+
+msgctxt "#30023"
+msgid "Login failed"
+msgstr "Ошибка входа"
+
+msgctxt "#30024"
+msgid "Stremio email"
+msgstr "Email Stremio"
+
+msgctxt "#30025"
+msgid "Password"
+msgstr "Пароль"
+
+msgctxt "#30026"
+msgid "Showcase"
+msgstr "Витрина"
+
+msgctxt "#30030"
+msgid "No streams found"
+msgstr "Потоки не найдены"
+
+msgctxt "#30031"
+msgid "Streaming server unavailable"
+msgstr "Сервер потоковой передачи недоступен"
+
+msgctxt "#30032"
+msgid "Something went wrong"
+msgstr "Что-то пошло не так"
+
+msgctxt "#30033"
+msgid "Loading…"
+msgstr "Загрузка…"
+
+msgctxt "#30034"
+msgid "Addons synced"
+msgstr "Дополнения синхронизированы"
+
+msgctxt "#30035"
+msgid "Addon sync failed"
+msgstr "Ошибка синхронизации дополнений"
+
+msgctxt "#30036"
+msgid "Sync addons now"
+msgstr "Синхронизировать дополнения сейчас"
+
+msgctxt "#30040"
+msgid "Next page"
+msgstr "Следующая страница"
+
+msgctxt "#30041"
+msgid "Streams"
+msgstr "Потоки"
+
+msgctxt "#30042"
+msgid "New search…"
+msgstr "Новый поиск…"
+
+msgctxt "#30043"
+msgid "Type a new query"
+msgstr "Введите новый запрос"
+
+msgctxt "#30044"
+msgid "Clear search history"
+msgstr "Очистить историю поиска"
+
+msgctxt "#30045"
+msgid "Search again"
+msgstr "Повторить поиск"
+
+msgctxt "#30046"
+msgid "Remove every saved search?"
+msgstr "Удалить все сохранённые запросы?"
+
+msgctxt "#30100"
+msgid "General"
+msgstr "Общие"
+
+msgctxt "#30101"
+msgid "Streaming server"
+msgstr "Сервер потоковой передачи"
+
+msgctxt "#30102"
+msgid "Server URL"
+msgstr "URL сервера"
+
+msgctxt "#30103"
+msgid "Run embedded server"
+msgstr "Запускать встроенный сервер"
+
+msgctxt "#30104"
+msgid "Server binary path"
+msgstr "Путь к исполняемому файлу сервера"
+
+msgctxt "#30105"
+msgid "Account"
+msgstr "Учётная запись"
+
+msgctxt "#30050"
+msgid "Subtitles"
+msgstr "Субтитры"
+
+msgctxt "#30051"
+msgid "Enable addon subtitles"
+msgstr "Включить субтитры дополнения"
+
+msgctxt "#30052"
+msgid "Preferred subtitle language"
+msgstr "Предпочитаемый язык субтитров"
+
+msgctxt "#30060"
+msgid "Download stremio-server binary"
+msgstr "Загрузить исполняемый файл stremio-server"
+
+msgctxt "#30061"
+msgid "Downloading stremio-server"
+msgstr "Загрузка stremio-server"
+
+msgctxt "#30062"
+msgid "Server binary installed (%s)"
+msgstr "Исполняемый файл сервера установлен (%s)"
+
+msgctxt "#30063"
+msgid "Download failed"
+msgstr "Ошибка загрузки"
+
+msgctxt "#30064"
+msgid "No release asset for this platform"
+msgstr "Нет файла релиза для этой платформы"
+
+msgctxt "#30070"
+msgid "Playback"
+msgstr "Воспроизведение"
+
+msgctxt "#30071"
+msgid "Pre-buffer torrents"
+msgstr "Предварительная буферизация торрентов"
+
+msgctxt "#30072"
+msgid "Pre-buffer size (MB)"
+msgstr "Размер предварительной буферизации (МБ)"
+
+msgctxt "#30073"
+msgid "Sort streams by"
+msgstr "Сортировать потоки по"
+
+msgctxt "#30074"
+msgid "Quality"
+msgstr "Качество"
+
+msgctxt "#30075"
+msgid "Size"
+msgstr "Размер"
+
+msgctxt "#30076"
+msgid "Seeders"
+msgstr "Сиды"
+
+msgctxt "#30065"
+msgid "Install recommended advancedsettings.xml"
+msgstr "Установить рекомендуемый advancedsettings.xml"
+
+msgctxt "#30066"
+msgid "advancedsettings.xml installed - restart Kodi to apply"
+msgstr "advancedsettings.xml установлен - перезапустите Kodi для применения"
+
+msgctxt "#30067"
+msgid "advancedsettings.xml already exists - merge changes manually"
+msgstr "advancedsettings.xml уже существует - объедините изменения вручную"
+
+msgctxt "#30068"
+msgid "Failed to install advancedsettings.xml"
+msgstr "Не удалось установить advancedsettings.xml"
+
+msgctxt "#30069"
+msgid "Setting up streaming server…"
+msgstr "Настройка сервера потоковой передачи…"
+
+msgctxt "#30080"
+msgid "Preparing stream"
+msgstr "Подготовка потока"
+
+msgctxt "#30081"
+msgid "Buffering: %s of %s"
+msgstr "Буферизация: %s из %s"
+
+msgctxt "#30082"
+msgid "%s/s — %d peers"
+msgstr "%s/с — %d пиров"
+
+msgctxt "#30083"
+msgid "Buffering timed out, starting anyway"
+msgstr "Время буферизации истекло, запуск в любом случае"
+
+msgctxt "#30084"
+msgid "No peers available for this stream"
+msgstr "Нет доступных пиров для этого потока"
+
+msgctxt "#30085"
+msgid "Session expired - please log in again"
+msgstr "Сессия истекла - выполните вход снова"
+
+msgctxt "#30086"
+msgid "Connecting to streaming server…"
+msgstr "Подключение к серверу потоковой передачи…"
+
+msgctxt "#30087"
+msgid "Resolving stream…"
+msgstr "Определение потока…"
+
+msgctxt "#30088"
+msgid "Fetching torrent metadata…"
+msgstr "Получение метаданных торрента…"
+
+msgctxt "#30089"
+msgid "Warming torrent engine…"
+msgstr "Прогрев торрент-движка…"
+
+msgctxt "#30090"
+msgid "attempt %d of %d"
+msgstr "попытка %d из %d"
+
+msgctxt "#30110"
+msgid "BitTorrent"
+msgstr "BitTorrent"
+
+msgctxt "#30111"
+msgid "Server resources"
+msgstr "Ресурсы сервера"
+
+msgctxt "#30112"
+msgid "Server proxy"
+msgstr "Прокси сервера"
+
+msgctxt "#30113"
+msgid "Server add-ons"
+msgstr "Дополнения сервера"
+
+msgctxt "#30114"
+msgid "Server diagnostics"
+msgstr "Диагностика сервера"
+
+msgctxt "#30115"
+msgid "BitTorrent listen port"
+msgstr "Порт прослушивания BitTorrent"
+
+msgctxt "#30116"
+msgid "Peers per torrent"
+msgstr "Пиров на торрент"
+
+msgctxt "#30117"
+msgid "Idle torrent timeout (seconds)"
+msgstr "Тайм-аут неактивного торрента (секунды)"
+
+msgctxt "#30118"
+msgid "BitTorrent encryption"
+msgstr "Шифрование BitTorrent"
+
+msgctxt "#30119"
+msgid "Prefer"
+msgstr "Предпочитать"
+
+msgctxt "#30120"
+msgid "Require"
+msgstr "Требовать"
+
+msgctxt "#30121"
+msgid "Disable"
+msgstr "Отключить"
+
+msgctxt "#30122"
+msgid "Anonymous mode"
+msgstr "Анонимный режим"
+
+msgctxt "#30123"
+msgid "Disable trackers"
+msgstr "Отключить трекеры"
+
+msgctxt "#30124"
+msgid "BitTorrent proxy (SOCKS/HTTP URL)"
+msgstr "Прокси BitTorrent (SOCKS/HTTP URL)"
+
+msgctxt "#30125"
+msgid "Disable WebTorrent/WebRTC peers"
+msgstr "Отключить пиры WebTorrent/WebRTC"
+
+msgctxt "#30126"
+msgid "Max trackers per torrent"
+msgstr "Максимум трекеров на торрент"
+
+msgctxt "#30127"
+msgid "Custom tracker list URL"
+msgstr "URL пользовательского списка трекеров"
+
+msgctxt "#30128"
+msgid "Extra DHT bootstrap nodes"
+msgstr "Дополнительные узлы загрузки DHT"
+
+msgctxt "#30129"
+msgid "Memory cache size (MB, 0 = disk only)"
+msgstr "Размер кэша в памяти (МБ, 0 = только диск)"
+
+msgctxt "#30130"
+msgid "Soft memory limit (MB, 0 = unlimited)"
+msgstr "Мягкий лимит памяти (МБ, 0 = без ограничений)"
+
+msgctxt "#30131"
+msgid "Proxy pre-buffer (segments)"
+msgstr "Предварительная буферизация прокси (сегменты)"
+
+msgctxt "#30132"
+msgid "Proxy segment cache TTL (seconds)"
+msgstr "TTL кэша сегментов прокси (секунды)"
+
+msgctxt "#30133"
+msgid "Proxy password"
+msgstr "Пароль прокси"
+
+msgctxt "#30134"
+msgid "Proxy IP allow-list"
+msgstr "Белый список IP прокси"
+
+msgctxt "#30135"
+msgid "Proxy public URL"
+msgstr "Публичный URL прокси"
+
+msgctxt "#30136"
+msgid "Proxy upstream URL"
+msgstr "URL восходящего потока прокси"
+
+msgctxt "#30137"
+msgid "Proxy signing secret"
+msgstr "Секрет подписи прокси"
+
+msgctxt "#30138"
+msgid "Enable DLNA casting"
+msgstr "Включить трансляцию DLNA"
+
+msgctxt "#30139"
+msgid "Local IMDB resolution"
+msgstr "Локальное определение IMDB"
+
+msgctxt "#30140"
+msgid "Metadata addon URL (blank = Cinemeta, \"off\" to disable)"
+msgstr "URL дополнения метаданных (пусто = Cinemeta, \"off\" для отключения)"
+
+msgctxt "#30141"
+msgid "Bitmagnet indexer URL"
+msgstr "URL индексатора Bitmagnet"
+
+msgctxt "#30142"
+msgid "Torznab indexer URL"
+msgstr "URL индексатора Torznab"
+
+msgctxt "#30143"
+msgid "Torznab API key"
+msgstr "API-ключ Torznab"
+
+msgctxt "#30144"
+msgid "Web UI location"
+msgstr "Расположение веб-интерфейса"
+
+msgctxt "#30145"
+msgid "HTTPS port (0 = disabled)"
+msgstr "Порт HTTPS (0 = отключено)"
+
+msgctxt "#30146"
+msgid "pprof diagnostics address"
+msgstr "Адрес диагностики pprof"
+
+msgctxt "#30147"
+msgid "Stremio account auth key (HTTPS auto-cert)"
+msgstr "Ключ авторизации учётной записи Stremio (авто-сертификат HTTPS)"

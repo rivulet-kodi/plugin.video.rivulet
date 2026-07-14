@@ -1,0 +1,441 @@
+# Kodi Media Center language file
+# Addon Name: Rivulet
+# Addon id: plugin.video.rivulet
+# Addon Provider: M0Rf30
+msgid ""
+msgstr ""
+"Project-Id-Version: plugin.video.rivulet\n"
+"Report-Msgid-Bugs-To: https://github.com/M0Rf30/plugin.video.rivulet/issues\n"
+"POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: M0Rf30\n"
+"Language-Team: Arabic (العربية)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: ar_SA\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgctxt "#30000"
+msgid "Discover"
+msgstr "استكشاف"
+
+msgctxt "#30001"
+msgid "Search"
+msgstr "بحث"
+
+msgctxt "#30002"
+msgid "Library"
+msgstr "المكتبة"
+
+msgctxt "#30003"
+msgid "Addons"
+msgstr "الإضافات"
+
+msgctxt "#30004"
+msgid "Settings"
+msgstr "الإعدادات"
+
+msgctxt "#30010"
+msgid "Install addon from URL"
+msgstr "تثبيت إضافة من عنوان URL"
+
+msgctxt "#30011"
+msgid "Remove addon"
+msgstr "إزالة الإضافة"
+
+msgctxt "#30012"
+msgid "Addon installed"
+msgstr "تم تثبيت الإضافة"
+
+msgctxt "#30013"
+msgid "Addon removed"
+msgstr "تمت إزالة الإضافة"
+
+msgctxt "#30014"
+msgid "Invalid addon manifest"
+msgstr "بيان إضافة غير صالح"
+
+msgctxt "#30020"
+msgid "Login to Stremio"
+msgstr "تسجيل الدخول إلى Stremio"
+
+msgctxt "#30021"
+msgid "Logout"
+msgstr "تسجيل الخروج"
+
+msgctxt "#30022"
+msgid "Logged in as %s"
+msgstr "تم تسجيل الدخول باسم %s"
+
+msgctxt "#30023"
+msgid "Login failed"
+msgstr "فشل تسجيل الدخول"
+
+msgctxt "#30024"
+msgid "Stremio email"
+msgstr "البريد الإلكتروني لـ Stremio"
+
+msgctxt "#30025"
+msgid "Password"
+msgstr "كلمة المرور"
+
+msgctxt "#30026"
+msgid "Showcase"
+msgstr "العرض"
+
+msgctxt "#30030"
+msgid "No streams found"
+msgstr "لم يتم العثور على أي بث"
+
+msgctxt "#30031"
+msgid "Streaming server unavailable"
+msgstr "خادم البث غير متوفر"
+
+msgctxt "#30032"
+msgid "Something went wrong"
+msgstr "حدث خطأ ما"
+
+msgctxt "#30033"
+msgid "Loading…"
+msgstr "جارٍ التحميل…"
+
+msgctxt "#30034"
+msgid "Addons synced"
+msgstr "تمت مزامنة الإضافات"
+
+msgctxt "#30035"
+msgid "Addon sync failed"
+msgstr "فشلت مزامنة الإضافات"
+
+msgctxt "#30036"
+msgid "Sync addons now"
+msgstr "مزامنة الإضافات الآن"
+
+msgctxt "#30040"
+msgid "Next page"
+msgstr "الصفحة التالية"
+
+msgctxt "#30041"
+msgid "Streams"
+msgstr "البث"
+
+msgctxt "#30042"
+msgid "New search…"
+msgstr "بحث جديد…"
+
+msgctxt "#30043"
+msgid "Type a new query"
+msgstr "أدخل استعلامًا جديدًا"
+
+msgctxt "#30044"
+msgid "Clear search history"
+msgstr "مسح سجل البحث"
+
+msgctxt "#30045"
+msgid "Search again"
+msgstr "البحث مرة أخرى"
+
+msgctxt "#30046"
+msgid "Remove every saved search?"
+msgstr "إزالة كل عمليات البحث المحفوظة؟"
+
+msgctxt "#30100"
+msgid "General"
+msgstr "عام"
+
+msgctxt "#30101"
+msgid "Streaming server"
+msgstr "خادم البث"
+
+msgctxt "#30102"
+msgid "Server URL"
+msgstr "عنوان URL للخادم"
+
+msgctxt "#30103"
+msgid "Run embedded server"
+msgstr "تشغيل الخادم المدمج"
+
+msgctxt "#30104"
+msgid "Server binary path"
+msgstr "مسار الملف التنفيذي للخادم"
+
+msgctxt "#30105"
+msgid "Account"
+msgstr "الحساب"
+
+msgctxt "#30050"
+msgid "Subtitles"
+msgstr "الترجمة"
+
+msgctxt "#30051"
+msgid "Enable addon subtitles"
+msgstr "تفعيل ترجمات الإضافة"
+
+msgctxt "#30052"
+msgid "Preferred subtitle language"
+msgstr "لغة الترجمة المفضلة"
+
+msgctxt "#30060"
+msgid "Download stremio-server binary"
+msgstr "تنزيل الملف التنفيذي لـ stremio-server"
+
+msgctxt "#30061"
+msgid "Downloading stremio-server"
+msgstr "جارٍ تنزيل stremio-server"
+
+msgctxt "#30062"
+msgid "Server binary installed (%s)"
+msgstr "تم تثبيت الملف التنفيذي للخادم (%s)"
+
+msgctxt "#30063"
+msgid "Download failed"
+msgstr "فشل التنزيل"
+
+msgctxt "#30064"
+msgid "No release asset for this platform"
+msgstr "لا توجد نسخة متاحة لهذه المنصة"
+
+msgctxt "#30070"
+msgid "Playback"
+msgstr "التشغيل"
+
+msgctxt "#30071"
+msgid "Pre-buffer torrents"
+msgstr "تخزين مؤقت مسبق للتورنت"
+
+msgctxt "#30072"
+msgid "Pre-buffer size (MB)"
+msgstr "حجم التخزين المؤقت المسبق (ميغابايت)"
+
+msgctxt "#30073"
+msgid "Sort streams by"
+msgstr "ترتيب البث حسب"
+
+msgctxt "#30074"
+msgid "Quality"
+msgstr "الجودة"
+
+msgctxt "#30075"
+msgid "Size"
+msgstr "الحجم"
+
+msgctxt "#30076"
+msgid "Seeders"
+msgstr "الموزعون (Seeders)"
+
+msgctxt "#30065"
+msgid "Install recommended advancedsettings.xml"
+msgstr "تثبيت advancedsettings.xml الموصى به"
+
+msgctxt "#30066"
+msgid "advancedsettings.xml installed - restart Kodi to apply"
+msgstr "تم تثبيت advancedsettings.xml - أعد تشغيل Kodi للتطبيق"
+
+msgctxt "#30067"
+msgid "advancedsettings.xml already exists - merge changes manually"
+msgstr "ملف advancedsettings.xml موجود بالفعل - قم بدمج التغييرات يدويًا"
+
+msgctxt "#30068"
+msgid "Failed to install advancedsettings.xml"
+msgstr "فشل تثبيت advancedsettings.xml"
+
+msgctxt "#30069"
+msgid "Setting up streaming server…"
+msgstr "جارٍ إعداد خادم البث…"
+
+msgctxt "#30080"
+msgid "Preparing stream"
+msgstr "جارٍ تحضير البث"
+
+msgctxt "#30081"
+msgid "Buffering: %s of %s"
+msgstr "التخزين المؤقت: %s من %s"
+
+msgctxt "#30082"
+msgid "%s/s — %d peers"
+msgstr "%s/ث — %d نظير"
+
+msgctxt "#30083"
+msgid "Buffering timed out, starting anyway"
+msgstr "انتهت مهلة التخزين المؤقت، سيتم البدء على أي حال"
+
+msgctxt "#30084"
+msgid "No peers available for this stream"
+msgstr "لا يوجد نظراء متاحون لهذا البث"
+
+msgctxt "#30085"
+msgid "Session expired - please log in again"
+msgstr "انتهت الجلسة - يرجى تسجيل الدخول مرة أخرى"
+
+msgctxt "#30086"
+msgid "Connecting to streaming server…"
+msgstr "جارٍ الاتصال بخادم البث…"
+
+msgctxt "#30087"
+msgid "Resolving stream…"
+msgstr "جارٍ تحليل البث…"
+
+msgctxt "#30088"
+msgid "Fetching torrent metadata…"
+msgstr "جارٍ جلب بيانات التورنت الوصفية…"
+
+msgctxt "#30089"
+msgid "Warming torrent engine…"
+msgstr "جارٍ تهيئة محرك التورنت…"
+
+msgctxt "#30090"
+msgid "attempt %d of %d"
+msgstr "المحاولة %d من %d"
+
+msgctxt "#30110"
+msgid "BitTorrent"
+msgstr "BitTorrent"
+
+msgctxt "#30111"
+msgid "Server resources"
+msgstr "موارد الخادم"
+
+msgctxt "#30112"
+msgid "Server proxy"
+msgstr "وكيل الخادم (Proxy)"
+
+msgctxt "#30113"
+msgid "Server add-ons"
+msgstr "إضافات الخادم"
+
+msgctxt "#30114"
+msgid "Server diagnostics"
+msgstr "تشخيص الخادم"
+
+msgctxt "#30115"
+msgid "BitTorrent listen port"
+msgstr "منفذ استماع BitTorrent"
+
+msgctxt "#30116"
+msgid "Peers per torrent"
+msgstr "عدد النظراء لكل تورنت"
+
+msgctxt "#30117"
+msgid "Idle torrent timeout (seconds)"
+msgstr "مهلة خمول التورنت (بالثواني)"
+
+msgctxt "#30118"
+msgid "BitTorrent encryption"
+msgstr "تشفير BitTorrent"
+
+msgctxt "#30119"
+msgid "Prefer"
+msgstr "تفضيل"
+
+msgctxt "#30120"
+msgid "Require"
+msgstr "إلزامي"
+
+msgctxt "#30121"
+msgid "Disable"
+msgstr "تعطيل"
+
+msgctxt "#30122"
+msgid "Anonymous mode"
+msgstr "الوضع المجهول"
+
+msgctxt "#30123"
+msgid "Disable trackers"
+msgstr "تعطيل المتتبعات (Trackers)"
+
+msgctxt "#30124"
+msgid "BitTorrent proxy (SOCKS/HTTP URL)"
+msgstr "وكيل BitTorrent (عنوان URL لـ SOCKS/HTTP)"
+
+msgctxt "#30125"
+msgid "Disable WebTorrent/WebRTC peers"
+msgstr "تعطيل نظراء WebTorrent/WebRTC"
+
+msgctxt "#30126"
+msgid "Max trackers per torrent"
+msgstr "الحد الأقصى للمتتبعات لكل تورنت"
+
+msgctxt "#30127"
+msgid "Custom tracker list URL"
+msgstr "عنوان URL مخصص لقائمة المتتبعات"
+
+msgctxt "#30128"
+msgid "Extra DHT bootstrap nodes"
+msgstr "عُقد تمهيد DHT إضافية"
+
+msgctxt "#30129"
+msgid "Memory cache size (MB, 0 = disk only)"
+msgstr "حجم ذاكرة التخزين المؤقت (ميغابايت، 0 = القرص فقط)"
+
+msgctxt "#30130"
+msgid "Soft memory limit (MB, 0 = unlimited)"
+msgstr "الحد الأدنى للذاكرة (ميغابايت، 0 = غير محدود)"
+
+msgctxt "#30131"
+msgid "Proxy pre-buffer (segments)"
+msgstr "تخزين مؤقت مسبق للوكيل (أجزاء)"
+
+msgctxt "#30132"
+msgid "Proxy segment cache TTL (seconds)"
+msgstr "مدة صلاحية ذاكرة تخزين أجزاء الوكيل (بالثواني)"
+
+msgctxt "#30133"
+msgid "Proxy password"
+msgstr "كلمة مرور الوكيل"
+
+msgctxt "#30134"
+msgid "Proxy IP allow-list"
+msgstr "قائمة عناوين IP المسموح بها للوكيل"
+
+msgctxt "#30135"
+msgid "Proxy public URL"
+msgstr "عنوان URL العام للوكيل"
+
+msgctxt "#30136"
+msgid "Proxy upstream URL"
+msgstr "عنوان URL المصدر للوكيل"
+
+msgctxt "#30137"
+msgid "Proxy signing secret"
+msgstr "المفتاح السري لتوقيع الوكيل"
+
+msgctxt "#30138"
+msgid "Enable DLNA casting"
+msgstr "تفعيل البث عبر DLNA"
+
+msgctxt "#30139"
+msgid "Local IMDB resolution"
+msgstr "دقة IMDB محلية"
+
+msgctxt "#30140"
+msgid "Metadata addon URL (blank = Cinemeta, \"off\" to disable)"
+msgstr "عنوان URL لإضافة البيانات الوصفية (فراغ = Cinemeta، \"off\" للتعطيل)"
+
+msgctxt "#30141"
+msgid "Bitmagnet indexer URL"
+msgstr "عنوان URL لفهرس Bitmagnet"
+
+msgctxt "#30142"
+msgid "Torznab indexer URL"
+msgstr "عنوان URL لفهرس Torznab"
+
+msgctxt "#30143"
+msgid "Torznab API key"
+msgstr "مفتاح API لـ Torznab"
+
+msgctxt "#30144"
+msgid "Web UI location"
+msgstr "موقع واجهة الويب"
+
+msgctxt "#30145"
+msgid "HTTPS port (0 = disabled)"
+msgstr "منفذ HTTPS (0 = معطل)"
+
+msgctxt "#30146"
+msgid "pprof diagnostics address"
+msgstr "عنوان تشخيص pprof"
+
+msgctxt "#30147"
+msgid "Stremio account auth key (HTTPS auto-cert)"
+msgstr "مفتاح مصادقة حساب Stremio (شهادة HTTPS تلقائية)"
