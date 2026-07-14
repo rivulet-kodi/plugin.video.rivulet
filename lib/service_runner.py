@@ -6,9 +6,10 @@ Launch interface verified against ~/M0Rf30/stremio-server-go @ cmd/stremio-serve
   - All runtime config is via environment variables (main.go:141-181):
       APP_PATH   - data/cache root, default "~/.stremio-server" (main.go:141-144)
       HTTP_PORT  - enginefs HTTP API port, default 11470 (main.go:150)
-    (HTTPS_PORT/BT_LISTEN_PORT/etc. are left at their own defaults; we only need
-    to pin APP_PATH and HTTP_PORT to keep the addon and the child process
-    agreeing on where data lives and which port `server_url` points at.)
+    (APP_PATH and HTTP_PORT are pinned internally so the addon and the child
+    process agree on where data lives and which port `server_url` points at;
+    every other env var main.go reads is exposed as its own Kodi setting via
+    EXTRA_ENV_SETTINGS/extra_env_from_settings below instead of being pinned.)
   - Logging goes to os.Stderr via internal/logging (logging.go:28-29), text or
     json per STREMIO_LOG_FORMAT/STREMIO_LOG_LEVEL -- there is no built-in log
     file, so this module captures the child's stdout+stderr into a file itself.
@@ -58,6 +59,75 @@ MISSING_BINARY_RECHECK_INTERVAL = 5.0
 # freshly-installed binary is picked up on the very next loop iteration
 # instead of waiting out a full missing-binary recheck cycle.
 POST_DOWNLOAD_RECHECK_INTERVAL = 0.5
+
+# Every env var stremio-server-go's main() reads besides APP_PATH/HTTP_PORT
+# (which stay pinned in ServerProcess.build_env()), one row per Kodi setting:
+# (kodi_setting_id, env_var, kind). `kind` drives both how ServiceMonitor
+# (inside main() below) reads the raw Kodi setting value and how
+# extra_env_from_settings() turns it into an env var string:
+#   'string'      - forwarded only when truthy (matches main.go treating ""
+#                   as "use the binary's own default").
+#   'int'         - always forwarded as str(value); the Kodi default equals
+#                   the binary's own default, so an untouched setting is a
+#                   no-op.
+#   'mb_to_bytes' - Kodi setting stores MB; always forwarded as
+#                   str(value * 1024 * 1024).
+#   'bool'        - always forwarded as 'true'/'false'.
+EXTRA_ENV_SETTINGS = (
+    ("bt_listen_port", "BT_LISTEN_PORT", "int"),
+    ("peers_per_torrent", "STREMIO_PEERS_PER_TORRENT", "int"),
+    ("torrent_idle_timeout", "STREMIO_TORRENT_IDLE_TIMEOUT", "int"),
+    ("bt_encryption", "STREMIO_BT_ENCRYPTION", "string"),
+    ("bt_anonymous", "STREMIO_BT_ANONYMOUS", "bool"),
+    ("disable_trackers", "STREMIO_DISABLE_TRACKERS", "bool"),
+    ("bt_proxy", "STREMIO_BT_PROXY", "string"),
+    ("disable_webtorrent", "STREMIO_DISABLE_WEBTORRENT", "bool"),
+    ("trackers_max", "STREMIO_TRACKERS_MAX", "int"),
+    ("trackers_url", "STREMIO_TRACKERS_URL", "string"),
+    ("dht_bootstrap", "STREMIO_DHT_BOOTSTRAP", "string"),
+    ("memory_cache_size_mb", "STREMIO_MEMORY_CACHE_SIZE", "mb_to_bytes"),
+    ("mem_limit_mb", "STREMIO_MEM_LIMIT", "mb_to_bytes"),
+    ("proxy_prebuffer", "STREMIO_PROXY_PREBUFFER", "int"),
+    ("proxy_seg_cache_ttl", "STREMIO_PROXY_SEG_CACHE_TTL", "int"),
+    ("proxy_password", "STREMIO_PROXY_PASSWORD", "string"),
+    ("proxy_ip_acl", "STREMIO_PROXY_IP_ACL", "string"),
+    ("proxy_public_url", "STREMIO_PROXY_PUBLIC_URL", "string"),
+    ("proxy_upstream", "STREMIO_PROXY_UPSTREAM", "string"),
+    ("proxy_secret", "STREMIO_PROXY_SECRET", "string"),
+    ("enable_dlna", "STREMIO_ENABLE_DLNA", "bool"),
+    ("local_imdb", "STREMIO_LOCAL_IMDB", "bool"),
+    ("metadata_url", "STREMIO_METADATA_URL", "string"),
+    ("bitmagnet_url", "STREMIO_BITMAGNET_URL", "string"),
+    ("torznab_url", "STREMIO_TORZNAB_URL", "string"),
+    ("torznab_apikey", "STREMIO_TORZNAB_APIKEY", "string"),
+    ("web_ui_location", "WEB_UI_LOCATION", "string"),
+    ("https_port", "HTTPS_PORT", "int"),
+    ("pprof_addr", "STREMIO_PPROF", "string"),
+    ("cert_authkey", "STREMIO_CERT_AUTHKEY", "string"),
+)
+
+
+def extra_env_from_settings(values):
+    """Turn a `{kodi_setting_id: raw_value}` dict into the `{env_var: str}`
+    overlay `ServerProcess.build_env()` applies, per EXTRA_ENV_SETTINGS's
+    `kind` semantics. A `kodi_setting_id` missing from `values` is treated
+    as if the setting were absent -- its row is skipped, never a KeyError.
+    """
+    env = {}
+    for setting_id, env_var, kind in EXTRA_ENV_SETTINGS:
+        if setting_id not in values:
+            continue
+        value = values[setting_id]
+        if kind == "string":
+            if value:
+                env[env_var] = str(value)
+        elif kind == "int":
+            env[env_var] = str(value)
+        elif kind == "mb_to_bytes":
+            env[env_var] = str(value * 1024 * 1024)
+        elif kind == "bool":
+            env[env_var] = "true" if value else "false"
+    return env
 
 
 def http_port_from_url(server_url, default=DEFAULT_HTTP_PORT):
@@ -111,11 +181,12 @@ class ServerProcess:
     Pure process management: no `xbmc*` imports, safe to unit test directly.
     """
 
-    def __init__(self, binary, server_url, app_path, log_path):
+    def __init__(self, binary, server_url, app_path, log_path, extra_env=None):
         self.binary = binary
         self.server_url = server_url
         self.app_path = app_path
         self.log_path = log_path
+        self.extra_env = extra_env or {}
         self._proc = None
         self._log_fh = None
         self._started_at = None
@@ -128,6 +199,7 @@ class ServerProcess:
         env = os.environ.copy()
         env["APP_PATH"] = self.app_path
         env["HTTP_PORT"] = str(http_port_from_url(self.server_url))
+        env.update(self.extra_env)
         return env
 
     def _rotate_log(self):
@@ -209,17 +281,35 @@ def main():
             self.enabled = False
             self.binary_setting = ""
             self.server_url = DEFAULT_SERVER_URL
+            self.extra_settings = {}
+            self.extra_env = {}
             self._refresh()
 
         def _refresh(self):
             self.enabled = addon.getSettingBool("server_enable")
             self.binary_setting = addon.getSetting("server_binary")
             self.server_url = addon.getSetting("server_url") or DEFAULT_SERVER_URL
+            values = {}
+            for setting_id, _env_var, kind in EXTRA_ENV_SETTINGS:
+                if kind == "bool":
+                    values[setting_id] = addon.getSettingBool(setting_id)
+                elif kind in ("int", "mb_to_bytes"):
+                    values[setting_id] = addon.getSettingInt(setting_id)
+                else:
+                    values[setting_id] = addon.getSetting(setting_id)
+            self.extra_settings = values
+            self.extra_env = extra_env_from_settings(values)
+
+        def _snapshot(self):
+            return (
+                self.enabled, self.binary_setting, self.server_url,
+                tuple(sorted(self.extra_settings.items())),
+            )
 
         def onSettingsChanged(self):
-            prev = (self.enabled, self.binary_setting, self.server_url)
+            prev = self._snapshot()
             self._refresh()
-            if prev != (self.enabled, self.binary_setting, self.server_url):
+            if prev != self._snapshot():
                 self.restart_requested = True
 
     monitor = ServiceMonitor()
@@ -298,7 +388,9 @@ def main():
                 else:
                     notified_missing = False
                     log(xbmc.LOGINFO, f"starting embedded server: {binary}")
-                    proc = ServerProcess(binary, monitor.server_url, app_path, log_path)
+                    proc = ServerProcess(
+                        binary, monitor.server_url, app_path, log_path, extra_env=monitor.extra_env,
+                    )
                     proc.start()
                     interval = HEALTHY_POLL_INTERVAL
 

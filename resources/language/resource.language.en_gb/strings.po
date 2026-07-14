@@ -287,3 +287,155 @@ msgstr ""
 msgctxt "#30090"
 msgid "attempt %d of %d"
 msgstr ""
+
+msgctxt "#30110"
+msgid "BitTorrent"
+msgstr ""
+
+msgctxt "#30111"
+msgid "Server resources"
+msgstr ""
+
+msgctxt "#30112"
+msgid "Server proxy"
+msgstr ""
+
+msgctxt "#30113"
+msgid "Server add-ons"
+msgstr ""
+
+msgctxt "#30114"
+msgid "Server diagnostics"
+msgstr ""
+
+msgctxt "#30115"
+msgid "BitTorrent listen port"
+msgstr ""
+
+msgctxt "#30116"
+msgid "Peers per torrent"
+msgstr ""
+
+msgctxt "#30117"
+msgid "Idle torrent timeout (seconds)"
+msgstr ""
+
+msgctxt "#30118"
+msgid "BitTorrent encryption"
+msgstr ""
+
+msgctxt "#30119"
+msgid "Prefer"
+msgstr ""
+
+msgctxt "#30120"
+msgid "Require"
+msgstr ""
+
+msgctxt "#30121"
+msgid "Disable"
+msgstr ""
+
+msgctxt "#30122"
+msgid "Anonymous mode"
+msgstr ""
+
+msgctxt "#30123"
+msgid "Disable trackers"
+msgstr ""
+
+msgctxt "#30124"
+msgid "BitTorrent proxy (SOCKS/HTTP URL)"
+msgstr ""
+
+msgctxt "#30125"
+msgid "Disable WebTorrent/WebRTC peers"
+msgstr ""
+
+msgctxt "#30126"
+msgid "Max trackers per torrent"
+msgstr ""
+
+msgctxt "#30127"
+msgid "Custom tracker list URL"
+msgstr ""
+
+msgctxt "#30128"
+msgid "Extra DHT bootstrap nodes"
+msgstr ""
+
+msgctxt "#30129"
+msgid "Memory cache size (MB, 0 = disk only)"
+msgstr ""
+
+msgctxt "#30130"
+msgid "Soft memory limit (MB, 0 = unlimited)"
+msgstr ""
+
+msgctxt "#30131"
+msgid "Proxy pre-buffer (segments)"
+msgstr ""
+
+msgctxt "#30132"
+msgid "Proxy segment cache TTL (seconds)"
+msgstr ""
+
+msgctxt "#30133"
+msgid "Proxy password"
+msgstr ""
+
+msgctxt "#30134"
+msgid "Proxy IP allow-list"
+msgstr ""
+
+msgctxt "#30135"
+msgid "Proxy public URL"
+msgstr ""
+
+msgctxt "#30136"
+msgid "Proxy upstream URL"
+msgstr ""
+
+msgctxt "#30137"
+msgid "Proxy signing secret"
+msgstr ""
+
+msgctxt "#30138"
+msgid "Enable DLNA casting"
+msgstr ""
+
+msgctxt "#30139"
+msgid "Local IMDB resolution"
+msgstr ""
+
+msgctxt "#30140"
+msgid "Metadata addon URL (blank = Cinemeta, \"off\" to disable)"
+msgstr ""
+
+msgctxt "#30141"
+msgid "Bitmagnet indexer URL"
+msgstr ""
+
+msgctxt "#30142"
+msgid "Torznab indexer URL"
+msgstr ""
+
+msgctxt "#30143"
+msgid "Torznab API key"
+msgstr ""
+
+msgctxt "#30144"
+msgid "Web UI location"
+msgstr ""
+
+msgctxt "#30145"
+msgid "HTTPS port (0 = disabled)"
+msgstr ""
+
+msgctxt "#30146"
+msgid "pprof diagnostics address"
+msgstr ""
+
+msgctxt "#30147"
+msgid "Stremio account auth key (HTTPS auto-cert)"
+msgstr ""

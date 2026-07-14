@@ -82,6 +82,306 @@
                 </setting>
             </group>
         </category>
+        <category id="server_bittorrent" label="30110">
+            <group id="1">
+                <setting id="bt_listen_port" type="integer" label="30115">
+                    <level>0</level>
+                    <default>0</default>
+                    <constraints>
+                        <minimum>0</minimum>
+                    </constraints>
+                    <control type="edit" format="integer">
+                        <heading>30115</heading>
+                    </control>
+                </setting>
+                <setting id="peers_per_torrent" type="integer" label="30116">
+                    <level>0</level>
+                    <default>0</default>
+                    <constraints>
+                        <minimum>0</minimum>
+                    </constraints>
+                    <control type="edit" format="integer">
+                        <heading>30116</heading>
+                    </control>
+                </setting>
+                <setting id="torrent_idle_timeout" type="integer" label="30117">
+                    <level>0</level>
+                    <default>300</default>
+                    <constraints>
+                        <minimum>0</minimum>
+                    </constraints>
+                    <control type="edit" format="integer">
+                        <heading>30117</heading>
+                    </control>
+                </setting>
+                <setting id="bt_encryption" type="string" label="30118">
+                    <level>0</level>
+                    <default>prefer</default>
+                    <constraints>
+                        <options>
+                            <option label="30119">prefer</option>
+                            <option label="30120">require</option>
+                            <option label="30121">disable</option>
+                        </options>
+                        <allowempty>false</allowempty>
+                    </constraints>
+                    <control type="list" format="string">
+                        <heading>30118</heading>
+                    </control>
+                </setting>
+                <setting id="bt_anonymous" type="boolean" label="30122">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="disable_trackers" type="boolean" label="30123">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="bt_proxy" type="string" label="30124">
+                    <level>1</level>
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30124</heading>
+                    </control>
+                </setting>
+                <setting id="disable_webtorrent" type="boolean" label="30125">
+                    <level>1</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="trackers_max" type="integer" label="30126">
+                    <level>1</level>
+                    <default>5</default>
+                    <constraints>
+                        <minimum>0</minimum>
+                    </constraints>
+                    <control type="edit" format="integer">
+                        <heading>30126</heading>
+                    </control>
+                </setting>
+                <setting id="trackers_url" type="string" label="30127">
+                    <level>2</level>
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30127</heading>
+                    </control>
+                </setting>
+                <setting id="dht_bootstrap" type="string" label="30128">
+                    <level>2</level>
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30128</heading>
+                    </control>
+                </setting>
+            </group>
+        </category>
+        <category id="server_resources" label="30111">
+            <group id="1">
+                <setting id="memory_cache_size_mb" type="integer" label="30129">
+                    <level>0</level>
+                    <default>0</default>
+                    <constraints>
+                        <minimum>0</minimum>
+                    </constraints>
+                    <control type="edit" format="integer">
+                        <heading>30129</heading>
+                    </control>
+                </setting>
+                <setting id="mem_limit_mb" type="integer" label="30130">
+                    <level>0</level>
+                    <default>0</default>
+                    <constraints>
+                        <minimum>0</minimum>
+                    </constraints>
+                    <control type="edit" format="integer">
+                        <heading>30130</heading>
+                    </control>
+                </setting>
+            </group>
+        </category>
+        <category id="server_proxy" label="30112">
+            <group id="1">
+                <setting id="proxy_prebuffer" type="integer" label="30131">
+                    <level>1</level>
+                    <default>3</default>
+                    <constraints>
+                        <minimum>0</minimum>
+                    </constraints>
+                    <control type="edit" format="integer">
+                        <heading>30131</heading>
+                    </control>
+                </setting>
+                <setting id="proxy_seg_cache_ttl" type="integer" label="30132">
+                    <level>1</level>
+                    <default>300</default>
+                    <constraints>
+                        <minimum>0</minimum>
+                    </constraints>
+                    <control type="edit" format="integer">
+                        <heading>30132</heading>
+                    </control>
+                </setting>
+                <setting id="proxy_password" type="string" label="30133">
+                    <level>2</level>
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30133</heading>
+                    </control>
+                </setting>
+                <setting id="proxy_ip_acl" type="string" label="30134">
+                    <level>2</level>
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30134</heading>
+                    </control>
+                </setting>
+                <setting id="proxy_public_url" type="string" label="30135">
+                    <level>2</level>
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30135</heading>
+                    </control>
+                </setting>
+                <setting id="proxy_upstream" type="string" label="30136">
+                    <level>2</level>
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30136</heading>
+                    </control>
+                </setting>
+                <setting id="proxy_secret" type="string" label="30137">
+                    <level>2</level>
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30137</heading>
+                    </control>
+                </setting>
+            </group>
+        </category>
+        <category id="server_addons" label="30113">
+            <group id="1">
+                <setting id="enable_dlna" type="boolean" label="30138">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="local_imdb" type="boolean" label="30139">
+                    <level>1</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="metadata_url" type="string" label="30140">
+                    <level>2</level>
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30140</heading>
+                    </control>
+                </setting>
+                <setting id="bitmagnet_url" type="string" label="30141">
+                    <level>2</level>
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30141</heading>
+                    </control>
+                </setting>
+                <setting id="torznab_url" type="string" label="30142">
+                    <level>2</level>
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30142</heading>
+                    </control>
+                </setting>
+                <setting id="torznab_apikey" type="string" label="30143">
+                    <level>2</level>
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30143</heading>
+                    </control>
+                </setting>
+                <setting id="web_ui_location" type="string" label="30144">
+                    <level>2</level>
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30144</heading>
+                    </control>
+                </setting>
+            </group>
+        </category>
+        <category id="server_diagnostics" label="30114">
+            <group id="1">
+                <setting id="https_port" type="integer" label="30145">
+                    <level>1</level>
+                    <default>12470</default>
+                    <constraints>
+                        <minimum>0</minimum>
+                    </constraints>
+                    <control type="edit" format="integer">
+                        <heading>30145</heading>
+                    </control>
+                </setting>
+                <setting id="pprof_addr" type="string" label="30146">
+                    <level>2</level>
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30146</heading>
+                    </control>
+                </setting>
+                <setting id="cert_authkey" type="string" label="30147">
+                    <level>2</level>
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30147</heading>
+                    </control>
+                </setting>
+            </group>
+        </category>
         <category id="account" label="30105">
             <group id="1">
                 <setting id="login" type="action" label="30020">

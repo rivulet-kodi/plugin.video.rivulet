@@ -3,9 +3,10 @@ local stremio-server-go child process.
 
 The module is split in two halves (see its own docstring):
   - A pure process-management core (`http_port_from_url`, `resolve_binary`,
-    `probe_listening`, `ServerProcess`) with no `xbmc*` imports anywhere at
-    module scope -- importable and testable with plain python3, exercised
-    below with NO Kodi stubs at all (real filesystem via `tmp_path`, mocked
+    `probe_listening`, `ServerProcess`, `extra_env_from_settings`) with no
+    `xbmc*` imports anywhere at module scope -- importable and testable
+    with plain python3, exercised below with NO Kodi stubs at all (real
+    filesystem via `tmp_path`, mocked
     `subprocess.Popen`/`urllib.request.urlopen`, never a real socket or
     child process).
   - `main()`, which does all `xbmc*` imports locally and drives an
@@ -211,6 +212,67 @@ def test_probe_listening_forwards_caller_supplied_timeout(monkeypatch):
 
 
 # ===========================================================================
+# extra_env_from_settings / EXTRA_ENV_SETTINGS
+# ===========================================================================
+
+
+def test_extra_env_from_settings_forwards_truthy_string_value():
+    env = service_runner.extra_env_from_settings({'bt_proxy': 'socks5://127.0.0.1:9050'})
+    assert env == {'STREMIO_BT_PROXY': 'socks5://127.0.0.1:9050'}
+
+
+def test_extra_env_from_settings_omits_falsy_string_value():
+    assert service_runner.extra_env_from_settings({'bt_proxy': ''}) == {}
+
+
+def test_extra_env_from_settings_skips_missing_key_without_raising():
+    """A caller supplying only a subset of EXTRA_ENV_SETTINGS keys must not
+    KeyError on the rows it did not supply -- `bt_proxy` here is entirely
+    absent from `values`, not merely falsy."""
+    env = service_runner.extra_env_from_settings({'bt_listen_port': 6900})
+    assert env == {'BT_LISTEN_PORT': '6900'}
+
+
+@pytest.mark.parametrize('port', [0, 6900])
+def test_extra_env_from_settings_int_always_forwarded_including_zero(port):
+    env = service_runner.extra_env_from_settings({'bt_listen_port': port})
+    assert env == {'BT_LISTEN_PORT': str(port)}
+
+
+@pytest.mark.parametrize('mb,expected_bytes', [(0, 0), (256, 256 * 1024 * 1024)])
+def test_extra_env_from_settings_mb_to_bytes_multiplies_correctly(mb, expected_bytes):
+    env = service_runner.extra_env_from_settings({'memory_cache_size_mb': mb})
+    assert env == {'STREMIO_MEMORY_CACHE_SIZE': str(expected_bytes)}
+
+
+@pytest.mark.parametrize('value,expected', [(True, 'true'), (False, 'false')])
+def test_extra_env_from_settings_bool_always_forwarded_as_true_false_string(value, expected):
+    env = service_runner.extra_env_from_settings({'bt_anonymous': value})
+    assert env == {'STREMIO_BT_ANONYMOUS': expected}
+
+
+def test_extra_env_from_settings_combines_multiple_kinds_and_ignores_absent_rows():
+    """Exercises several kinds in one call; every EXTRA_ENV_SETTINGS row
+    not present in `values` (i.e. every one of the 30 besides these four)
+    contributes nothing."""
+    values = {
+        'bt_listen_port': 6900,
+        'disable_trackers': True,
+        'memory_cache_size_mb': 512,
+        'bt_proxy': '',  # present but falsy -> omitted, not skipped
+    }
+    env = service_runner.extra_env_from_settings(values)
+    assert env == {
+        'BT_LISTEN_PORT': '6900',
+        'STREMIO_DISABLE_TRACKERS': 'true',
+        'STREMIO_MEMORY_CACHE_SIZE': str(512 * 1024 * 1024),
+    }
+
+
+def test_extra_env_from_settings_empty_values_dict_returns_empty_env():
+    assert service_runner.extra_env_from_settings({}) == {}
+
+# ===========================================================================
 # ServerProcess
 # ===========================================================================
 
@@ -263,10 +325,10 @@ def fake_popen(monkeypatch):
     return created
 
 
-def _server_process(tmp_path, server_url='http://127.0.0.1:9090'):
+def _server_process(tmp_path, server_url='http://127.0.0.1:9090', extra_env=None):
     return service_runner.ServerProcess(
         '/opt/bin/stremio-server', server_url,
-        str(tmp_path / 'server'), str(tmp_path / 'server.log'),
+        str(tmp_path / 'server'), str(tmp_path / 'server.log'), extra_env=extra_env,
     )
 
 
@@ -298,6 +360,18 @@ def test_build_env_does_not_mutate_the_real_process_environment(tmp_path):
     env = sp.build_env()
     assert env['APP_PATH'] == str(tmp_path / 'server')
     assert 'APP_PATH' not in os.environ
+
+
+def test_build_env_overlays_extra_env_passed_at_construction(tmp_path):
+    sp = _server_process(tmp_path, extra_env={
+        'STREMIO_BT_ANONYMOUS': 'true', 'BT_LISTEN_PORT': '6900',
+    })
+    env = sp.build_env()
+    assert env['APP_PATH'] == str(tmp_path / 'server')
+    assert env['HTTP_PORT'] == '9090'
+    assert env['STREMIO_BT_ANONYMOUS'] == 'true'
+    assert env['BT_LISTEN_PORT'] == '6900'
+    assert 'STREMIO_BT_ANONYMOUS' not in os.environ
 
 
 def test_start_is_a_noop_while_already_running(fake_popen, tmp_path):
@@ -465,6 +539,47 @@ def test_stop_closes_the_log_file_handle(fake_popen, tmp_path):
 # `sys.modules` at the end of the `with` block.
 
 
+# Real Kodi defaults (per the shared settings contract) for every one of the
+# 30 EXTRA_ENV_SETTINGS keys. Tests that seed `env_box['env'].addon.settings`
+# with these before flipping ONE key can trust that a resave changing
+# nothing among the 30 really means nothing changed -- FakeAddon otherwise
+# defaults an absent key to ''/False/0, which disagrees with several of
+# these real defaults (e.g. `disable_webtorrent`/`local_imdb` default True,
+# `https_port` defaults to 12470, not 0).
+_EXTRA_ENV_DEFAULTS = {
+    'bt_listen_port': 0,
+    'peers_per_torrent': 0,
+    'torrent_idle_timeout': 300,
+    'bt_encryption': 'prefer',
+    'bt_anonymous': False,
+    'disable_trackers': False,
+    'bt_proxy': '',
+    'disable_webtorrent': True,
+    'trackers_max': 5,
+    'trackers_url': '',
+    'dht_bootstrap': '',
+    'memory_cache_size_mb': 0,
+    'mem_limit_mb': 0,
+    'proxy_prebuffer': 3,
+    'proxy_seg_cache_ttl': 300,
+    'proxy_password': '',
+    'proxy_ip_acl': '',
+    'proxy_public_url': '',
+    'proxy_upstream': '',
+    'proxy_secret': '',
+    'enable_dlna': False,
+    'local_imdb': True,
+    'metadata_url': '',
+    'bitmagnet_url': '',
+    'torznab_url': '',
+    'torznab_apikey': '',
+    'web_ui_location': '',
+    'https_port': 12470,
+    'pprof_addr': '',
+    'cert_authkey': '',
+}
+
+
 class ScriptedProcess:
     """Stand-in for the `ServerProcess` class itself (not for
     `subprocess.Popen`) used only by the `main()` orchestration tests
@@ -473,11 +588,15 @@ class ScriptedProcess:
     real subprocess.
     """
 
-    def __init__(self, binary, server_url, app_path, log_path, poll_sequence=None, uptime_value=None):
+    def __init__(
+        self, binary, server_url, app_path, log_path,
+        poll_sequence=None, uptime_value=None, extra_env=None,
+    ):
         self.binary = binary
         self.server_url = server_url
         self.app_path = app_path
         self.log_path = log_path
+        self.extra_env = extra_env or {}
         self.start_calls = 0
         self.stop_calls = 0
         self._poll_sequence = list(poll_sequence or [])
@@ -507,9 +626,9 @@ def _make_process_factory(specs):
     queue = list(specs)
     spawned = []
 
-    def factory(binary, server_url, app_path, log_path):
+    def factory(binary, server_url, app_path, log_path, extra_env=None):
         kwargs = queue.pop(0) if queue else {}
-        proc = ScriptedProcess(binary, server_url, app_path, log_path, **kwargs)
+        proc = ScriptedProcess(binary, server_url, app_path, log_path, extra_env=extra_env, **kwargs)
         spawned.append(proc)
         return proc
 
@@ -993,4 +1112,68 @@ def test_main_settings_changed_with_no_running_server_resets_state_without_crash
     assert len(setup_notifications) == 2
     assert len(failed_notifications) == 2
     assert len(missing_notifications) == 1
+    assert not any('settings changed, restarting' in msg for msg, _level in ctx.env.log_calls)
+
+
+# --- (i) extra-env settings changes also trigger a restart -----------------
+
+
+def test_main_onsettingschanged_extra_env_setting_change_triggers_restart(monkeypatch, tmp_path):
+    """Changing exactly one of the 30 new env-var-forwarding settings
+    (`disable_trackers`) must trigger a restart just like a `server_url`
+    change already does, and the respawned process must carry the new
+    value through `extra_env`."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: '/opt/bin/stremio-server')
+    factory, spawned = _make_process_factory([{}, {}])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    env_box = {}
+    settings = {'server_enable': True}
+    settings.update(_EXTRA_ENV_DEFAULTS)
+
+    def flip_disable_trackers_and_signal(monitor):
+        env_box['env'].addon.settings['disable_trackers'] = True
+        monitor.onSettingsChanged()
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, flip_disable_trackers_and_signal, None, None])
+    with _main_env(tmp_path, wait, settings=settings) as ctx:
+        env_box['env'] = ctx.env
+        service_runner.main()
+
+    assert len(spawned) == 2
+    old_proc, new_proc = spawned
+    assert old_proc.stop_calls == 1  # stopped by the restart, not by shutdown
+    assert new_proc.extra_env.get('STREMIO_DISABLE_TRACKERS') == 'true'
+    assert new_proc.stop_calls == 1  # then stopped again by the final shutdown path
+
+    restart_logs = [msg for msg, _level in ctx.env.log_calls if 'settings changed, restarting' in msg]
+    assert len(restart_logs) == 1
+
+
+def test_main_onsettingschanged_extra_env_resave_without_change_does_not_restart(monkeypatch, tmp_path):
+    """A resave that leaves every one of the 30 extra-env settings (seeded
+    at their real Kodi defaults) unchanged must not restart an
+    already-healthy server, exactly like the plain
+    `test_main_onsettingschanged_with_no_actual_change_does_not_restart`
+    case above for (enabled, binary, url)."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: '/opt/bin/stremio-server')
+    factory, spawned = _make_process_factory([{}])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    settings = {'server_enable': True}
+    settings.update(_EXTRA_ENV_DEFAULTS)
+
+    def resave_without_changes(monitor):
+        monitor.onSettingsChanged()
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, resave_without_changes, None])
+    with _main_env(tmp_path, wait, settings=settings) as ctx:
+        service_runner.main()
+
+    assert len(spawned) == 1  # never restarted -> never respawned
+    assert spawned[0].stop_calls == 1  # only the final shutdown-path stop
     assert not any('settings changed, restarting' in msg for msg, _level in ctx.env.log_calls)
