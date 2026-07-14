@@ -84,6 +84,16 @@
         </category>
         <category id="account" label="30105">
             <group id="1">
+                <setting id="login" type="action" label="30020">
+                    <level>0</level>
+                    <data>RunPlugin(plugin://plugin.video.rivulet/?action=login)</data>
+                    <control type="button" format="action"/>
+                </setting>
+                <setting id="logout" type="action" label="30021">
+                    <level>0</level>
+                    <data>RunPlugin(plugin://plugin.video.rivulet/?action=logout)</data>
+                    <control type="button" format="action"/>
+                </setting>
                 <setting id="sync_addons_now" type="action" label="30036">
                     <level>0</level>
                     <data>RunPlugin(plugin://plugin.video.rivulet/?action=sync_addons_now)</data>

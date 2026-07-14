@@ -67,16 +67,23 @@ account.
 ## Auto-updates
 
 Instead of re-downloading and reinstalling a zip for every release, install
-the repository once:
+the repository once — no separate download needed, useful on set-top boxes
+(e.g. Nvidia Shield):
 
-1. Grab `repository.rivulet-<version>.zip` from a
-   [release](https://github.com/rivulet-kodi/plugin.video.rivulet/releases/latest) or
-   from the "Build addon zip" GitHub Actions artifact.
-2. In Kodi: **Settings → Add-ons → Install from zip file** and pick the
-   downloaded zip (same as installing the plugin itself).
+1. **Settings → File manager → Add source**, enter
+   `https://rivulet-kodi.github.io/plugin.video.rivulet/` as the path, and
+   give it a name (e.g. `Rivulet`).
+2. **Settings → Add-ons → Install from zip file → Rivulet →
+   repository.rivulet → repository.rivulet-<version>.zip**.
 3. From then on, Kodi offers Rivulet — and its future updates — from
    **Settings → Add-ons → Install from repository → Rivulet Repository**,
    with automatic update checks like any other Kodi repo.
+
+Alternatively, grab `repository.rivulet-<version>.zip` from a
+[release](https://github.com/rivulet-kodi/plugin.video.rivulet/releases/latest)
+or from the "Build addon zip" GitHub Actions artifact, and install it the
+same way as step 2 above (**Install from zip file**) without adding a
+source.
 
 The repository is served from GitHub Pages at
 [rivulet-kodi.github.io/plugin.video.rivulet](https://rivulet-kodi.github.io/plugin.video.rivulet/),
