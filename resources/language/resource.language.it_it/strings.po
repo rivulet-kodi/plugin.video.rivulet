@@ -439,3 +439,23 @@ msgstr "Indirizzo diagnostica pprof"
 msgctxt "#30147"
 msgid "Stremio account auth key (HTTPS auto-cert)"
 msgstr "Chiave di autenticazione account Stremio (certificato HTTPS automatico)"
+
+msgctxt "#30148"
+msgid "Browse catalogs from your installed addons"
+msgstr "Sfoglia i catalogi dei tuoi add-on installati"
+
+msgctxt "#30149"
+msgid "Search across every installed addon"
+msgstr "Cerca in tutti gli add-on installati"
+
+msgctxt "#30150"
+msgid "Your saved titles"
+msgstr "I tuoi titoli salvati"
+
+msgctxt "#30151"
+msgid "Manage installed Stremio addons"
+msgstr "Gestisci gli add-on Stremio installati"
+
+msgctxt "#30152"
+msgid "Configure Rivulet"
+msgstr "Configura Rivulet"

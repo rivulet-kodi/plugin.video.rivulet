@@ -29,14 +29,15 @@ _MENU = (
 )
 
 
-#: Per-row subtitle text (HomeWindow.xml's dimmer second label per row) -
-#: plain literal strings; no matching string ids exist for this copy.
+#: (action -> localized-string id) for HomeWindow.xml's dimmer second
+#: label per row - localized via L(), not plain literals, so it follows
+#: Kodi's language setting the same as every other row's main label.
 _SUBTITLES = {
-    'discover': 'Browse catalogs from your installed addons',
-    'search': 'Search across every installed addon',
-    'library': 'Your saved titles',
-    'addons': 'Manage installed Stremio addons',
-    'settings': 'Configure Rivulet',
+    'discover': 30148,
+    'search': 30149,
+    'library': 30150,
+    'addons': 30151,
+    'settings': 30152,
 }
 
 
@@ -50,7 +51,7 @@ def _menu_items(show_library):
         item = xbmcgui.ListItem(L(string_id))
         item.setProperty('action', action)
         item.setArt({'icon': addon_media_path('%s.png' % action)})
-        item.setProperty('subtitle', _SUBTITLES[action])
+        item.setProperty('subtitle', L(_SUBTITLES[action]))
         items.append(item)
     return items
 

@@ -439,3 +439,23 @@ msgstr ""
 msgctxt "#30147"
 msgid "Stremio account auth key (HTTPS auto-cert)"
 msgstr ""
+
+msgctxt "#30148"
+msgid "Browse catalogs from your installed addons"
+msgstr ""
+
+msgctxt "#30149"
+msgid "Search across every installed addon"
+msgstr ""
+
+msgctxt "#30150"
+msgid "Your saved titles"
+msgstr ""
+
+msgctxt "#30151"
+msgid "Manage installed Stremio addons"
+msgstr ""
+
+msgctxt "#30152"
+msgid "Configure Rivulet"
+msgstr ""

@@ -110,11 +110,7 @@ def test_menu_items_includes_library_when_show_library_true(load_homewindow):
         ctx.compat.addon_media_path('settings.png'),
     ]
     assert [item.getProperty('subtitle') for item in items] == [
-        'Browse catalogs from your installed addons',
-        'Search across every installed addon',
-        'Your saved titles',
-        'Manage installed Stremio addons',
-        'Configure Rivulet',
+        'STR30148', 'STR30149', 'STR30150', 'STR30151', 'STR30152',
     ]
 
 
