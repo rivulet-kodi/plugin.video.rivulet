@@ -22,7 +22,7 @@ import zipfile
 try:
     import requests
 except ImportError:  # pragma: no cover - exercised only without the dependency
-    requests = None
+    requests = None  # type: ignore[assignment]
 
 GITHUB_REPO = "M0Rf30/stremio-server-go"
 GITHUB_API_URL = "https://api.github.com/repos/%s/releases/latest" % GITHUB_REPO
