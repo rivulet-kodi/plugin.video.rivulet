@@ -1,8 +1,9 @@
 """Protocol tests for lib.stremio.server (streaming-server URL resolution).
 
 Reference: stremio-core src/types/resource/stream.rs (Stream::convert) and
-src/constants.rs (STREAMING_SERVER_URL). No network access - `fake_requests`
-patches the real `requests.get`/`requests.post`.
+src/constants.rs (STREAMING_SERVER_URL). No network access - ServerClient
+methods that hit stremio-server-go are exercised by substituting
+`client.session` with `tests.conftest.FakeSession`.
 """
 from urllib.parse import urlencode
 
@@ -10,6 +11,7 @@ import pytest
 import requests
 
 from lib.stremio.server import ServerClient
+from tests.conftest import FakeSession
 
 BASE = "http://127.0.0.1:11470"
 
@@ -161,33 +163,35 @@ def test_resolve_stream_unknown_source_returns_none():
 # --- is_available ----------------------------------------------------------
 
 
-def test_is_available_true_when_settings_ok(fake_requests):
-    fake_requests.queue_get(_ok_response())
+def test_is_available_true_when_settings_ok():
     client = make_client()
+    client.session = FakeSession(responses=[_ok_response()])
     assert client.is_available() is True
-    assert fake_requests.calls[0]["url"] == BASE + "/settings"
+    assert client.session.calls[0]["url"] == BASE + "/settings"
 
 
-def test_is_available_falls_back_to_stats_json(fake_requests):
-    fake_requests.queue_get(_not_ok_response())
-    fake_requests.queue_get(_ok_response())
+def test_is_available_falls_back_to_stats_json():
     client = make_client()
+    client.session = FakeSession(responses=[_not_ok_response(), _ok_response()])
     assert client.is_available() is True
-    urls = [c["url"] for c in fake_requests.calls]
+    urls = [c["url"] for c in client.session.calls]
     assert urls == [BASE + "/settings", BASE + "/stats.json"]
 
 
-def test_is_available_false_on_connection_error(fake_requests):
-    fake_requests.queue_get(requests.exceptions.ConnectionError("refused"))
-    fake_requests.queue_get(requests.exceptions.ConnectionError("refused"))
+def test_is_available_false_on_connection_error():
     client = make_client()
+    client.session = FakeSession(
+        responses=[
+            requests.exceptions.ConnectionError("refused"),
+            requests.exceptions.ConnectionError("refused"),
+        ]
+    )
     assert client.is_available() is False
 
 
-def test_is_available_false_when_both_endpoints_fail(fake_requests):
-    fake_requests.queue_get(_not_ok_response())
-    fake_requests.queue_get(_not_ok_response())
+def test_is_available_false_when_both_endpoints_fail():
     client = make_client()
+    client.session = FakeSession(responses=[_not_ok_response(), _not_ok_response()])
     assert client.is_available() is False
 
 
@@ -267,46 +271,48 @@ def _bad_json_response(status_code=200):
 # --- create_engine -----------------------------------------------------
 
 
-def test_create_engine_hits_create_endpoint(fake_requests):
-    fake_requests.queue_get(_json_response({"guessedFileIdx": 2, "infoHash": "aa" * 20}))
+def test_create_engine_hits_create_endpoint():
     client = make_client()
+    client.session = FakeSession(
+        responses=[_json_response({"guessedFileIdx": 2, "infoHash": "aa" * 20})]
+    )
     stats = client.create_engine("aa" * 20)
-    assert fake_requests.calls[0]["method"] == "GET"
-    assert fake_requests.calls[0]["url"] == BASE + "/" + "aa" * 20 + "/create"
+    assert client.session.calls[0]["method"] == "GET"
+    assert client.session.calls[0]["url"] == BASE + "/" + "aa" * 20 + "/create"
     assert stats["guessedFileIdx"] == 2
 
 
-def test_create_engine_lowercases_info_hash(fake_requests):
-    fake_requests.queue_get(_json_response({}))
+def test_create_engine_lowercases_info_hash():
     client = make_client()
+    client.session = FakeSession(responses=[_json_response({})])
     client.create_engine("AA" * 20)
-    assert fake_requests.calls[0]["url"] == BASE + "/" + "aa" * 20 + "/create"
+    assert client.session.calls[0]["url"] == BASE + "/" + "aa" * 20 + "/create"
 
 
-def test_create_engine_uses_100s_timeout(fake_requests):
-    fake_requests.queue_get(_json_response({}))
+def test_create_engine_uses_100s_timeout():
     client = make_client()
+    client.session = FakeSession(responses=[_json_response({})])
     client.create_engine("aa" * 20)
-    assert fake_requests.calls[0]["kwargs"].get("timeout") == 100
+    assert client.session.calls[0]["kwargs"].get("timeout") == 100
 
 
-def test_create_engine_raises_server_error_on_connection_error(fake_requests):
-    fake_requests.queue_get(requests.exceptions.ConnectionError("refused"))
+def test_create_engine_raises_server_error_on_connection_error():
     client = make_client()
+    client.session = FakeSession(exc=requests.exceptions.ConnectionError("refused"))
     with pytest.raises(ServerError):
         client.create_engine("aa" * 20)
 
 
-def test_create_engine_raises_server_error_on_http_error(fake_requests):
-    fake_requests.queue_get(_json_response({}, status_code=500))
+def test_create_engine_raises_server_error_on_http_error():
     client = make_client()
+    client.session = FakeSession(responses=[_json_response({}, status_code=500)])
     with pytest.raises(ServerError):
         client.create_engine("aa" * 20)
 
 
-def test_create_engine_raises_server_error_on_invalid_json(fake_requests):
-    fake_requests.queue_get(_bad_json_response())
+def test_create_engine_raises_server_error_on_invalid_json():
     client = make_client()
+    client.session = FakeSession(responses=[_bad_json_response()])
     with pytest.raises(ServerError):
         client.create_engine("aa" * 20)
 
@@ -314,39 +320,41 @@ def test_create_engine_raises_server_error_on_invalid_json(fake_requests):
 # --- file_stats ----------------------------------------------------------
 
 
-def test_file_stats_hits_per_file_endpoint(fake_requests):
-    fake_requests.queue_get(_json_response({"streamProgress": 0.5, "streamLen": 1000}))
+def test_file_stats_hits_per_file_endpoint():
     client = make_client()
+    client.session = FakeSession(
+        responses=[_json_response({"streamProgress": 0.5, "streamLen": 1000})]
+    )
     stats = client.file_stats("bb" * 20, 3)
-    assert fake_requests.calls[0]["method"] == "GET"
-    assert fake_requests.calls[0]["url"] == BASE + "/" + "bb" * 20 + "/3/stats.json"
+    assert client.session.calls[0]["method"] == "GET"
+    assert client.session.calls[0]["url"] == BASE + "/" + "bb" * 20 + "/3/stats.json"
     assert stats["streamProgress"] == 0.5
 
 
-def test_file_stats_lowercases_info_hash(fake_requests):
-    fake_requests.queue_get(_json_response({}))
+def test_file_stats_lowercases_info_hash():
     client = make_client()
+    client.session = FakeSession(responses=[_json_response({})])
     client.file_stats("BB" * 20, 0)
-    assert fake_requests.calls[0]["url"] == BASE + "/" + "bb" * 20 + "/0/stats.json"
+    assert client.session.calls[0]["url"] == BASE + "/" + "bb" * 20 + "/0/stats.json"
 
 
-def test_file_stats_uses_10s_timeout(fake_requests):
-    fake_requests.queue_get(_json_response({}))
+def test_file_stats_uses_10s_timeout():
     client = make_client()
+    client.session = FakeSession(responses=[_json_response({})])
     client.file_stats("cc" * 20, 0)
-    assert fake_requests.calls[0]["kwargs"].get("timeout") == 10
+    assert client.session.calls[0]["kwargs"].get("timeout") == 10
 
 
-def test_file_stats_raises_server_error_on_connection_error(fake_requests):
-    fake_requests.queue_get(requests.exceptions.ConnectionError("refused"))
+def test_file_stats_raises_server_error_on_connection_error():
     client = make_client()
+    client.session = FakeSession(exc=requests.exceptions.ConnectionError("refused"))
     with pytest.raises(ServerError):
         client.file_stats("cc" * 20, 0)
 
 
-def test_file_stats_raises_server_error_on_http_error(fake_requests):
-    fake_requests.queue_get(_json_response({}, status_code=404))
+def test_file_stats_raises_server_error_on_http_error():
     client = make_client()
+    client.session = FakeSession(responses=[_json_response({}, status_code=404)])
     with pytest.raises(ServerError):
         client.file_stats("cc" * 20, 0)
 
@@ -495,90 +503,92 @@ class _StreamResp:
         self.closed = True
 
 
-def test_iter_front_requests_range_header_and_streams(fake_requests):
-    fake_requests.queue_get(_StreamResp([b"a" * 1024, b"b" * 1024]))
+def test_iter_front_requests_range_header_and_streams():
     client = make_client()
+    client.session = FakeSession(responses=[_StreamResp([b"a" * 1024, b"b" * 1024])])
 
     lengths = list(client.iter_front("AA" * 20, 5, want_bytes=2048))
 
     assert lengths == [1024, 1024]
-    call = fake_requests.calls[0]
+    call = client.session.calls[0]
     assert call["url"] == BASE + "/" + "aa" * 20 + "/5"  # info_hash lower-cased like other methods
     assert call["kwargs"]["headers"] == {"Range": "bytes=0-2047"}
     assert call["kwargs"]["stream"] is True
 
 
-def test_iter_front_stops_early_once_want_bytes_satisfied(fake_requests):
-    fake_requests.queue_get(_StreamResp([b"a" * 1024, b"b" * 1024, b"c" * 1024]))
+def test_iter_front_stops_early_once_want_bytes_satisfied():
     client = make_client()
+    client.session = FakeSession(
+        responses=[_StreamResp([b"a" * 1024, b"b" * 1024, b"c" * 1024])]
+    )
 
     lengths = list(client.iter_front("bb" * 20, 0, want_bytes=1500))
 
     assert lengths == [1024, 1024]  # stops after the SECOND chunk crosses want_bytes
 
 
-def test_iter_front_skips_empty_chunks(fake_requests):
-    fake_requests.queue_get(_StreamResp([b"", b"abcd", b""]))
+def test_iter_front_skips_empty_chunks():
     client = make_client()
+    client.session = FakeSession(responses=[_StreamResp([b"", b"abcd", b""])])
 
     assert list(client.iter_front("cc" * 20, 0, want_bytes=4)) == [4]
 
 
-def test_iter_front_default_chunk_size_and_timeout_passed_through(fake_requests):
-    fake_requests.queue_get(_StreamResp([b"x"]))
+def test_iter_front_default_chunk_size_and_timeout_passed_through():
     client = make_client()
+    client.session = FakeSession(responses=[_StreamResp([b"x"])])
 
     list(client.iter_front("dd" * 20, 0, want_bytes=1))
 
-    assert fake_requests.calls[0]["kwargs"].get("timeout") == 60
+    assert client.session.calls[0]["kwargs"].get("timeout") == 60
 
 
-def test_iter_front_raises_server_error_on_connection_failure(fake_requests):
-    fake_requests.queue_get(requests.exceptions.ConnectionError("refused"))
+def test_iter_front_raises_server_error_on_connection_failure():
     client = make_client()
+    client.session = FakeSession(exc=requests.exceptions.ConnectionError("refused"))
     with pytest.raises(ServerError):
         list(client.iter_front("ee" * 20, 0, want_bytes=1024))
 
 
-def test_iter_front_raises_server_error_on_http_error(fake_requests):
-    fake_requests.queue_get(_StreamResp([], status_code=500))
+def test_iter_front_raises_server_error_on_http_error():
     client = make_client()
+    client.session = FakeSession(responses=[_StreamResp([], status_code=500)])
     with pytest.raises(ServerError):
         list(client.iter_front("ff" * 20, 0, want_bytes=1024))
 
 
-def test_iter_front_raises_server_error_when_zero_bytes_then_stream_error(fake_requests):
+def test_iter_front_raises_server_error_when_zero_bytes_then_stream_error():
     """A torrent with no peers at offset 0: the request succeeds but the
     stream yields nothing before the connection drops - the exact live
     symptom (Batman 1989, 1 peer: 0 bytes, instantly). Zero usable bytes
     from this attempt -> raise, so the caller (player.py's retry loop)
     knows this attempt produced nothing and should wait before retrying.
     """
-    fake_requests.queue_get(
-        _StreamResp([], raise_after=requests.exceptions.ChunkedEncodingError("closed"))
-    )
     client = make_client()
+    client.session = FakeSession(
+        responses=[_StreamResp([], raise_after=requests.exceptions.ChunkedEncodingError("closed"))]
+    )
     with pytest.raises(ServerError):
         list(client.iter_front("aa" * 20, 1, want_bytes=1024))
 
 
-def test_iter_front_tolerates_partial_read_then_mid_stream_close(fake_requests):
+def test_iter_front_tolerates_partial_read_then_mid_stream_close():
     """Some front bytes arrived before the connection closed early - the
     exact live symptom for a well-seeded torrent under load (Sintel: 254KB
     delivered then IncompleteRead). Still useful data, so this must NOT
     raise; the generator just ends, yielding what it got.
     """
-    fake_requests.queue_get(
-        _StreamResp([b"x" * 512], raise_after=requests.exceptions.ChunkedEncodingError("closed"))
-    )
     client = make_client()
+    client.session = FakeSession(
+        responses=[_StreamResp([b"x" * 512], raise_after=requests.exceptions.ChunkedEncodingError("closed"))]
+    )
 
     lengths = list(client.iter_front("bb" * 20, 3, want_bytes=4096))
 
     assert lengths == [512]
 
 
-def test_iter_front_raises_when_requests_module_unavailable(fake_requests, monkeypatch):
+def test_iter_front_raises_when_requests_module_unavailable(monkeypatch):
     import lib.stremio.server as server_module
 
     monkeypatch.setattr(server_module, "requests", None)
@@ -587,10 +597,10 @@ def test_iter_front_raises_when_requests_module_unavailable(fake_requests, monke
         list(client.iter_front("cc" * 20, 0, want_bytes=1024))
 
 
-def test_iter_front_closes_response_when_done(fake_requests):
+def test_iter_front_closes_response_when_done():
     resp = _StreamResp([b"a" * 10])
-    fake_requests.queue_get(resp)
     client = make_client()
+    client.session = FakeSession(responses=[resp])
 
     list(client.iter_front("dd" * 20, 0, want_bytes=10))
 

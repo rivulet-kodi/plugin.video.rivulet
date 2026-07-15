@@ -910,6 +910,50 @@ def test_main_settings_changed_resets_attempted_download_guard_for_retry(monkeyp
     assert len(missing_notifications) == 1
 
 
+def test_main_binary_download_aborts_mid_chunk_without_error_notification(monkeypatch, tmp_path):
+    """install_binary()'s progress_cb is polled once per chunk (see
+    serverbin._download_to_file); the moment monitor.abortRequested()
+    flips True mid-download, main() must unwind immediately instead of
+    letting the download run to completion -- and because an abort isn't a
+    download failure, no error notification (30063) may fire.
+    """
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: None)
+
+    abort_box = {'requested': False}
+    install_calls = []
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        install_calls.append(dest_dir)
+        progress_cb(1000, 10000)  # first chunk: abort not requested yet
+        abort_box['requested'] = True  # shutdown arrives mid-download
+        progress_cb(2000, 10000)  # second chunk: must raise and unwind now
+        pytest.fail('install_binary kept running after abortRequested() flipped True')
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
+    factory, spawned = _make_process_factory([])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}) as ctx:
+        ctx.xbmc.Monitor.abortRequested = lambda self: abort_box['requested']
+        service_runner.main()
+
+    assert install_calls == [os.path.join(str(tmp_path), 'bin')]
+    assert spawned == []
+
+    error_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30063']
+    assert error_notifications == []
+
+    info_logs = [msg for msg, level in ctx.env.log_calls if level == ctx.xbmc.LOGINFO]
+    assert any('aborted' in msg for msg in info_logs)
+
+    # Unwinds the instant the callback raises -- never falls through to the
+    # waitForAbort() at the bottom of the loop for the aborted iteration.
+    assert intervals == []
+
+
 # --- (d) crash-restart backoff progression + stable-uptime reset -----------
 
 
@@ -940,6 +984,7 @@ def test_main_crash_restart_backoff_progression_and_stable_uptime_reset(monkeypa
 
     assert len(spawned) == 4
     assert [p.start_calls for p in spawned] == [1, 1, 1, 1]
+    assert [p.stop_calls for p in spawned] == [1, 1, 1, 1]
 
     # Spawn iterations (0, 2, 4, 6) always poll at HEALTHY_POLL_INTERVAL.
     assert [intervals[i] for i in (0, 2, 4, 6)] == [service_runner.HEALTHY_POLL_INTERVAL] * 4
@@ -951,6 +996,47 @@ def test_main_crash_restart_backoff_progression_and_stable_uptime_reset(monkeypa
     # backoff resets to RESTART_BACKOFF[0] instead of staying capped at
     # RESTART_BACKOFF[-1].
     assert intervals[7] == service_runner.RESTART_BACKOFF[0]
+
+
+def test_main_crash_path_closes_the_log_file_handle(fake_popen, monkeypatch, tmp_path):
+    """The crash branch (~main()'s `elif proc is not None:` / `else:` arm)
+    must call `proc.stop()` itself instead of dropping the `ServerProcess`
+    reference and leaving `_log_fh` open for GC to eventually close.
+    Exercised with the *real* `ServerProcess` (wrapped, not `ScriptedProcess`)
+    so `log_fh.closed` genuinely proves `stop()` ran.
+    """
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: '/opt/bin/stremio-server')
+
+    real_server_process = service_runner.ServerProcess
+    created = []
+
+    def factory(*args, **kwargs):
+        sp = real_server_process(*args, **kwargs)
+        created.append(sp)
+        return sp
+
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    log_fh_box = {}
+
+    def crash_it(monitor):
+        # Runs during the waitForAbort() call ending the spawn iteration,
+        # once the log file is open: grab the handle now, then flip the
+        # fake child's exit code so the *next* iteration's poll() sees a
+        # crash.
+        log_fh_box['fh'] = created[0]._log_fh
+        fake_popen[0]['proc'].poll_result = 1
+
+    intervals = []
+    wait = _scripted_wait(intervals, [crash_it, None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}):
+        service_runner.main()
+
+    assert len(created) == 1
+    log_fh = log_fh_box['fh']
+    assert log_fh is not None
+    assert log_fh.closed is True
 
 
 # --- (e) settings-changed restart -------------------------------------------

@@ -257,6 +257,15 @@ class ServerProcess:
             self._log_fh = None
 
 
+class _AbortRequested(Exception):
+    """Raised by main()'s download-progress callback (passed to
+    serverbin.install_binary()) so a multi-minute binary download unwinds
+    the instant Kodi requests shutdown, instead of blocking
+    monitor.abortRequested() from ever being re-polled until the transfer
+    finishes on its own.
+    """
+
+
 def main():
     """Entry point for service.py: xbmc.Monitor-driven supervision loop."""
     import xbmc
@@ -346,6 +355,7 @@ def main():
                 log(xbmc.LOGWARNING, f"embedded server exited (code {code}), restarting")
                 interval = RESTART_BACKOFF[min(backoff_idx, len(RESTART_BACKOFF) - 1)]
                 backoff_idx = min(backoff_idx + 1, len(RESTART_BACKOFF) - 1)
+                proc.stop()
                 proc = None
         else:
             # Nothing of ours running: prefer an already-reachable instance
@@ -366,10 +376,31 @@ def main():
                         log(xbmc.LOGINFO, "auto-downloading stremio-server binary")
                         from lib import serverbin
 
+                        def _abort_progress(done, total):
+                            # install_binary() forwards this to
+                            # serverbin._download_to_file(), which calls it
+                            # once per chunk -- so a multi-minute download
+                            # notices a Kodi shutdown request within one
+                            # chunk instead of blocking abortRequested()
+                            # from ever being polled again until it finishes
+                            # on its own.
+                            if monitor.abortRequested():
+                                raise _AbortRequested()
+
                         try:
-                            serverbin.install_binary(os.path.join(profile_dir, "bin"))
+                            serverbin.install_binary(
+                                os.path.join(profile_dir, "bin"), progress_cb=_abort_progress,
+                            )
                             log(xbmc.LOGINFO, "stremio-server binary download complete")
                             interval = POST_DOWNLOAD_RECHECK_INTERVAL
+                        except _AbortRequested:
+                            # Not a failure -- Kodi is shutting down. No
+                            # error notification, and unwind the loop right
+                            # away instead of falling through to the
+                            # waitForAbort() at the bottom (abort is already
+                            # known, waiting on it again just adds latency).
+                            log(xbmc.LOGINFO, "stremio-server binary download aborted, shutting down")
+                            break
                         except Exception as exc:
                             log(xbmc.LOGERROR, f"stremio-server binary download failed: {exc}")
                             xbmcgui.Dialog().notification(

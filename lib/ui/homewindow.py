@@ -13,7 +13,7 @@ which is not worth replacing.
 """
 import xbmcgui
 
-from lib.ui.uicommon import BACK_ACTIONS, open_window
+from lib.ui.uicommon import BaseWindow, open_window
 
 BACKGROUND = 30000
 LIST = 30002
@@ -71,7 +71,7 @@ def _status_text(auth):
     return L(30022) % (user.get('email') or user.get('name') or '?')
 
 
-class HomeWindow(xbmcgui.WindowXMLDialog):
+class HomeWindow(BaseWindow):
     """See module docstring. Built/run via `open_home()`."""
 
     def onInit(self):
@@ -83,10 +83,6 @@ class HomeWindow(xbmcgui.WindowXMLDialog):
         self.getControl(LIST).addItems(_menu_items(bool(auth)))
         self.getControl(STATUS_LABEL).setLabel(_status_text(auth))
         self.setFocusId(LIST)
-
-    def onAction(self, action):
-        if action.getId() in BACK_ACTIONS:
-            self.close()
 
     def onClick(self, control_id):
         if control_id != LIST:

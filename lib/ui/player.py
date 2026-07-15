@@ -4,6 +4,7 @@ Kodi calls default.py -> router.run() -> here with the ADDON_HANDLE and the
 base64url-decoded stream dict for action=play. This module owns the only
 xbmc* calls involved in actually starting playback.
 """
+import contextlib
 import os
 from urllib.parse import urlencode
 
@@ -88,6 +89,11 @@ _MAX_FRONT_ATTEMPTS = 60
 #: Seconds to wait for a not-yet-reachable streaming server to come up
 #: (e.g. one the background service is still launching) before giving up.
 _SERVER_WAIT_ATTEMPTS = 5
+
+#: Sleep between reachability probes while waiting for the streaming
+#: server to come up (see `_wait_for_server`). Also doubles as the
+#: abort-poll interval for that wait via `monitor.waitForAbort`.
+_SERVER_POLL_INTERVAL_SECONDS = 1.0
 
 #: Minimum bytes streamed from the file's FRONT (offset 0) before Kodi's
 #: player can reliably probe the container header and start playback (see
@@ -419,7 +425,7 @@ def _wait_for_server(server, dialog, monitor):
             return False
         percent = min(_CONNECT_PERCENT_MAX, (attempt + 1) * _CONNECT_PERCENT_MAX // _SERVER_WAIT_ATTEMPTS)
         dialog.update(percent, L(30086))
-        if monitor.waitForAbort(1.0):
+        if monitor.waitForAbort(_SERVER_POLL_INTERVAL_SECONDS):
             return False
         if server.is_available():
             return True
@@ -480,7 +486,11 @@ def _resolve_playable_item(stream, stype, sid):
             if not proceed:
                 return None, None
     finally:
-        dialog.close()
+        # A raising close() must never replace an exception already
+        # unwinding through this try (e.g. a cancel/notify path above) -
+        # best-effort cleanup only.
+        with contextlib.suppress(Exception):
+            dialog.close()
 
     request_headers = (behavior_hints.get('proxyHeaders') or {}).get('request') or {}
     if request_headers:

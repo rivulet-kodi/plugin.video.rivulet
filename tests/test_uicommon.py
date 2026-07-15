@@ -14,11 +14,11 @@ the same trio tests/test_router.py itself relies on for router's own
 BASE_URL-dependent behavior. Setting `ctx.router.BASE_URL` before calling
 fallback_to_classical() mirrors tests/test_router.py's url_for() tests.
 
-BaseWindow currently has no caller among the other three new custom-window
-modules (each defines its own onAction() back-handling instead of
-subclassing it - see the module docstring), so it is instantiated and
-driven directly here, the same way tests/test_infowindow.py drives
-ShowcaseWindow.onInit()/onClick()/onAction() without a real modal loop.
+BaseWindow is also the shared base for HomeWindow/CatalogPickerWindow/
+StreamsWindow/AddonsWindow/SearchWindow's back-navigation onAction() -
+see each module's own docstring - but it is exercised directly here too,
+the same way tests/test_infowindow.py drives ShowcaseWindow.onInit()/
+onClick()/onAction() without a real modal loop.
 """
 import contextlib
 

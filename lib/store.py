@@ -27,6 +27,7 @@ read-modify-write pattern (every write either replaces it wholesale or
 clears it), so it does not need this.
 """
 
+import copy
 import json
 import os
 import tempfile
@@ -746,7 +747,7 @@ class Store:
         """
         addons = _read_json(self._addons_path, None)
         if not isinstance(addons, list):
-            addons = [dict(addon) for addon in DEFAULT_ADDONS]
+            addons = copy.deepcopy(DEFAULT_ADDONS)
             self.set_addons(addons)
         return addons
 

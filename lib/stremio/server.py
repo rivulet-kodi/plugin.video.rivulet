@@ -64,10 +64,20 @@ class ServerError(Exception):
 
 
 class ServerClient:
-    """Talks to a local stremio-server-go instance (default http://127.0.0.1:11470)."""
+    """Talks to a local stremio-server-go instance (default http://127.0.0.1:11470).
+
+    One `requests.Session()` per client instance (stored as `.session`, not
+    private, so callers/tests can substitute it directly - mirrors
+    AddonClient in addons.py). Session creation is gated behind the same
+    `requests is None` check the rest of this module uses for the optional
+    dependency, so constructing a client without `requests` installed still
+    doesn't crash; `.session` just stays `None`, which is_available() (and
+    every other method below) already treats as "unavailable"/raises on.
+    """
 
     def __init__(self, base_url):
         self.base_url = (base_url or '').rstrip('/')
+        self.session = requests.Session() if requests is not None else None
 
     def is_available(self):
         """Probe the server: GET /settings, falling back to /stats.json.
@@ -82,7 +92,7 @@ class ServerClient:
             return False
         for path in ('/settings', '/stats.json'):
             try:
-                resp = requests.get(self.base_url + path, timeout=2)
+                resp = self.session.get(self.base_url + path, timeout=2)
                 if resp.ok:
                     return True
             except requests.RequestException:
@@ -134,7 +144,7 @@ class ServerClient:
             raise ServerError('the "requests" package is required for ServerClient')
         url = '%s/%s/create' % (self.base_url, str(info_hash).lower())
         try:
-            resp = requests.get(url, timeout=timeout)
+            resp = self.session.get(url, timeout=timeout)
             resp.raise_for_status()
         except requests.RequestException as exc:
             raise ServerError('GET %s failed: %s' % (url, exc))
@@ -159,7 +169,7 @@ class ServerClient:
             raise ServerError('the "requests" package is required for ServerClient')
         url = '%s/%s/%s/stats.json' % (self.base_url, str(info_hash).lower(), file_idx)
         try:
-            resp = requests.get(url, timeout=10)
+            resp = self.session.get(url, timeout=10)
             resp.raise_for_status()
         except requests.RequestException as exc:
             raise ServerError('GET %s failed: %s' % (url, exc))
@@ -200,7 +210,7 @@ class ServerClient:
         url = '%s/%s/%s' % (self.base_url, str(info_hash).lower(), file_idx)
         headers = {'Range': 'bytes=0-%d' % (want_bytes - 1)}
         try:
-            resp = requests.get(url, headers=headers, stream=True, timeout=timeout)
+            resp = self.session.get(url, headers=headers, stream=True, timeout=timeout)
             resp.raise_for_status()
         except requests.RequestException as exc:
             raise ServerError('GET %s failed: %s' % (url, exc))

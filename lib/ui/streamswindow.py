@@ -43,7 +43,7 @@ import xbmcgui
 from lib.store import Store
 from lib.stremio import streaminfo
 from lib.stremio.addons import AddonClient, AddonError, addon_supports
-from lib.ui.uicommon import BACK_ACTIONS, busy_dialog, open_window
+from lib.ui.uicommon import BaseWindow, busy_dialog, open_window
 
 BACKGROUND = 30000
 LIST = 30002
@@ -51,8 +51,13 @@ POSTER = 30004
 HEADING = 30005
 INFO_PANEL = 30008
 
+#: Brief settle pause before reopening the picker after playback ends -
+#: gives Kodi's player teardown a moment to finish before a fresh modal
+#: window is drawn on top of it.
+_REOPEN_SETTLE_SECONDS = 0.5
 
-class StreamsWindow(xbmcgui.WindowXMLDialog):
+
+class StreamsWindow(BaseWindow):
     """See module docstring. Built/run via `open_streams()`."""
 
     def __init__(self, *args, **kwargs):
@@ -122,10 +127,6 @@ class StreamsWindow(xbmcgui.WindowXMLDialog):
         if single_provider:
             lines.append('via %s' % single_provider)
         self.getControl(INFO_PANEL).setText('\n'.join(lines))
-
-    def onAction(self, action):
-        if action.getId() in BACK_ACTIONS:
-            self.close()
 
     def onClick(self, control_id):
         if control_id != LIST:
@@ -294,6 +295,6 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None):
         # immediately, reopening nothing.
         if not _wait_for_playback_end():
             return False
-        if xbmc.Monitor().waitForAbort(0.5):  # brief settle pause before reopening
+        if xbmc.Monitor().waitForAbort(_REOPEN_SETTLE_SECONDS):  # brief settle pause before reopening
             return False
         log('streamswindow: reopening StreamsWindow after playback (%d streams)' % len(pairs), xbmc.LOGINFO)

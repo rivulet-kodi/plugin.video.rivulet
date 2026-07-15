@@ -56,13 +56,24 @@ class StremioAPI:
     def __init__(self, base_url=API_URL, timeout=DEFAULT_TIMEOUT):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        #: One requests.Session() per client instance (mirrors AddonClient
+        #: in addons.py). Public/not-prefixed so callers/tests can
+        #: substitute it directly. Created lazily on first _call() rather
+        #: than here, since `requests` itself is only imported lazily
+        #: inside _call (module docstring) -- eagerly creating a real
+        #: Session in __init__ would defeat that "importable without the
+        #: dependency" guarantee.
+        self.session = None
 
     def _call(self, method, payload):
         import requests
 
+        if self.session is None:
+            self.session = requests.Session()
+
         url = "%s/api/%s" % (self.base_url, method)
         try:
-            response = requests.post(url, json=payload, timeout=self.timeout)
+            response = self.session.post(url, json=payload, timeout=self.timeout)
             response.raise_for_status()
             data = response.json()
         except requests.exceptions.RequestException as exc:

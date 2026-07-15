@@ -62,7 +62,10 @@ class FakeResponse:
 
 
 class FakeSession:
-    """Stand-in for a requests.Session instance (AddonClient.session)."""
+    """Stand-in for a requests.Session instance (AddonClient.session /
+    StremioAPI.session / ServerClient.session -- all three now pool one
+    Session per client instance rather than opening a connection per call).
+    """
 
     def __init__(self, responses=None, exc=None):
         self.calls = []
@@ -70,7 +73,13 @@ class FakeSession:
         self._exc = exc
 
     def get(self, url, **kwargs):
-        self.calls.append({"url": url, "kwargs": kwargs})
+        return self._respond("GET", url, kwargs)
+
+    def post(self, url, **kwargs):
+        return self._respond("POST", url, kwargs)
+
+    def _respond(self, method, url, kwargs):
+        self.calls.append({"method": method, "url": url, "kwargs": kwargs})
         if self._exc is not None:
             raise self._exc
         if not self._responses:

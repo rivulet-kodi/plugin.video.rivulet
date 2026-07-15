@@ -7,12 +7,12 @@ that catalog's items; picking a TITLE from the coverflow opens
 import xbmcgui
 
 from lib.stremio.addons import AddonError
-from lib.ui.uicommon import BACK_ACTIONS, busy_dialog, open_window
+from lib.ui.uicommon import BaseWindow, busy_dialog, open_window
 
 LIST = 30002
 
 
-class CatalogPickerWindow(xbmcgui.WindowXMLDialog):
+class CatalogPickerWindow(BaseWindow):
     """See module docstring. Built/run via `open_catalog_picker()`."""
 
     def __init__(self, *args, **kwargs):
@@ -47,10 +47,6 @@ class CatalogPickerWindow(xbmcgui.WindowXMLDialog):
         ]
         self.getControl(LIST).addItems(items)
         self.setFocusId(LIST)
-
-    def onAction(self, action):
-        if action.getId() in BACK_ACTIONS:
-            self.close()
 
     def onClick(self, control_id):
         if control_id != LIST:
