@@ -107,6 +107,22 @@ section{padding-block:var(--space)}
 .card h3{margin-bottom:.4em}
 .card p{margin:0;font-size:.94rem}
 
+/* screenshot gallery */
+.shot-grid{display:grid;gap:1.1rem;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.shot-card{
+  position:relative;overflow:hidden;border-radius:var(--radius);border:1px solid var(--border);
+  aspect-ratio:16/10;background:var(--panel-2);
+  transition:border-color .2s var(--ease),transform .2s var(--ease),box-shadow .2s var(--ease);
+}
+.shot-card img{width:100%;height:100%;object-fit:cover;transition:transform .4s var(--ease)}
+.shot-card figcaption{
+  position:absolute;inset:auto 0 0;padding:1rem 1.1rem .9rem;
+  background:linear-gradient(to top,rgba(6,10,22,.92),rgba(6,10,22,.55) 60%,transparent);
+  font-size:.86rem;font-weight:600;color:var(--text);
+}
+.shot-card:hover{border-color:var(--border-hi);transform:translateY(-3px);box-shadow:var(--shadow)}
+.shot-card:hover img{transform:scale(1.06)}
+
 /* install */
 .install-grid{display:grid;gap:1.25rem;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
 .install-card{
@@ -283,6 +299,7 @@ footer{border-top:1px solid var(--border);padding-block:2.5rem;color:var(--text-
     <label class="burger" for="nav-toggle" aria-label="Toggle navigation"><svg viewBox="0 0 24 24"><use href="#i-menu"/></svg></label>
     <div class="nav-links">
       <a href="#features">Features</a>
+      <a href="#screenshots">Screenshots</a>
       <a href="#install">Install</a>
       <a href="#server">Streaming server</a>
       <a href="#faq">FAQ</a>
@@ -349,6 +366,59 @@ footer{border-top:1px solid var(--border);padding-block:2.5rem;color:var(--text-
         <h3>One-click streaming server</h3>
         <p>Download the right <code>stremio-server-go</code> build for your platform and run it embedded, or point at a server you already run.</p>
       </article>
+    </div>
+  </section>
+
+  <section id="screenshots" class="wrap">
+    <div class="section-head center">
+      <div class="eyebrow">See it in action</div>
+      <h2>The couch-first UI, screen by screen</h2>
+    </div>
+    <div class="shot-grid">
+      <figure class="shot-card">
+        <img src="screenshots/home.png" alt="Rivulet's custom Home menu with Discover, Search, Library, Add-ons and Settings rows" loading="lazy">
+        <figcaption>Home — Discover, Search, Library and Add-ons, one row away.</figcaption>
+      </figure>
+      <figure class="shot-card">
+        <img src="screenshots/discover-catalogs.png" alt="Discover screen listing catalogs from installed Stremio add-ons" loading="lazy">
+        <figcaption>Discover — every catalog from your installed add-ons, listed straight up.</figcaption>
+      </figure>
+      <figure class="shot-card">
+        <img src="screenshots/discover-coverflow.png" alt="A catalog opened into a coverflow with a featured title's synopsis" loading="lazy">
+        <figcaption>Open a catalog into a full coverflow, poster and synopsis included.</figcaption>
+      </figure>
+      <figure class="shot-card">
+        <img src="screenshots/detail-streams.png" alt="Title detail merged with a list of resolved stream sources" loading="lazy">
+        <figcaption>Title details and resolved stream sources, merged into one view.</figcaption>
+      </figure>
+      <figure class="shot-card">
+        <img src="screenshots/resolving-stream.png" alt="Preparing stream dialog live-resolving a torrent with peer and speed stats" loading="lazy">
+        <figcaption>Live stream resolution — real peers, real speed, no guesswork.</figcaption>
+      </figure>
+      <figure class="shot-card">
+        <img src="screenshots/search.png" alt="Search screen's empty new-search entry state" loading="lazy">
+        <figcaption>Search, ready when you are.</figcaption>
+      </figure>
+      <figure class="shot-card">
+        <img src="screenshots/search-results.png" alt="Search results for star wars rendered as a coverflow" loading="lazy">
+        <figcaption>Results land as a coverflow, not a bare list.</figcaption>
+      </figure>
+      <figure class="shot-card">
+        <img src="screenshots/library.png" alt="Library screen showing saved titles in the same coverflow style" loading="lazy">
+        <figcaption>Library — everything you've saved, same couch-first look.</figcaption>
+      </figure>
+      <figure class="shot-card">
+        <img src="screenshots/addons-manager.png" alt="Rivulet's in-app Stremio add-on manager listing installed add-ons" loading="lazy">
+        <figcaption>Install Stremio add-ons from a URL, manage them without leaving Kodi.</figcaption>
+      </figure>
+      <figure class="shot-card">
+        <img src="screenshots/kodi-addon-browser.png" alt="Kodi's native Add-ons browser with Rivulet highlighted among video add-ons" loading="lazy">
+        <figcaption>Shows up right alongside Kodi's own add-ons.</figcaption>
+      </figure>
+      <figure class="shot-card">
+        <img src="screenshots/kodi-addon-info.png" alt="Kodi's native addon-info dialog for Rivulet with Configure, Disable and Uninstall buttons" loading="lazy">
+        <figcaption>Doesn't host content, doesn't hide that fact.</figcaption>
+      </figure>
     </div>
   </section>
 
@@ -448,7 +518,7 @@ footer{border-top:1px solid var(--border);padding-block:2.5rem;color:var(--text-
   var reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   /* scroll-reveal */
-  var targets = document.querySelectorAll(".card,.install-card,.callout,.faq-grid>div,.section-head");
+  var targets = document.querySelectorAll(".card,.shot-card,.install-card,.callout,.faq-grid>div,.section-head");
   if (reduced || !("IntersectionObserver" in window)) {
     targets.forEach(function(el){ el.classList.add("is-visible"); });
   } else {
