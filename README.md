@@ -33,6 +33,7 @@ account.
 ## Contents
 
 - [Features](#features)
+- [Screenshots](#screenshots)
 - [Install](#install)
 - [Auto-updates](#auto-updates)
 - [Streaming server](#streaming-server)
@@ -54,6 +55,24 @@ account.
 - **One-click streaming server** — download the right
   `stremio-server-go` build for your platform and run it embedded, or
   point Rivulet at any server you already run.
+
+## Screenshots
+
+Rivulet's custom UI:
+
+| ![Home](artwork/screenshots/home.png) | ![Discover](artwork/screenshots/discover-coverflow.png) |
+| :---: | :---: |
+| **Home** | **Discover** |
+
+| ![Detail + streams](artwork/screenshots/detail-streams.png) | ![Addon manager](artwork/screenshots/addons-manager.png) |
+| :---: | :---: |
+| **Detail + streams** | **Addon manager** |
+
+In Kodi's native UI:
+
+| ![Add-ons browser](artwork/screenshots/kodi-addon-browser.png) | ![Add-on info](artwork/screenshots/kodi-addon-info.png) |
+| :---: | :---: |
+| **Add-ons browser** | **Add-on info** |
 
 ## Install
 
@@ -140,6 +159,13 @@ make parallel    # tests across CPUs (pytest-xdist)
 Tool config lives in `pyproject.toml`. CI (`.github/workflows/test.yml`)
 runs ruff + the test suite with coverage across Python 3.8/3.11/3.13
 (Kodi 19 "Matrix" through current), on every push and pull request.
+
+Screenshots in the [Screenshots](#screenshots) section above are generated,
+not hand-picked crops - `scripts/capture_screenshots.py` drives a running
+`kodi-standalone` instance over its always-on TCP JSON-RPC socket
+(`127.0.0.1:9090`, no webserver setup needed), walks every screen listed
+there plus Kodi's native Add-ons browser, and writes the curated result to
+`artwork/screenshots/`. Re-run it after a UI change to refresh the gallery.
 
 ---
 
