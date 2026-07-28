@@ -40,6 +40,11 @@ def make_xbmc(env, info_labels=None):
             abort = env.monitor_abort
             return bool(abort(env.monitor_abort_calls)) if callable(abort) else bool(abort)
 
+        def abortRequested(self):
+            env.monitor_abort_requested_calls += 1
+            requested = env.monitor_abort_requested
+            return bool(requested(env.monitor_abort_requested_calls)) if callable(requested) else bool(requested)
+
     class Player:
         """Stand-in for `xbmc.Player()`: records every `.play(url, listitem)`
         call `lib.ui.player.play_direct()` makes on it - the custom-window

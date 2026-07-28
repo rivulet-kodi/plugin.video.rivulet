@@ -1039,3 +1039,192 @@ def test_play_direct_failed_resolution_returns_false_without_starting_player(kod
     assert result is False
     assert env.player_play_calls == []
     assert env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
+
+
+# --- item_meta: OSD title/art/info forwarding (Defect A: "Not available" +
+# --- placeholder art), and the improved torrent filename derivation that
+# --- feeds both the title fallback and setMimeType -------------------------
+
+
+def test_resolve_with_no_item_meta_uses_sanitized_stream_title_as_label_and_info_title(kodi_stubs, monkeypatch):
+    """Defect A repro with no `item_meta` at all: a stream with nothing but
+    a `title` - the common shape for a torrent with no
+    `behaviorHints.filename` - must still reach Kodi's OSD with a real,
+    sanitized title instead of the empty label/title that caused the
+    live "Not available" bug. Addon-supplied titles routinely bake in
+    CR/LF (see `lib.ui.streamswindow.onInit`'s identical sanitization).
+    """
+    env = kodi_stubs.env
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    stream = {'url': 'https://example.com/a.mp4', 'title': 'Some\r\nTitle'}
+    kodi_stubs.player.play(70, stream, 'movie', 'tt70')
+
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (70, True)
+    assert list_item.getLabel() == 'Some  Title'
+    assert list_item.legacy_info.get('title') == 'Some  Title'
+
+
+def test_resolve_with_full_item_meta_populates_label_art_and_info(kodi_stubs, monkeypatch):
+    """The full `item_meta` contract: label/title come from
+    `item_meta['label']` (not the stream's own `title`), art carries
+    poster+thumb+fanart, and info carries
+    plot/year/rating/genre/duration/mediatype/tvshowtitle - the actual
+    fix for Defect A: `lib.ui.streamswindow` already knows all of this
+    and now forwards it instead of letting the OSD show "Not available"
+    and the default camera placeholder.
+    """
+    env = kodi_stubs.env
+    env.addon.settings['buffer_enable'] = False
+    _ServerScript(resolve_url='http://server/x/0').install(monkeypatch, kodi_stubs.player)
+
+    item_meta = {
+        'label': 'The Mandalorian - S01E02 Chapter 2',
+        'art': {'poster': 'http://img/poster.jpg', 'fanart': 'http://img/fanart.jpg'},
+        'meta': {
+            'name': 'The Mandalorian',
+            'description': 'A lone gunfighter...',
+            'releaseInfo': '2019-2023',
+            'imdbRating': '8.7',
+            'genres': ['Action', 'Sci-Fi'],
+            'runtime': '40 min',
+        },
+    }
+    stream = _torrent_stream(fileIdx=0, title='ignored raw title')
+
+    kodi_stubs.player.play(71, stream, 'series', 'tt71:1:2', item_meta=item_meta)
+
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (71, True)
+    assert list_item.getLabel() == 'The Mandalorian - S01E02 Chapter 2'
+    assert list_item.art.get('poster') == 'http://img/poster.jpg'
+    assert list_item.art.get('thumb') == 'http://img/poster.jpg'
+    assert list_item.art.get('fanart') == 'http://img/fanart.jpg'
+    info = list_item.legacy_info
+    assert info.get('title') == 'The Mandalorian - S01E02 Chapter 2'
+    assert info.get('mediatype') == 'episode'
+    assert info.get('tvshowtitle') == 'The Mandalorian'
+    assert info.get('plot') == 'A lone gunfighter...'
+    assert info.get('year') == 2019
+    assert info.get('rating') == 8.7
+    assert info.get('genre') == ['Action', 'Sci-Fi']
+    assert info.get('duration') == 40 * 60
+
+
+def test_torrent_resolved_filename_from_create_stats_sets_correct_mimetype(kodi_stubs, monkeypatch):
+    """Defect A/mime fix: a torrent's resolved playback URL
+    (`http://host/<infoHash>/<fileIdx>`) carries no file extension of
+    its own, so `_mime_for` could never derive a MIME type from it
+    before. `_extract_file_name` recovers the real filename from the
+    `/create` stats dict the metadata-wait loop already fetched (no
+    extra HTTP round-trip), letting a torrent stream get a correct
+    `setMimeType` (and a real title) exactly like a
+    `behaviorHints.filename` stream always could.
+    """
+    env = kodi_stubs.env
+    stream = _torrent_stream()  # fileIdx missing -> UNKNOWN_FILE_IDX
+    files = [{'name': 'Some.Movie.2020.mkv', 'length': 500}]
+    _ServerScript(
+        resolve_url='http://server/x/-1',
+        create_engine_result={'files': files},
+        iter_front_attempts=[[600_000]],
+        torrent_url_result='http://server/x/0',
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(72, stream, 'movie', 'tt72')
+
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (72, True)
+    assert list_item.mimetype == 'video/x-matroska'
+    assert list_item.getLabel() == 'Some.Movie.2020.mkv'
+
+
+def test_apply_item_metadata_skips_malformed_meta_fields_without_poisoning_others(kodi_stubs, monkeypatch):
+    """Malformed Stremio meta values must be tolerated field-by-field:
+    an unparseable `imdbRating`/`runtime` is skipped, `releaseInfo`'s
+    open-ended '2019-' shape is still parsed to a year, and none of that
+    prevents the OTHER metadata (label, plot, genre) from coming
+    through intact.
+    """
+    env = kodi_stubs.env
+    env.addon.settings['buffer_enable'] = False
+    _ServerScript(resolve_url='http://server/x/0').install(monkeypatch, kodi_stubs.player)
+
+    item_meta = {
+        'label': 'Dune',
+        'meta': {
+            'description': 'A desert planet',
+            'imdbRating': 'n/a',
+            'runtime': '?',
+            'releaseInfo': '2019-',
+            'genres': ['Sci-Fi'],
+        },
+    }
+    kodi_stubs.player.play(76, _torrent_stream(fileIdx=0), 'movie', 'tt76', item_meta=item_meta)
+
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (76, True)
+    assert list_item.getLabel() == 'Dune'
+    info = list_item.legacy_info
+    assert info.get('plot') == 'A desert planet'
+    assert info.get('year') == 2019  # tolerates the open-ended '2019-' shape
+    assert 'rating' not in info  # 'n/a' is unparseable -> skipped, not raised
+    assert 'duration' not in info  # '?' is unparseable -> skipped, not raised
+    assert info.get('genre') == ['Sci-Fi']  # other fields unaffected
+
+
+# --- play_direct(on_ready=...): fires immediately before xbmc.Player().play(),
+# --- only on successful resolution, and never blocks playback on its own -
+
+
+def test_play_direct_on_ready_invoked_once_immediately_before_player_play(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    calls = []
+
+    def on_ready():
+        calls.append(len(env.player_play_calls))  # must run BEFORE Player().play() is recorded
+
+    result = kodi_stubs.player.play_direct(
+        {'url': 'https://example.com/a.mp4'}, 'movie', 'tt73', on_ready=on_ready,
+    )
+
+    assert result is True
+    assert calls == [0]  # exactly one call, and it ran before any play() was recorded
+    assert len(env.player_play_calls) == 1
+
+
+def test_play_direct_on_ready_not_called_when_resolution_fails(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    _ServerScript(resolve_url=None).install(monkeypatch, kodi_stubs.player)
+    calls = []
+
+    result = kodi_stubs.player.play_direct(
+        {'url': 'https://example.com/a.mp4'}, 'movie', 'tt74', on_ready=lambda: calls.append(1),
+    )
+
+    assert result is False
+    assert calls == []
+    assert env.player_play_calls == []
+
+
+def test_play_direct_on_ready_exception_is_logged_and_swallowed_but_playback_still_starts(kodi_stubs, monkeypatch):
+    """A broken `on_ready` hook must never prevent playback that has
+    already been resolved - it is logged at LOGWARNING and swallowed,
+    and `xbmc.Player().play()` still runs.
+    """
+    env = kodi_stubs.env
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    def boom():
+        raise RuntimeError('hook boom')
+
+    result = kodi_stubs.player.play_direct(
+        {'url': 'https://example.com/a.mp4'}, 'movie', 'tt75', on_ready=boom,
+    )
+
+    assert result is True
+    assert len(env.player_play_calls) == 1
+    assert any(level == kodi_stubs.player.xbmc.LOGWARNING for _, level in env.log_calls)

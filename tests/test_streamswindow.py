@@ -17,6 +17,16 @@ dependency).
 call time, so load_streamswindow reloads lib.ui.compat/lib.ui.uicommon/
 lib.ui.player/lib.ui.streamswindow fresh together to get a handle
 (`ctx.player`) this file monkeypatches `play_direct` on directly.
+`play_direct()` also now takes `item_meta=`/`on_ready=` (the picker's own
+heading/art/meta, and a hook it fires right before `xbmc.Player().play()`
+to force-close every other live screen via
+`lib.ui.uicommon.close_windows_for_playback()` - see that module's
+docstring for why: every Rivulet screen is a real `WindowXMLDialog`, so
+playing over a live one leaves play/pause and the OSD dead until the
+user backs all the way out) - the onClick() tests below cover both,
+including invoking the captured `on_ready` hook against a fake
+`_MODAL_WINDOW_STACK` entry to prove the teardown actually happens and
+never touches `self`.
 
 StreamsWindow.onInit()/onClick()/onAction()/start() are called directly
 here, never through a real modal event loop, exactly like
@@ -413,7 +423,7 @@ def test_onclick_dispatches_the_focused_pairs_own_stream_to_play_direct(load_str
     win.getControl(ctx.streamswindow.LIST).selected_index = 1  # simulate scrolling to the 2nd row
     captured = {}
 
-    def fake_play_direct(stream, stype, sid):
+    def fake_play_direct(stream, stype, sid, item_meta=None, on_ready=None):
         captured['args'] = (stream, stype, sid)
         return True
 
@@ -431,12 +441,124 @@ def test_onclick_stays_open_when_play_direct_returns_false(load_streamswindow, m
     win = _make_window(ctx.streamswindow)
     win.pairs = [({'raw': 'A'}, {'url': 'https://a.example/a.mp4'})]
     win.onInit()
-    monkeypatch.setattr(ctx.player, 'play_direct', lambda stream, stype, sid: False)
+    monkeypatch.setattr(
+        ctx.player, 'play_direct',
+        lambda stream, stype, sid, item_meta=None, on_ready=None: False,
+    )
 
     win.onClick(ctx.streamswindow.LIST)
 
     assert win.played is False
     assert win.closed is False
+
+
+class _FakeStackWindow:
+    """Minimal stand-in for another live `ModalStackWindow`-mixed screen
+    sitting on `lib.ui.uicommon._MODAL_WINDOW_STACK` underneath this
+    StreamsWindow - only `.close()`/`._closed_for_playback` matter to
+    `close_windows_for_playback()`, exactly like tests/test_uicommon.py's
+    own `_StackWindow`."""
+
+    def __init__(self):
+        self._closed_for_playback = False
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def test_onclick_passes_item_meta_with_heading_art_and_meta_to_play_direct(load_streamswindow, monkeypatch):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = [({'raw': 'A'}, {'url': 'https://a.example/a.mp4'})]
+    win.heading = 'Dune'
+    win.art = {'poster': 'https://x/p.jpg', 'fanart': 'https://x/f.jpg'}
+    win.meta = {'name': 'Dune', 'runtime': '155 min'}
+    win.onInit()
+    captured = {}
+
+    def fake_play_direct(stream, stype, sid, item_meta=None, on_ready=None):
+        captured['item_meta'] = item_meta
+        captured['on_ready'] = on_ready
+        return True
+
+    monkeypatch.setattr(ctx.player, 'play_direct', fake_play_direct)
+
+    win.onClick(ctx.streamswindow.LIST)
+
+    assert captured['item_meta'] == {
+        'label': 'Dune',
+        'art': {'poster': 'https://x/p.jpg', 'fanart': 'https://x/f.jpg'},
+        'meta': {'name': 'Dune', 'runtime': '155 min'},
+    }
+    assert callable(captured['on_ready'])
+
+
+def test_onclick_item_meta_falls_back_to_meta_name_and_bare_poster_when_no_heading_or_art(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = [({'raw': 'A'}, {'url': 'https://a.example/a.mp4'})]
+    win.poster = 'https://x/poster.jpg'
+    win.meta = {'name': 'Some Movie'}
+    win.onInit()
+    captured = {}
+
+    def fake_play_direct(stream, stype, sid, item_meta=None, on_ready=None):
+        captured['item_meta'] = item_meta
+        return True
+
+    monkeypatch.setattr(ctx.player, 'play_direct', fake_play_direct)
+
+    win.onClick(ctx.streamswindow.LIST)
+
+    assert captured['item_meta'] == {
+        'label': 'Some Movie',
+        'art': {'poster': 'https://x/poster.jpg'},
+        'meta': {'name': 'Some Movie'},
+    }
+
+
+def test_onclick_item_meta_is_empty_when_nothing_is_known(load_streamswindow, monkeypatch):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = [({'raw': 'A'}, {'url': 'https://a.example/a.mp4'})]
+    win.onInit()
+    captured = {}
+
+    def fake_play_direct(stream, stype, sid, item_meta=None, on_ready=None):
+        captured['item_meta'] = item_meta
+        return True
+
+    monkeypatch.setattr(ctx.player, 'play_direct', fake_play_direct)
+
+    win.onClick(ctx.streamswindow.LIST)
+
+    assert captured['item_meta'] == {}
+
+
+def test_onclick_on_ready_hook_tears_down_every_other_live_window_but_not_self(load_streamswindow, monkeypatch):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = [({'raw': 'A'}, {'url': 'https://a.example/a.mp4'})]
+    win.onInit()
+    other = _FakeStackWindow()
+    ctx.uicommon._MODAL_WINDOW_STACK.append(other)
+    captured = {}
+
+    def fake_play_direct(stream, stype, sid, item_meta=None, on_ready=None):
+        captured['on_ready'] = on_ready
+        return True
+
+    monkeypatch.setattr(ctx.player, 'play_direct', fake_play_direct)
+
+    win.onClick(ctx.streamswindow.LIST)
+    captured['on_ready']()
+
+    assert other.closed is True
+    assert other._closed_for_playback is True
+    assert win not in ctx.uicommon._MODAL_WINDOW_STACK  # excluded, never touched by the hook
 
 
 # ---------------------------------------------------------------------------
@@ -469,7 +591,10 @@ def test_start_with_pairs_calls_domodal_and_returns_played(load_streamswindow, m
     ctx = load_streamswindow()
     win = _make_window(ctx.streamswindow)
     pairs = [({'raw': 'A'}, {'url': 'https://a.example/a.mp4'})]
-    monkeypatch.setattr(ctx.player, 'play_direct', lambda stream, stype, sid: True)
+    monkeypatch.setattr(
+        ctx.player, 'play_direct',
+        lambda stream, stype, sid, item_meta=None, on_ready=None: True,
+    )
 
     # The fake doModal() is a no-op counter; simulate what a real modal event
     # loop would drive around it (onInit(), the user picking the only row).

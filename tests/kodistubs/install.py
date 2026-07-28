@@ -32,7 +32,7 @@ _MISSING = object()
 @contextlib.contextmanager
 def install_kodi_stubs(reload=(), addon_info=None, settings=None, localized=None,
                         info_labels=None, dialog_inputs=None, dialog_yesno=None,
-                        cancel=False, monitor_abort=False):
+                        cancel=False, monitor_abort=False, monitor_abort_requested=False):
     """Inject fresh fake xbmc*/xbmcgui/xbmcplugin/xbmcaddon/xbmcvfs
     modules bound to a fresh `Env`, then (re)import every dotted module
     name in `reload` fresh against them.
@@ -64,7 +64,7 @@ def install_kodi_stubs(reload=(), addon_info=None, settings=None, localized=None
     leaves = [name.rsplit('.', 1)[-1] for name in reload_names]
     parent_names = [name.rsplit('.', 1)[0] if '.' in name else None for name in reload_names]
 
-    env = Env(cancel=cancel, monitor_abort=monitor_abort)
+    env = Env(cancel=cancel, monitor_abort=monitor_abort, monitor_abort_requested=monitor_abort_requested)
     env.addon = FakeAddon(env, settings=settings, addon_info=addon_info, localized=localized)
 
     fake_modules = {

@@ -87,13 +87,14 @@ class Env:
     queued Dialog.input() answers) the fakes below consult. One fresh
     `Env` is created per `install_kodi_stubs()` call.
 
-    `cancel`, `monitor_abort`, and `player_is_playing` may each be a plain
-    bool (fixed answer for every call) or a callable taking the 1-based
-    call count and returning a truthy/falsy value, for tests that need
-    cancellation/abort/playback-state to change only after N attempts.
+    `cancel`, `monitor_abort`, `monitor_abort_requested`, and
+    `player_is_playing` may each be a plain bool (fixed answer for every
+    call) or a callable taking the 1-based call count and returning a
+    truthy/falsy value, for tests that need cancellation/abort/
+    playback-state to change only after N attempts.
     """
 
-    def __init__(self, cancel=False, monitor_abort=False):
+    def __init__(self, cancel=False, monitor_abort=False, monitor_abort_requested=False):
         # xbmcplugin recorders
         self.directory_items = []   # [{'handle', 'items', 'totalItems'}]
         self.end_of_directory = []  # [{'handle', 'succeeded', 'updateListing', 'cacheToDisc'}]
@@ -114,6 +115,7 @@ class Env:
         self.log_calls = []          # [(msg, level)]
         self.executed_builtins = []  # [cmd, ...]
         self.monitor_abort_calls = 0
+        self.monitor_abort_requested_calls = 0
         self.player_play_calls = []  # [(url, list_item)] - xbmc.Player().play() calls
         self.player_is_playing_calls = 0  # xbmc.Player().isPlaying() poll count
 
@@ -124,6 +126,7 @@ class Env:
         # xbmc.Monitor.waitForAbort()/xbmc.Player().isPlaying()
         self.cancel = cancel
         self.monitor_abort = monitor_abort
+        self.monitor_abort_requested = monitor_abort_requested
         self.player_is_playing = False  # see streamswindow._wait_for_playback_end()
 
         # bound by install_kodi_stubs() once the FakeAddon exists

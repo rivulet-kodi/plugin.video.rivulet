@@ -43,7 +43,7 @@ import xbmcgui
 from lib.store import Store
 from lib.stremio import streaminfo
 from lib.stremio.addons import AddonClient, AddonError, addon_supports
-from lib.ui.uicommon import BaseWindow, busy_dialog, open_window
+from lib.ui.uicommon import BaseWindow, busy_dialog, close_windows_for_playback, open_window
 
 BACKGROUND = 30000
 LIST = 30002
@@ -110,7 +110,13 @@ class StreamsWindow(BaseWindow):
             item = xbmcgui.ListItem(line1, label2=line2)
             item.setProperty('position', str(index))
             items.append(item)
-        self.getControl(LIST).addItems(items)
+        control = self.getControl(LIST)
+        # reset() before addItems(): onInit() runs again when
+        # uicommon.ModalStackWindow reopens a screen force-closed for
+        # playback, and re-adding onto a retained list would double every
+        # item.
+        control.reset()
+        control.addItems(items)
         self.setFocusId(LIST)
 
         meta = self.meta or {}
@@ -136,8 +142,33 @@ class StreamsWindow(BaseWindow):
             return
         _info, stream = self.pairs[int(focused.getProperty('position'))]
 
+        # item_meta carries the content title/art/meta this window
+        # already has in hand (see the module docstring's heading/art/
+        # meta kwargs) into the player's OSD - only the keys actually
+        # known are included, so a bare "no context" open still behaves
+        # exactly like item_meta=None to play_direct(). on_ready tears
+        # down every OTHER live screen (close_windows_for_playback())
+        # right before Kodi starts playing, so the fullscreen player -
+        # not a leftover dialog underneath it - is what actually owns
+        # play/pause and the OSD; THIS window is excluded and keeps
+        # closing itself the normal way below so open_streams()'s own
+        # reopen loop (not the ModalStackWindow mixin) is what brings
+        # the picker back afterwards.
+        item_meta = {}
+        label = self.heading or (self.meta or {}).get('name') or ''
+        if label:
+            item_meta['label'] = label
+        art = self.art or ({'poster': self.poster} if self.poster else None)
+        if art:
+            item_meta['art'] = art
+        if self.meta:
+            item_meta['meta'] = self.meta
+
         from lib.ui.player import play_direct
-        if play_direct(stream, self.stype, self.sid):
+        if play_direct(
+            stream, self.stype, self.sid, item_meta=item_meta,
+            on_ready=lambda: close_windows_for_playback(exclude=self),
+        ):
             self.played = True
             self.close()
 

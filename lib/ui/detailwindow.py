@@ -22,7 +22,7 @@ in `open_detail()` does the same with the movie's own title/art.
 """
 import xbmcgui
 
-from lib.ui.uicommon import BACK_ACTIONS, busy_dialog, open_window
+from lib.ui.uicommon import BACK_ACTIONS, ModalStackWindow, busy_dialog, open_window
 
 BACKGROUND = 30000
 POSTER = 30004
@@ -128,7 +128,7 @@ def _show_art(meta):
     return {'poster': poster, 'fanart': fanart}
 
 
-class DetailWindow(xbmcgui.WindowXMLDialog):
+class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
     """See module docstring. Built/run via `open_detail()` - only for a
     series (a title with episodes); a movie never reaches this window.
     Every episode is grouped by season behind a season-selector bar
@@ -270,6 +270,16 @@ class DetailWindow(xbmcgui.WindowXMLDialog):
         video = self._video_by_id.get(sid)
 
         from lib.ui.streamswindow import open_streams
+        # open_streams() only ever returns False (see its own module
+        # docstring) - a played pick reopens the SAME StreamsWindow round
+        # trip instead of returning True, so this branch is dormant while
+        # playback succeeds. If close_windows_for_playback() force-closed
+        # THIS window mid-round-trip (it was still an open ancestor), that
+        # close() cannot actually take effect until this onClick() call -
+        # and therefore open_streams() - returns, at which point
+        # ModalStackWindow.doModal() reopens it fresh; the user never sees
+        # more than the one real close their own Back action eventually
+        # causes.
         if open_streams(
             self.stype, sid, poster=self.meta.get('poster'),
             heading=_episode_heading(self.meta.get('name') or self.meta.get('id') or '', video),

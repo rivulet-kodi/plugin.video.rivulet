@@ -45,7 +45,13 @@ class CatalogPickerWindow(BaseWindow):
             self._make_item(index, manifest, catalog)
             for index, (_transport_url, manifest, catalog) in enumerate(self.catalogs)
         ]
-        self.getControl(LIST).addItems(items)
+        control = self.getControl(LIST)
+        # reset() before addItems(): onInit() runs again when
+        # uicommon.ModalStackWindow reopens a screen force-closed for
+        # playback, and re-adding onto a retained list would double every
+        # item.
+        control.reset()
+        control.addItems(items)
         self.setFocusId(LIST)
 
     def onClick(self, control_id):
