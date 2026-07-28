@@ -511,7 +511,11 @@ def test_server_download_success_notifies_with_path_and_closes_dialog(load_route
     assert ctx.env.notifications == [('Rivulet', 'installed to %s' % expected_path, 'info', 4000)]
 
 
-def test_server_download_no_asset_error_notifies_and_logs_warning(load_router, monkeypatch):
+def test_server_download_no_asset_error_notifies_platform_and_logs_warning(load_router, monkeypatch):
+    """The notification must tell the user what platform was actually
+    detected (os_name/arch from serverbin.platform_key()), not just the
+    bare 30064 string -- otherwise there's no way to tell a genuinely
+    unsupported platform from a release that's simply missing an asset."""
     ctx = load_router()
     monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=server_download'])
 
@@ -519,11 +523,38 @@ def test_server_download_no_asset_error_notifies_and_logs_warning(load_router, m
         raise serverbin.NoAssetError('no release asset for Linux/arm64')
 
     monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
+    monkeypatch.setattr(serverbin, 'platform_key', lambda: ('Linux', 'arm64'))
     xbmc_mod = sys.modules['xbmc']
 
     ctx.router.run()
 
-    assert [msg for _, msg, _, _ in ctx.env.notifications] == ['STR30064']
+    assert [msg for _, msg, _, _ in ctx.env.notifications] == ['STR30064 (Linux/arm64)']
+    assert any(
+        level == xbmc_mod.LOGWARNING and 'router: server_download:' in msg
+        for msg, level in ctx.env.log_calls
+    )
+    assert ctx.env.dialog_closed_count == 1
+    assert ctx.env.end_of_directory == []
+    assert ctx.env.resolved == []
+
+
+def test_server_download_unsupported_platform_error_notifies_and_logs_warning(load_router, monkeypatch):
+    """UnsupportedPlatformError is a DownloadError subclass but a sibling of
+    NoAssetError -- it must be caught by its own, earlier clause (rather
+    than falling into the generic DownloadError branch) and notify the
+    dedicated 30091 message."""
+    ctx = load_router()
+    monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=server_download'])
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        raise serverbin.UnsupportedPlatformError('exec() is forbidden on Android 10+')
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
+    xbmc_mod = sys.modules['xbmc']
+
+    ctx.router.run()
+
+    assert [msg for _, msg, _, _ in ctx.env.notifications] == ['STR30091']
     assert any(
         level == xbmc_mod.LOGWARNING and 'router: server_download:' in msg
         for msg, level in ctx.env.log_calls

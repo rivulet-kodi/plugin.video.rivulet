@@ -131,9 +131,13 @@ def _download_server_binary():
 
     try:
         path = serverbin.install_binary(dest_dir, progress_cb=progress_cb)
+    except serverbin.UnsupportedPlatformError as exc:
+        log('router: server_download: %s' % exc, xbmc.LOGWARNING)
+        notify(L(30091))
     except serverbin.NoAssetError as exc:
         log('router: server_download: %s' % exc, xbmc.LOGWARNING)
-        notify(L(30064))
+        os_name, arch = serverbin.platform_key()
+        notify('%s (%s/%s)' % (L(30064), os_name, arch))
     except serverbin.DownloadError as exc:
         log('router: server_download failed: %s' % exc, xbmc.LOGERROR)
         notify(L(30063))

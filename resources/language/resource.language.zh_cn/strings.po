@@ -288,6 +288,14 @@ msgctxt "#30090"
 msgid "attempt %d of %d"
 msgstr "第 %d 次尝试（共 %d 次）"
 
+msgctxt "#30091"
+msgid "Embedded server is not supported on Android - set Server URL to a server running elsewhere"
+msgstr "内置服务器不支持Android – 将服务器URL设置为在其他地方运行的服务器"
+
+msgctxt "#30092"
+msgid "Installed server binary cannot be executed on this device"
+msgstr "安装的服务器二进制文件无法在此设备上执行"
+
 msgctxt "#30110"
 msgid "BitTorrent"
 msgstr "BitTorrent"

@@ -15,6 +15,7 @@ import hashlib
 import os
 import platform
 import shutil
+import subprocess
 import sys
 import tarfile
 import zipfile
@@ -33,6 +34,7 @@ CHECKSUMS_ASSET_NAME = "checksums.txt"
 PART_SUFFIX = ".part"
 DOWNLOAD_CHUNK_SIZE = 64 * 1024
 REQUEST_TIMEOUT = 30
+VERIFY_TIMEOUT = 15
 
 
 class DownloadError(Exception):
@@ -41,6 +43,21 @@ class DownloadError(Exception):
 
 class NoAssetError(DownloadError):
     """Raised when the latest release has no asset for this platform/arch."""
+
+
+class UnsupportedPlatformError(DownloadError):
+    """Raised when this platform cannot run a downloaded server binary at all.
+
+    Kodi 19+ targets Android API >= 29, where Android 10+ enforces W^X:
+    exec() of any file under the app's writable home directory -- where
+    addon_data lives -- is blocked outright, so an installed binary could
+    never be launched there regardless of which release asset matched.
+    addon_data on Android also lives on emulated external storage, where
+    os.chmod(0o755) is a silent no-op. Confirmed by the identical failure
+    in elgatito/plugin.video.elementum#669 ([Errno 13] Permission denied).
+    The only remedy is pointing Settings -> Streaming server -> Server URL
+    at a server running elsewhere.
+    """
 
 
 def platform_key():
@@ -64,7 +81,12 @@ def platform_key():
         arch = "x86_64"
     elif machine in ("aarch64", "arm64"):
         arch = "arm64"
-    elif machine in ("armv7l", "armv6l"):
+    elif machine in ("armv7l", "armv6l", "armv8l"):
+        # armv8l: a 32-bit Android/Linux userspace running on an ARMv8
+        # (aarch64) kernel reports this via platform.machine() -- the
+        # normal case on Android TV sticks (e.g. Chromecast with Google
+        # TV) running Kodi's armeabi-v7a APK. Treat it the same as the
+        # native 32-bit ARM variants.
         arch = "armv7"
     else:
         arch = machine
@@ -225,6 +247,29 @@ def _extract_binary(archive_path, asset_name, target_name, dest_path):
                 shutil.copyfileobj(src, dst)
 
 
+def verify_executable(path):
+    """Best-effort confirmation that the installed binary can be exec()'d.
+
+    Runs `<path> version` and treats only an OSError raised by the exec()
+    attempt itself (e.g. EACCES from a noexec-mounted addon_data, or
+    ENOEXEC for a binary built for the wrong architecture) as fatal. A
+    non-zero exit status or a timeout is tolerated silently: some builds
+    may not implement the `version` subcommand at all, and refusing an
+    otherwise-successful install over that would be a worse outcome than
+    skipping the check.
+    """
+    try:
+        subprocess.run(
+            [path, "version"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=VERIFY_TIMEOUT)
+    except OSError:
+        raise UnsupportedPlatformError("%s cannot be executed on this device" % path)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def install_binary(dest_dir, progress_cb=None):
     """Download+install the stremio-server-go binary matching this platform.
 
@@ -241,8 +286,20 @@ def install_binary(dest_dir, progress_cb=None):
     compromised maintainer credentials, or a malicious fork a user was
     tricked into pointing at) could ship a backdoored binary that installs,
     and later runs, with no integrity check at all.
-    Raises DownloadError (or its NoAssetError subclass) on any failure.
+
+    Raises UnsupportedPlatformError (a DownloadError subclass) immediately,
+    before any network request, when running under Android: Android 10+'s
+    W^X enforcement blocks exec() of anything under the app's writable
+    home directory, so a downloaded binary could never run there no matter
+    which asset matched. Also raises DownloadError (or its NoAssetError
+    subclass) on any other failure.
     """
+    if _is_android():
+        raise UnsupportedPlatformError(
+            "Android blocks executing downloaded binaries (W^X); point "
+            "Settings -> Streaming server -> Server URL at a server "
+            "running elsewhere instead")
+
     os_name, arch = platform_key()
     release = latest_release()
     asset = select_asset(release, os_name, arch)
@@ -287,4 +344,5 @@ def install_binary(dest_dir, progress_cb=None):
 
     if os_name != "Windows":
         os.chmod(final_path, 0o755)
+    verify_executable(final_path)
     return final_path

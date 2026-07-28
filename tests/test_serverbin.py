@@ -11,6 +11,7 @@ import io
 import os
 import platform
 import stat
+import subprocess
 import sys
 import tarfile
 
@@ -22,10 +23,12 @@ from lib.serverbin import (
     GITHUB_REPO,
     DownloadError,
     NoAssetError,
+    UnsupportedPlatformError,
     install_binary,
     latest_release,
     platform_key,
     select_asset,
+    verify_executable,
 )
 
 
@@ -70,6 +73,16 @@ def test_platform_key_linux_armv7l_maps_to_armv7(monkeypatch):
 def test_platform_key_linux_armv6l_maps_to_armv7(monkeypatch):
     _set_platform(monkeypatch, "Linux", "armv6l")
     assert platform_key() == ("Linux", "armv7")
+
+
+def test_platform_key_linux_armv8l_maps_to_armv7(monkeypatch):
+    _set_platform(monkeypatch, "Linux", "armv8l")
+    assert platform_key() == ("Linux", "armv7")
+
+
+def test_platform_key_android_armv8l_maps_to_armv7(monkeypatch):
+    _set_platform(monkeypatch, "Linux", "armv8l", android_root="/system")
+    assert platform_key() == ("Android", "armv7")
 
 
 def test_platform_key_unknown_arch_falls_back_to_raw_lowercased_value(monkeypatch):
@@ -289,6 +302,7 @@ def _make_tar_gz(members):
 
 def test_install_binary_downloads_verifies_checksum_and_installs(tmp_path, monkeypatch, fake_requests):
     _set_platform(monkeypatch, "Linux", "x86_64")
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
     binary_content = b"#!/bin/sh\necho fake-stremio-server\n"
     archive_bytes = _make_tar_gz({"stremio-server": binary_content})
     asset_name = "stremio-server_Linux_x86_64.tar.gz"
@@ -322,6 +336,7 @@ def test_install_binary_downloads_verifies_checksum_and_installs(tmp_path, monke
 
 def test_install_binary_finds_binary_nested_in_a_safe_subdirectory(tmp_path, monkeypatch, fake_requests):
     _set_platform(monkeypatch, "Linux", "x86_64")
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
     binary_content = b"nested-binary"
     archive_bytes = _make_tar_gz({"dist/stremio-server": binary_content})
     asset_name = "stremio-server_Linux_x86_64.tar.gz"
@@ -476,3 +491,55 @@ def test_install_binary_progress_cb_exception_aborts_and_cleans_up_partial_file(
         install_binary(str(tmp_path), progress_cb=cancel)
 
     assert not (tmp_path / ".stremio-server.part").exists()
+
+
+# --- UnsupportedPlatformError / Android gating ------------------------------
+
+
+def test_unsupported_platform_error_is_a_download_error_subclass():
+    assert issubclass(UnsupportedPlatformError, DownloadError)
+
+
+def test_unsupported_platform_error_is_not_a_no_asset_error_subclass():
+    assert not issubclass(UnsupportedPlatformError, NoAssetError)
+
+
+def test_install_binary_raises_unsupported_platform_error_on_android_with_no_http_request(
+        tmp_path, monkeypatch, fake_requests):
+    _set_platform(monkeypatch, "Linux", "arm64", android_root="/system")
+
+    with pytest.raises(UnsupportedPlatformError):
+        install_binary(str(tmp_path))
+
+    assert fake_requests.calls == []
+
+
+# --- verify_executable -------------------------------------------------
+
+
+def test_verify_executable_raises_unsupported_platform_error_on_os_error(monkeypatch):
+    def _raise(*args, **kwargs):
+        raise OSError("Exec format error")
+
+    monkeypatch.setattr(subprocess, "run", _raise)
+
+    with pytest.raises(UnsupportedPlatformError):
+        verify_executable("/fake/path/stremio-server")
+
+
+def test_verify_executable_tolerates_nonzero_exit_status(monkeypatch):
+    class _Completed:
+        returncode = 1
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _Completed())
+
+    verify_executable("/fake/path/stremio-server")  # must not raise
+
+
+def test_verify_executable_tolerates_timeout(monkeypatch):
+    def _timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="stremio-server", timeout=15)
+
+    monkeypatch.setattr(subprocess, "run", _timeout)
+
+    verify_executable("/fake/path/stremio-server")  # must not raise

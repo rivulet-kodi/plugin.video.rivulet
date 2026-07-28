@@ -401,6 +401,22 @@ def main():
                             # known, waiting on it again just adds latency).
                             log(xbmc.LOGINFO, "stremio-server binary download aborted, shutting down")
                             break
+                        except serverbin.UnsupportedPlatformError as exc:
+                            # This platform can never execute a downloaded
+                            # binary (e.g. Android 10+'s W^X ban on exec()
+                            # inside the app's writable storage) -- no
+                            # retry would ever succeed, so leaning on the
+                            # existing attempted_download one-shot guard
+                            # below (instead of resetting it) is exactly
+                            # right: warn once per session and fall
+                            # through to the regular missing-binary poll
+                            # for the rest of it.
+                            log(xbmc.LOGWARNING, f"stremio-server binary cannot run on this device: {exc}")
+                            xbmcgui.Dialog().notification(
+                                addon.getAddonInfo("name"),
+                                addon.getLocalizedString(30091),
+                                xbmcgui.NOTIFICATION_ERROR,
+                            )
                         except Exception as exc:
                             log(xbmc.LOGERROR, f"stremio-server binary download failed: {exc}")
                             xbmcgui.Dialog().notification(

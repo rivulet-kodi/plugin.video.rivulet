@@ -856,6 +856,59 @@ def test_main_embedded_enabled_binary_missing_download_fails_then_notifies_once_
     assert f'[{service_runner.ADDON_ID}] stremio-server binary not found' in error_logs
 
 
+def test_main_embedded_enabled_binary_missing_unsupported_platform_notifies_once_and_stops_retrying(
+    monkeypatch, tmp_path
+):
+    """When install_binary() raises UnsupportedPlatformError (e.g. Android's
+    W^X ban on exec()-ing anything inside app storage), main() must not
+    crash, must notify the dedicated 30091 message exactly once, and must
+    never call install_binary() again on later polls -- unlike a plain
+    DownloadError, retrying can never succeed here, so the existing
+    `attempted_download` one-shot guard is exactly the right (and only)
+    behavior."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: None)
+
+    install_calls = []
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        install_calls.append(dest_dir)
+        raise serverbin.UnsupportedPlatformError('exec() is forbidden on Android 10+')
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
+    factory, spawned = _make_process_factory([])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None, None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}) as ctx:
+        service_runner.main()
+
+    assert spawned == []
+    assert intervals == [service_runner.MISSING_BINARY_RECHECK_INTERVAL] * 3
+
+    # Attempted exactly once across all 3 iterations, never retried.
+    assert install_calls == [os.path.join(str(tmp_path), 'bin')]
+
+    setup_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30069']
+    unsupported_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30091']
+    missing_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30031']
+    assert len(setup_notifications) == 1
+    assert len(unsupported_notifications) == 1
+    assert unsupported_notifications[0][2] == 'error'
+    # After the one unsupported-platform attempt, the loop falls back to
+    # the original notify-once "binary not found" behavior for the
+    # remaining iterations.
+    assert len(missing_notifications) == 1
+    assert missing_notifications[0][2] == 'error'
+
+    warning_logs = [msg for msg, level in ctx.env.log_calls if level == ctx.xbmc.LOGWARNING]
+    assert any('cannot run on this device' in msg for msg in warning_logs)
+    assert f'[{service_runner.ADDON_ID}] stremio-server binary not found' in [
+        msg for msg, level in ctx.env.log_calls if level == ctx.xbmc.LOGERROR
+    ]
+
+
 def test_main_settings_changed_resets_attempted_download_guard_for_retry(monkeypatch, tmp_path):
     """A settings change resets `attempted_download` (alongside
     `notified_missing`/`backoff_idx`) so a user who fixes whatever made the

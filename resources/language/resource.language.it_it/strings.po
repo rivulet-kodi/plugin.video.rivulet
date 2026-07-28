@@ -288,6 +288,14 @@ msgctxt "#30090"
 msgid "attempt %d of %d"
 msgstr "tentativo %d di %d"
 
+msgctxt "#30091"
+msgid "Embedded server is not supported on Android - set Server URL to a server running elsewhere"
+msgstr "Il server integrato non è supportato su Android – impostare l'URL del server su un server in esecuzione altrove"
+
+msgctxt "#30092"
+msgid "Installed server binary cannot be executed on this device"
+msgstr "Il binario del server installato non può essere eseguito su questo dispositivo"
+
 msgctxt "#30110"
 msgid "BitTorrent"
 msgstr "BitTorrent"
