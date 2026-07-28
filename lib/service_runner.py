@@ -26,6 +26,7 @@ This module is split in two halves:
     loop on top of the pure core.
 """
 
+import datetime
 import os
 import shutil
 import subprocess
@@ -33,6 +34,10 @@ import time
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
+
+from lib import library
+from lib.store import Store
+from lib.stremio.api import StremioAPI
 
 ADDON_ID = "plugin.video.rivulet"
 DEFAULT_SERVER_URL = "http://127.0.0.1:11470"
@@ -44,6 +49,12 @@ PROBE_TIMEOUT = 2.0
 
 # Restart backoff schedule for a crashing child: 5s, 10s, 30s, then capped at 30s.
 RESTART_BACKOFF = (5, 10, 30)
+
+#: Minimum interval between datastorePut pushes for one continuously-
+#: playing session -- matches stremio-core's own player model
+#: (`PUSH_TO_LIBRARY_EVERY`, src/models/player.rs:47), reused here
+#: rather than inventing a different cadence.
+LIBRARY_PUSH_INTERVAL_SECONDS = 90
 # A run shorter than this does not count as "stable" -- backoff keeps climbing
 # instead of resetting, so a crash loop is actually throttled.
 MIN_STABLE_UPTIME = 60.0
@@ -266,6 +277,136 @@ class _AbortRequested(Exception):
     """
 
 
+def should_push_now(last_pushed_at, now, final, interval=LIBRARY_PUSH_INTERVAL_SECONDS):
+    """True if a `datastorePut` push should happen now: always on the
+    FINAL sample of a session (the last chance to sync before playback
+    ends), the very first sample (`last_pushed_at is None`), or once
+    `interval` seconds have passed since the last push. Keeps
+    `build_progress_player`'s tracker from hammering the Stremio API on
+    every `sample_if_playing()` tick.
+    """
+    if final or last_pushed_at is None:
+        return True
+    return (now - last_pushed_at).total_seconds() >= interval
+
+
+def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn):
+    """Return an `xbmc.Player` subclass instance reporting playback
+    progress for Rivulet-originated playback only, and performing the
+    one-shot resume seek `lib.ui.player` queues via
+    `Store.set_resume_offset_ms`.
+
+    `xbmc_module` is the `xbmc` package itself (the real one, or in
+    tests the shared `tests/kodistubs` fake) -- taken as a PARAMETER
+    rather than imported at this module's top so the whole module stays
+    plain-python3 importable (see the module docstring's "pure core"
+    split): only `main()` (and this factory, once it is actually
+    called) ever needs a real or stubbed `xbmc.Player` to exist.
+
+    Kodi invokes `onAVStarted`/`onPlayBackStopped`/`onPlayBackEnded` on
+    every live `Player` instance for ANY playback in the whole Kodi
+    session, not just this addon's -- hence every method below first
+    checks `store.get_now_playing()` and no-ops when no Rivulet context
+    is active. `sample_if_playing()` is NOT a Kodi callback -- `main()`'s
+    own poll loop calls it once per iteration, approximating
+    "periodically while playing"; `xbmc.Player` has no native
+    periodic-tick hook to drive that instead.
+
+    `sync_enabled_fn`/`log_fn` are plain callables (`sync_enabled_fn() ->
+    bool`, `log_fn(level, message)`) rather than an `xbmcaddon.Addon`/
+    `xbmc.log` reference directly, so this factory itself needs no
+    xbmc-specific type beyond the `xbmc_module.Player` base class.
+    """
+
+    class _RivuletPlayer(xbmc_module.Player):
+        def __init__(self):
+            super().__init__()
+            self._last_pushed_at = None
+
+        def onAVStarted(self):
+            if store.get_now_playing() is None:
+                return
+            offset_ms = store.get_resume_offset_ms()
+            if not offset_ms:
+                return
+            store.set_resume_offset_ms(None)
+            try:
+                self.seekTime(offset_ms / library.MS_PER_SECOND)
+            except Exception as exc:  # noqa: BLE001 - a seek failure must never crash the service or interrupt playback
+                log_fn(xbmc_module.LOGWARNING, "resume seek failed: %r" % (exc,))
+
+        def onPlayBackStopped(self):
+            self._flush(final=True)
+            store.set_now_playing(None)
+
+        def onPlayBackEnded(self):
+            self._flush(final=True)
+            store.set_now_playing(None)
+
+        def sample_if_playing(self):
+            """Call once per `main()` loop tick -- a no-op unless BOTH a
+            Rivulet now-playing context is active AND Kodi is actually
+            mid-playback."""
+            if store.get_now_playing() is None:
+                return
+            try:
+                playing = self.isPlayingVideo()
+            except Exception:  # noqa: BLE001 - isPlayingVideo() must never crash the service loop
+                playing = False
+            if playing:
+                self._flush(final=False)
+
+        def _flush(self, final):
+            context = store.get_now_playing()
+            if context is None:
+                return
+            try:
+                position_ms = int(self.getTime() * library.MS_PER_SECOND)
+                duration_ms = int(self.getTotalTime() * library.MS_PER_SECOND)
+            except Exception as exc:  # noqa: BLE001 - getTime()/getTotalTime() must never crash the service
+                log_fn(xbmc_module.LOGWARNING, "playback sample failed: %r" % (exc,))
+                return
+            if duration_ms <= 0:
+                return
+            store.set_progress(
+                context["type"], context["id"], context.get("video_id"),
+                position_ms, duration_ms, library.iso8601_utc(),
+            )
+            now = datetime.datetime.now(datetime.timezone.utc)
+            if not should_push_now(self._last_pushed_at, now, final):
+                return
+            self._last_pushed_at = now
+            self._push(context, position_ms, duration_ms)
+
+        def _push(self, context, position_ms, duration_ms):
+            """Best-effort `datastorePut`: only when logged in AND the
+            'sync_progress' setting is on. A failure here is logged and
+            swallowed -- `_flush` above has already written the local
+            progress cache regardless, so a Stremio API hiccup never
+            costs the user their local resume position."""
+            if not sync_enabled_fn():
+                return
+            auth = store.get_auth()
+            if not auth or not auth.get("authKey"):
+                return
+            try:
+                existing = api.datastore_get(auth["authKey"], ids=[context["id"]], all=False)
+                base = existing[0] if existing else library.build_library_item({
+                    "id": context["id"],
+                    "type": context["type"],
+                    "name": context.get("name", ""),
+                    "poster": context.get("poster"),
+                })
+                merged = library.merge_playback(
+                    base, position_ms, duration_ms, video_id=context.get("video_id"),
+                )
+                api.datastore_put(auth["authKey"], [merged])
+            except Exception as exc:  # noqa: BLE001 - a Stremio API hiccup must never interrupt playback or crash the service
+                log_fn(xbmc_module.LOGWARNING, "library push failed: %r" % (exc,))
+
+    return _RivuletPlayer()
+
+
 def main():
     """Entry point for service.py: xbmc.Monitor-driven supervision loop."""
     import xbmc
@@ -282,6 +423,11 @@ def main():
 
     def log(level, message):
         xbmc.log(f"[{ADDON_ID}] {message}", level)
+
+    store = Store(profile_dir)
+    progress_player = build_progress_player(
+        xbmc, store, StremioAPI(), log, lambda: addon.getSettingBool("sync_progress"),
+    )
 
     class ServiceMonitor(xbmc.Monitor):
         def __init__(self):
@@ -328,6 +474,11 @@ def main():
     attempted_download = False
 
     while not monitor.abortRequested():
+        try:
+            progress_player.sample_if_playing()
+        except Exception as exc:  # noqa: BLE001 - playback-progress sampling must never crash the service loop
+            log(xbmc.LOGWARNING, "progress sampling failed: %r" % (exc,))
+
         if monitor.restart_requested:
             monitor.restart_requested = False
             if proc is not None:

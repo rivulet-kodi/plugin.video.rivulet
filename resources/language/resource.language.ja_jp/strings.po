@@ -447,3 +447,47 @@ msgstr "pprof診断用アドレス"
 msgctxt "#30147"
 msgid "Stremio account auth key (HTTPS auto-cert)"
 msgstr "Stremioアカウント認証キー (HTTPS自動証明書)"
+
+msgctxt "#30170"
+msgid "Sync playback progress to your Stremio account"
+msgstr "再生の進行度をStremioアカウントに同期する"
+
+msgctxt "#30171"
+msgid "Ask to resume"
+msgstr "再生の再開を確認する"
+
+msgctxt "#30172"
+msgid "Resume playback?"
+msgstr "再生を再開しますか？"
+
+msgctxt "#30173"
+msgid "Resume from %s?"
+msgstr "%s から再開しますか？"
+
+msgctxt "#30174"
+msgid "Resume"
+msgstr "再開"
+
+msgctxt "#30175"
+msgid "Start from beginning"
+msgstr "最初から再生"
+
+msgctxt "#30160"
+msgid "This stream can only be opened in the Stremio app"
+msgstr "このストリームは Stremio アプリでのみ開くことができます"
+
+msgctxt "#30180"
+msgid "Play the next episode automatically"
+msgstr "次のエピソードを自動再生する"
+
+msgctxt "#30181"
+msgid "Auto-play countdown (seconds)"
+msgstr "自動再生までのカウントダウン（秒）"
+
+msgctxt "#30182"
+msgid "Next episode"
+msgstr "次のエピソード"
+
+msgctxt "#30183"
+msgid "Playing %s in %d s"
+msgstr "%sを%d秒後に再生"

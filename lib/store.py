@@ -10,6 +10,24 @@ JSON files live under ``data_dir``:
   Stremio account, or absent/``None`` when logged out.
 * ``search_history.json`` -- list of past search query strings, most
   recent first, capped at :data:`MAX_SEARCH_HISTORY` entries.
+* ``now_playing.json`` -- the single active "now playing" context dict
+  (see the cross-slice Contract: ``{'type', 'id', 'video_id', 'name',
+  'poster', 'started_at'}``) while Rivulet-originated playback is
+  ongoing, or absent when nothing is playing.
+* ``resume_offset.json`` -- a one-shot pending resume-seek offset
+  (milliseconds) queued by ``lib.ui.player`` for the NEXT playback
+  session's ``onAVStarted``, consumed and cleared exactly once by
+  ``lib.service_runner``. Deliberately a SEPARATE file from
+  ``now_playing.json`` rather than an extra key on that dict, so the
+  Contract-pinned shape above stays exactly those five keys.
+* ``progress.json`` -- a local cache of playback position, keyed by
+  ``(type, id, video_id)`` (see :func:`Store.get_progress`/
+  :func:`Store.set_progress`), so resume and progress display work
+  fully offline and while logged out -- this file is never read from or
+  written to the Stremio account API (that is
+  ``lib.stremio.api.StremioAPI.datastore_get``/``datastore_put``'s job,
+  driven by ``lib.service_runner`` only when logged in AND the
+  "sync_progress" setting is on).
 
 Writes are atomic (write to a temp file, then ``os.replace``) so a crash or
 power loss never leaves a half-written JSON file behind. A corrupt file on
@@ -25,6 +43,15 @@ retry -- no ``fcntl``/``msvcrt`` OS-specific locking, since this addon
 also runs on Windows and Android. ``auth.json`` has no such
 read-modify-write pattern (every write either replaces it wholesale or
 clears it), so it does not need this.
+
+``now_playing.json``/``resume_offset.json`` follow the same wholesale-
+replace-or-clear pattern as ``auth.json`` above (no read-modify-write, so
+no compare-and-swap needed). ``progress.json`` is a plain read-modify-
+write like ``search_history.json`` -- a lost update under two concurrent
+writers (e.g. ``default.py`` and the background service both sampling
+around the same moment) at worst drops one sample, which the next
+periodic sample corrects within seconds; writes are still atomic, so
+this never corrupts the file itself.
 """
 
 import copy
@@ -35,6 +62,9 @@ import tempfile
 ADDONS_FILENAME = "addons.json"
 AUTH_FILENAME = "auth.json"
 SEARCH_HISTORY_FILENAME = "search_history.json"
+NOW_PLAYING_FILENAME = "now_playing.json"
+RESUME_OFFSET_FILENAME = "resume_offset.json"
+PROGRESS_FILENAME = "progress.json"
 
 #: Most-recent-first cap for the persisted search history list.
 MAX_SEARCH_HISTORY = 15
@@ -736,6 +766,9 @@ class Store:
         self._addons_path = os.path.join(self.data_dir, ADDONS_FILENAME)
         self._auth_path = os.path.join(self.data_dir, AUTH_FILENAME)
         self._search_history_path = os.path.join(self.data_dir, SEARCH_HISTORY_FILENAME)
+        self._now_playing_path = os.path.join(self.data_dir, NOW_PLAYING_FILENAME)
+        self._resume_offset_path = os.path.join(self.data_dir, RESUME_OFFSET_FILENAME)
+        self._progress_path = os.path.join(self.data_dir, PROGRESS_FILENAME)
 
     # -- addons ----------------------------------------------------------
 
@@ -912,3 +945,95 @@ class Store:
             os.remove(self._search_history_path)
         except OSError:
             pass
+
+    # -- now playing / resume / progress (LibrarySync) ----------------------
+
+    def get_now_playing(self):
+        """Return the current Rivulet "now playing" context dict (the
+        cross-slice Contract shape: ``{'type', 'id', 'video_id', 'name',
+        'poster', 'started_at'}``), or ``None`` while nothing Rivulet-
+        originated is playing."""
+        context = _read_json(self._now_playing_path, None)
+        return context if isinstance(context, dict) else None
+
+    def set_now_playing(self, context):
+        """Persist/replace the "now playing" context, or clear it when
+        ``context`` is ``None`` (playback ended). Wholesale replace-or-
+        clear like :meth:`set_auth` -- see the module docstring."""
+        if context is None:
+            try:
+                os.remove(self._now_playing_path)
+            except OSError:
+                pass
+            return
+        _atomic_write(self._now_playing_path, dict(context))
+
+    def get_resume_offset_ms(self):
+        """Return the pending resume-seek offset (milliseconds) queued by
+        ``lib.ui.player`` for the NEXT playback session's ``onAVStarted``,
+        or ``None`` if there is nothing queued."""
+        payload = _read_json(self._resume_offset_path, None)
+        return payload.get("offset_ms") if isinstance(payload, dict) else None
+
+    def set_resume_offset_ms(self, offset_ms):
+        """Queue a pending resume-seek offset, or clear it when
+        ``offset_ms`` is ``None``. ``lib.service_runner``'s playback-
+        progress tracker consumes and clears this exactly once, on the
+        next ``onAVStarted``, so a later session (e.g. auto-playing the
+        next episode) never re-seeks using a stale value."""
+        if offset_ms is None:
+            try:
+                os.remove(self._resume_offset_path)
+            except OSError:
+                pass
+            return
+        _atomic_write(self._resume_offset_path, {"offset_ms": int(offset_ms)})
+
+    @staticmethod
+    def _progress_key(content_type, content_id, video_id=None):
+        """Flatten ``(content_type, content_id, video_id)`` into the
+        single string key ``progress.json`` indexes by (JSON object keys
+        must be strings). Joined with ``"\\x1f"`` (ASCII unit separator)
+        rather than ``":"`` -- Stremio ids are themselves colon-delimited
+        (e.g. an episode id like ``"tt1234567:1:2"``), so reusing ``":"``
+        here could make two different tuples collide; ``"\\x1f"`` never
+        appears in a Stremio id."""
+        return "\x1f".join((content_type or "", content_id or "", video_id or ""))
+
+    def get_progress(self, content_type, content_id, video_id=None):
+        """Return the cached local playback-progress dict for
+        ``(content_type, content_id, video_id)`` --
+        ``{'position_ms', 'duration_ms', 'updated_at'}`` -- or ``None`` if
+        nothing has been recorded yet. Never talks to the Stremio API
+        (that is ``lib.stremio.api.StremioAPI``'s job): this is the sole
+        source of truth for ``lib.ui.player``'s resume prompt, so it
+        works fully offline and while logged out."""
+        progress = _read_json(self._progress_path, None)
+        if not isinstance(progress, dict):
+            return None
+        entry = progress.get(self._progress_key(content_type, content_id, video_id))
+        return entry if isinstance(entry, dict) else None
+
+    def set_progress(self, content_type, content_id, video_id, position_ms, duration_ms, now):
+        """Record/replace the local progress-cache entry for
+        ``(content_type, content_id, video_id)``. ``now`` is a caller-
+        supplied timestamp string (see ``lib.library.iso8601_utc``) --
+        this module stays purely mechanical persistence and never
+        formats timestamps itself.
+
+        Plain read-modify-write, no :meth:`update_addons`-style compare-
+        and-swap: like :meth:`add_search_query`, a lost update under two
+        concurrent writers (``default.py`` and the background service
+        sampling at the same moment) at worst drops one sample, which the
+        next periodic sample corrects within seconds -- never file
+        corruption (writes are still atomic).
+        """
+        progress = _read_json(self._progress_path, None)
+        if not isinstance(progress, dict):
+            progress = {}
+        progress[self._progress_key(content_type, content_id, video_id)] = {
+            "position_ms": int(position_ms),
+            "duration_ms": int(duration_ms),
+            "updated_at": now,
+        }
+        _atomic_write(self._progress_path, progress)

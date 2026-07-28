@@ -283,7 +283,7 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         if open_streams(
             self.stype, sid, poster=self.meta.get('poster'),
             heading=_episode_heading(self.meta.get('name') or self.meta.get('id') or '', video),
-            art=_show_art(self.meta), meta=self.meta,
+            art=_show_art(self.meta), meta=self.meta, video_id=sid,
         ):
             self.should_close_caller = True
             self.close()

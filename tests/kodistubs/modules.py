@@ -49,10 +49,16 @@ def make_xbmc(env, info_labels=None):
         """Stand-in for `xbmc.Player()`: records every `.play(url, listitem)`
         call `lib.ui.player.play_direct()` makes on it - the custom-window
         direct-play path (no ADDON_HANDLE/xbmcplugin.setResolvedUrl
-        involved). `isPlaying()` answers from `env.player_is_playing`
-        (plain bool, or a callable taking the 1-based call count - same
-        convention as `Monitor.waitForAbort()`/`env.monitor_abort` above),
-        for `lib.ui.streamswindow._wait_for_playback_end()`'s poll loop."""
+        involved). `isPlaying()`/`isPlayingVideo()` answer from
+        `env.player_is_playing` (plain bool, or a callable taking the
+        1-based call count - same convention as
+        `Monitor.waitForAbort()`/`env.monitor_abort` above), for
+        `lib.ui.streamswindow._wait_for_playback_end()`'s poll loop and
+        `lib.service_runner`'s progress-tracking player.
+        `getTime()`/`getTotalTime()` (seconds, matching the real
+        `xbmc.Player` API) answer from `env.player_get_time`/
+        `env.player_get_total_time` the same way; `seekTime()` just
+        records its argument into `env.player_seek_calls`."""
 
         def play(self, item='', listitem=None, windowed=False, startpos=-1):
             env.player_play_calls.append((item, listitem))
@@ -61,6 +67,22 @@ def make_xbmc(env, info_labels=None):
             env.player_is_playing_calls += 1
             playing = env.player_is_playing
             return bool(playing(env.player_is_playing_calls)) if callable(playing) else bool(playing)
+
+        def isPlayingVideo(self):
+            return self.isPlaying()
+
+        def getTime(self):
+            env.player_get_time_calls += 1
+            value = env.player_get_time
+            return value(env.player_get_time_calls) if callable(value) else value
+
+        def getTotalTime(self):
+            env.player_get_total_time_calls += 1
+            value = env.player_get_total_time
+            return value(env.player_get_total_time_calls) if callable(value) else value
+
+        def seekTime(self, seek_time):
+            env.player_seek_calls.append(seek_time)
 
     module.Monitor = Monitor
     module.Player = Player

@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 import pytest
 import requests
 
-from lib.stremio.server import ServerClient
+from lib.stremio.server import ServerClient, UnsupportedStreamError
 from tests.conftest import FakeSession
 
 BASE = "http://127.0.0.1:11470"
@@ -121,10 +121,16 @@ def test_resolve_stream_yt_id_builds_yt_endpoint():
     assert client.resolve_stream(stream) == BASE + "/yt/dQw4w9WgXcQ"
 
 
-def test_resolve_stream_external_url_returns_none():
+def test_resolve_stream_external_url_raises_unsupported():
+    """externalUrl (StreamSource::External) is a native-app deep link,
+    never a URL Kodi's player can open - resolve_stream must raise
+    UnsupportedStreamError, not silently return None (see
+    test_resolve_stream_player_frame_url_raises_unsupported for the
+    companion PlayerFrame case)."""
     client = make_client()
     stream = {"externalUrl": "https://example.com/watch"}
-    assert client.resolve_stream(stream) is None
+    with pytest.raises(UnsupportedStreamError):
+        client.resolve_stream(stream)
 
 
 def test_resolve_stream_magnet_parses_btih_and_trackers():
@@ -605,3 +611,215 @@ def test_iter_front_closes_response_when_done():
     list(client.iter_front("dd" * 20, 0, want_bytes=10))
 
     assert resp.closed is True
+
+
+# ============================================================================
+# NEW SECTION (StreamSources) - base32 info hashes, percent-encoded
+# trackers, archive/nzb/ftp `/create` payload building, and the
+# UnsupportedStreamError contract for externalUrl/playerFrameUrl. Added
+# independently of the sections above; do not edit them when touching
+# this section.
+# ============================================================================
+import json
+from urllib.parse import parse_qs, urlsplit
+
+from lib.stremio.lzstring import decompress_from_encoded_uri_component
+from lib.stremio.server import UNKNOWN_FILE_IDX, normalize_info_hash, normalize_trackers
+
+_HEX_HASH = "aabbccddeeff00112233445566778899aabbccdd"
+_BASE32_HASH = "VK54ZXPO74ABCIRTIRKWM54ITGVLXTG5"  # base32(unhexlify(_HEX_HASH))
+
+
+def _lz_payload(url):
+    """Pull the `lz` query param out of `url`, percent-decode it, run it
+    through the real LZ-String decompressor, and json.loads() the
+    result - i.e. reverse exactly what `ServerClient._lz_query_url`
+    built, to assert on the JSON body a real stremio-server-go would
+    see."""
+    query = parse_qs(urlsplit(url).query)
+    compressed = query["lz"][0]
+    decompressed = decompress_from_encoded_uri_component(compressed)
+    assert decompressed is not None
+    return json.loads(decompressed)
+
+
+# --- normalize_info_hash / normalize_trackers -----------------------------
+
+
+def test_normalize_info_hash_hex_lowercased():
+    assert normalize_info_hash(_HEX_HASH.upper()) == _HEX_HASH
+
+
+def test_normalize_info_hash_base32_decodes_to_hex():
+    assert normalize_info_hash(_BASE32_HASH) == _HEX_HASH
+    assert normalize_info_hash(_BASE32_HASH.lower()) == _HEX_HASH
+
+
+def test_normalize_info_hash_wrong_length_returns_none():
+    assert normalize_info_hash(_HEX_HASH[:-1]) is None  # 39 chars
+    assert normalize_info_hash(_BASE32_HASH[:-1]) is None  # 31 chars
+
+
+def test_normalize_info_hash_non_hex_non_base32_garbage_returns_none():
+    assert normalize_info_hash("g" * 40) is None  # right length, not valid hex
+    assert normalize_info_hash("0" * 32) is None  # right length, '0'/'1' not in RFC 4648 base32
+
+
+def test_normalize_info_hash_non_string_returns_none():
+    assert normalize_info_hash(None) is None
+    assert normalize_info_hash(12345) is None
+
+
+def test_normalize_trackers_percent_decodes_dedupes_preserves_order():
+    trackers = [
+        "udp%3A%2F%2Ftracker1.example%2Fannounce",
+        "udp://tracker1.example/announce",  # decodes to the same value - dropped
+        "udp://tracker2.example/announce",
+        "",  # empty - dropped
+    ]
+    assert normalize_trackers(trackers) == [
+        "udp://tracker1.example/announce",
+        "udp://tracker2.example/announce",
+    ]
+
+
+def test_torrent_url_percent_encoded_tracker_decoded_and_deduped():
+    client = make_client()
+    trackers = [
+        "udp%3A%2F%2Ftracker1.example%2Fannounce",
+        "udp://tracker1.example/announce",
+        "udp://tracker2.example/announce",
+    ]
+    url = client.torrent_url(_HEX_HASH, 0, trackers)
+    query = parse_qs(urlsplit(url).query)
+    assert query["tr"] == ["udp://tracker1.example/announce", "udp://tracker2.example/announce"]
+
+
+# --- resolve_stream: base32 magnet / garbage infoHash ----------------------
+
+
+def test_resolve_stream_magnet_base32_info_hash_resolves_to_hex_url():
+    client = make_client()
+    stream = {"url": "magnet:?xt=urn:btih:%s" % _BASE32_HASH}
+    resolved = client.resolve_stream(stream)
+    assert resolved == client.torrent_url(_HEX_HASH, UNKNOWN_FILE_IDX, [])
+
+
+def test_resolve_stream_garbage_info_hash_returns_none():
+    client = make_client()
+    stream = {"infoHash": "not-a-valid-hash-at-all-and-31-chars"}
+    assert client.resolve_stream(stream) is None
+
+
+# --- archive kinds (rar/zip/7zip/tgz/tar) -----------------------------------
+
+
+@pytest.mark.parametrize(
+    ("stream_key", "url_kind"),
+    [
+        ("rarUrls", "rar"),
+        ("zipUrls", "zip"),
+        ("7zipUrls", "7zip"),
+        ("tgzUrls", "tgz"),
+        ("tarUrls", "tar"),
+    ],
+)
+def test_resolve_stream_archive_kinds_build_create_url_and_payload(stream_key, url_kind):
+    client = make_client()
+    stream = {
+        stream_key: [["https://example.com/file.rar", 10000], ["https://example.com/file2.rar"]],
+        "fileIdx": 1,
+        "fileMustInclude": ["includeFile1"],
+    }
+    resolved = client.resolve_stream(stream)
+    assert resolved.startswith("%s/%s/create?" % (BASE, url_kind))
+    assert _lz_payload(resolved) == {
+        "urls": [["https://example.com/file.rar", 10000], ["https://example.com/file2.rar"]],
+        "fileIdx": 1,
+        "fileMustInclude": ["includeFile1"],
+    }
+
+
+def test_resolve_stream_archive_omits_file_idx_and_file_must_include_when_absent():
+    client = make_client()
+    stream = {"rarUrls": [["https://example.com/file.rar"]]}
+    resolved = client.resolve_stream(stream)
+    assert _lz_payload(resolved) == {"urls": [["https://example.com/file.rar"]]}
+
+
+def test_resolve_stream_archive_no_urls_returns_none():
+    client = make_client()
+    assert client.resolve_stream({"rarUrls": []}) is None
+
+
+def test_resolve_stream_archive_ftp_member_rewritten_through_ftp_create():
+    client = make_client()
+    stream = {"zipUrls": [["ftp://ftp.example.com/path/movie.mkv", 5000]]}
+    resolved = client.resolve_stream(stream)
+    payload = _lz_payload(resolved)
+    assert len(payload["urls"]) == 1
+    ftp_proxy_url, num_bytes = payload["urls"][0]
+    assert num_bytes == 5000
+    assert ftp_proxy_url.startswith(BASE + "/ftp/movie.mkv?")
+    assert _lz_payload(ftp_proxy_url) == {"ftpUrl": "ftp://ftp.example.com/path/movie.mkv"}
+
+
+# --- nzb ---------------------------------------------------------------
+
+
+def test_resolve_stream_nzb_single_url():
+    client = make_client()
+    stream = {
+        "nzbUrl": "https://example.com/release.nzb",
+        "servers": ["https://usenet1.example.com", "https://usenet2.example.com"],
+    }
+    resolved = client.resolve_stream(stream)
+    assert resolved.startswith(BASE + "/nzb/create?")
+    assert _lz_payload(resolved) == {
+        "nzbUrl": "https://example.com/release.nzb",
+        "servers": ["https://usenet1.example.com", "https://usenet2.example.com"],
+    }
+
+
+def test_resolve_stream_nzb_multi_url():
+    client = make_client()
+    stream = {
+        "nzbUrls": ["https://example.com/a.nzb", "https://example.com/b.nzb"],
+        "servers": ["https://usenet1.example.com"],
+    }
+    resolved = client.resolve_stream(stream)
+    assert _lz_payload(resolved) == {
+        "nzbUrls": ["https://example.com/a.nzb", "https://example.com/b.nzb"],
+        "servers": ["https://usenet1.example.com"],
+    }
+
+
+def test_resolve_stream_nzb_without_servers_returns_none():
+    client = make_client()
+    stream = {"nzbUrl": "https://example.com/release.nzb", "servers": []}
+    assert client.resolve_stream(stream) is None
+
+
+# --- ftp (top-level bare stream) -----------------------------------------
+
+
+def test_resolve_stream_bare_ftp_url_builds_ftp_create():
+    client = make_client()
+    stream = {"url": "ftp://ftp.example.com/dir/movie.mkv"}
+    resolved = client.resolve_stream(stream)
+    assert resolved.startswith(BASE + "/ftp/movie.mkv?")
+    assert _lz_payload(resolved) == {"ftpUrl": "ftp://ftp.example.com/dir/movie.mkv"}
+
+
+# --- UnsupportedStreamError --------------------------------------------
+
+
+def test_resolve_stream_player_frame_url_raises_unsupported():
+    client = make_client()
+    stream = {"playerFrameUrl": "https://example.com/embed"}
+    with pytest.raises(UnsupportedStreamError):
+        client.resolve_stream(stream)
+
+
+def test_unsupported_stream_error_is_a_server_error():
+    assert issubclass(UnsupportedStreamError, ServerError)

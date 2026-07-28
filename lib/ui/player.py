@@ -13,9 +13,15 @@ import xbmc
 import xbmcgui
 import xbmcplugin
 
+from lib.library import iso8601_utc
 from lib.store import Store
 from lib.stremio.addons import AddonClient
-from lib.stremio.server import UNKNOWN_FILE_IDX, ServerClient, guess_file_idx
+from lib.stremio.server import (
+    UNKNOWN_FILE_IDX,
+    ServerClient,
+    UnsupportedStreamError,
+    guess_file_idx,
+)
 from lib.stremio.subtitles import collect_subtitles, sort_subtitles
 from lib.ui.compat import (
     ADDON,
@@ -177,6 +183,87 @@ def _get_client():
     if _CLIENT is None:
         _CLIENT = AddonClient()
     return _CLIENT
+
+
+#: Resume-prompt progress band (percent of duration already watched):
+#: below RESUME_MIN_PERCENT is "barely started, not worth asking"; at/
+#: above RESUME_MAX_PERCENT is "basically finished, nothing meaningful
+#: left to resume".
+RESUME_MIN_PERCENT = 1.0
+RESUME_MAX_PERCENT = 95.0
+
+
+def _format_hms(seconds):
+    """'H:MM:SS' for the resume-prompt message (e.g. 5410 -> '1:30:10')."""
+    seconds = max(0, int(seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return '%d:%02d:%02d' % (hours, minutes, secs)
+
+
+def _maybe_resume_offset_ms(store, stype, sid, video_id):
+    """Return the cached position (milliseconds) to resume from if the
+    user has local progress for `(stype, sid, video_id)` between
+    `RESUME_MIN_PERCENT` and `RESUME_MAX_PERCENT` of duration, the
+    'resume_ask' setting is on, and they answer yes to the
+    `xbmcgui.Dialog().yesno()` prompt below - else `None` (nothing
+    cached, out of band, declined, or the setting is off). Never raises:
+    a broken local progress cache must never block playback.
+    """
+    if not setting_bool('resume_ask', True):
+        return None
+    try:
+        progress = store.get_progress(stype, sid, video_id)
+    except Exception as exc:  # noqa: BLE001 - a corrupt local cache must never block playback
+        log('player: get_progress failed for %s/%s: %r' % (stype, sid, exc), xbmc.LOGWARNING)
+        return None
+    if not progress:
+        return None
+    position_ms = progress.get('position_ms') or 0
+    duration_ms = progress.get('duration_ms') or 0
+    if duration_ms <= 0 or position_ms <= 0:
+        return None
+    percent = (position_ms / duration_ms) * 100.0
+    if percent < RESUME_MIN_PERCENT or percent > RESUME_MAX_PERCENT:
+        return None
+    if not xbmcgui.Dialog().yesno(
+        L(30172), _lfmt(30173, _format_hms(position_ms / 1000.0)),
+        yeslabel=L(30174), nolabel=L(30175),
+    ):
+        return None
+    return position_ms
+
+
+def _record_now_playing_and_maybe_resume(stype, sid, video_id, item_meta):
+    """Best-effort: persist the "now playing" context
+    (`lib.store.Store.set_now_playing`, consumed by
+    `lib.service_runner`'s background progress tracker) and, when local
+    progress exists for `(stype, sid, video_id)` in a resumable band,
+    prompt the user and queue a one-shot resume-seek offset the
+    service's `onAVStarted` performs - `ListItem.setProperty(
+    'StartOffset')` is unreliable for the direct `xbmc.Player().play()`
+    path this addon's custom windows use, hence an explicit post-start
+    seek rather than a resume property (see `lib.service_runner`).
+
+    Never raises: a broken store write must never block playback that
+    has already been resolved.
+    """
+    try:
+        store = _get_store()
+        resume_offset_ms = _maybe_resume_offset_ms(store, stype, sid, video_id)
+        meta = (item_meta or {}).get('meta') or {}
+        art = (item_meta or {}).get('art') or {}
+        store.set_now_playing({
+            'type': stype,
+            'id': sid,
+            'video_id': video_id,
+            'name': (item_meta or {}).get('label') or meta.get('name') or '',
+            'poster': art.get('poster') or meta.get('poster'),
+            'started_at': iso8601_utc(),
+        })
+        store.set_resume_offset_ms(resume_offset_ms)
+    except Exception as exc:  # noqa: BLE001 - a broken store write must never block playback
+        log('player: recording now-playing context failed for %s/%s: %r' % (stype, sid, exc), xbmc.LOGWARNING)
 
 
 def _attach_subtitles(list_item, behavior_hints, stype, sid):
@@ -571,6 +658,26 @@ def _resolve_art(art, meta):
     return result
 
 
+def _stream_plot(stream):
+    """Last-resort plot text for the OSD: the stream's own parsed
+    description (release name, size, seeders, provider), or '' when the
+    stream yields nothing worth showing.
+
+    Parsing here rather than accepting a pre-parsed `info` from the
+    caller keeps `item_meta` a pure content-metadata contract and means
+    the classical `action=play` path (which never had an `info` dict)
+    benefits too. `parse_stream`/`format_plot` are pure text helpers and
+    cannot raise on odd input, but a malformed stream must never cost us
+    playback, so this still degrades to ''.
+    """
+    try:
+        from lib.stremio.streaminfo import format_plot, parse_stream
+        return format_plot(parse_stream(stream or {}))
+    except Exception as exc:  # noqa: BLE001 - a plot is cosmetic, playback is not
+        log('player: stream plot fallback failed: %r' % (exc,), xbmc.LOGWARNING)
+        return ''
+
+
 def _apply_item_metadata(list_item, stream, stype, item_meta, filename):
     """Populate `list_item`'s label and video-info metadata (title, art,
     plot, year, rating, genre, duration, mediatype/tvshowtitle) so
@@ -614,8 +721,22 @@ def _apply_item_metadata(list_item, stream, stype, item_meta, filename):
     if originaltitle and originaltitle != title:
         info['originaltitle'] = originaltitle
 
-    if meta.get('description'):
-        info['plot'] = meta['description']
+    # Kodi's fullscreen OSD info panel (Estuary's DialogSeekBar.xml renders
+    # `$INFO[VideoPlayer.Tagline][CR]$INFO[VideoPlayer.Plot]` with
+    # `fallback="10005"`, and Kodi string 10005 IS the literal "Not
+    # available") shows that fallback whenever the playing item has no
+    # plot - live-confirmed on a real device even after the title/art fix
+    # above landed. Catalog previews frequently carry no `description` at
+    # all, so rather than leave the panel reading "Not available", fall
+    # back to the stream's own parsed description (release name, size,
+    # seeders, provider) - genuinely the most useful thing to show about
+    # the file actually playing.
+    plot = item_meta.get('plot') or meta.get('description') or _stream_plot(stream)
+    if plot:
+        info['plot'] = plot
+
+    if meta.get('tagline'):
+        info['plotoutline'] = meta['tagline']
 
     year = _parse_year(meta.get('releaseInfo') or meta.get('year'))
     if year is not None:
@@ -639,7 +760,7 @@ def _apply_item_metadata(list_item, stream, stype, item_meta, filename):
     set_video_info(list_item, info)
 
 
-def _resolve_playable_item(stream, stype, sid, item_meta=None):
+def _resolve_playable_item(stream, stype, sid, item_meta=None, video_id=None):
     """Resolve `stream` (Stremio Stream object for content `stype`/`sid`)
     to a `(url, list_item)` pair ready to hand to Kodi's player, or
     `(None, None)` on failure - a notification has already been shown
@@ -671,6 +792,13 @@ def _resolve_playable_item(stream, stype, sid, item_meta=None):
     camera placeholder, even though the caller (`lib.ui.streamswindow`)
     already knew the real title/poster/fanart/meta all along. `None`/
     `{}` (the default) behaves exactly as before this parameter existed.
+
+    `video_id` (optional) is the specific episode id actually being
+    played, when the caller has one - threaded into the "now playing"
+    context (`lib.store.Store.set_now_playing`) and the local progress-
+    cache lookup/write key (see `_record_now_playing_and_maybe_resume`).
+    `None` (a movie, or a caller with no episode id of its own) behaves
+    exactly as before this parameter existed.
     """
     stream = stream or {}
     behavior_hints = stream.get('behaviorHints') or {}
@@ -690,6 +818,14 @@ def _resolve_playable_item(stream, stype, sid, item_meta=None):
         dialog.update(_RESOLVE_PERCENT, L(30087))
         try:
             url = server.resolve_stream(stream)
+        except UnsupportedStreamError as exc:
+            # A known limitation (externalUrl/playerFrameUrl streams can
+            # only be opened by the Stremio app itself), not a fault -
+            # LOGINFO, and a message telling the user WHY instead of the
+            # generic "no playable stream" one below.
+            log('player: unsupported stream for %s/%s: %r' % (stype, sid, exc), xbmc.LOGINFO)
+            notify(L(30160))
+            return None, None
         except Exception as exc:  # noqa: BLE001 - a broken server response must not crash Kodi
             log('player: resolve_stream failed for %s/%s: %r' % (stype, sid, exc), xbmc.LOGERROR)
             url = None
@@ -735,10 +871,12 @@ def _resolve_playable_item(stream, stype, sid, item_meta=None):
 
     _attach_subtitles(list_item, behavior_hints, stype, sid)
 
+    _record_now_playing_and_maybe_resume(stype, sid, video_id, item_meta)
+
     return url, list_item
 
 
-def play(handle, stream, stype, sid, item_meta=None):
+def play(handle, stream, stype, sid, item_meta=None, video_id=None):
     """Resolve `stream` and hand it to Kodi via `setResolvedUrl` - the
     classical GetDirectory play path (action=play).
 
@@ -748,15 +886,18 @@ def play(handle, stream, stype, sid, item_meta=None):
     bug where a stream with no filename of its own left Kodi showing
     "Not available" and the default camera placeholder. `None` (the
     default) behaves exactly as before this parameter existed.
+
+    `video_id` (optional) is forwarded to `_resolve_playable_item()`
+    unchanged - see that function's docstring.
     """
-    _url, list_item = _resolve_playable_item(stream, stype, sid, item_meta=item_meta)
+    _url, list_item = _resolve_playable_item(stream, stype, sid, item_meta=item_meta, video_id=video_id)
     if list_item is None:
         xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())
         return
     xbmcplugin.setResolvedUrl(handle, True, list_item)
 
 
-def play_direct(stream, stype, sid, item_meta=None, on_ready=None):
+def play_direct(stream, stype, sid, item_meta=None, on_ready=None, video_id=None):
     """Resolve `stream` and hand it DIRECTLY to `xbmc.Player()` - the
     custom-window path (`lib.ui.streamswindow`), where there is no
     `ADDON_HANDLE`/GetDirectory call to satisfy. Returns True if
@@ -771,8 +912,11 @@ def play_direct(stream, stype, sid, item_meta=None, on_ready=None):
     moment playback is handed off rather than guessing earlier. Any
     exception it raises is logged at LOGWARNING and swallowed - a broken
     hook must never prevent playback that has already been resolved.
+
+    `video_id` (optional) is forwarded to `_resolve_playable_item()`
+    unchanged - see that function's docstring.
     """
-    url, list_item = _resolve_playable_item(stream, stype, sid, item_meta=item_meta)
+    url, list_item = _resolve_playable_item(stream, stype, sid, item_meta=item_meta, video_id=video_id)
     if list_item is None:
         return False
     if on_ready is not None:

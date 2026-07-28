@@ -46,6 +46,8 @@ real bytes-obtained/target ratio). Buffering also gains a live,
 best-effort speed/peers second line (same `/create` poll the metadata
 stage already used) so a 2s retry pause is never silent.
 """
+import contextlib
+
 import pytest
 
 from tests.kodistubs import install_kodi_stubs
@@ -97,12 +99,14 @@ class _ServerScript:
     """
 
     def __init__(self, *, available=True, available_results=None, resolve_url='http://server/x/0',
+                 resolve_error=None,
                  create_engine_result=None, create_engine_results=None, create_engine_error=None,
                  iter_front_attempts=None,
                  torrent_url_result=None):
         self.available = available
         self.available_results = list(available_results or [])
         self.resolve_url = resolve_url
+        self.resolve_error = resolve_error
         self.create_engine_result = {} if create_engine_result is None else create_engine_result
         self.create_engine_results = list(create_engine_results or [])
         self.create_engine_error = create_engine_error
@@ -129,6 +133,8 @@ class _ServerScript:
                 return script.available
 
             def resolve_stream(self, stream):
+                if script.resolve_error is not None:
+                    raise script.resolve_error
                 return script.resolve_url
 
             def create_engine(self, info_hash, timeout=None):
@@ -606,6 +612,36 @@ def test_server_dependent_non_torrent_stream_shows_connect_and_resolve_stages(ko
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (40, True)
     assert list_item.path == 'http://server/yt/xyz'
+
+
+# --- UnsupportedStreamError: externalUrl/playerFrameUrl are a known -------
+# --- limitation, not a fault - distinct notification + LOGINFO -----------
+
+
+def test_unsupported_stream_error_notifies_30160_and_logs_loginfo_not_error(kodi_stubs, monkeypatch):
+    """resolve_stream() raising UnsupportedStreamError (externalUrl/
+    playerFrameUrl - see lib.stremio.server) must be handled distinctly
+    from a generic broken-response failure: notify() shows the specific
+    "only playable in the Stremio app" string (30160), not the generic
+    "no playable stream" one (30030), and the failure is logged at
+    LOGINFO (a known limitation) rather than LOGERROR (a fault)."""
+    from lib.stremio.server import UnsupportedStreamError
+
+    env = kodi_stubs.env
+    _ServerScript(
+        resolve_error=UnsupportedStreamError('externalUrl'),
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(50, {'externalUrl': 'https://example.com/watch'}, 'movie', 'tt50')
+
+    assert [msg for _, msg, _, _ in env.notifications] == ['STR30160']
+    loginfo = kodi_stubs.player.xbmc.LOGINFO
+    logerror = kodi_stubs.player.xbmc.LOGERROR
+    assert any(level == loginfo for _, level in env.log_calls)
+    assert not any(level == logerror for _, level in env.log_calls)
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (50, False)
+    assert list_item.path == ''
 
 
 # --- ListItem hardening: setContentLookup/setMimeType/video-info (seek-exit fix) -
@@ -1111,6 +1147,53 @@ def test_resolve_with_full_item_meta_populates_label_art_and_info(kodi_stubs, mo
     assert info.get('genre') == ['Action', 'Sci-Fi']
     assert info.get('duration') == 40 * 60
 
+def test_plot_falls_back_to_the_streams_own_description_when_meta_has_none(kodi_stubs, monkeypatch):
+    """Kodi's OSD info panel renders an empty plot as the literal "Not
+    available" (Estuary's DialogSeekBar.xml binds
+    `$INFO[VideoPlayer.Plot]` with `fallback="10005"`), and a catalog
+    preview routinely carries no `description` at all - so a picked
+    stream with a title/poster but no plot still looked broken on a real
+    device. The stream's own parsed description (release name, size,
+    seeders, provider) is the fallback.
+    """
+    env = kodi_stubs.env
+    env.addon.settings['buffer_enable'] = False
+    _ServerScript(resolve_url='http://server/x/0').install(monkeypatch, kodi_stubs.player)
+
+    item_meta = {'label': 'Dune', 'meta': {'name': 'Dune'}}  # no description
+    stream = _torrent_stream(fileIdx=0, title='Dune.2021.2160p.WEB-DL\nSeeds: 42')
+
+    kodi_stubs.player.play(72, stream, 'movie', 'tt72', item_meta=item_meta)
+
+    _handle, _succeeded, list_item = _resolved_one(env)
+    plot = list_item.legacy_info.get('plot')
+    assert plot  # never empty -> the OSD never shows "Not available"
+    assert 'Dune.2021.2160p.WEB-DL' in plot
+    assert '42 seeders' in plot
+
+
+def test_explicit_item_meta_plot_wins_over_description_and_stream_fallback(kodi_stubs, monkeypatch):
+    """A caller that knows the episode's own overview (DetailWindow) can
+    pass it directly; it outranks both the show-level `description` and
+    the stream-derived fallback."""
+    env = kodi_stubs.env
+    env.addon.settings['buffer_enable'] = False
+    _ServerScript(resolve_url='http://server/x/0').install(monkeypatch, kodi_stubs.player)
+
+    item_meta = {
+        'label': 'Chapter 2',
+        'plot': 'The Mandalorian returns the Child.',
+        'meta': {'description': 'show-level blurb', 'tagline': 'This is the Way'},
+    }
+
+    kodi_stubs.player.play(73, _torrent_stream(fileIdx=0), 'series', 'tt73:1:2', item_meta=item_meta)
+
+    _handle, _succeeded, list_item = _resolved_one(env)
+    info = list_item.legacy_info
+    assert info.get('plot') == 'The Mandalorian returns the Child.'
+    assert info.get('plotoutline') == 'This is the Way'
+
+
 
 def test_torrent_resolved_filename_from_create_stats_sets_correct_mimetype(kodi_stubs, monkeypatch):
     """Defect A/mime fix: a torrent's resolved playback URL
@@ -1228,3 +1311,258 @@ def test_play_direct_on_ready_exception_is_logged_and_swallowed_but_playback_sti
     assert result is True
     assert len(env.player_play_calls) == 1
     assert any(level == kodi_stubs.player.xbmc.LOGWARNING for _, level in env.log_calls)
+
+
+@contextlib.contextmanager
+def _kodi_stubs_with_yesno(yesno_answers):
+    """Like the `kodi_stubs` fixture above, but with scripted
+    `xbmcgui.Dialog().yesno()` answers queued up front -- that fixture
+    has no such parameter (no other test in this file needs one)."""
+    with install_kodi_stubs(
+        reload=_RELOADED_MODULES, localized={30090: 'attempt %d of %d'},
+        dialog_yesno=yesno_answers,
+    ) as ctx:
+        yield ctx
+
+
+class _FakeProgressStore:
+    """Fake `lib.store.Store` surface `lib.ui.player`'s resume/now-
+    playing code needs (`get_progress`/`set_now_playing`/
+    `set_resume_offset_ms`) -- injected via `monkeypatch.setattr(
+    kodi_stubs.player, 'Store', ...)` so these tests never touch a real
+    filesystem or `lib.store.Store` directly."""
+
+    def __init__(self, progress=None):
+        self._progress = progress
+        self.now_playing = None
+        self.resume_offset_ms = 'UNSET'  # distinguishes "never called" from "cleared to None"
+        self.get_progress_calls = []
+
+    def get_progress(self, content_type, content_id, video_id=None):
+        self.get_progress_calls.append((content_type, content_id, video_id))
+        return self._progress
+
+    def set_now_playing(self, context):
+        self.now_playing = context
+
+    def set_resume_offset_ms(self, offset_ms):
+        self.resume_offset_ms = offset_ms
+
+
+def _install_progress_store(monkeypatch, player_module, store):
+    monkeypatch.setattr(player_module, 'Store', lambda *a, **k: store)
+
+
+# --- "now playing" context recording (LibrarySync) --------------------------
+
+
+def test_now_playing_context_recorded_on_successful_resolve(kodi_stubs, monkeypatch):
+    store = _FakeProgressStore()
+    _install_progress_store(monkeypatch, kodi_stubs.player, store)
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    item_meta = {'label': 'Some Title', 'art': {'poster': 'https://x/poster.jpg'},
+                 'meta': {'name': 'Meta Name', 'poster': 'https://x/meta-poster.jpg'}}
+    kodi_stubs.player.play_direct(
+        {'url': 'https://example.com/a.mp4'}, 'series', 'tt1', item_meta=item_meta, video_id='tt1:1:2',
+    )
+
+    assert store.now_playing['type'] == 'series'
+    assert store.now_playing['id'] == 'tt1'
+    assert store.now_playing['video_id'] == 'tt1:1:2'
+    assert store.now_playing['name'] == 'Some Title'  # item_meta['label'] wins over meta.name
+    assert store.now_playing['poster'] == 'https://x/poster.jpg'  # item_meta['art'] wins over meta.poster
+    assert store.now_playing['started_at'].endswith('Z')
+
+
+def test_now_playing_falls_back_to_meta_name_and_poster_with_no_label_or_art(kodi_stubs, monkeypatch):
+    store = _FakeProgressStore()
+    _install_progress_store(monkeypatch, kodi_stubs.player, store)
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    item_meta = {'meta': {'name': 'Meta Name', 'poster': 'https://x/meta-poster.jpg'}}
+    kodi_stubs.player.play_direct(
+        {'url': 'https://example.com/a.mp4'}, 'movie', 'tt2', item_meta=item_meta,
+    )
+
+    assert store.now_playing['name'] == 'Meta Name'
+    assert store.now_playing['poster'] == 'https://x/meta-poster.jpg'
+    assert store.now_playing['video_id'] is None  # no video_id passed -> None, unchanged
+
+
+def test_now_playing_defaults_empty_name_and_none_poster_with_no_item_meta(kodi_stubs, monkeypatch):
+    store = _FakeProgressStore()
+    _install_progress_store(monkeypatch, kodi_stubs.player, store)
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play_direct({'url': 'https://example.com/a.mp4'}, 'movie', 'tt3')
+
+    assert store.now_playing['name'] == ''
+    assert store.now_playing['poster'] is None
+
+
+def test_resolve_failure_does_not_record_now_playing(kodi_stubs, monkeypatch):
+    store = _FakeProgressStore()
+    _install_progress_store(monkeypatch, kodi_stubs.player, store)
+    _ServerScript(resolve_url=None).install(monkeypatch, kodi_stubs.player)
+
+    result = kodi_stubs.player.play_direct({'url': 'https://example.com/a.mp4'}, 'movie', 'tt4')
+
+    assert result is False
+    assert store.now_playing is None
+
+
+def test_play_classical_path_also_records_now_playing(kodi_stubs, monkeypatch):
+    """The classical GetDirectory `play()` path shares
+    `_resolve_playable_item()` with `play_direct()` -- both the
+    setResolvedUrl path and the custom-window direct path must resume."""
+    env = kodi_stubs.env
+    store = _FakeProgressStore()
+    _install_progress_store(monkeypatch, kodi_stubs.player, store)
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(50, {'url': 'https://example.com/a.mp4'}, 'movie', 'tt5')
+
+    handle, succeeded, _list_item = _resolved_one(env)
+    assert (handle, succeeded) == (50, True)
+    assert store.now_playing['id'] == 'tt5'
+
+
+def test_video_id_threaded_to_progress_lookup_and_now_playing_context(kodi_stubs, monkeypatch):
+    store = _FakeProgressStore()
+    _install_progress_store(monkeypatch, kodi_stubs.player, store)
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play_direct(
+        {'url': 'https://example.com/a.mp4'}, 'series', 'tt6', video_id='tt6:1:3',
+    )
+
+    assert store.get_progress_calls == [('series', 'tt6', 'tt6:1:3')]
+    assert store.now_playing['video_id'] == 'tt6:1:3'
+
+
+# --- resume prompt: 1%-95% band, resume_ask setting, yes/no -----------------
+
+
+def test_resume_prompt_skipped_below_one_percent(kodi_stubs, monkeypatch):
+    store = _FakeProgressStore(progress={'position_ms': 500, 'duration_ms': 1000000})
+    _install_progress_store(monkeypatch, kodi_stubs.player, store)
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play_direct({'url': 'https://example.com/a.mp4'}, 'movie', 'tt7')
+
+    assert kodi_stubs.env.dialog_yesno_prompts == []
+    assert store.resume_offset_ms is None
+
+
+def test_resume_prompt_skipped_above_ninety_five_percent(kodi_stubs, monkeypatch):
+    store = _FakeProgressStore(progress={'position_ms': 96000, 'duration_ms': 100000})
+    _install_progress_store(monkeypatch, kodi_stubs.player, store)
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play_direct({'url': 'https://example.com/a.mp4'}, 'movie', 'tt8')
+
+    assert kodi_stubs.env.dialog_yesno_prompts == []
+    assert store.resume_offset_ms is None
+
+
+def test_resume_prompt_shown_between_one_and_ninety_five_percent_yes_queues_offset(monkeypatch):
+    with _kodi_stubs_with_yesno([True]) as ctx:
+        store = _FakeProgressStore(progress={'position_ms': 50000, 'duration_ms': 100000})
+        _install_progress_store(monkeypatch, ctx.player, store)
+        _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, ctx.player)
+
+        ctx.player.play_direct({'url': 'https://example.com/a.mp4'}, 'movie', 'tt9')
+
+        assert len(ctx.env.dialog_yesno_prompts) == 1
+        assert store.resume_offset_ms == 50000
+
+
+def test_resume_prompt_declined_does_not_queue_offset(monkeypatch):
+    with _kodi_stubs_with_yesno([False]) as ctx:
+        store = _FakeProgressStore(progress={'position_ms': 50000, 'duration_ms': 100000})
+        _install_progress_store(monkeypatch, ctx.player, store)
+        _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, ctx.player)
+
+        ctx.player.play_direct({'url': 'https://example.com/a.mp4'}, 'movie', 'tt10')
+
+        assert len(ctx.env.dialog_yesno_prompts) == 1
+        assert store.resume_offset_ms is None
+
+
+def test_resume_ask_setting_off_skips_prompt_entirely(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    env.addon.settings['resume_ask'] = False
+    store = _FakeProgressStore(progress={'position_ms': 50000, 'duration_ms': 100000})
+    _install_progress_store(monkeypatch, kodi_stubs.player, store)
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play_direct({'url': 'https://example.com/a.mp4'}, 'movie', 'tt11')
+
+    assert env.dialog_yesno_prompts == []
+    assert store.resume_offset_ms is None
+
+
+def test_no_cached_progress_skips_resume_prompt_and_still_records_now_playing(kodi_stubs, monkeypatch):
+    store = _FakeProgressStore(progress=None)
+    _install_progress_store(monkeypatch, kodi_stubs.player, store)
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play_direct({'url': 'https://example.com/a.mp4'}, 'movie', 'tt12')
+
+    assert kodi_stubs.env.dialog_yesno_prompts == []
+    assert store.now_playing['id'] == 'tt12'
+
+
+# --- degrade-gracefully guarantees: never block playback --------------------
+
+
+def test_logged_out_user_gets_local_resume_with_zero_extra_calls_and_no_swallowed_bug(monkeypatch):
+    """A logged-out user must still get local progress/resume: the fake
+    store below deliberately has NO `get_auth()` method at all -- if
+    `lib.ui.player`'s resume/now-playing code ever called it, this
+    would raise AttributeError, which the broad `except Exception`
+    guards would silently swallow and log, masking a real bug. Asserts
+    no such warning appears."""
+    with _kodi_stubs_with_yesno([True]) as ctx:
+        store = _FakeProgressStore(progress={'position_ms': 50000, 'duration_ms': 100000})
+        _install_progress_store(monkeypatch, ctx.player, store)
+        _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, ctx.player)
+
+        ctx.player.play_direct({'url': 'https://example.com/a.mp4'}, 'movie', 'tt13')
+
+        assert store.resume_offset_ms == 50000
+        assert not any('failed' in msg for msg, _level in ctx.env.log_calls)
+
+
+def test_store_construction_failure_is_logged_and_never_blocks_playback(kodi_stubs, monkeypatch):
+    def _raise(*_a, **_k):
+        raise OSError('disk full')
+
+    monkeypatch.setattr(kodi_stubs.player, 'Store', _raise)
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    result = kodi_stubs.player.play_direct({'url': 'https://example.com/a.mp4'}, 'movie', 'tt14')
+
+    assert result is True  # playback still starts
+    assert len(kodi_stubs.env.player_play_calls) == 1
+    assert any(
+        'recording now-playing context failed' in msg and level == kodi_stubs.player.xbmc.LOGWARNING
+        for msg, level in kodi_stubs.env.log_calls
+    )
+
+
+def test_get_progress_exception_is_logged_and_resume_skipped_without_blocking_playback(kodi_stubs, monkeypatch):
+    class _BrokenStore(_FakeProgressStore):
+        def get_progress(self, content_type, content_id, video_id=None):
+            raise RuntimeError('corrupt cache')
+
+    store = _BrokenStore()
+    _install_progress_store(monkeypatch, kodi_stubs.player, store)
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    result = kodi_stubs.player.play_direct({'url': 'https://example.com/a.mp4'}, 'movie', 'tt15')
+
+    assert result is True
+    assert kodi_stubs.env.dialog_yesno_prompts == []
+    assert store.now_playing['id'] == 'tt15'  # now-playing recording still succeeds

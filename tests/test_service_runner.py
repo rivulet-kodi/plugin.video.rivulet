@@ -17,6 +17,7 @@ The module is split in two halves (see its own docstring):
     `xbmcgui.NOTIFICATION_ERROR` (see `_main_env` below).
 """
 import contextlib
+import datetime
 import os
 import subprocess
 import sys
@@ -1316,3 +1317,343 @@ def test_main_onsettingschanged_extra_env_resave_without_change_does_not_restart
     assert len(spawned) == 1  # never restarted -> never respawned
     assert spawned[0].stop_calls == 1  # only the final shutdown-path stop
     assert not any('settings changed, restarting' in msg for msg, _level in ctx.env.log_calls)
+
+
+# ===========================================================================
+# should_push_now
+# ===========================================================================
+
+
+def test_should_push_now_true_when_final_regardless_of_timing():
+    now = datetime.datetime(2020, 1, 1, 0, 0, 0)
+    assert service_runner.should_push_now(now, now, final=True) is True
+
+
+def test_should_push_now_true_when_never_pushed_before():
+    now = datetime.datetime(2020, 1, 1, 0, 0, 0)
+    assert service_runner.should_push_now(None, now, final=False) is True
+
+
+def test_should_push_now_false_before_interval_elapses():
+    last = datetime.datetime(2020, 1, 1, 0, 0, 0)
+    now = last + datetime.timedelta(seconds=service_runner.LIBRARY_PUSH_INTERVAL_SECONDS - 1)
+    assert service_runner.should_push_now(last, now, final=False) is False
+
+
+def test_should_push_now_true_once_interval_elapses():
+    last = datetime.datetime(2020, 1, 1, 0, 0, 0)
+    now = last + datetime.timedelta(seconds=service_runner.LIBRARY_PUSH_INTERVAL_SECONDS)
+    assert service_runner.should_push_now(last, now, final=False) is True
+
+
+def test_should_push_now_honors_custom_interval():
+    last = datetime.datetime(2020, 1, 1, 0, 0, 0)
+    now = last + datetime.timedelta(seconds=10)
+    assert service_runner.should_push_now(last, now, final=False, interval=10) is True
+    assert service_runner.should_push_now(last, now, final=False, interval=11) is False
+
+
+# ===========================================================================
+# build_progress_player: the xbmc.Player subclass tracking Rivulet playback
+# ===========================================================================
+
+
+class _FakeProgressStore:
+    """Fake `lib.store.Store` surface `build_progress_player` needs --
+    controllable and inspectable without touching a real filesystem."""
+
+    def __init__(self, now_playing=None, auth=None, resume_offset_ms=None):
+        self._now_playing = now_playing
+        self._auth = auth
+        self._resume_offset_ms = resume_offset_ms
+        self.progress_calls = []       # [(type, id, video_id, position_ms, duration_ms, now), ...]
+        self.now_playing_sets = []     # every set_now_playing() call, in order (incl. None to clear)
+
+    def get_now_playing(self):
+        return self._now_playing
+
+    def set_now_playing(self, context):
+        self.now_playing_sets.append(context)
+        self._now_playing = context
+
+    def get_resume_offset_ms(self):
+        return self._resume_offset_ms
+
+    def set_resume_offset_ms(self, offset_ms):
+        self._resume_offset_ms = offset_ms
+
+    def get_auth(self):
+        return self._auth
+
+    def set_progress(self, content_type, content_id, video_id, position_ms, duration_ms, now):
+        self.progress_calls.append((content_type, content_id, video_id, position_ms, duration_ms, now))
+
+
+class _FakeProgressAPI:
+    """Fake `lib.stremio.api.StremioAPI` surface the progress player's
+    push path needs."""
+
+    def __init__(self, datastore_get_result=None, datastore_get_error=None, datastore_put_error=None):
+        self.datastore_get_calls = []
+        self.datastore_put_calls = []
+        self._datastore_get_result = [] if datastore_get_result is None else datastore_get_result
+        self._datastore_get_error = datastore_get_error
+        self._datastore_put_error = datastore_put_error
+
+    def datastore_get(self, auth_key, collection='libraryItem', ids=None, all=True):
+        self.datastore_get_calls.append((auth_key, collection, ids, all))
+        if self._datastore_get_error is not None:
+            raise self._datastore_get_error
+        return self._datastore_get_result
+
+    def datastore_put(self, auth_key, changes, collection='libraryItem'):
+        self.datastore_put_calls.append((auth_key, collection, list(changes)))
+        if self._datastore_put_error is not None:
+            raise self._datastore_put_error
+
+
+_CONTEXT = {
+    'type': 'movie', 'id': 'tt1', 'video_id': None,
+    'name': 'A Movie', 'poster': None, 'started_at': '2020-01-01T00:00:00Z',
+}
+
+
+@contextlib.contextmanager
+def _progress_player_env(store, api, sync_enabled=True):
+    """Builds one `build_progress_player()` instance against the shared
+    fake `xbmc` module, with a plain list-based log recorder (`logs`)
+    instead of a real `xbmc.log()` -- no full `main()` loop involved."""
+    with install_kodi_stubs(reload=()) as ctx:
+        xbmc_mod = sys.modules['xbmc']
+        logs = []
+
+        def log_fn(level, message):
+            logs.append((level, message))
+
+        player = service_runner.build_progress_player(
+            xbmc_mod, store, api, log_fn, lambda: sync_enabled,
+        )
+        yield ctx.env, player, logs
+
+
+# --- onAVStarted: one-shot resume seek --------------------------------------
+
+
+def test_onavstarted_seeks_when_resume_offset_queued_for_active_context():
+    store = _FakeProgressStore(now_playing=_CONTEXT, resume_offset_ms=45000)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()
+    assert env.player_seek_calls == [45.0]
+    assert store.get_resume_offset_ms() is None  # consumed exactly once
+
+
+
+
+def test_onavstarted_clears_resume_offset_so_it_never_reseeks_twice():
+    store = _FakeProgressStore(now_playing=_CONTEXT, resume_offset_ms=45000)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()
+        player.onAVStarted()
+    assert env.player_seek_calls == [45.0]  # only once
+
+
+def test_onavstarted_noop_when_no_rivulet_context_active():
+    """Kodi fires onAVStarted for ANY playback, not just Rivulet's --
+    a queued resume offset must not leak into unrelated playback."""
+    store = _FakeProgressStore(now_playing=None, resume_offset_ms=45000)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()
+    assert env.player_seek_calls == []
+    assert store.get_resume_offset_ms() == 45000  # left untouched
+
+
+def test_onavstarted_noop_when_no_resume_offset_queued():
+    store = _FakeProgressStore(now_playing=_CONTEXT, resume_offset_ms=None)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()
+    assert env.player_seek_calls == []
+
+
+# --- sample_if_playing / local progress cache (ms conversion) --------------
+
+
+def test_sample_if_playing_writes_local_progress_cache_with_ms_conversion():
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        env.player_is_playing = True
+        env.player_get_time = 12.5
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+    assert store.progress_calls == [('movie', 'tt1', None, 12500, 100000, store.progress_calls[0][5])]
+
+
+def test_sample_if_playing_noop_when_not_playing_video():
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        env.player_is_playing = False
+        player.sample_if_playing()
+    assert store.progress_calls == []
+
+
+def test_sample_if_playing_noop_when_no_rivulet_context_active():
+    store = _FakeProgressStore(now_playing=None)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        env.player_is_playing = True
+        env.player_get_time = 10.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+    assert store.progress_calls == []
+
+
+def test_sample_if_playing_skips_zero_duration_sample():
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        env.player_is_playing = True
+        env.player_get_time = 0.0
+        env.player_get_total_time = 0.0
+        player.sample_if_playing()
+    assert store.progress_calls == []
+
+
+# --- onPlayBackStopped/onPlayBackEnded: final flush + context clear --------
+
+
+def test_onplaybackstopped_flushes_local_cache_and_clears_context():
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        env.player_get_time = 50.0
+        env.player_get_total_time = 100.0
+        player.onPlayBackStopped()
+    assert store.progress_calls == [('movie', 'tt1', None, 50000, 100000, store.progress_calls[0][5])]
+    assert store.get_now_playing() is None
+
+
+def test_onplaybackended_flushes_local_cache_and_clears_context():
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        env.player_get_time = 99.0
+        env.player_get_total_time = 100.0
+        player.onPlayBackEnded()
+    assert store.progress_calls == [('movie', 'tt1', None, 99000, 100000, store.progress_calls[0][5])]
+    assert store.get_now_playing() is None
+
+
+def test_onplaybackstopped_noop_when_no_rivulet_context_active():
+    store = _FakeProgressStore(now_playing=None)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onPlayBackStopped()
+    assert store.progress_calls == []
+
+
+# --- push to the Stremio API: gating, merge, failure handling --------------
+
+
+def test_push_skipped_when_sync_setting_disabled_zero_api_calls():
+    store = _FakeProgressStore(now_playing=_CONTEXT, auth={'authKey': 'tok'})
+    api = _FakeProgressAPI()
+    with _progress_player_env(store, api, sync_enabled=False) as (env, player, logs):
+        env.player_is_playing = True
+        env.player_get_time = 50.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+    assert api.datastore_get_calls == []
+    assert api.datastore_put_calls == []
+    assert store.progress_calls  # local cache still written regardless
+
+
+def test_push_skipped_when_logged_out_zero_api_calls():
+    """A logged-out user gets local progress/resume with ZERO API calls,
+    even with sync_progress enabled."""
+    store = _FakeProgressStore(now_playing=_CONTEXT, auth=None)
+    api = _FakeProgressAPI()
+    with _progress_player_env(store, api, sync_enabled=True) as (env, player, logs):
+        env.player_is_playing = True
+        env.player_get_time = 50.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+    assert api.datastore_get_calls == []
+    assert api.datastore_put_calls == []
+    assert store.progress_calls  # local cache still written regardless
+
+
+
+
+def test_push_merges_existing_remote_item_preserving_watched_bitfield():
+    existing = {
+        '_id': 'tt1', 'name': 'A Movie', 'type': 'movie', 'poster': None,
+        'posterShape': 'poster', 'removed': False, 'temp': False,
+        '_ctime': '2019-01-01T00:00:00Z', '_mtime': '2019-01-01T00:00:00Z',
+        'state': {
+            'lastWatched': '2019-01-01T00:00:00Z', 'timeWatched': 0, 'timeOffset': 0,
+            'overallTimeWatched': 0, 'timesWatched': 0, 'flaggedWatched': 0,
+            'duration': 0, 'video_id': None, 'watched': 'REAL-BITFIELD', 'noNotif': False,
+        },
+        'behaviorHints': {'defaultVideoId': None, 'featuredVideoId': None, 'hasScheduledVideos': False},
+    }
+    store = _FakeProgressStore(now_playing=_CONTEXT, auth={'authKey': 'tok'})
+    api = _FakeProgressAPI(datastore_get_result=[existing])
+    with _progress_player_env(store, api, sync_enabled=True) as (env, player, logs):
+        env.player_is_playing = True
+        env.player_get_time = 50.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+    assert api.datastore_get_calls == [('tok', 'libraryItem', ['tt1'], False)]
+    assert len(api.datastore_put_calls) == 1
+    auth_key, collection, changes = api.datastore_put_calls[0]
+    assert (auth_key, collection) == ('tok', 'libraryItem')
+    assert changes[0]['state']['watched'] == 'REAL-BITFIELD'  # carried over untouched
+    assert changes[0]['state']['timeOffset'] == 50000
+    assert changes[0]['state']['duration'] == 100000
+
+
+def test_push_builds_fresh_item_when_no_existing_remote_item():
+    store = _FakeProgressStore(now_playing=_CONTEXT, auth={'authKey': 'tok'})
+    api = _FakeProgressAPI(datastore_get_result=[])
+    with _progress_player_env(store, api, sync_enabled=True) as (env, player, logs):
+        env.player_is_playing = True
+        env.player_get_time = 50.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+    changes = api.datastore_put_calls[0][2]
+    assert changes[0]['_id'] == 'tt1'
+    assert changes[0]['state']['watched'] is None
+
+
+def test_push_failure_is_logged_and_local_cache_still_written():
+    store = _FakeProgressStore(now_playing=_CONTEXT, auth={'authKey': 'tok'})
+    api = _FakeProgressAPI(datastore_get_error=RuntimeError('network down'))
+    with _progress_player_env(store, api, sync_enabled=True) as (env, player, logs):
+        env.player_is_playing = True
+        env.player_get_time = 50.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()  # must not raise
+    assert store.progress_calls  # local cache written before the push attempt
+    assert api.datastore_put_calls == []
+    assert any('library push failed' in msg for _level, msg in logs)
+
+
+def test_push_throttled_between_consecutive_samples():
+    store = _FakeProgressStore(now_playing=_CONTEXT, auth={'authKey': 'tok'})
+    api = _FakeProgressAPI()
+    with _progress_player_env(store, api, sync_enabled=True) as (env, player, logs):
+        env.player_is_playing = True
+        env.player_get_time = 10.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+        player.sample_if_playing()
+    assert len(store.progress_calls) == 2  # local cache always updates
+    assert len(api.datastore_put_calls) == 1  # push throttled on the second sample
+
+
+
+
+def test_final_flush_bypasses_the_push_throttle():
+    store = _FakeProgressStore(now_playing=_CONTEXT, auth={'authKey': 'tok'})
+    api = _FakeProgressAPI()
+    with _progress_player_env(store, api, sync_enabled=True) as (env, player, logs):
+        env.player_is_playing = True
+        env.player_get_time = 10.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+        player.onPlayBackStopped()
+    assert len(api.datastore_put_calls) == 2  # the final flush always pushes

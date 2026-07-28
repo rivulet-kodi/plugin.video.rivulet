@@ -227,7 +227,14 @@ def parse_stream(stream, addon_name=''):
     Reads ``stream['name']``/``['title']``/['description']`` plus
     ``behaviorHints.videoSize``/``.filename``, all of which are free-form
     text addons stuff arbitrary marketing/quality info into (see module
-    docstring for the AIOStreams shape this is built against).
+    docstring for the AIOStreams shape this is built against). Also lifts
+    ``behaviorHints.bingeGroup`` through verbatim (never through
+    ``clean_text()`` - it is an opaque addon-chosen id, not display text)
+    as ``binge_group``: `stremio-core`'s `types::resource::stream::Stream`
+    (``src/types/resource/stream.rs`` lines 953-958) declares the same
+    field `Option<String>`, and its ``is_binge_match()`` (lines 140-149)
+    is exactly `lib.ui.binge.pick_binge_stream()`'s matching rule -
+    absent here, like there, means "cannot binge-match", not "".
     """
     stream = stream or {}
     name = stream.get('name') or ''
@@ -254,6 +261,7 @@ def parse_stream(stream, addon_name=''):
         'seeders': _parse_seeders(raw),
         'is_torrent': bool(stream.get('infoHash')),
         'filename': clean_text(filename),
+        'binge_group': behavior_hints.get('bingeGroup') or None,
         'raw': raw,
     }
 
@@ -271,11 +279,20 @@ _RESOLUTION_COLORS = {
 }
 
 
+#: Seeder-count marker in `format_label`'s row. U+25B2 BLACK UP-POINTING
+#: TRIANGLE is the conventional "seeds" glyph in torrent UIs and reads at
+#: a glance, unlike the old bare "S50" which looked like part of the
+#: release name. Deliberately from Geometric Shapes (U+25A0-U+25FF), NOT
+#: the Misc Symbols/Dingbats block `clean_text()` strips as unrenderable
+#: junk (see `_JUNK_RANGES`): Kodi's default font covers this one.
+SEEDERS_SYMBOL = '\u25b2'
+
+
 def format_label(info, include_addon=True):
     """Build the single-line BBcode label shown in the streams view.
 
     ``[COLOR <c>]<res>[/COLOR] [B]<source>[/B] <codec/hdr> \u00b7 <size> \u00b7
-    S<seeders>[ \u00b7 [COLOR gray]<addon>[/COLOR]]`` -- any empty part (and
+    \u25b2<seeders>[ \u00b7 [COLOR gray]<addon>[/COLOR]]`` -- any empty part (and
     its separator) is dropped so e.g. a stream with no detected source or
     HDR tags doesn't leave dangling '· ·' gaps. Every input already passed
     through clean_text() via parse_stream(), so the result never contains
@@ -302,7 +319,7 @@ def format_label(info, include_addon=True):
         tail_bits.append(info['size_text'])
     seeders = info.get('seeders')
     if seeders is not None:
-        tail_bits.append('S%s' % seeders)
+        tail_bits.append('%s%s' % (SEEDERS_SYMBOL, seeders))
     if include_addon and info.get('addon'):
         tail_bits.append('[COLOR gray]%s[/COLOR]' % info['addon'])
     tail = ' \u00b7 '.join(tail_bits)

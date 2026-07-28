@@ -213,6 +213,62 @@ def test_collect_subtitles_coerces_non_string_lang_to_str():
     assert result == [{"id": "1", "lang": "42", "url": url}]
 
 
+# --- collect_subtitles: label (stremio-core commit b1bd9b3f) -------------
+
+
+def test_collect_subtitles_carries_and_sanitizes_label():
+    addon = _descriptor(MANIFEST_URL_A, _manifest(["subtitles"]))
+    url = "https://a.example/1.srt"
+    client = FakeSubtitleClient({
+        MANIFEST_URL_A: [
+            {"id": "1", "lang": "en", "url": url, "label": "  English\r\n (SDH)\n"},
+        ],
+    })
+
+    result = collect_subtitles(client, [addon], "movie", "tt1234567")
+
+    assert result == [
+        {"id": "1", "lang": "en", "url": url, "label": "English (SDH)"},
+    ]
+
+
+def test_collect_subtitles_omits_label_when_missing_empty_or_blank():
+    addon = _descriptor(MANIFEST_URL_A, _manifest(["subtitles"]))
+    url_missing = "https://a.example/no-label-key.srt"
+    url_empty = "https://a.example/empty-label.srt"
+    url_blank = "https://a.example/blank-label.srt"
+    client = FakeSubtitleClient({
+        MANIFEST_URL_A: [
+            {"id": "1", "lang": "en", "url": url_missing},
+            {"id": "2", "lang": "en", "url": url_empty, "label": ""},
+            {"id": "3", "lang": "en", "url": url_blank, "label": "   \r\n  "},
+        ],
+    })
+
+    result = collect_subtitles(client, [addon], "movie", "tt1234567")
+
+    assert result == [
+        {"id": "1", "lang": "en", "url": url_missing},
+        {"id": "2", "lang": "en", "url": url_empty},
+        {"id": "3", "lang": "en", "url": url_blank},
+    ]
+    assert all("label" not in sub for sub in result)
+
+
+def test_collect_subtitles_dedupes_by_url_keeps_first_label_too():
+    dup_url = "https://cdn.example/same.srt"
+    addon_a = _descriptor(MANIFEST_URL_A, _manifest(["subtitles"]))
+    addon_b = _descriptor(MANIFEST_URL_B, _manifest(["subtitles"]))
+    client = FakeSubtitleClient({
+        MANIFEST_URL_A: [{"id": "from-a", "lang": "en", "url": dup_url, "label": "Forced"}],
+        MANIFEST_URL_B: [{"id": "from-b", "lang": "en", "url": dup_url, "label": "Full"}],
+    })
+
+    result = collect_subtitles(client, [addon_a, addon_b], "movie", "tt1234567")
+
+    assert result == [{"id": "from-a", "lang": "en", "url": dup_url, "label": "Forced"}]
+
+
 # --- sort_subtitles -------------------------------------------------------
 
 
@@ -226,6 +282,23 @@ def test_sort_subtitles_preferred_first_stable_order():
     result = sort_subtitles(subs, "en")
 
     assert [s["id"] for s in result] == ["2", "4", "1", "3"]
+
+
+def test_sort_subtitles_label_does_not_affect_ordering():
+    # Same fixture/order as test_sort_subtitles_preferred_first_stable_order,
+    # but every entry now carries a label -- the ranking must be byte-for-byte
+    # identical, and the labels must simply ride along untouched.
+    subs = [
+        {"id": "1", "lang": "fr", "url": "https://x.example/1.srt", "label": "Francais"},
+        {"id": "2", "lang": "en", "url": "https://x.example/2.srt", "label": "English"},
+        {"id": "3", "lang": "es", "url": "https://x.example/3.srt", "label": "Espanol"},
+        {"id": "4", "lang": "en", "url": "https://x.example/4.srt", "label": "English (SDH)"},
+    ]
+
+    result = sort_subtitles(subs, "en")
+
+    assert [s["id"] for s in result] == ["2", "4", "1", "3"]
+    assert [s["label"] for s in result] == ["English", "English (SDH)", "Francais", "Espanol"]
 
 
 def test_sort_subtitles_en_matches_two_and_three_letter_codes_case_insensitively():

@@ -488,3 +488,140 @@ def test_corrupt_search_history_json_returns_empty_list_without_raising(tmp_path
     (data_dir / "search_history.json").write_text("{not valid json")
     store = Store(str(data_dir))
     assert store.get_search_history() == []  # must not raise
+
+
+# --- now playing (LibrarySync) ----------------------------------------------
+
+
+def test_get_now_playing_none_when_never_set(tmp_path):
+    store = make_store(tmp_path)
+    assert store.get_now_playing() is None
+
+
+def test_set_and_get_now_playing_round_trip(tmp_path):
+    store = make_store(tmp_path)
+    context = {
+        "type": "movie", "id": "tt1", "video_id": None,
+        "name": "A Movie", "poster": "https://example.com/p.jpg",
+        "started_at": "2020-01-01T00:00:00Z",
+    }
+    store.set_now_playing(context)
+    assert store.get_now_playing() == context
+
+
+def test_set_now_playing_none_clears(tmp_path):
+    store = make_store(tmp_path)
+    store.set_now_playing({"type": "movie", "id": "tt1", "video_id": None,
+                            "name": "A", "poster": None, "started_at": "x"})
+    store.set_now_playing(None)
+    assert store.get_now_playing() is None
+
+
+def test_now_playing_persists_across_store_instances(tmp_path):
+    data_dir = tmp_path / "addon_data"
+    context = {"type": "series", "id": "tt2", "video_id": "tt2:1:1",
+               "name": "A Show", "poster": None, "started_at": "2020-01-01T00:00:00Z"}
+    Store(str(data_dir)).set_now_playing(context)
+    assert Store(str(data_dir)).get_now_playing() == context
+
+
+def test_corrupt_now_playing_json_returns_none_without_raising(tmp_path):
+    data_dir = tmp_path / "addon_data"
+    data_dir.mkdir()
+    (data_dir / "now_playing.json").write_text("{not valid json")
+    store = Store(str(data_dir))
+    assert store.get_now_playing() is None  # must not raise
+
+
+# --- resume offset (LibrarySync) --------------------------------------------
+
+
+def test_get_resume_offset_ms_none_when_never_set(tmp_path):
+    store = make_store(tmp_path)
+    assert store.get_resume_offset_ms() is None
+
+
+def test_set_and_get_resume_offset_ms_round_trip(tmp_path):
+    store = make_store(tmp_path)
+    store.set_resume_offset_ms(42000)
+    assert store.get_resume_offset_ms() == 42000
+
+
+def test_set_resume_offset_ms_none_clears(tmp_path):
+    store = make_store(tmp_path)
+    store.set_resume_offset_ms(42000)
+    store.set_resume_offset_ms(None)
+    assert store.get_resume_offset_ms() is None
+
+
+def test_resume_offset_ms_persists_across_store_instances(tmp_path):
+    data_dir = tmp_path / "addon_data"
+    Store(str(data_dir)).set_resume_offset_ms(9000)
+    assert Store(str(data_dir)).get_resume_offset_ms() == 9000
+
+
+# --- local progress cache (LibrarySync) -------------------------------------
+
+
+def test_get_progress_none_when_never_set(tmp_path):
+    store = make_store(tmp_path)
+    assert store.get_progress("movie", "tt1") is None
+
+
+def test_set_and_get_progress_round_trip(tmp_path):
+    store = make_store(tmp_path)
+    store.set_progress("movie", "tt1", None, 5000, 90000, "2020-01-01T00:00:00Z")
+    assert store.get_progress("movie", "tt1") == {
+        "position_ms": 5000, "duration_ms": 90000, "updated_at": "2020-01-01T00:00:00Z",
+    }
+
+
+def test_progress_keys_distinguish_by_video_id(tmp_path):
+    """Two different episodes of the SAME series id must never collide
+    -- (type, id) alone is not a unique key for a series."""
+    store = make_store(tmp_path)
+    store.set_progress("series", "tt9", "tt9:1:1", 1000, 2000, "t1")
+    store.set_progress("series", "tt9", "tt9:1:2", 3000, 4000, "t2")
+    assert store.get_progress("series", "tt9", "tt9:1:1") == {
+        "position_ms": 1000, "duration_ms": 2000, "updated_at": "t1",
+    }
+    assert store.get_progress("series", "tt9", "tt9:1:2") == {
+        "position_ms": 3000, "duration_ms": 4000, "updated_at": "t2",
+    }
+
+
+def test_progress_key_with_no_video_id_distinct_from_with_video_id(tmp_path):
+    store = make_store(tmp_path)
+    store.set_progress("movie", "tt1", None, 100, 200, "t1")
+    store.set_progress("series", "tt1", "tt1:1:1", 300, 400, "t2")
+    assert store.get_progress("movie", "tt1", None) == {
+        "position_ms": 100, "duration_ms": 200, "updated_at": "t1",
+    }
+    assert store.get_progress("series", "tt1", "tt1:1:1") == {
+        "position_ms": 300, "duration_ms": 400, "updated_at": "t2",
+    }
+
+
+def test_set_progress_overwrites_existing_entry(tmp_path):
+    store = make_store(tmp_path)
+    store.set_progress("movie", "tt1", None, 100, 200, "t1")
+    store.set_progress("movie", "tt1", None, 150, 200, "t2")
+    assert store.get_progress("movie", "tt1") == {
+        "position_ms": 150, "duration_ms": 200, "updated_at": "t2",
+    }
+
+
+def test_progress_persists_across_store_instances(tmp_path):
+    data_dir = tmp_path / "addon_data"
+    Store(str(data_dir)).set_progress("movie", "tt1", None, 100, 200, "t1")
+    assert Store(str(data_dir)).get_progress("movie", "tt1") == {
+        "position_ms": 100, "duration_ms": 200, "updated_at": "t1",
+    }
+
+
+def test_corrupt_progress_json_returns_none_without_raising(tmp_path):
+    data_dir = tmp_path / "addon_data"
+    data_dir.mkdir()
+    (data_dir / "progress.json").write_text("{not valid json")
+    store = Store(str(data_dir))
+    assert store.get_progress("movie", "tt1") is None  # must not raise

@@ -144,7 +144,7 @@ def test_oninit_builds_two_line_row_stripping_addon_from_line_one_into_label2(lo
 
     item = win.getControl(ctx.streamswindow.LIST).items[0]
     assert item.getLabel() == (
-        '[COLOR lime]1080p[/COLOR] [B]WEB-DL[/B] x265 HDR10 \u00b7 2.1 GB \u00b7 S42'
+        '[COLOR lime]1080p[/COLOR] [B]WEB-DL[/B] x265 HDR10 \u00b7 2.1 GB \u00b7 \u25b242'
     )
     assert item.label2 == 'AddonA'
 
@@ -436,6 +436,39 @@ def test_onclick_dispatches_the_focused_pairs_own_stream_to_play_direct(load_str
     assert win.closed is True
 
 
+def test_onclick_records_played_pair_when_play_direct_succeeds(load_streamswindow, monkeypatch):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    info_a, stream_a = {'raw': 'A'}, {'url': 'https://a.example/a.mp4'}
+    info_b, stream_b = {'raw': 'B'}, {'url': 'https://b.example/b.mp4'}
+    win.pairs = [(info_a, stream_a), (info_b, stream_b)]
+    win.onInit()
+    win.getControl(ctx.streamswindow.LIST).selected_index = 1
+    monkeypatch.setattr(
+        ctx.player, 'play_direct',
+        lambda stream, stype, sid, item_meta=None, on_ready=None: True,
+    )
+
+    win.onClick(ctx.streamswindow.LIST)
+
+    assert win.played_pair == (info_b, stream_b)
+
+
+def test_onclick_leaves_played_pair_none_when_play_direct_returns_false(load_streamswindow, monkeypatch):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = [({'raw': 'A'}, {'url': 'https://a.example/a.mp4'})]
+    win.onInit()
+    monkeypatch.setattr(
+        ctx.player, 'play_direct',
+        lambda stream, stype, sid, item_meta=None, on_ready=None: False,
+    )
+
+    win.onClick(ctx.streamswindow.LIST)
+
+    assert win.played_pair is None
+
+
 def test_onclick_stays_open_when_play_direct_returns_false(load_streamswindow, monkeypatch):
     ctx = load_streamswindow()
     win = _make_window(ctx.streamswindow)
@@ -639,6 +672,36 @@ def test_start_defaults_heading_art_and_meta_when_omitted(load_streamswindow):
     assert win.meta is None
 
 
+def test_start_forwards_video_id_onto_the_window(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    pairs = [({'raw': 'A'}, {'url': 'https://a.example/a.mp4'})]
+
+    win.start(pairs, 'series', 'tt1:1:2', video_id='tt1:1:2')
+
+    assert win.video_id == 'tt1:1:2'
+
+
+def test_start_defaults_video_id_to_none_when_omitted(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    pairs = [({'raw': 'A'}, {'url': 'https://a.example/a.mp4'})]
+
+    win.start(pairs, 'movie', 'tt1')
+
+    assert win.video_id is None
+
+
+def test_start_resets_played_pair_on_each_call(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.played_pair = ({'raw': 'stale'}, {'url': 'stale'})  # leftover from a previous run
+
+    win.start([], 'movie', 'tt1')
+
+    assert win.played_pair is None
+
+
 # ---------------------------------------------------------------------------
 # open_streams()
 # ---------------------------------------------------------------------------
@@ -665,7 +728,7 @@ def test_open_streams_filters_unsupported_addons_and_forwards_aggregate_to_the_w
     captured = {}
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
             captured['args'] = (pairs, stype, sid, poster)
             return True
 
@@ -697,7 +760,7 @@ def test_open_streams_forwards_heading_art_and_meta_to_the_window(load_streamswi
     captured = {}
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
             captured['heading'] = heading
             captured['art'] = art
             captured['meta'] = meta
@@ -742,7 +805,7 @@ def test_open_streams_window_is_closed_exactly_once_when_start_raises(load_strea
             self.close_calls += 1
             super().close()
 
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
             # Stands in for a crash inside onInit()/onAction() while the
             # modal loop is running - self.close() (the window's own,
             # normal-path close) never gets a chance to run.
@@ -777,7 +840,7 @@ def test_open_streams_addonerror_is_logged_and_skipped_not_fatal(load_streamswin
     captured = {}
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
             captured['pairs'] = pairs
             return True
 
@@ -827,7 +890,7 @@ def test_open_streams_multiple_addon_failures_still_log_a_single_aggregate_warni
     _wire_data_layer(sw, _FakeStore(addons=[fail_a, fail_b, working]), client)
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
             return True
 
     monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
@@ -909,7 +972,7 @@ def test_open_streams_reads_stream_sort_setting_and_applies_it_to_final_order(lo
     captured = {}
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
             captured['pairs'] = pairs
             return True
 
@@ -972,7 +1035,7 @@ def test_open_streams_busy_dialog_reports_progress_and_skips_unsupported_addons(
     captured = {}
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
             captured['pairs'] = pairs
             return True
 
@@ -1017,7 +1080,7 @@ def test_open_streams_cancelled_mid_loop_keeps_partial_results_and_closes_dialog
     captured = {}
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
             captured['pairs'] = pairs
             return True
 
@@ -1210,7 +1273,7 @@ def test_open_streams_reopens_with_the_same_pairs_after_a_played_round_trip_then
     start_calls = []
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
             start_calls.append((pairs, stype, sid, poster, heading, art, meta))
             return len(start_calls) == 1  # plays the first time, backs out of the reopened window
 
@@ -1238,7 +1301,7 @@ def test_open_streams_user_cancel_on_first_window_returns_false_without_waiting_
     start_calls = []
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
             start_calls.append(1)
             return False  # user backed out without picking anything
 
@@ -1261,7 +1324,7 @@ def test_open_streams_reopens_even_when_playback_never_starts_within_the_timeout
     start_calls = []
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
             start_calls.append(1)
             return len(start_calls) == 1  # "played" once, then the reopened window backs out
 
@@ -1287,7 +1350,7 @@ def test_open_streams_monitor_abort_before_playing_returns_false_without_reopeni
     start_calls = []
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
             start_calls.append(1)
             return True  # must never be reached a second time
 
@@ -1310,7 +1373,7 @@ def test_open_streams_monitor_abort_while_playing_returns_false_without_reopenin
     start_calls = []
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
             start_calls.append(1)
             return True
 
@@ -1334,7 +1397,7 @@ def test_open_streams_monitor_abort_during_settle_pause_returns_false_without_re
     start_calls = []
 
     class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
             start_calls.append(1)
             return True  # must never be reached a second time
 
@@ -1351,3 +1414,362 @@ def test_open_streams_monitor_abort_during_settle_pause_returns_false_without_re
     assert result is False
     assert len(start_calls) == 1  # no reopen - shutdown safety on the settle pause too
     assert ctx.env.monitor_abort_calls == 1
+
+
+# ---------------------------------------------------------------------------
+# open_streams() - the binge-watching round trip (lib.ui.binge.next_video()/
+# pick_binge_stream() wired into _try_binge_watch(), which runs right after
+# the SAME _wait_for_playback_end()/settle-pause the plain reopen round trip
+# above already exercises). `video_id`/`meta` drive it entirely; see
+# lib/ui/binge.py's own module docstring and tests/test_binge.py for the
+# pure "what's next"/"which stream" logic these tests wire end to end.
+# ---------------------------------------------------------------------------
+
+
+class _PerEpisodeAddonClient:
+    """Fake `lib.stremio.addons.AddonClient` keyed by `(transport, sid)`,
+    not just `transport` like `_FakeAddonClient` above - the
+    binge-watching round trip fetches TWO different episode ids from the
+    SAME addon (the one just played, then its next one[s]) and each must
+    answer with its own stream list. `.calls` mirrors `_FakeAddonClient`'s
+    own `(transport, stype, sid)` recorder."""
+
+    def __init__(self, stream_results):
+        self._stream_results = stream_results
+        self.calls = []
+
+    def streams(self, transport, stype, sid):
+        self.calls.append((transport, stype, sid))
+        result = self._stream_results.get((transport, sid), [])
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+_TWO_EPISODE_SERIES_META = {
+    'id': 'tt1', 'name': 'Show',
+    'videos': [
+        {'id': 's1e1', 'season': 1, 'episode': 1, 'title': 'One'},
+        {'id': 's1e2', 'season': 1, 'episode': 2, 'title': 'Two'},
+    ],
+}
+
+_THREE_EPISODE_SERIES_META = {
+    'id': 'tt1', 'name': 'Show',
+    'videos': [
+        {'id': 's1e1', 'season': 1, 'episode': 1, 'title': 'One'},
+        {'id': 's1e2', 'season': 1, 'episode': 2, 'title': 'Two'},
+        {'id': 's1e3', 'season': 1, 'episode': 3, 'title': 'Three'},
+    ],
+}
+
+
+def _wire_series_addon(sw, results_by_sid, types=('series',)):
+    """`_wire_data_layer()` with one supported addon (declaring `types`,
+    'series' by default) whose `streams()` answers per-sid via
+    `_PerEpisodeAddonClient`. Returns the client so a test can assert on
+    `.calls`."""
+    supported = {
+        'transportUrl': 't1',
+        'manifest': {'name': 'Addon', 'resources': ['stream'], 'types': list(types)},
+    }
+    client = _PerEpisodeAddonClient({('t1', sid): results for sid, results in results_by_sid.items()})
+    _wire_data_layer(sw, _FakeStore(addons=[supported]), client)
+    return client
+
+
+class _OnceThenBackOutWindow:
+    """Builds a `StreamsWindow` subclass whose `.start()` simulates "the
+    user picked `played_pair` the first time, then backed out with no
+    pick on every reopen" - the exact shape the binge round trip needs a
+    picker double for, without a real onClick()/doModal() event loop."""
+
+    @staticmethod
+    def build(streamswindow_mod, played_pair, start_calls):
+        class RecordingWindow(streamswindow_mod.StreamsWindow):
+            def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
+                start_calls.append(sid)
+                if len(start_calls) == 1:
+                    self.played_pair = played_pair
+                    return True
+                return False
+        return RecordingWindow
+
+
+def test_open_streams_binge_watch_auto_plays_the_next_episode_then_reopens_the_original_picker(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    ctx.env.addon.settings['binge_countdown'] = 1  # keep the test fast: a single tick
+    played_stream = {'name': 'Episode One', 'behaviorHints': {}, 'url': 'https://a.example/e1.mp4'}
+    next_stream = {'name': 'Episode Two', 'behaviorHints': {}, 'url': 'https://a.example/e2.mp4'}
+    client = _wire_series_addon(sw, {'s1e1': [played_stream], 's1e2': [next_stream]})
+    start_calls = []
+    played_info = streaminfo.parse_stream(played_stream, addon_name='Addon')
+    monkeypatch.setattr(
+        sw, 'StreamsWindow', _OnceThenBackOutWindow.build(sw, (played_info, played_stream), start_calls),
+    )
+    play_direct_calls = []
+    monkeypatch.setattr(
+        ctx.player, 'play_direct',
+        lambda stream, stype, sid, item_meta=None, on_ready=None: (
+            play_direct_calls.append((stream, stype, sid, item_meta, on_ready)) or True
+        ),
+    )
+    # Reports "playing" once per _wait_for_playback_end() call (calls 1 and
+    # 3 - the first check of each of the two invocations this flow makes),
+    # then "stopped" right after - see the module's own such comments above.
+    ctx.env.player_is_playing = lambda n: n in (1, 3)
+
+    result = sw.open_streams('series', 's1e1', meta=_TWO_EPISODE_SERIES_META, video_id='s1e1')
+
+    assert result is False
+    assert start_calls == ['s1e1', 's1e1']  # opened once (played), reopened once (chain fell back)
+    assert len(play_direct_calls) == 1  # only the auto-played next episode goes through play_direct here
+    auto_stream, auto_stype, auto_sid, auto_item_meta, auto_on_ready = play_direct_calls[0]
+    assert (auto_stream, auto_stype, auto_sid) == (next_stream, 'series', 's1e2')
+    assert auto_item_meta['label'] == 'Show \u2013 S01E02 \u00b7 Two'
+    assert auto_on_ready is sw.close_windows_for_playback
+    assert [call[2] for call in client.calls] == ['s1e1', 's1e2']  # fetched the played sid, then the next one
+
+
+def test_open_streams_binge_watch_prefers_the_stream_matching_the_played_binge_group(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    ctx.env.addon.settings['binge_countdown'] = 1
+    played_stream = {'name': 'Episode One', 'behaviorHints': {'bingeGroup': 'grp'}, 'url': 'https://a.example/e1.mp4'}
+    # The non-matching stream is listed FIRST - pick_binge_stream() must
+    # still prefer the matching one, not just "whatever sorts/lists first".
+    other_group_stream = {
+        'name': 'Episode Two Other', 'behaviorHints': {'bingeGroup': 'other'}, 'url': 'https://a.example/e2-other.mp4',
+    }
+    matching_stream = {
+        'name': 'Episode Two Match', 'behaviorHints': {'bingeGroup': 'grp'}, 'url': 'https://a.example/e2-match.mp4',
+    }
+    client = _wire_series_addon(sw, {'s1e1': [played_stream], 's1e2': [other_group_stream, matching_stream]})
+    start_calls = []
+    played_info = streaminfo.parse_stream(played_stream, addon_name='Addon')
+    monkeypatch.setattr(
+        sw, 'StreamsWindow', _OnceThenBackOutWindow.build(sw, (played_info, played_stream), start_calls),
+    )
+    play_direct_calls = []
+    monkeypatch.setattr(
+        ctx.player, 'play_direct',
+        lambda stream, stype, sid, item_meta=None, on_ready=None: play_direct_calls.append(stream) or True,
+    )
+    ctx.env.player_is_playing = lambda n: n in (1, 3)
+
+    result = sw.open_streams('series', 's1e1', meta=_TWO_EPISODE_SERIES_META, video_id='s1e1')
+
+    assert result is False
+    assert play_direct_calls == [matching_stream]
+    assert client.calls  # sanity: the next episode really was fetched
+
+
+
+
+def test_open_streams_binge_watch_chain_continues_through_a_third_episode(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    ctx.env.addon.settings['binge_countdown'] = 1
+    stream_e1 = {'name': 'E1', 'behaviorHints': {}, 'url': 'https://a.example/e1.mp4'}
+    stream_e2 = {'name': 'E2', 'behaviorHints': {}, 'url': 'https://a.example/e2.mp4'}
+    stream_e3 = {'name': 'E3', 'behaviorHints': {}, 'url': 'https://a.example/e3.mp4'}
+    client = _wire_series_addon(sw, {'s1e1': [stream_e1], 's1e2': [stream_e2], 's1e3': [stream_e3]})
+    start_calls = []
+    played_info = streaminfo.parse_stream(stream_e1, addon_name='Addon')
+    monkeypatch.setattr(
+        sw, 'StreamsWindow', _OnceThenBackOutWindow.build(sw, (played_info, stream_e1), start_calls),
+    )
+    play_direct_calls = []
+    monkeypatch.setattr(
+        ctx.player, 'play_direct',
+        lambda stream, stype, sid, item_meta=None, on_ready=None: play_direct_calls.append((sid, stream)) or True,
+    )
+    # "playing" once at the START of EVERY _wait_for_playback_end() call
+    # this makes (episode 1, then auto-played 2, then auto-played 3) -
+    # i.e. every odd-numbered isPlaying() call in sequence.
+    ctx.env.player_is_playing = lambda n: n % 2 == 1
+
+    result = sw.open_streams('series', 's1e1', meta=_THREE_EPISODE_SERIES_META, video_id='s1e1')
+
+    assert result is False
+    assert [sid for sid, _stream in play_direct_calls] == ['s1e2', 's1e3']
+    assert start_calls == ['s1e1', 's1e1']  # the original picker only ever reopens once the WHOLE chain ends
+    assert [call[2] for call in client.calls] == ['s1e1', 's1e2', 's1e3']
+
+
+def test_open_streams_binge_watch_cancelling_the_countdown_reopens_the_original_picker(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    ctx.env.addon.settings['binge_countdown'] = 5
+    played_stream = {'name': 'E1', 'behaviorHints': {}, 'url': 'https://a.example/e1.mp4'}
+    next_stream = {'name': 'E2', 'behaviorHints': {}, 'url': 'https://a.example/e2.mp4'}
+    client = _wire_series_addon(sw, {'s1e1': [played_stream], 's1e2': [next_stream]})
+    start_calls = []
+    played_info = streaminfo.parse_stream(played_stream, addon_name='Addon')
+    monkeypatch.setattr(
+        sw, 'StreamsWindow', _OnceThenBackOutWindow.build(sw, (played_info, played_stream), start_calls),
+    )
+    play_direct_calls = []
+    monkeypatch.setattr(
+        ctx.player, 'play_direct',
+        lambda stream, stype, sid, item_meta=None, on_ready=None: play_direct_calls.append(stream) or True,
+    )
+    ctx.env.player_is_playing = lambda n: n == 1
+    # dialog.iscanceled() is shared by EVERY busy_dialog in this flow - the
+    # first two calls are the (single-addon) fetches for the played episode
+    # then the next one; only from the THIRD call on (the countdown's own
+    # first tick) does the user's Cancel actually land.
+    ctx.env.cancel = _cancel_after(2)
+
+    result = sw.open_streams('series', 's1e1', meta=_TWO_EPISODE_SERIES_META, video_id='s1e1')
+
+    assert result is False
+    assert play_direct_calls == []  # never auto-played
+    assert start_calls == ['s1e1', 's1e1']  # falls back to reopening the SAME original picker
+    assert client.calls  # the next episode's streams were fetched before the countdown ran
+
+
+def test_open_streams_binge_watch_monitor_abort_during_the_countdown_returns_false_without_reopening(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    ctx.env.addon.settings['binge_countdown'] = 5
+    played_stream = {'name': 'E1', 'behaviorHints': {}, 'url': 'https://a.example/e1.mp4'}
+    next_stream = {'name': 'E2', 'behaviorHints': {}, 'url': 'https://a.example/e2.mp4'}
+    client = _wire_series_addon(sw, {'s1e1': [played_stream], 's1e2': [next_stream]})
+    start_calls = []
+    played_info = streaminfo.parse_stream(played_stream, addon_name='Addon')
+    monkeypatch.setattr(
+        sw, 'StreamsWindow', _OnceThenBackOutWindow.build(sw, (played_info, played_stream), start_calls),
+    )
+    play_direct_calls = []
+    monkeypatch.setattr(
+        ctx.player, 'play_direct',
+        lambda stream, stype, sid, item_meta=None, on_ready=None: play_direct_calls.append(stream) or True,
+    )
+    ctx.env.player_is_playing = lambda n: n == 1
+    # Call #1 is the settle pause right after episode 1's own
+    # _wait_for_playback_end() (which never touches the monitor itself -
+    # see the plain reopen round trip's own such comments above); call #2
+    # is unambiguously the countdown's own first tick.
+    ctx.env.monitor_abort = lambda n: n == 2
+
+    result = sw.open_streams('series', 's1e1', meta=_TWO_EPISODE_SERIES_META, video_id='s1e1')
+
+    assert result is False
+    assert play_direct_calls == []  # never auto-played
+    assert start_calls == ['s1e1']  # no reopen at all - a shutdown, not a "not now"
+    assert ctx.env.monitor_abort_calls == 2
+    assert client.calls  # the next episode's streams really were fetched before the abort
+
+
+def test_open_streams_binge_watch_no_next_episode_reopens_the_original_picker_without_fetching_anything_else(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    played_stream = {'name': 'E1', 'behaviorHints': {}, 'url': 'https://a.example/e1.mp4'}
+    only_episode_meta = {'id': 'tt1', 'name': 'Show', 'videos': [{'id': 's1e1', 'season': 1, 'episode': 1}]}
+    client = _wire_series_addon(sw, {'s1e1': [played_stream]})
+    start_calls = []
+    played_info = streaminfo.parse_stream(played_stream, addon_name='Addon')
+    monkeypatch.setattr(
+        sw, 'StreamsWindow', _OnceThenBackOutWindow.build(sw, (played_info, played_stream), start_calls),
+    )
+    monkeypatch.setattr(
+        ctx.player, 'play_direct',
+        lambda stream, stype, sid, item_meta=None, on_ready=None: True,
+    )
+    ctx.env.player_is_playing = lambda n: n == 1
+
+    result = sw.open_streams('series', 's1e1', meta=only_episode_meta, video_id='s1e1')
+
+    assert result is False
+    assert start_calls == ['s1e1', 's1e1']
+    assert [call[2] for call in client.calls] == ['s1e1']  # never fetched anything beyond the played sid
+
+
+def test_open_streams_binge_watch_disabled_setting_reopens_the_original_picker_without_fetching_anything_else(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    ctx.env.addon.settings['binge_enable'] = 'false'
+    played_stream = {'name': 'E1', 'behaviorHints': {}, 'url': 'https://a.example/e1.mp4'}
+    client = _wire_series_addon(sw, {'s1e1': [played_stream], 's1e2': [{'url': 'https://a.example/e2.mp4'}]})
+    start_calls = []
+    played_info = streaminfo.parse_stream(played_stream, addon_name='Addon')
+    monkeypatch.setattr(
+        sw, 'StreamsWindow', _OnceThenBackOutWindow.build(sw, (played_info, played_stream), start_calls),
+    )
+    monkeypatch.setattr(
+        ctx.player, 'play_direct',
+        lambda stream, stype, sid, item_meta=None, on_ready=None: True,
+    )
+    ctx.env.player_is_playing = lambda n: n == 1
+
+    result = sw.open_streams('series', 's1e1', meta=_TWO_EPISODE_SERIES_META, video_id='s1e1')
+
+    assert result is False
+    assert start_calls == ['s1e1', 's1e1']
+    assert [call[2] for call in client.calls] == ['s1e1']  # the setting gate never even checked for a next episode
+
+
+def test_open_streams_binge_watch_no_fetchable_stream_for_the_next_episode_reopens_the_original_picker(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    played_stream = {'name': 'E1', 'behaviorHints': {}, 'url': 'https://a.example/e1.mp4'}
+    client = _wire_series_addon(sw, {'s1e1': [played_stream], 's1e2': []})  # next episode: nothing to play
+    start_calls = []
+    played_info = streaminfo.parse_stream(played_stream, addon_name='Addon')
+    monkeypatch.setattr(
+        sw, 'StreamsWindow', _OnceThenBackOutWindow.build(sw, (played_info, played_stream), start_calls),
+    )
+    monkeypatch.setattr(
+        ctx.player, 'play_direct',
+        lambda stream, stype, sid, item_meta=None, on_ready=None: True,
+    )
+    ctx.env.player_is_playing = lambda n: n == 1
+
+    result = sw.open_streams('series', 's1e1', meta=_TWO_EPISODE_SERIES_META, video_id='s1e1')
+
+    assert result is False
+    assert start_calls == ['s1e1', 's1e1']
+    assert [call[2] for call in client.calls] == ['s1e1', 's1e2']  # the next episode WAS looked up, just empty
+
+
+def test_open_streams_binge_watch_a_movie_without_video_id_never_triggers_it(load_streamswindow, monkeypatch):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    played_stream = {'name': 'Movie', 'behaviorHints': {}, 'url': 'https://a.example/movie.mp4'}
+    client = _wire_series_addon(sw, {'tt-movie': [played_stream]}, types=('movie',))
+    start_calls = []
+    played_info = streaminfo.parse_stream(played_stream, addon_name='Addon')
+    monkeypatch.setattr(
+        sw, 'StreamsWindow', _OnceThenBackOutWindow.build(sw, (played_info, played_stream), start_calls),
+    )
+    monkeypatch.setattr(
+        ctx.player, 'play_direct',
+        lambda stream, stype, sid, item_meta=None, on_ready=None: True,
+    )
+    ctx.env.player_is_playing = lambda n: n == 1
+
+    # No video_id kwarg at all - a movie/context-free call, exactly like every
+    # pre-existing open_streams() call site keeps making.
+    result = sw.open_streams('movie', 'tt-movie')
+
+    assert result is False
+    assert start_calls == ['tt-movie', 'tt-movie']
+    assert [call[2] for call in client.calls] == ['tt-movie']  # no second fetch was ever attempted
