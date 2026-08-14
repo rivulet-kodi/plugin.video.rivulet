@@ -495,3 +495,7 @@ msgstr "%sを%d秒後に再生"
 msgctxt "#30184"
 msgid "Updated to version %s"
 msgstr "バージョン %s に更新されました"
+
+msgctxt "#30185"
+msgid "Loading more sources..."
+msgstr "他のソースを読み込み中..."

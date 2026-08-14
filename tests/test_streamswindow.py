@@ -59,6 +59,7 @@ plain-bool-or-1-based-callable convention as `ctx.env.cancel`/
 `ctx.env.monitor_abort`).
 """
 import contextlib
+import threading
 
 import pytest
 
@@ -1175,19 +1176,14 @@ def test_open_streams_busy_dialog_reports_progress_and_skips_unsupported_addons(
         'transportUrl': 't-alpha',
         'manifest': {'name': 'Alpha', 'resources': ['stream'], 'types': ['movie']},
     }
-    beta = {
-        'transportUrl': 't-beta',
-        'manifest': {'name': 'Beta', 'resources': ['stream'], 'types': ['movie']},
-    }
     unsupported = {
         'transportUrl': 't-unsupported',
         # no 'stream' resource -> excluded before total_addons is even computed.
         'manifest': {'name': 'Unsupported', 'resources': ['catalog'], 'types': ['movie']},
     }
     alpha_stream = {'url': 'https://a.example/a.mp4'}
-    beta_stream = {'url': 'https://b.example/b.mp4'}
-    client = _FakeAddonClient({'t-alpha': [alpha_stream], 't-beta': [beta_stream]})
-    _wire_data_layer(sw, _FakeStore(addons=[alpha, beta, unsupported]), client)
+    client = _FakeAddonClient({'t-alpha': [alpha_stream]})
+    _wire_data_layer(sw, _FakeStore(addons=[alpha, unsupported]), client)
     captured = {}
 
     class RecordingWindow(sw.StreamsWindow):
@@ -1201,53 +1197,52 @@ def test_open_streams_busy_dialog_reports_progress_and_skips_unsupported_addons(
     result = sw.open_streams('movie', 'tt1')
 
     assert result is False
-    assert [call[0] for call in client.calls] == ['t-alpha', 't-beta']
-    assert [s for _info, s in captured['pairs']] == [alpha_stream, beta_stream]
+    assert [call[0] for call in client.calls] == ['t-alpha']  # the unsupported addon is never even queried
+    assert [s for _info, s in captured['pairs']] == [alpha_stream]
     assert ctx.env.dialog_created == [('STR30033', '')]
-    # total_addons is 2 (the unsupported addon never counts toward the
-    # denominator), so percent is index * 100 / 2 -> 0, then 50; the
-    # unsupported addon produces no 'Checking Unsupported...' entry at all.
+    # total_addons is 1 (the unsupported addon never counts toward the
+    # denominator) - one 'Checking Alpha...' update at 100%, on top of
+    # busy_dialog's own initial update(0, message) on entry.
     assert ctx.env.dialog_updates == [
-        (0, ''),  # busy_dialog's own initial update(0, message) on entry
-        (0, 'Checking Alpha...'),
-        (50, 'Checking Beta...'),
+        (0, ''),
+        (100, 'Checking Alpha...'),
     ]
     assert ctx.env.dialog_closed_count == 1
 
 
-def test_open_streams_cancelled_mid_loop_keeps_partial_results_and_closes_dialog(
+def test_open_streams_cancelled_while_still_waiting_for_a_non_empty_result_falls_back_to_no_results(
     load_streamswindow, monkeypatch,
 ):
+    """Every addon queried concurrently now fires its own HTTP call
+    immediately regardless of cancellation (unlike the old serial loop,
+    which could skip an addon it never reached) - so cancellation can no
+    longer stop an addon from being QUERIED, only stop open_streams()
+    from continuing to WAIT for a non-empty result. Two addons that both
+    answer empty force the wait loop to actually check
+    `dialog.iscanceled()` more than once before giving up."""
     ctx = load_streamswindow()
     sw = ctx.streamswindow
-    alpha = {
-        'transportUrl': 't-alpha',
-        'manifest': {'name': 'Alpha', 'resources': ['stream'], 'types': ['movie']},
+    empty_a = {
+        'transportUrl': 't-empty-a',
+        'manifest': {'name': 'A', 'resources': ['stream'], 'types': ['movie']},
     }
-    beta = {
-        'transportUrl': 't-beta',
-        'manifest': {'name': 'Beta', 'resources': ['stream'], 'types': ['movie']},
+    empty_b = {
+        'transportUrl': 't-empty-b',
+        'manifest': {'name': 'B', 'resources': ['stream'], 'types': ['movie']},
     }
-    alpha_stream = {'url': 'https://a.example/a.mp4'}
-    beta_stream = {'url': 'https://b.example/b.mp4'}
-    client = _FakeAddonClient({'t-alpha': [alpha_stream], 't-beta': [beta_stream]})
-    _wire_data_layer(sw, _FakeStore(addons=[alpha, beta]), client)
-    ctx.env.cancel = _cancel_after(1)  # index 0 -> not cancelled; index 1 -> cancelled, breaks
-    captured = {}
+    client = _FakeAddonClient({'t-empty-a': [], 't-empty-b': []})
+    _wire_data_layer(sw, _FakeStore(addons=[empty_a, empty_b]), client)
+    ctx.env.cancel = _cancel_after(1)  # 1st check -> not cancelled; 2nd -> cancelled, breaks
 
-    class RecordingWindow(sw.StreamsWindow):
-        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
-            captured['pairs'] = pairs
-            return True
+    def _unexpected(*a, **k):
+        raise AssertionError('StreamsWindow must never be constructed when the wait is cancelled with nothing found')
 
-    monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
-    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: (False, False))
+    monkeypatch.setattr(sw, 'StreamsWindow', _unexpected)
 
     result = sw.open_streams('movie', 'tt1')
 
     assert result is False
-    assert [call[0] for call in client.calls] == ['t-alpha']  # beta never queried
-    assert [s for _info, s in captured['pairs']] == [alpha_stream]  # partial results kept
+    assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
     assert ctx.env.dialog_closed_count == 1
 
 
@@ -1262,7 +1257,7 @@ def test_open_streams_cancelled_before_first_addon_falls_back_to_no_results(
     }
     client = _FakeAddonClient({'t1': [{'url': 'https://a.example/a.mp4'}]})
     _wire_data_layer(sw, _FakeStore(addons=[descriptor]), client)
-    ctx.env.cancel = True  # already cancelled before the loop ever starts
+    ctx.env.cancel = True  # already cancelled before the wait ever starts
 
     def _unexpected(*a, **k):
         raise AssertionError('StreamsWindow must never be constructed on an empty aggregate')
@@ -1271,10 +1266,204 @@ def test_open_streams_cancelled_before_first_addon_falls_back_to_no_results(
 
     result = sw.open_streams('movie', 'tt1')
 
-    assert client.calls == []  # cancelled before the first addon was ever queried
+    # Every addon is now submitted to the fan-out CONCURRENTLY, before
+    # open_streams() ever checks cancellation - unlike the old serial
+    # loop, which gated each addon's own HTTP call behind that same
+    # check, cancelling before the first addon can no longer prevent it
+    # from being queried. What it DOES still guarantee is the same
+    # user-visible outcome: no window, and the "no results" notification.
     assert result is False
     assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
     assert ctx.env.dialog_closed_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Progressive picker: open_streams() opens on the first addon's own
+# results without waiting for a slower one, and StreamsWindow.add_pairs()/
+# set_loading() feed the rest in live - see the module docstring's
+# concurrency/progressive-opening paragraph.
+# ---------------------------------------------------------------------------
+
+
+def test_open_streams_opens_on_the_first_addon_without_waiting_for_a_slower_one(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    fast = {
+        'transportUrl': 't-fast',
+        'manifest': {'name': 'Fast', 'resources': ['stream'], 'types': ['movie']},
+    }
+    slow = {
+        'transportUrl': 't-slow',
+        'manifest': {'name': 'Slow', 'resources': ['stream'], 'types': ['movie']},
+    }
+    fast_stream = {'url': 'https://fast.example/a.mp4'}
+    slow_stream = {'url': 'https://slow.example/a.mp4'}
+    release_slow = threading.Event()
+    slow_answered = threading.Event()
+
+    class _OrderedClient:
+        """Blocks the slow addon's own answer until the test releases it
+        - guarantees the fast addon is always the one open_streams() sees
+        first, deterministically, regardless of real thread scheduling."""
+
+        def __init__(self):
+            self.calls = []
+
+        def streams(self, transport, stype, sid):
+            self.calls.append(transport)
+            if transport == 't-slow':
+                release_slow.wait(2)
+                slow_answered.set()
+                return [slow_stream]
+            return [fast_stream]
+
+    client = _OrderedClient()
+    _wire_data_layer(sw, _FakeStore(addons=[fast, slow]), client)
+    captured = {}
+
+    class RecordingWindow(sw.StreamsWindow):
+        def set_loading(self, loading):
+            captured.setdefault('loading_calls', []).append(loading)
+            super().set_loading(loading)
+
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
+            captured['pairs'] = list(pairs)
+            captured['slow_answered_before_open'] = slow_answered.is_set()
+            release_slow.set()  # only let the slow addon finish once the picker has already decided to open
+            return False
+
+    monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+
+    result = sw.open_streams('movie', 'tt1')
+
+    assert result is False
+    assert not captured['slow_answered_before_open']
+    assert [s for _info, s in captured['pairs']] == [fast_stream]
+    assert captured['loading_calls'] == [True]  # the slow addon was still outstanding when this window opened
+
+
+def test_streamswindow_add_pairs_from_a_worker_thread_never_touches_controls_until_the_gui_drain_runs(
+    load_streamswindow,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    win = _make_window(sw)
+    info = {'addon': 'A', 'raw': 'Row A'}
+    stream = {'url': 'https://a.example/a.mp4'}
+    win.start([(info, stream)], 'movie', 'tt1')
+    win.onInit()
+
+    new_info = {'addon': 'B', 'raw': 'Row B'}
+    new_stream = {'url': 'https://b.example/b.mp4'}
+
+    # add_pairs() runs on a real background thread here - proving it is
+    # actually thread-safe, not merely "called synchronously and happens
+    # not to touch anything".
+    worker = threading.Thread(target=win.add_pairs, args=([(new_info, new_stream)],))
+    worker.start()
+    worker.join(2)
+
+    assert win.pairs == [(info, stream)]  # not merged yet - only queued
+    assert len(win.getControl(sw.LIST).items) == 1  # onInit()'s original single row, untouched
+
+    win.onAction(_FakeBackAction(-1))
+
+    assert [s for _i, s in win.pairs] == [stream, new_stream]
+    assert len(win.getControl(sw.LIST).items) == 2
+
+
+class _FakeBackAction:
+    """Minimal `xbmcgui.Action`-shaped stand-in for a non-back keypress -
+    `getId()` alone is what `BaseWindow.onAction()`/`StreamsWindow.onAction()`
+    read."""
+
+    def __init__(self, action_id):
+        self._id = action_id
+
+    def getId(self):
+        return self._id
+
+
+def test_streamswindow_add_pairs_drain_resorts_and_preserves_focus_by_identity_not_equality(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    win = _make_window(sw)
+    low_info = {'addon': 'A', 'raw': 'Low'}
+    low_stream_1 = {'url': 'https://a.example/low.mp4'}  # focused row - must stay selected after the re-sort
+    low_stream_2 = dict(low_stream_1)  # a DIFFERENT object, but an EQUAL dict - the identity trap
+    win.start([(low_info, low_stream_1)], 'movie', 'tt1')
+    win.onInit()
+    win.getControl(sw.LIST).selected_index = 0
+
+    def fake_sort_streams(pairs, key='quality'):
+        # Put whatever is NOT the originally-focused pair first, so a
+        # naive re-select-by-index (rather than by identity) would land
+        # on the wrong row.
+        return sorted(pairs, key=lambda pair: pair[1] is low_stream_1)
+
+    monkeypatch.setattr(streaminfo, 'sort_streams', fake_sort_streams)
+
+    high_info = {'addon': 'B', 'raw': 'High'}
+    win.add_pairs([(high_info, low_stream_2)])
+    win.onAction(_FakeBackAction(-1))
+
+    assert [s for _i, s in win.pairs] == [low_stream_2, low_stream_1]  # low_stream_1 sorted to the END
+    focused = win.getControl(sw.LIST).getSelectedItem()
+    focused_pair = win.pairs[int(focused.getProperty('position'))]
+    assert focused_pair[1] is low_stream_1  # NOT low_stream_2, despite comparing equal as a dict
+    assert low_stream_1 == low_stream_2  # the equality trap this test guards against
+
+
+def test_streamswindow_add_pairs_after_close_is_a_silent_noop(load_streamswindow):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    win = _make_window(sw)
+    info = {'addon': 'A', 'raw': 'Row A'}
+    stream = {'url': 'https://a.example/a.mp4'}
+    win.start([(info, stream)], 'movie', 'tt1')
+    win.onInit()
+    win.close()
+
+    win.add_pairs([({'addon': 'B'}, {'url': 'https://b.example/b.mp4'})])
+    win.set_loading(True)
+
+    assert win.pairs == [(info, stream)]  # nothing merged
+    assert ctx.env.executed_builtins == []  # never even woke the GUI thread
+
+
+
+
+def test_fetch_stream_pairs_aggregates_every_addon_and_logs_a_single_warning_on_failure(
+    load_streamswindow,
+):
+    ctx = load_streamswindow()
+    import xbmc
+    sw = ctx.streamswindow
+    failing_transport = 'https://fail.example/manifest.json'
+    ok_transport = 'https://ok.example/manifest.json'
+    failing = {
+        'transportUrl': failing_transport,
+        'manifest': {'name': 'Failing', 'resources': ['stream'], 'types': ['movie']},
+    }
+    working = {
+        'transportUrl': ok_transport,
+        'manifest': {'name': 'Working', 'resources': ['stream'], 'types': ['movie']},
+    }
+    ok_stream = {'url': 'https://a.example/a.mp4'}
+    client = _FakeAddonClient({failing_transport: AddonError('upstream down'), ok_transport: [ok_stream]})
+    _wire_data_layer(sw, _FakeStore(addons=[failing, working]), client)
+
+    pairs = sw._fetch_stream_pairs('movie', 'tt1')
+
+    assert [s for _info, s in pairs] == [ok_stream]
+    assert sorted(call[0] for call in client.calls) == [failing_transport, ok_transport]
+    warnings = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGWARNING]
+    assert len(warnings) == 1 and 'streamswindow: 1 addon(s) failed' in warnings[0]
+
 
 
 # ---------------------------------------------------------------------------
@@ -1450,6 +1639,11 @@ def test_open_streams_reopens_with_the_same_pairs_after_a_played_round_trip_then
 
     class RecordingWindow(sw.StreamsWindow):
         def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
+            # open_streams() now reads win.pairs back after this returns
+            # (the live streaming fan-out may have accumulated more than
+            # what was passed in) - mirror that part of the real
+            # start()'s contract so the reopen below sees the same rows.
+            self.pairs = list(pairs)
             start_calls.append((pairs, stype, sid, poster, heading, art, meta))
             return len(start_calls) == 1  # plays the first time, backs out of the reopened window
 
@@ -1461,8 +1655,14 @@ def test_open_streams_reopens_with_the_same_pairs_after_a_played_round_trip_then
 
     assert result is False
     assert len(start_calls) == 2
-    assert start_calls[0] == start_calls[1]  # reopened with the SAME pairs/heading/art/meta/poster
-    assert start_calls[0][0] is start_calls[1][0]  # not just equal - the identical pairs list
+    # Same rows/heading/art/meta on reopen - but no longer the identical
+    # `pairs` OBJECT: open_streams() now re-reads win.pairs after the
+    # first window closes (a single-addon fetch has nothing left to
+    # stream in here, but the accumulation point is real - see the
+    # module docstring), which is a fresh list StreamsWindow.start()
+    # itself copies `pairs` into, not the one open_streams() fetched.
+    assert start_calls[0][1:] == start_calls[1][1:]
+    assert start_calls[0][0] == start_calls[1][0]
     assert start_calls[0][6] is meta is start_calls[1][6]  # meta threaded through unchanged, same object
     assert len(client.calls) == 1  # addon streams were fetched only once, never re-fetched
     assert [s for _info, s in start_calls[0][0]] == [stream]

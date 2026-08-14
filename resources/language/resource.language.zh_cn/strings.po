@@ -495,3 +495,7 @@ msgstr "%s将在%d秒后播放"
 msgctxt "#30184"
 msgid "Updated to version %s"
 msgstr "已更新到版本 %s"
+
+msgctxt "#30185"
+msgid "Loading more sources..."
+msgstr "正在加载更多来源..."

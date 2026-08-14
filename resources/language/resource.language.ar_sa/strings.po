@@ -495,3 +495,7 @@ msgstr "جارٍ تشغيل %s خلال %d ثانية"
 msgctxt "#30184"
 msgid "Updated to version %s"
 msgstr "تم التحديث إلى الإصدار %s"
+
+msgctxt "#30185"
+msgid "Loading more sources..."
+msgstr "جارٍ تحميل المزيد من المصادر..."

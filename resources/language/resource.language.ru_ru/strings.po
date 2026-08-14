@@ -495,3 +495,7 @@ msgstr "Воспроизведение %s через %d с"
 msgctxt "#30184"
 msgid "Updated to version %s"
 msgstr "Обновлено до версии %s"
+
+msgctxt "#30185"
+msgid "Loading more sources..."
+msgstr "Загрузка дополнительных источников..."

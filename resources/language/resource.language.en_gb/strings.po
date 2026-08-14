@@ -515,3 +515,7 @@ msgstr ""
 msgctxt "#30184"
 msgid "Updated to version %s"
 msgstr ""
+
+msgctxt "#30185"
+msgid "Loading more sources..."
+msgstr ""

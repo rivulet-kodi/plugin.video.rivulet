@@ -495,3 +495,7 @@ msgstr "%s wird in %d s abgespielt"
 msgctxt "#30184"
 msgid "Updated to version %s"
 msgstr "Auf Version %s aktualisiert"
+
+msgctxt "#30185"
+msgid "Loading more sources..."
+msgstr "Weitere Quellen werden geladen..."

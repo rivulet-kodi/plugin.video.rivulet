@@ -56,7 +56,29 @@ letting it end, cancelling the countdown, a monitor abort, no next
 episode, or no fetchable stream for it all fall back to the
 SAME "reopen the picker" round trip described above - `open_streams()`
 still only ever returns False.
+
+Every installed addon's own stream fetch runs CONCURRENTLY, not one at
+a time: real user logs showed the old serial `for` loop - each addon
+call bounded by `AddonClient`'s own 15s timeout - taking as long as
+27.6s to open this picker, and 5.0s even in the ordinary case, because
+one slow or unresponsive addon held up every addon queued behind it
+(`streamswindow: 1 addon(s) failed` on every single fetch, whether or
+not that addon was the slow one). `_fetch_stream_pairs()` (still used,
+unchanged, by `_try_binge_watch()`) fetches every addon concurrently
+but still blocks until all of them answer; `open_streams()` goes
+further and opens the picker as soon as the FIRST addon answers,
+letting the rest stream their own results in live onto the open
+`StreamsWindow` (`StreamsWindow.add_pairs()`/`set_loading()`) exactly
+like `infowindow.ShowcaseWindow`'s background meta-enrich worker feeds
+an already-open coverflow - see that module's docstring and
+`add_pairs()`'s own docstring below for the worker->GUI handoff both
+share. That live phase only ever feeds the FIRST window a picker opens;
+every reopen after a played pick (or a binge-watched one) works off
+whatever `StreamsWindow.pairs` had already accumulated by then, a
+static snapshot, never resumes listening for more addons.
 """
+import threading
+
 import xbmcgui
 
 from lib.stremio import streaminfo
@@ -69,6 +91,23 @@ LIST = 30002
 POSTER = 30004
 HEADING = 30005
 INFO_PANEL = 30008
+
+#: Cap on concurrent addon HTTP calls a streams fan-out below opens at
+#: once - mirrors `lib.ui.views._MAX_ADDON_WORKERS`'s bounded-pool
+#: convention (kept as its own local constant, since each fan-out point
+#: in this addon bounds its OWN pool rather than sharing one - this one
+#: also runs on low-power ARM boxes, where an unbounded thread-per-addon
+#: fan-out would be its own liability). Each AddonClient call still
+#: carries its own 15s timeout; this only lets that timeout run
+#: concurrently across addons instead of serializing N of them one
+#: after another - see the module docstring for the measured 5.0s/
+#: 27.6s cost of the old serial loop this replaces.
+_MAX_STREAM_ADDON_WORKERS = 8
+
+#: strings.po id for the transient "more sources still loading" line
+#: `StreamsWindow._rebuild_list()` appends to INFO_PANEL while
+#: `open_streams()`'s fan-out still has an addon outstanding.
+_LOADING_STRING_ID = 30185
 
 #: Brief settle pause before reopening the picker after playback ends -
 #: gives Kodi's player teardown a moment to finish before a fresh modal
@@ -111,6 +150,23 @@ class StreamsWindow(BaseWindow):
         self.video_id = None
         self.played = False
         self.played_pair = None
+        #: True once close() has run - add_pairs()/set_loading() become
+        #: silent no-ops from then on, so a straggling addon answering
+        #: after the user backed out (or after playback started) never
+        #: touches a torn-down window. See close()/add_pairs().
+        self._closed = False
+        #: Guards `_pending_batches`/`_pending_loading` below - written
+        #: by add_pairs()/set_loading() from a background fetch thread,
+        #: drained by `_merge_pending()` on the GUI thread only. Mirrors
+        #: `infowindow.ShowcaseWindow`'s `_enrich_lock`/`_enrich_pending`
+        #: worker->GUI handoff exactly.
+        self._pending_lock = threading.Lock()
+        self._pending_batches = []
+        self._pending_loading = None
+        #: True while `open_streams()`'s own fan-out still has an addon
+        #: outstanding - renders `_LOADING_STRING_ID`'s status line onto
+        #: INFO_PANEL until the last one answers (`set_loading(False)`).
+        self._loading = False
 
     def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
         """doModal() showing `pairs` (a list of `(info, stream)` as
@@ -118,8 +174,13 @@ class StreamsWindow(BaseWindow):
         `heading`/`art`/`meta` are the optional caller-context kwargs
         described in the module docstring; `video_id` is the episode
         `pairs` belongs to (`None` for a movie or a context-free call -
-        see the module docstring's binge-watching paragraph). Returns
-        True if playback started (the caller should also close)."""
+        see the module docstring's binge-watching paragraph). A caller
+        wanting the picker to open before every addon has answered
+        calls `set_loading(True)`/`add_pairs()` on this window BEFORE
+        this method (see `open_streams()`) - neither is reset here, so
+        anything already queued still lands in `onInit()`'s first
+        build. Returns True if playback started (the caller should
+        also close)."""
         self.pairs = list(pairs or [])
         self.stype = stype
         self.sid = sid
@@ -130,20 +191,117 @@ class StreamsWindow(BaseWindow):
         self.video_id = video_id
         self.played = False
         self.played_pair = None
+        self._closed = False
         if not self.pairs:
             return False
         self.doModal()
         return self.played
 
-    def onInit(self):
-        from lib.ui.compat import L, addon_fanart
+    def close(self):
+        # Any exit path must stop accepting further live updates before
+        # the underlying window (and its controls) actually goes away -
+        # see add_pairs()/set_loading()'s own no-op-after-close contract.
+        self._closed = True
+        super().close()
 
-        art = self.art or {}
-        background = art.get('fanart') or art.get('poster') or self.poster or addon_fanart()
-        self.getControl(BACKGROUND).setImage(background)
-        self.getControl(POSTER).setImage(art.get('poster') or self.poster or '')
-        self.getControl(HEADING).setLabel((self.heading or L(30041)).upper())
+    def add_pairs(self, pairs):
+        """Thread-safe: queue one addon's OWN batch of `(info, stream)`
+        pairs - called by `open_streams()`'s streaming fan-out as each
+        addon answers, from a background fetch thread, NEVER the GUI
+        thread. Mirrors `infowindow.ShowcaseWindow._enrich_fetch()`'s
+        worker->GUI handoff exactly: this never touches a control or
+        `self.pairs` directly - it only queues the batch, then wakes the
+        GUI thread with `Action(noop)`, which lands on `onAction()`'s
+        own `_apply_pending()` drain below. A silent no-op once this
+        window has closed, or for an empty batch."""
+        if not pairs:
+            return
+        with self._pending_lock:
+            if self._closed:
+                return
+            self._pending_batches.append(list(pairs))
+        self._wake()
 
+    def set_loading(self, loading):
+        """Thread-safe toggle for the transient "more sources still
+        loading" INFO_PANEL line (see `_rebuild_list()`) - `True` while
+        `open_streams()`'s fan-out still has an addon outstanding,
+        `False` once the last one has answered. Same worker->GUI
+        handoff as `add_pairs()`; a silent no-op once this window has
+        closed."""
+        with self._pending_lock:
+            if self._closed:
+                return
+            self._pending_loading = bool(loading)
+        self._wake()
+
+    def _wake(self):
+        import xbmc
+        xbmc.executebuiltin('Action(noop)')
+
+    def _merge_pending(self):
+        """Pull whatever `add_pairs()`/`set_loading()` queued onto
+        `self.pairs`/`self._loading` - GUI thread only. Re-sorts the
+        WHOLE list with the user's `stream_sort` setting, since a fast
+        addon landing after a slow one can outrank rows already on
+        screen. Returns True if anything actually changed, so a caller
+        only rebuilds the list when there is something new to show."""
+        with self._pending_lock:
+            if not self._pending_batches and self._pending_loading is None:
+                return False
+            batches, self._pending_batches = self._pending_batches, []
+            loading, self._pending_loading = self._pending_loading, None
+        if batches:
+            for batch in batches:
+                self.pairs.extend(batch)
+            from lib.ui.compat import ADDON
+            sort_key = ADDON.getSetting('stream_sort') or 'quality'
+            self.pairs = streaminfo.sort_streams(self.pairs, key=sort_key)
+        if loading is not None:
+            self._loading = loading
+        return True
+
+    def _apply_pending(self):
+        """`onAction()`'s live-merge drain - GUI thread only. Rebuilds
+        LIST/INFO_PANEL exactly like `onInit()` when `_merge_pending()`
+        finds something new, preserving the focused row by OBJECT
+        IDENTITY (`is`, not `==` - two different streams can compare
+        equal as `(info, stream)` tuples) so a re-sort never yanks the
+        cursor out from under a user about to click. Falls back to the
+        same numeric position (clamped to the new length) when the
+        previously-focused pair is no longer in the list at all."""
+        control = self.getControl(LIST)
+        focused = control.getSelectedItem()
+        focus_index = control.getSelectedPosition()
+        focus_pair = None
+        if focused is not None:
+            try:
+                pos = int(focused.getProperty('position'))
+            except (TypeError, ValueError):
+                pos = -1
+            if 0 <= pos < len(self.pairs):
+                focus_pair = self.pairs[pos]
+
+        if not self._merge_pending():
+            return
+
+        self._rebuild_list()
+        if not self.pairs:
+            return
+        if focus_pair is not None:
+            for index, pair in enumerate(self.pairs):
+                if pair is focus_pair:
+                    control.selectItem(index)
+                    return
+        control.selectItem(min(max(focus_index, 0), len(self.pairs) - 1))
+
+    def _rebuild_list(self):
+        """Build LIST's rows from `self.pairs` and INFO_PANEL's text
+        from `self.meta` - shared by `onInit()` and `_apply_pending()`'s
+        live merge so both build rows identically (single-provider
+        dedupe included) instead of duplicating this logic. Never
+        touches focus - callers position the cursor themselves once
+        this returns."""
         providers = {info.get('addon') for info, _stream in self.pairs if info.get('addon')}
         single_provider = next(iter(providers)) if len(providers) == 1 else None
 
@@ -164,13 +322,13 @@ class StreamsWindow(BaseWindow):
             item.setProperty('position', str(index))
             items.append(item)
         control = self.getControl(LIST)
-        # reset() before addItems(): onInit() runs again when
-        # uicommon.ModalStackWindow reopens a screen force-closed for
-        # playback, and re-adding onto a retained list would double every
-        # item.
+        # reset() before addItems(): a rebuild - onInit() reopening a
+        # screen force-closed for playback, or a live add_pairs() merge -
+        # onto a retained list would double every item.
         control.reset()
         control.addItems(items)
-        self.setFocusId(LIST)
+
+        from lib.ui.compat import L
 
         meta = self.meta or {}
         year = str(meta.get('releaseInfo') or meta.get('year') or '').rstrip('-')
@@ -185,7 +343,33 @@ class StreamsWindow(BaseWindow):
             lines.append(' / '.join(genres))
         if single_provider:
             lines.append('via %s' % single_provider)
+        if self._loading:
+            lines.append(L(_LOADING_STRING_ID))
         self.getControl(INFO_PANEL).setText('\n'.join(lines))
+
+    def onInit(self):
+        from lib.ui.compat import L, addon_fanart
+
+        # Pick up anything open_streams() queued via set_loading()/
+        # add_pairs() before doModal() actually opened this window, so
+        # the ONE initial build below already reflects it.
+        self._merge_pending()
+
+        art = self.art or {}
+        background = art.get('fanart') or art.get('poster') or self.poster or addon_fanart()
+        self.getControl(BACKGROUND).setImage(background)
+        self.getControl(POSTER).setImage(art.get('poster') or self.poster or '')
+        self.getControl(HEADING).setLabel((self.heading or L(30041)).upper())
+
+        self._rebuild_list()
+        self.setFocusId(LIST)
+
+    def onAction(self, action):
+        # Drain first, on the GUI thread, exactly like
+        # infowindow.ShowcaseWindow.onAction() calls _apply_enriched()
+        # before its own per-focus work - see add_pairs()/set_loading().
+        self._apply_pending()
+        super().onAction(action)
 
     def onClick(self, control_id):
         if control_id != LIST:
@@ -350,6 +534,63 @@ def _wait_for_playback_end(player=None, monitor=None, start_timeout=20.0, tick=0
         return False, False
 
 
+def _query_addon_streams(client, transport_url, addon_name, stype, sid):
+    """Fetch+parse one addon's own streams for (stype, sid) - the unit
+    of work every fan-out below submits CONCURRENTLY (see
+    `_MAX_STREAM_ADDON_WORKERS`) instead of the old serial `for` loop's
+    one-at-a-time calls (see the module docstring for the measured
+    5.0s/27.6s cost that caused). Returns a `(pairs, failed)` tuple;
+    `failed` is True on `AddonError`, already logged here at DEBUG with
+    only `safe_url_for_log()`'s safe scheme+host and the exception's
+    TYPE - never the raw url or exception text, which may embed
+    credentials/paths/queries - so a caller can aggregate a single
+    WARNING across every addon's own outcome without re-deriving this
+    per-addon detail itself."""
+    import xbmc
+
+    from lib.stremio.addons import AddonError, safe_url_for_log
+    from lib.ui.compat import log
+
+    try:
+        results = client.streams(transport_url, stype, sid)
+    except AddonError as exc:
+        log('streamswindow: %s failed: %s' % (
+            safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGDEBUG)
+        return [], True
+    pairs = [(streaminfo.parse_stream(stream, addon_name=addon_name), stream) for stream in results or []]
+    return pairs, False
+
+
+def _supported_stream_addons(stype, sid):
+    """Every installed addon whose manifest declares `stream` support
+    for (stype, sid) - the exact filter the old serial loop applied
+    before its own `for`, factored out so both `_fetch_stream_pairs()`
+    and `open_streams()`'s own fan-out share one list."""
+    from lib.stremio.addons import addon_supports
+
+    store = get_store()
+    addons = []
+    for descriptor in store.get_addons():
+        manifest = descriptor.get('manifest') or {}
+        if addon_supports(manifest, 'stream', stype, sid):
+            addons.append((descriptor, manifest))
+    return addons
+
+
+def _submit_stream_fetches(pool, stype, sid, addons):
+    """Submit `_query_addon_streams()` for every `(descriptor, manifest)`
+    in `addons` onto `pool` all at once - concurrently, not gated behind
+    each other - returning a `{future: addon_name}` map for
+    `as_completed()` to consume."""
+    client = get_client()
+    return {
+        pool.submit(
+            _query_addon_streams, client, descriptor.get('transportUrl'), manifest.get('name', '?'), stype, sid,
+        ): manifest.get('name', '?')
+        for descriptor, manifest in addons
+    }
+
+
 def _fetch_stream_pairs(stype, sid):
     """Fetch+parse (not sort) every installed addon's streams for
     (stype, sid) - the exact aggregate pipeline `open_streams()` has
@@ -359,48 +600,54 @@ def _fetch_stream_pairs(stype, sid):
     Sorting and the "no results" notify()/return-False handling stay the
     CALLER's job - `open_streams()`'s own caller wants a user-visible
     notify(); the binge round trip wants a silent fall-back to reopening
-    the picker instead (see `_try_binge_watch()`)."""
+    the picker instead (see `_try_binge_watch()`).
+
+    Every addon is queried CONCURRENTLY (see `_MAX_STREAM_ADDON_WORKERS`)
+    rather than one at a time - see the module docstring for why. This
+    still BLOCKS until every addon has answered, exactly like the old
+    serial loop did - `open_streams()`'s own streaming fan-out is what
+    lets THAT caller react before every addon has answered; this
+    function's callers (`_try_binge_watch()`, and `open_streams()`
+    itself for as long as it used to) want the plain "wait for
+    everything, then decide" contract."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     import xbmc
 
-    from lib.stremio.addons import AddonError, addon_supports, safe_url_for_log
     from lib.ui.compat import L, log
 
-    store = get_store()
-    client = get_client()
+    addons = _supported_stream_addons(stype, sid)
     pairs = []
-    addons = []
-    for descriptor in store.get_addons():
-        manifest = descriptor.get('manifest') or {}
-        if addon_supports(manifest, 'stream', stype, sid):
-            addons.append((descriptor, manifest))
-    total_addons = len(addons)
     failed_addons = 0
-    with busy_dialog(L(30033)) as dialog:
-        for index, (descriptor, manifest) in enumerate(addons):
+    if not addons:
+        return pairs
+
+    pool = ThreadPoolExecutor(max_workers=min(len(addons), _MAX_STREAM_ADDON_WORKERS))
+    try:
+        futures = _submit_stream_fetches(pool, stype, sid, addons)
+        with busy_dialog(L(30033)) as dialog:
             if dialog.iscanceled():
-                break
-            transport_url = descriptor.get('transportUrl')
-            addon_name = manifest.get('name', '?')
-            percent = int(index * 100 / total_addons) if total_addons else 0
-            dialog.update(percent, 'Checking %s...' % addon_name)
-            try:
-                results = client.streams(transport_url, stype, sid)
-            except AddonError as exc:
-                # One addon failing (offline, misconfigured, slow) is
-                # routine, not exceptional - logging each at ERROR with a
-                # full exception repr drowned real problems in noise on
-                # every single fetch. DEBUG + only the safe scheme/host
-                # (never the raw transport_url, which may carry
-                # path/query/credentials, nor the exception text, which
-                # may embed the raw URL too) here; one aggregate WARNING
-                # below covers "something's wrong" without spamming
-                # per-addon detail into the normal log.
-                log('streamswindow: %s failed: %s' % (
-                    safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGDEBUG)
-                failed_addons += 1
-                continue
-            for stream in results or []:
-                pairs.append((streaminfo.parse_stream(stream, addon_name=addon_name), stream))
+                return pairs
+            total = len(futures)
+            completed = 0
+            for future in as_completed(futures):
+                addon_name = futures[future]
+                addon_pairs, failed = future.result()
+                completed += 1
+                if failed:
+                    failed_addons += 1
+                else:
+                    pairs.extend(addon_pairs)
+                dialog.update(int(completed * 100 / total), 'Checking %s...' % addon_name)
+                if dialog.iscanceled():
+                    break
+    finally:
+        # wait=False: a cancelled (or simply finished) fetch returns
+        # immediately with whatever landed so far rather than blocking on
+        # addons still mid-flight - each is bounded by AddonClient's own
+        # 15s timeout regardless, no worse than the single in-flight call
+        # the old serial loop could never interrupt either.
+        pool.shutdown(wait=False)
 
     if failed_addons:
         log('streamswindow: %d addon(s) failed' % failed_addons, xbmc.LOGWARNING)
@@ -562,6 +809,68 @@ def _try_binge_watch(stype, meta, poster, art, video_id, played_info):
         return None
 
 
+class _PickerFeed:
+    """Bridges `open_streams()`'s background fan-out thread to whichever
+    `StreamsWindow` it opens once the first addon answers - buffering
+    batches under a lock until `attach()` hands them to a live window's
+    `add_pairs()`/`set_loading()`, so nothing a worker delivers in the
+    narrow window between "decided to open" and "window fully attached"
+    is ever dropped. `stop()` makes every later `add()` a silent no-op,
+    the same contract `StreamsWindow.add_pairs()` itself has once
+    closed - see `open_streams()` for when each is called."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._buffered = []
+        self._window = None
+        self._done = False
+        self._stopped = False
+
+    def add(self, pairs):
+        with self._lock:
+            if self._stopped:
+                return
+            if self._window is None:
+                self._buffered.append(list(pairs))
+                return
+            window = self._window
+        window.add_pairs(pairs)
+
+    def mark_done(self):
+        """Every addon has now answered - flip the live window's status
+        line off, or remember to for whichever window `attach()` next."""
+        with self._lock:
+            self._done = True
+            window = None if self._stopped else self._window
+        if window is not None:
+            window.set_loading(False)
+
+    def attach(self, window):
+        """Flush anything buffered onto `window`, then route every
+        subsequent `add()` straight there. Returns True if the fan-out
+        was still outstanding at attach time - the caller's initial
+        `set_loading()` state."""
+        with self._lock:
+            if self._stopped:
+                return False
+            buffered, self._buffered = self._buffered, []
+            self._window = window
+            still_loading = not self._done
+        for batch in buffered:
+            window.add_pairs(batch)
+        return still_loading
+
+    def stop(self):
+        """Nothing may deliver to (or even buffer for) a window again -
+        called once the first picker this feeds has closed for good
+        (backed out, or handed off to playback); see `open_streams()`'s
+        "MUST continue with the accumulated pairs" contract."""
+        with self._lock:
+            self._stopped = True
+            self._window = None
+            self._buffered = []
+
+
 def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
     """Fetch+sort every installed addon's streams for (stype, sid) and
     show them; a pick resolves+plays directly. `heading`/`art`/`meta` are
@@ -570,35 +879,125 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
     context-free call) drives the binge-watching round trip below - see
     the module docstring for both.
 
-    Once a pick plays, this reopens a fresh `StreamsWindow` over the
-    SAME `pairs`/`heading`/`art`/`meta`/`poster` once playback ends (see
-    `_wait_for_playback_end()`) rather than returning - see the module
-    docstring for why this means the function now only ever returns
-    False."""
+    Every installed addon is queried CONCURRENTLY, and the picker opens
+    as soon as the FIRST one answers with anything - the rest stream in
+    live onto that SAME window (see the module docstring and
+    `StreamsWindow.add_pairs()`/`set_loading()`) rather than blocking
+    the whole picker open on whichever addon is slowest. Only that
+    FIRST window gets live updates; once it closes (a pick, or the user
+    backing out), a `threading.Event` tells the fan-out thread to stop
+    delivering, and every later reopen below works off the accumulated
+    `StreamsWindow.pairs` snapshot instead.
+
+    Once a pick plays, this reopens a fresh `StreamsWindow` over that
+    SAME snapshot once playback ends (see `_wait_for_playback_end()`)
+    rather than returning - see the module docstring for why this means
+    the function now only ever returns False."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     import xbmc
 
     from lib.ui.compat import ADDON, L, log, notify
 
-    pairs = _fetch_stream_pairs(stype, sid)
+    addons = _supported_stream_addons(stype, sid)
+    if not addons:
+        notify(L(30030))
+        return False
+
+    pool = ThreadPoolExecutor(max_workers=min(len(addons), _MAX_STREAM_ADDON_WORKERS))
+    futures = _submit_stream_fetches(pool, stype, sid, addons)
+    completed_iter = as_completed(futures)
+    total = len(futures)
+    pairs = []
+    failed_addons = 0
+    consumed = 0
+
+    def consume_next():
+        """Advance `completed_iter` by one addon's own answer, folding
+        its pairs/failure into the running totals above. Returns that
+        addon's own `(name, pairs)`, or None once every addon has
+        answered."""
+        nonlocal failed_addons, consumed
+        try:
+            future = next(completed_iter)
+        except StopIteration:
+            return None
+        addon_name = futures[future]
+        addon_pairs, failed = future.result()
+        consumed += 1
+        if failed:
+            failed_addons += 1
+        else:
+            pairs.extend(addon_pairs)
+        return addon_name, addon_pairs
+
+    with busy_dialog(L(30033)) as dialog:
+        while not pairs:
+            if dialog.iscanceled():
+                break
+            result = consume_next()
+            if result is None:
+                break
+            addon_name, _addon_pairs = result
+            dialog.update(int(consumed * 100 / total), 'Checking %s...' % addon_name)
 
     if not pairs:
+        pool.shutdown(wait=False)
+        if failed_addons:
+            log('streamswindow: %d addon(s) failed' % failed_addons, xbmc.LOGWARNING)
         notify(L(30030))
         return False
 
     sort_key = ADDON.getSetting('stream_sort') or 'quality'
     pairs = streaminfo.sort_streams(pairs, key=sort_key)
 
-    log('streamswindow: opening StreamsWindow (%d streams)' % len(pairs), xbmc.LOGINFO)
+    feed = _PickerFeed()
+    stop_event = threading.Event()
+
+    def drain_remaining():
+        try:
+            while True:
+                result = consume_next()
+                if result is None:
+                    break
+                _addon_name, addon_pairs = result
+                if addon_pairs and not stop_event.is_set():
+                    feed.add(addon_pairs)
+        except Exception as exc:  # noqa: BLE001 - nothing else can catch a failure on this background thread; log it as loudly as open_streams()'s own window-construction failures below, rather than let it vanish silently.
+            log('streamswindow: fan-out failed: %r' % (exc,), xbmc.LOGERROR)
+        finally:
+            pool.shutdown(wait=False)
+            if not stop_event.is_set():
+                feed.mark_done()
+            if failed_addons:
+                log('streamswindow: %d addon(s) failed' % failed_addons, xbmc.LOGWARNING)
+
+    still_loading = consumed < total
+    if still_loading:
+        threading.Thread(target=drain_remaining, daemon=True).start()
+    else:
+        pool.shutdown(wait=False)
+        feed.mark_done()
+        if failed_addons:
+            log('streamswindow: %d addon(s) failed' % failed_addons, xbmc.LOGWARNING)
+
+    log('streamswindow: opening StreamsWindow (%d streams so far)' % len(pairs), xbmc.LOGINFO)
+    live = True
     while True:
         win = None
         try:
             win = open_window(StreamsWindow, 'StreamsWindow.xml')
+            if live:
+                win.set_loading(feed.attach(win))
             played = win.start(
                 pairs, stype, sid, poster=poster, heading=heading, art=art, meta=meta, video_id=video_id,
             )
         except Exception as exc:  # a skin/UI failure must surface, not vanish
             log('streamswindow: window failed to open: %r' % (exc,), xbmc.LOGERROR)
             notify(L(30032))
+            if live:
+                stop_event.set()
+                feed.stop()
             return False
         finally:
             # A normal return means StreamsWindow already closed itself (its
@@ -612,6 +1011,19 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
                     win.close()
                 except Exception:
                     pass
+
+        if live:
+            # The live streaming phase only ever feeds the FIRST window
+            # this picker opens (see the module docstring): once it has
+            # closed - a pick, or the user backing out - capture
+            # whatever else streamed in before that close as the new
+            # `pairs` snapshot, and stop listening for more addons. Every
+            # later reopen below reuses THIS SAME list unchanged - there
+            # is nothing left updating it once live is False.
+            stop_event.set()
+            feed.stop()
+            live = False
+            pairs = win.pairs
 
         if not played:
             return False

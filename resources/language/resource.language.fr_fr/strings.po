@@ -495,3 +495,7 @@ msgstr "Lecture de %s dans %d s"
 msgctxt "#30184"
 msgid "Updated to version %s"
 msgstr "Mis à jour vers la version %s"
+
+msgctxt "#30185"
+msgid "Loading more sources..."
+msgstr "Chargement d'autres sources..."

@@ -495,3 +495,7 @@ msgstr "Reproduciendo %s en %d s"
 msgctxt "#30184"
 msgid "Updated to version %s"
 msgstr "Actualizado a la versión %s"
+
+msgctxt "#30185"
+msgid "Loading more sources..."
+msgstr "Cargando más fuentes..."

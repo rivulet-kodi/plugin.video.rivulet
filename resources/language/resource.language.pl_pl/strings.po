@@ -495,3 +495,7 @@ msgstr "Odtwarzanie %s za %d s"
 msgctxt "#30184"
 msgid "Updated to version %s"
 msgstr "Zaktualizowano do wersji %s"
+
+msgctxt "#30185"
+msgid "Loading more sources..."
+msgstr "Wczytywanie kolejnych źródeł..."
