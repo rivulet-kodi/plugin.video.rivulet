@@ -175,3 +175,63 @@ def set_video_info(list_item, info):
         }
         if legacy:
             list_item.setInfo('video', legacy)
+
+
+def set_video_cast(list_item, cast):
+    """Apply a Stremio meta's `cast` array to `list_item` on any Kodi
+    version.
+
+    `cast` is a Stremio meta's plain list of actor names (no roles, no
+    thumbnails) - e.g. `["Marlon Brando", "Al Pacino"]`. Non-list/None
+    input, and lists that reduce to no usable names once None/empty
+    entries are dropped, are no-ops: `setCast()` is never called with an
+    empty list. Non-string scalars are stringified.
+
+    Kodi >= 20 takes `ListItem.getVideoInfoTag().setCast()`, a list of
+    `xbmc.Actor` objects - a class only added in Kodi 20, so it is
+    resolved defensively via `getattr(xbmc, 'Actor', None)`; if it (or
+    `getVideoInfoTag`/`setCast`) is missing, this falls back to the
+    legacy path below instead of raising. Kodi 19 (Matrix) has no such
+    InfoTagVideo API at all and takes the legacy `ListItem.setCast()`, a
+    list of plain `{'name', 'role', 'order', 'thumbnail'}` dicts.
+
+    Either way, since Stremio supplies names only, `role`/`thumbnail`
+    are always empty by necessity, and `order` is 1-based, matching
+    Kodi's own convention. A `setCast()` call that raises is swallowed,
+    the same defensive posture as `set_video_info()`'s per-setter guard
+    - one hostile manifest must never break a whole directory listing.
+    """
+    if not isinstance(cast, (list, tuple)):
+        return
+    names = []
+    for name in cast:
+        if name is None:
+            continue
+        text = name if isinstance(name, str) else str(name)
+        if text:
+            names.append(text)
+    if not names:
+        return
+
+    if kodi_major_version() >= 20:
+        actor_cls = getattr(xbmc, 'Actor', None)
+        tag = list_item.getVideoInfoTag() if actor_cls is not None else None
+        setter = getattr(tag, 'setCast', None) if tag is not None else None
+        if setter is not None:
+            actors = [actor_cls(name, '', order) for order, name in enumerate(names, start=1)]
+            try:
+                setter(actors)
+            except (TypeError, ValueError):
+                pass
+            return
+
+    setter = getattr(list_item, 'setCast', None)
+    if setter is None:
+        return
+    try:
+        setter([
+            {'name': name, 'role': '', 'order': order, 'thumbnail': ''}
+            for order, name in enumerate(names, start=1)
+        ])
+    except (TypeError, ValueError):
+        pass

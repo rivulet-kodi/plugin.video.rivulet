@@ -11,6 +11,7 @@ from lib.stremio.addons import (
     AddonError,
     addon_supports,
     build_resource_url,
+    catalog_extra_options,
     encode_extra,
     iter_catalogs,
     safe_url_for_log,
@@ -275,6 +276,74 @@ def test_iter_catalogs_aggregates_across_multiple_addons():
 def test_iter_catalogs_no_catalogs_yields_nothing():
     addons = [_addon("https://a.example/manifest.json", [])]
     assert list(iter_catalogs(addons)) == []
+
+
+# --- catalog_extra_options ----------------------------------------------
+
+
+def test_catalog_extra_options_modern_form():
+    catalog = {"extra": [{"name": "genre", "options": ["Action", "Comedy"]}]}
+    assert catalog_extra_options(catalog, "genre") == ["Action", "Comedy"]
+
+
+def test_catalog_extra_options_legacy_genres_fallback():
+    catalog = {"genres": ["2026", "2025", "1920"]}
+    assert catalog_extra_options(catalog, "genre") == ["2026", "2025", "1920"]
+
+
+def test_catalog_extra_options_modern_wins_over_legacy():
+    catalog = {
+        "extra": [{"name": "genre", "options": ["Action"]}],
+        "genres": ["Comedy"],
+    }
+    assert catalog_extra_options(catalog, "genre") == ["Action"]
+
+
+def test_catalog_extra_options_undeclared_extra_returns_empty():
+    catalog = {"extra": [{"name": "search"}]}
+    assert catalog_extra_options(catalog, "genre") == []
+
+
+def test_catalog_extra_options_declared_without_options_returns_empty():
+    catalog = {"extra": [{"name": "genre"}]}
+    assert catalog_extra_options(catalog, "genre") == []
+
+
+def test_catalog_extra_options_none_catalog_returns_empty():
+    assert catalog_extra_options(None, "genre") == []
+
+
+def test_catalog_extra_options_non_dict_catalog_returns_empty():
+    assert catalog_extra_options(["not", "a", "dict"], "genre") == []
+
+
+def test_catalog_extra_options_options_as_string_not_list_returns_empty():
+    catalog = {"extra": [{"name": "genre", "options": "Action"}]}
+    assert catalog_extra_options(catalog, "genre") == []
+
+
+def test_catalog_extra_options_preserves_order_and_dedupes():
+    catalog = {"extra": [{"name": "genre", "options": ["2026", "2025", "2026", "2025"]}]}
+    assert catalog_extra_options(catalog, "genre") == ["2026", "2025"]
+
+
+def test_catalog_extra_options_stringifies_int_options():
+    catalog = {"extra": [{"name": "year", "options": [2026, 2025, 1920]}]}
+    assert catalog_extra_options(catalog, "year") == ["2026", "2025", "1920"]
+
+
+def test_catalog_extra_options_real_cinemeta_year_catalog_shape():
+    catalog = {
+        "type": "movie",
+        "id": "year",
+        "extra": [
+            {"name": "genre", "options": ["2026", "2025", "1920"]},
+            {"name": "skip"},
+        ],
+        "genres": ["2026", "2025", "1920"],
+        "extraSupported": ["genre", "skip"],
+    }
+    assert catalog_extra_options(catalog, "genre") == ["2026", "2025", "1920"]
 
 
 # --- AddonClient -----------------------------------------------------------

@@ -17,10 +17,11 @@ import xbmcplugin
 
 from lib.store import ConcurrentUpdateError
 from lib.stremio import addons as addons_lib
+from lib.stremio import metalinks
 from lib.stremio.addons import AddonError, safe_url_for_log, validate_transport_url
 from lib.stremio.api import ApiError, StremioAPI
 from lib.ui import compat, router, urlutil
-from lib.ui.compat import L, log, notify, set_video_info
+from lib.ui.compat import L, log, notify, set_video_cast, set_video_info
 from lib.ui.dependencies import get_client, get_store
 
 _YEAR_RE = re.compile(r'(\d{4})')
@@ -157,6 +158,17 @@ def _find_manifest(store, transport_url):
     return None
 
 
+def _find_catalog(manifest, ctype, cid):
+    """Locate the catalog descriptor `(type, id)` inside a fetched
+    manifest - the shape addons_lib.catalog_extra_options() expects,
+    shared by catalog()'s filter-row check and filters() itself so
+    neither duplicates this lookup."""
+    for cat in (manifest or {}).get('catalogs') or []:
+        if cat.get('type') == ctype and cat.get('id') == cid:
+            return cat
+    return None
+
+
 def _decorate_label(name, date=None, rating=None):
     """Render a catalog/search row label as "Name   [date]   [rating]",
     mirroring the reference addon's (Stream4Me) showcase style: the
@@ -221,8 +233,12 @@ def _meta_item(meta, ctype=None):
     if meta.get('tagline'):
         info['plotoutline'] = meta.get('tagline')
     set_video_info(li, info)
+    # Stremio's `cast` is a plain name array, which cannot ride in the info
+    # dict above: Kodi >=20 wants xbmc.Actor objects. See compat.set_video_cast.
+    set_video_cast(li, meta.get('cast'))
 
     url = _url_for('meta', type=mtype, id=meta.get('id'))
+    li.addContextMenuItems([(L(30196), 'Container.Update(%s)' % _url_for('people', type=mtype, id=meta.get('id')))])
     return (url, li, True)
 
 
@@ -439,12 +455,26 @@ def catalog(transport, ctype, cid, extra=None):
         xbmcplugin.endOfDirectory(handle, succeeded=False)
         return
 
-    items = [_meta_item(meta, ctype) for meta in (metas or [])]
+    items = []
 
     if metas:
         manifest = _find_manifest(store, transport)
+        extra_pairs = _parse_extra(extra)
+
+        # Filter entry point: only when this catalog actually declares
+        # 'genre' options (year lists and real genre lists both use it -
+        # see catalog_extra_options()) - prepended before the metas so
+        # it's reachable without scrolling a full page. Reuses the same
+        # manifest fetch below for 'skip' paging; no second lookup.
+        if manifest and addons_lib.catalog_extra_options(_find_catalog(manifest, ctype, cid), 'genre'):
+            active_genre = next((v for k, v in extra_pairs if k == 'genre'), None)
+            label = L(30193) % active_genre if active_genre else L(30194)
+            filter_url = _url_for('filters', transport=transport, type=ctype, id=cid, extra=extra)
+            items.append(_folder_item(label, filter_url, 'DefaultFolder.png'))
+
+        items.extend(_meta_item(meta, ctype) for meta in metas)
+
         if manifest and _catalog_declares_extra(manifest, ctype, cid, 'skip'):
-            extra_pairs = _parse_extra(extra)
             current_skip = 0
             for name, value in extra_pairs:
                 if name == 'skip':
@@ -462,6 +492,45 @@ def catalog(transport, ctype, cid, extra=None):
         notify(L(30030))
     xbmcplugin.addDirectoryItems(handle, items, len(items))
     xbmcplugin.setContent(handle, _content_for_type(ctype))
+    xbmcplugin.endOfDirectory(handle)
+
+
+@_safe_listing
+def filters(transport, ctype, cid, extra=None):
+    """The year/genre filter surface for one catalog: lists the 'genre'
+    extra's declared option values (Cinemeta's 'year' catalog encodes
+    years there too - see catalog_extra_options()), each navigating to
+    the catalog filtered to that option. A pure UI surface over the
+    protocol's existing extra-options mechanism - no new query semantics.
+    """
+    handle = router.ADDON_HANDLE
+    store = get_store()
+    manifest = _find_manifest(store, transport)
+    options = addons_lib.catalog_extra_options(_find_catalog(manifest, ctype, cid) if manifest else None, 'genre')
+    if not options:
+        notify(L(30030))
+        xbmcplugin.endOfDirectory(handle, succeeded=False)
+        return
+
+    extra_pairs = _parse_extra(extra)
+    active = next((v for k, v in extra_pairs if k == 'genre'), None)
+
+    items = []
+    if active is not None:
+        remaining_pairs = [(k, v) for k, v in extra_pairs if k != 'genre']
+        clear_extra = addons_lib.encode_extra(remaining_pairs) if remaining_pairs else None
+        clear_url = _url_for('catalog', transport=transport, type=ctype, id=cid, extra=clear_extra)
+        items.append(_folder_item(L(30195), clear_url, 'DefaultFolder.png'))
+
+    for option in options:
+        option_url = _url_for('catalog', transport=transport, type=ctype, id=cid, extra=addons_lib.encode_extra([('genre', option)]))
+        url, li, is_folder = _folder_item(option, option_url, 'DefaultFolder.png')
+        if option == active:
+            li.select(True)
+        items.append((url, li, is_folder))
+
+    xbmcplugin.addDirectoryItems(handle, items, len(items))
+    xbmcplugin.setContent(handle, 'files')
     xbmcplugin.endOfDirectory(handle)
 
 
@@ -500,10 +569,39 @@ def showcase(transport, ctype, cid, extra=None):
         xbmc.executebuiltin('Container.Update(%s)' % _url_for('meta', type=selected.get('type') or ctype, id=selected.get('id')))
 
 
+def _rank_by_credit(metas, query):
+    """Stable-sort `metas` so any meta crediting `query` in its
+    `cast`/`director`/`writer` list (case-insensitive, exact match
+    against a list entry) is ranked ahead of the rest, preserving each
+    group's original relative order otherwise.
+
+    The protocol has no field-scoped query - `search=` is always plain
+    full-text, so a query that came from a Cast/Directors/Writers meta
+    link (see lib.stremio.metalinks) genuinely returns both the
+    person's credited titles and unrelated title matches (Cinemeta's
+    own "Marlon Brando" search returns both One-Eyed Jacks, where he is
+    cast+director, and "Listen to Me Marlon", a title-only match). We
+    RANK rather than filter: filtering would hide results the addon
+    actually returned, and would silently break for addons whose
+    search previews omit cast/director/writer entirely.
+    """
+    needle = query.casefold()
+
+    def _credit_rank(meta_obj):
+        for field in ('cast', 'director', 'writer'):
+            for entry in meta_obj.get(field) or []:
+                if isinstance(entry, str) and entry.casefold() == needle:
+                    return 0
+        return 1
+
+    return sorted(metas, key=_credit_rank)
+
+
 @_safe_listing
-def search():
+def search(query=None):
     handle = router.ADDON_HANDLE
-    query = xbmcgui.Dialog().input(L(30001))
+    if query is None:
+        query = xbmcgui.Dialog().input(L(30001))
     if not query:
         xbmcplugin.endOfDirectory(handle, succeeded=False, updateListing=False, cacheToDisc=False)
         return
@@ -532,6 +630,8 @@ def search():
         notify(L(30030))
         xbmcplugin.endOfDirectory(handle, succeeded=False, updateListing=False, cacheToDisc=False)
         return
+
+    metas = _rank_by_credit(metas, query)
 
     # Search results are presented directly in the coverflow showcase overlay
     # (the default search UX). Dismiss Kodi's GetDirectory busy dialog first so
@@ -576,7 +676,7 @@ def meta(stype, sid):
 
     items = []
     for season in seasons:
-        label = 'Specials' if season == 0 else 'Season %d' % season
+        label = L(30189) if season == 0 else L(30188) % season
         li = xbmcgui.ListItem(label=label)
         art = {'fanart': _row_fanart(background)}
         if poster:
@@ -590,6 +690,54 @@ def meta(stype, sid):
 
     xbmcplugin.addDirectoryItems(handle, items, len(items))
     xbmcplugin.setContent(handle, 'seasons')
+    xbmcplugin.endOfDirectory(handle)
+
+
+@_safe_listing
+def people(stype, sid):
+    """List a title's cast/crew from its meta.links (see
+    lib.stremio.metalinks) - the protocol's only cast/crew surface, no
+    separate "person" resource exists. Each row navigates back into
+    search (person credits) or discover/detail (genres, similar titles).
+    """
+    handle = router.ADDON_HANDLE
+    meta_obj = _fetch_meta(stype, sid)
+    store = get_store()
+    installed_transports = {d.get('transportUrl') for d in store.get_addons()}
+
+    items = []
+    for category, members in metalinks.iter_link_groups(meta_obj):
+        for name, parsed in members:
+            label = '%s: %s' % (category, name)
+            kind = parsed['kind']
+            if kind == 'search':
+                url = _url_for('search', query=parsed['query'])
+            elif kind == 'discover':
+                # SECURITY: an addon-supplied discover link's transport_url
+                # must never cause a fetch to an arbitrary host - only
+                # dispatch it once it's confirmed to name one of the
+                # user's own installed addons (resolved against
+                # store.get_addons(), never fetched from the link itself).
+                if parsed['transport_url'] not in installed_transports:
+                    log('views.people: discover link transport not installed: %s' % safe_url_for_log(parsed['transport_url']), xbmc.LOGWARNING)
+                    continue
+                url = _url_for(
+                    'catalog', transport=parsed['transport_url'], type=parsed['type'],
+                    id=parsed['catalog_id'], extra=addons_lib.encode_extra(parsed['extra']),
+                )
+            elif kind == 'detail':
+                url = _url_for('meta', type=parsed['type'], id=parsed['id'])
+            else:
+                continue
+            items.append(_folder_item(label, url))
+
+    if not items:
+        notify(L(30197))
+        xbmcplugin.endOfDirectory(handle, succeeded=False)
+        return
+
+    xbmcplugin.addDirectoryItems(handle, items, len(items))
+    xbmcplugin.setContent(handle, 'files')
     xbmcplugin.endOfDirectory(handle)
 
 

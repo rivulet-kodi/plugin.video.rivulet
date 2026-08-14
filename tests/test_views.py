@@ -21,7 +21,7 @@ import contextlib
 import sys
 import threading
 import time
-from urllib.parse import parse_qsl, urlparse
+from urllib.parse import parse_qsl, quote, urlparse
 
 import pytest
 
@@ -746,6 +746,150 @@ def test_catalog_next_page_skip_math(load_views, existing_extra, expected_next_s
     assert forwarded_extra['skip'] == expected_next_skip
 
 
+# ---------------------------------------------------------------------------
+# catalog() / filters() - year/genre filter surface
+# ---------------------------------------------------------------------------
+
+
+def _genre_catalog_descriptor(transport, options, ctype='movie', cid='top'):
+    return {
+        'transportUrl': transport,
+        'manifest': {'id': 'org.a', 'catalogs': [{'type': ctype, 'id': cid, 'extra': [{'name': 'genre', 'options': options}]}]},
+        'flags': {},
+    }
+
+
+def test_catalog_prepends_filter_row_with_inactive_label_when_no_genre_applied(load_views):
+    ctx = load_views()
+    views = ctx.views
+    transport = 'https://addon-a.example/manifest.json'
+    descriptor = _genre_catalog_descriptor(transport, ['1972', '1971'])
+    metas = [{'id': 'tt1', 'name': 'One', 'type': 'movie'}]
+    _wire_data_layer(views, FakeStore(addons=[descriptor]), FakeAddonClient(catalog_result=metas))
+
+    views.catalog(transport, 'movie', 'top')
+
+    items = ctx.env.directory_items[-1]['items']
+    assert len(items) == 2  # filter row + the one meta
+    url, li, is_folder = items[0]
+    assert is_folder is True
+    assert li.getLabel() == 'STR30194'
+    query = dict(parse_qsl(urlparse(url).query))
+    assert query['action'] == 'filters'
+    assert query['transport'] == transport and query['type'] == 'movie' and query['id'] == 'top'
+
+
+def test_catalog_prepends_filter_row_showing_active_genre_value(load_views):
+    """Deliberately uses the DEFAULT localized map rather than an override:
+    30193 is rendered as `L(30193) % <genre>`, so if it ever falls back to
+    the bare 'STR30193' marker this raises TypeError and takes the whole
+    filtered listing down (which is exactly what it did before 30193 was
+    added to `_DEFAULT_LOCALIZED`)."""
+    ctx = load_views()
+    views = ctx.views
+    transport = 'https://addon-a.example/manifest.json'
+    descriptor = _genre_catalog_descriptor(transport, ['Western', 'Crime'])
+    metas = [{'id': 'tt1', 'name': 'One', 'type': 'movie'}]
+    _wire_data_layer(views, FakeStore(addons=[descriptor]), FakeAddonClient(catalog_result=metas))
+
+    views.catalog(transport, 'movie', 'top', extra='genre=Western')
+
+    _, li, _ = ctx.env.directory_items[-1]['items'][0]
+    assert li.getLabel() == 'Filter: Western'
+
+
+def test_catalog_without_genre_options_item_list_unchanged(load_views):
+    """A catalog declaring only 'lastVideosIds' (no 'genre' extra at all,
+    e.g. Cinemeta's series/last-videos) must not gain a filter row - the
+    item list is byte-for-byte the same as before this feature."""
+    ctx = load_views()
+    views = ctx.views
+    transport = 'https://addon-a.example/manifest.json'
+    descriptor = {
+        'transportUrl': transport,
+        'manifest': {
+            'id': 'org.a',
+            'catalogs': [{'type': 'series', 'id': 'last-videos', 'extra': [{'name': 'lastVideosIds'}]}],
+        },
+        'flags': {},
+    }
+    metas = [{'id': 'tt1', 'name': 'One', 'type': 'series'}, {'id': 'tt2', 'name': 'Two', 'type': 'series'}]
+    _wire_data_layer(views, FakeStore(addons=[descriptor]), FakeAddonClient(catalog_result=metas))
+
+    views.catalog(transport, 'series', 'last-videos')
+
+    items = ctx.env.directory_items[-1]['items']
+    assert len(items) == 2
+    assert [li.getLabel() for _, li, _ in items] == ['One   [0.0]', 'Two   [0.0]']
+
+
+def test_filters_lists_declared_options_in_order(load_views):
+    ctx = load_views()
+    views = ctx.views
+    transport = 'https://addon-a.example/manifest.json'
+    descriptor = _genre_catalog_descriptor(transport, ['2026', '2025', '2024'])
+    _wire_data_layer(views, FakeStore(addons=[descriptor]), FakeAddonClient())
+
+    views.filters(transport, 'movie', 'top')
+
+    items = ctx.env.directory_items[-1]['items']
+    assert [li.getLabel() for _, li, _ in items] == ['2026', '2025', '2024']
+    assert ctx.env.content[-1][1] == 'files'
+
+
+def test_filters_no_options_notifies_and_fails(load_views):
+    ctx = load_views()
+    views = ctx.views
+    transport = 'https://addon-a.example/manifest.json'
+    descriptor = {
+        'transportUrl': transport,
+        'manifest': {'id': 'org.a', 'catalogs': [{'type': 'movie', 'id': 'top'}]},
+        'flags': {},
+    }
+    _wire_data_layer(views, FakeStore(addons=[descriptor]), FakeAddonClient())
+
+    views.filters(transport, 'movie', 'top')
+
+    assert ctx.env.directory_items == []
+    assert ctx.env.notifications[-1][1] == 'STR30030'
+    assert ctx.env.end_of_directory[-1]['succeeded'] is False
+
+
+def test_filters_clear_row_only_when_genre_active_and_drops_only_the_genre_pair(load_views):
+    ctx = load_views()
+    views = ctx.views
+    transport = 'https://addon-a.example/manifest.json'
+    descriptor = _genre_catalog_descriptor(transport, ['Western', 'Crime'])
+    _wire_data_layer(views, FakeStore(addons=[descriptor]), FakeAddonClient())
+
+    views.filters(transport, 'movie', 'top')
+    no_genre_labels = [li.getLabel() for _, li, _ in ctx.env.directory_items[-1]['items']]
+    assert 'STR30195' not in no_genre_labels  # no genre active -> no Clear filter row
+
+    views.filters(transport, 'movie', 'top', extra='skip=10&genre=Western')
+
+    items = ctx.env.directory_items[-1]['items']
+    url, li, _ = items[0]
+    assert li.getLabel() == 'STR30195'
+    outer_query = dict(parse_qsl(urlparse(url).query))
+    forwarded_extra = dict(parse_qsl(outer_query.get('extra', '')))
+    assert forwarded_extra == {'skip': '10'}  # genre dropped, skip kept
+
+
+def test_filters_marks_the_active_option_selected(load_views):
+    ctx = load_views()
+    views = ctx.views
+    transport = 'https://addon-a.example/manifest.json'
+    descriptor = _genre_catalog_descriptor(transport, ['Western', 'Crime'])
+    _wire_data_layer(views, FakeStore(addons=[descriptor]), FakeAddonClient())
+
+    views.filters(transport, 'movie', 'top', extra='genre=Crime')
+
+    option_rows = {li.getLabel(): li for _, li, _ in ctx.env.directory_items[-1]['items']}
+    assert option_rows['Western'].isSelected() is False
+    assert option_rows['Crime'].isSelected() is True
+
+
 def test_meta_item_maps_year_runtime_rating_and_skips_missing_fields(load_views):
     ctx = load_views()
     views = ctx.views
@@ -791,6 +935,21 @@ def test_meta_item_maps_year_runtime_rating_and_skips_missing_fields(load_views)
     assert 'setPlotOutline' not in li_bare.info_tag.calls
     assert 'clearlogo' not in li_bare.art
     assert li_bare.getLabel() == 'Bare Meta   [0.0]'
+
+
+def test_meta_item_context_menu_includes_people_entry(load_views, monkeypatch):
+    ctx = load_views(localized={30196: 'Cast & crew'})
+    views, router = ctx.views, ctx.router
+    transport = 'https://addon-a.example/manifest.json'
+    descriptor = {'transportUrl': transport, 'manifest': {'id': 'org.a', 'catalogs': []}, 'flags': {}}
+    metas = [{'id': 'tt1', 'name': 'One', 'type': 'movie'}]
+    _wire_data_layer(views, FakeStore(addons=[descriptor]), FakeAddonClient(catalog_result=metas))
+
+    views.catalog(transport, 'movie', 'top')
+
+    _, li, _ = ctx.env.directory_items[-1]['items'][0]
+    expected_url = urlutil.url_for(router.BASE_URL, 'people', type='movie', id='tt1')
+    assert li.context_menu_items == [('Cast & crew', 'Container.Update(%s)' % expected_url)]
 
 
 # ---------------------------------------------------------------------------
@@ -1073,6 +1232,69 @@ def test_search_addon_fanout_runs_concurrently_not_sequentially(load_views, monk
     assert len(captured['metas']) == num_addons
 
 
+def test_search_query_argument_skips_input_dialog(load_views, monkeypatch):
+    ctx = load_views()
+    views = ctx.views
+    transport = 'https://a.example/manifest.json'
+    descriptor = {
+        'transportUrl': transport,
+        'manifest': {'id': 'org.a', 'catalogs': [{'type': 'movie', 'id': 'search', 'extra': [{'name': 'search'}]}]},
+        'flags': {},
+    }
+    client = FakeAddonClient(catalog_results={transport: [{'id': 'tt1', 'name': 'Batman', 'type': 'movie'}]})
+    _wire_data_layer(views, FakeStore(addons=[descriptor]), client)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: None)
+
+    views.search(query='batman')
+
+    assert ctx.env.dialog_input_prompts == []
+
+
+def test_search_without_query_argument_still_prompts(load_views):
+    ctx = load_views(dialog_inputs=['batman'])
+    views = ctx.views
+    _wire_data_layer(views, FakeStore(addons=[]), FakeAddonClient())
+
+    views.search()
+
+    assert ctx.env.dialog_input_prompts == ['STR30001']
+
+
+def test_search_ranks_credited_result_above_title_only_match_without_dropping_it(load_views, monkeypatch):
+    """A person-link-driven query (e.g. "Marlon Brando") is plain
+    full-text search - Cinemeta genuinely returns both his credited
+    titles and unrelated title matches. The credited one must be ranked
+    first even though the addon itself returned it second; the
+    title-only match must still be present, proving this ranks rather
+    than filters."""
+    ctx = load_views(dialog_inputs=['Marlon Brando'])
+    views = ctx.views
+    transport = 'https://a.example/manifest.json'
+    descriptor = {
+        'transportUrl': transport,
+        'manifest': {'id': 'org.a', 'catalogs': [{'type': 'movie', 'id': 'search', 'extra': [{'name': 'search'}]}]},
+        'flags': {},
+    }
+    title_only = {'id': 'tt1', 'name': 'Listen to Me Marlon', 'type': 'movie'}
+    credited = {
+        'id': 'tt2', 'name': 'One-Eyed Jacks', 'type': 'movie',
+        'cast': ['Marlon Brando'], 'director': ['marlon brando'],
+    }
+    client = FakeAddonClient(catalog_results={transport: [title_only, credited]})
+    _wire_data_layer(views, FakeStore(addons=[descriptor]), client)
+    captured = {}
+
+    def fake_open_showcase(metas):
+        captured['metas'] = metas
+        return None
+
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', fake_open_showcase)
+
+    views.search()
+
+    assert captured['metas'] == [credited, title_only]
+
+
 # ---------------------------------------------------------------------------
 # meta() / _fetch_meta() / _ordered_seasons()
 # ---------------------------------------------------------------------------
@@ -1343,7 +1565,7 @@ def test_meta_series_orders_seasons_specials_last_with_poster_fallback_fanart(lo
 
     items = ctx.env.directory_items[-1]['items']
     labels = [li.getLabel() for _, li, _ in items]
-    assert labels == ['Season 1', 'Season 2', 'Specials']
+    assert labels == ['Season 1', 'Season 2', 'STR30189']
     for (url, li, is_folder), season in zip(items, (1, 2, 0)):
         assert is_folder is True
         # meta_obj has no explicit 'background'/'logo': fanart falls back to poster
@@ -1354,6 +1576,113 @@ def test_meta_series_orders_seasons_specials_last_with_poster_fallback_fanart(lo
         assert li.info_tag.calls.get('setMediaType') == 'season'
         assert url == urlutil.url_for(router.BASE_URL, 'videos', type='series', id='tt1', season=str(season))
     assert ctx.env.content[-1][1] == 'seasons'
+
+
+# ---------------------------------------------------------------------------
+# people()
+# ---------------------------------------------------------------------------
+
+
+def test_people_lists_one_row_per_link_in_group_order_with_kind_specific_urls(load_views):
+    ctx = load_views()
+    views, router = ctx.views, ctx.router
+    transport = 't1'
+    cinemeta_transport = 'https://v3-cinemeta.strem.io/manifest.json'
+    descriptor = {
+        'transportUrl': transport,
+        'manifest': {'id': 'org.a', 'resources': ['meta'], 'types': ['movie'], 'idPrefixes': ['tt']},
+    }
+    cinemeta_descriptor = {'transportUrl': cinemeta_transport, 'manifest': {'id': 'org.cinemeta', 'catalogs': []}}
+    meta_obj = {
+        'id': 'tt0068646', 'name': 'The Godfather', 'type': 'movie',
+        'links': [
+            {'name': 'Marlon Brando', 'category': 'Cast', 'url': 'stremio:///search?search=Marlon%20Brando'},
+            {'name': 'Francis Ford Coppola', 'category': 'Directors', 'url': 'stremio:///search?search=Francis%20Ford%20Coppola'},
+            {
+                'name': 'Crime', 'category': 'Genres',
+                'url': 'stremio:///discover/%s/movie/top?genre=Crime' % quote(cinemeta_transport, safe=''),
+            },
+            {'name': 'Related Title', 'category': 'Related', 'url': 'stremio:///detail/movie/tt9999'},
+            {'name': 'IMDb', 'category': 'imdb', 'url': 'https://imdb.com/title/tt0068646'},
+        ],
+    }
+    client = FakeAddonClient(meta_results={transport: meta_obj})
+    _wire_data_layer(views, FakeStore(addons=[descriptor, cinemeta_descriptor]), client)
+
+    views.people('movie', 'tt0068646')
+
+    items = ctx.env.directory_items[-1]['items']
+    labels = [li.getLabel() for _, li, _ in items]
+    assert labels == [
+        'Cast: Marlon Brando', 'Directors: Francis Ford Coppola', 'Genres: Crime', 'Related: Related Title',
+    ]  # reserved 'imdb' category dropped, others in first-seen order
+
+    url_search, _, _ = items[0]
+    assert url_search == urlutil.url_for(router.BASE_URL, 'search', query='Marlon Brando')
+
+    url_discover, _, _ = items[2]
+    assert url_discover == urlutil.url_for(
+        router.BASE_URL, 'catalog', transport=cinemeta_transport, type='movie', id='top', extra='genre=Crime',
+    )
+
+    url_detail, _, _ = items[3]
+    assert url_detail == urlutil.url_for(router.BASE_URL, 'meta', type='movie', id='tt9999')
+
+    assert ctx.env.content[-1][1] == 'files'
+
+
+def test_people_skips_discover_link_whose_transport_is_not_an_installed_addon(load_views):
+    """SECURITY: an addon-supplied discover link must never be dispatched
+    unless its transport_url matches one of the user's own installed
+    addons - otherwise a malicious meta object could make Rivulet fetch
+    an arbitrary host."""
+    ctx = load_views()
+    views = ctx.views
+    transport = 't1'
+    descriptor = {
+        'transportUrl': transport,
+        'manifest': {'id': 'org.a', 'resources': ['meta'], 'types': ['movie'], 'idPrefixes': ['tt']},
+    }
+    untrusted_transport = 'https://evil.example/manifest.json'
+    meta_obj = {
+        'id': 'tt1', 'name': 'One', 'type': 'movie',
+        'links': [
+            {
+                'name': 'Crime', 'category': 'Genres',
+                'url': 'stremio:///discover/%s/movie/top?genre=Crime' % quote(untrusted_transport, safe=''),
+            },
+            {'name': 'Marlon Brando', 'category': 'Cast', 'url': 'stremio:///search?search=Marlon%20Brando'},
+        ],
+    }
+    client = FakeAddonClient(meta_results={transport: meta_obj})
+    # only `transport` (the addon serving this meta) is installed
+    _wire_data_layer(views, FakeStore(addons=[descriptor]), client)
+
+    views.people('movie', 'tt1')
+
+    items = ctx.env.directory_items[-1]['items']
+    labels = [li.getLabel() for _, li, _ in items]
+    assert labels == ['Cast: Marlon Brando']  # the untrusted discover row was skipped
+    all_messages = ' '.join(msg for msg, _level in ctx.env.log_calls)
+    assert 'evil.example' in all_messages
+
+
+def test_people_no_links_notifies_and_fails(load_views):
+    ctx = load_views()
+    views = ctx.views
+    transport = 't1'
+    descriptor = {
+        'transportUrl': transport,
+        'manifest': {'id': 'org.a', 'resources': ['meta'], 'types': ['movie'], 'idPrefixes': ['tt']},
+    }
+    client = FakeAddonClient(meta_results={transport: {'id': 'tt1', 'name': 'One', 'type': 'movie'}})
+    _wire_data_layer(views, FakeStore(addons=[descriptor]), client)
+
+    views.people('movie', 'tt1')
+
+    assert ctx.env.directory_items == []
+    assert ctx.env.notifications[-1][1] == 'STR30197'
+    assert ctx.env.end_of_directory[-1]['succeeded'] is False
 
 
 # ---------------------------------------------------------------------------

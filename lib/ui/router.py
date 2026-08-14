@@ -58,10 +58,14 @@ def run():
         'showcase': lambda p: views.showcase(
             p.get('transport'), p.get('type'), p.get('id'), p.get('extra')
         ),
-        'search': lambda p: views.search(),
+        'filters': lambda p: views.filters(
+            p.get('transport'), p.get('type'), p.get('id'), p.get('extra')
+        ),
+        'search': lambda p: views.search(p.get('query')),
         'meta': lambda p: views.meta(p.get('type'), p.get('id')),
         'videos': lambda p: views.videos(p.get('type'), p.get('id'), p.get('season')),
         'streams': lambda p: views.streams(p.get('type'), p.get('id')),
+        'people': lambda p: views.people(p.get('type'), p.get('id')),
         'play': do_play,
         'addons': lambda p: views.addons(),
         'addon_install': lambda p: views.addon_install(),

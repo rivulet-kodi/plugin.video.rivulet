@@ -323,6 +323,54 @@ def _catalog_extra_names(catalog):
     return names
 
 
+def catalog_extra_options(catalog, name):
+    """Declared option values for extra prop `name` on `catalog`, from the
+    modern `extra: [{name, options, ...}]` array (ManifestExtra.options in
+    manifest.rs), falling back to the legacy sibling array Cinemeta also
+    ships for `genre` (a top-level `catalog['genres']` list carrying the
+    same values `extra[].options` would). Only that one `name + 's'`
+    lookup is supported - it is a documented Cinemeta quirk, not a general
+    pluralization rule.
+
+    Returns [] when `catalog` is missing/not a dict, the extra isn't
+    declared, it has no options, or `options` isn't a list. Order is
+    preserved (year options arrive newest-first) with duplicates and
+    empty/None entries dropped; non-string scalars are stringified.
+    """
+    if not isinstance(catalog, dict):
+        return []
+
+    options = None
+    extra = catalog.get('extra')
+    if isinstance(extra, list):
+        for prop in extra:
+            if isinstance(prop, dict) and prop.get('name') == name:
+                candidate = prop.get('options')
+                if isinstance(candidate, list):
+                    options = candidate
+                break
+
+    if options is None and name == 'genre':
+        candidate = catalog.get('genres')
+        if isinstance(candidate, list):
+            options = candidate
+
+    if not options:
+        return []
+
+    seen = set()
+    result = []
+    for value in options:
+        if value is None:
+            continue
+        text = value if isinstance(value, str) else str(value)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
+
+
 def iter_catalogs(addons, extra_required=None):
     """Yield `(transport_url, manifest, catalog)` for every catalog declared
     by `addons` - a list of descriptor dicts shaped like

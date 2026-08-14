@@ -117,6 +117,34 @@ def make_xbmc(env, info_labels=None):
 
     module.Monitor = Monitor
     module.Player = Player
+
+    class Actor:
+        """Stand-in for `xbmc.Actor` - a class only added in Kodi 20, used
+        by `lib.ui.compat.set_video_cast()`'s Kodi >=20 path via
+        `InfoTagVideo.setCast()`. Matches the real constructor signature
+        and getters so tests assert on actual attribute values rather
+        than `repr()`.
+        """
+
+        def __init__(self, name=None, role=None, order=None, thumbnail=None):
+            self._name = name
+            self._role = role
+            self._order = order
+            self._thumbnail = thumbnail
+
+        def getName(self):
+            return self._name
+
+        def getRole(self):
+            return self._role
+
+        def getOrder(self):
+            return self._order
+
+        def getThumbnail(self):
+            return self._thumbnail
+
+    module.Actor = Actor
     return module
 
 
