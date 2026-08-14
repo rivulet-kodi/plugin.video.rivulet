@@ -1,15 +1,22 @@
-"""Directory-listing views for plugin.video.rivulet.
+"""Shared data helpers and RunPlugin script actions for plugin.video.rivulet.
 
-Each public function here backs one router action. Functions that build a
-Kodi directory call addDirectoryItems()/endOfDirectory(); the handful that
-are one-shot side effects (login/logout/addon install/remove/settings),
-invoked via RunPlugin from inside another listing, finish with
-_finish_action() instead.
+The addon's real UI is the custom WindowXML dialog stack (HomeWindow,
+CatalogPickerWindow, infowindow.ShowcaseWindow, DetailWindow,
+StreamsWindow, SearchWindow, AddonsWindow, LibraryWindow) - this module no
+longer builds any of their directory listings. What remains here is:
+
+- Shared data-fetch/sync helpers (`_fetch_meta`, `_fetch_catalog`,
+  `_sync_addons_if_logged_in`, `_refresh_addon_manifests`) those custom
+  windows import lazily, so the addon-fetch/caching/sync logic lives in
+  one place instead of being duplicated per window.
+- The RunPlugin one-shot script actions wired directly into
+  resources/settings.xml (`login`, `logout`, `sync_addons_now`,
+  `open_settings`) - side effects, not listings, so they finish with
+  _finish_action() instead of xbmcplugin.endOfDirectory() on their own.
+- `home()`, the minimal recovery directory default.py falls back to when
+  opening the custom HomeWindow itself raises.
 """
-import re
-import sys
 from functools import wraps
-from urllib.parse import parse_qsl
 
 import xbmc
 import xbmcgui
@@ -17,22 +24,18 @@ import xbmcplugin
 
 from lib.store import ConcurrentUpdateError
 from lib.stremio import addons as addons_lib
-from lib.stremio import metalinks
 from lib.stremio.addons import AddonError, safe_url_for_log, validate_transport_url
 from lib.stremio.api import ApiError, StremioAPI
 from lib.ui import compat, router, urlutil
-from lib.ui.compat import L, log, notify, set_video_cast, set_video_info
+from lib.ui.compat import L, log, notify
 from lib.ui.dependencies import get_client, get_store
 
-_YEAR_RE = re.compile(r'(\d{4})')
-_RUNTIME_RE = re.compile(r'(\d+)')
-
-#: Cap on concurrent addon HTTP calls per fan-out (search()/streams()/
-#: _fetch_meta()) - bounded so a user with dozens of installed addons
-#: doesn't spawn dozens of threads at once. Each AddonClient call still
-#: carries its own 15s timeout; this only lets that timeout run
-#: concurrently across addons instead of serializing N of them one
-#: after another.
+#: Cap on concurrent addon HTTP calls per fan-out (`_fetch_meta()` and
+#: `_refresh_addon_manifests()`) - bounded so a user with dozens of
+#: installed addons doesn't spawn dozens of threads at once. Each
+#: AddonClient call still carries its own 15s timeout; this only lets
+#: that timeout run concurrently across addons instead of serializing N
+#: of them one after another.
 _MAX_ADDON_WORKERS = 8
 
 
@@ -51,7 +54,8 @@ def _map_addons(fn, items):
     each other. `fn` is expected to catch its own `AddonError` (log it,
     return a falsy sentinel) so one addon's failure can never abort the
     others - that per-addon try/except still runs, just inside whichever
-    worker thread executes it.
+    worker thread executes it. Used by `_refresh_addon_manifests()`'s
+    per-addon manifest fan-out.
     """
     if not items:
         return []
@@ -77,203 +81,21 @@ def _safe_listing(view):
 
 
 def _finish_action(handle, refresh=True):
-    """End a RunPlugin-style script action (login/logout/addon mgmt/settings)."""
+    """End a RunPlugin-style script action (login/logout/sync_addons_now)."""
     xbmcplugin.endOfDirectory(handle, succeeded=True, updateListing=False, cacheToDisc=False)
     if refresh:
         xbmc.executebuiltin('Container.Refresh')
 
 
-def _folder_item(label, url, icon=None, fanart=None):
-    li = xbmcgui.ListItem(label=label)
-    art = {'fanart': fanart or compat.addon_fanart()}
-    if icon:
-        art.update({'icon': icon, 'thumb': icon})
-    li.setArt(art)
-    return (url, li, True)
-
-
 def _action_item(label, url, icon=None):
-    """A RunPlugin-style action row (login/logout/install/...): gets art
-    like any other row but keeps isFolder=False, so Kodi runs it in place
+    """A RunPlugin-style action row (home()'s Settings row): gets art like
+    any other row but keeps isFolder=False, so Kodi runs it in place
     instead of pushing it onto the navigation stack."""
     li = xbmcgui.ListItem(label=label)
     art = {'fanart': compat.addon_fanart()}
     if icon:
         art.update({'icon': icon, 'thumb': icon})
     li.setArt(art)
-    return (url, li, False)
-
-
-def _row_fanart(background=None):
-    """Fanart for a directory row: addon/catalog-provided background art
-    when there is one, else Rivulet's own bundled fanart."""
-    return background or compat.addon_fanart()
-
-
-def _content_for_type(ctype):
-    if ctype == 'movie':
-        return 'movies'
-    if ctype == 'series':
-        return 'tvshows'
-    return 'videos'
-
-
-def _extract_year(value):
-    if not value:
-        return None
-    match = _YEAR_RE.search(str(value))
-    return int(match.group(1)) if match else None
-
-
-def _parse_runtime_seconds(runtime):
-    if not runtime:
-        return None
-    match = _RUNTIME_RE.search(str(runtime))
-    return int(match.group(1)) * 60 if match else None
-
-
-def _date_only(value):
-    return value.split('T', 1)[0] if value else None
-
-
-def _parse_extra(extra):
-    """Decode a "name=value&name2=value2" extra blob back to (name, value)
-    pairs so we can tweak it (e.g. bump skip=) before re-encoding it."""
-    if not extra:
-        return []
-    return parse_qsl(extra, keep_blank_values=True)
-
-
-def _catalog_declares_extra(manifest, ctype, cid, extra_name):
-    for cat in (manifest or {}).get('catalogs') or []:
-        if cat.get('type') == ctype and cat.get('id') == cid:
-            return any(e.get('name') == extra_name for e in (cat.get('extra') or []))
-    return False
-
-
-def _find_manifest(store, transport_url):
-    for descriptor in store.get_addons():
-        if descriptor.get('transportUrl') == transport_url:
-            return descriptor.get('manifest') or {}
-    return None
-
-
-def _find_catalog(manifest, ctype, cid):
-    """Locate the catalog descriptor `(type, id)` inside a fetched
-    manifest - the shape addons_lib.catalog_extra_options() expects,
-    shared by catalog()'s filter-row check and filters() itself so
-    neither duplicates this lookup."""
-    for cat in (manifest or {}).get('catalogs') or []:
-        if cat.get('type') == ctype and cat.get('id') == cid:
-            return cat
-    return None
-
-
-def _decorate_label(name, date=None, rating=None):
-    """Render a catalog/search row label as "Name   [date]   [rating]",
-    mirroring the reference addon's (Stream4Me) showcase style: the
-    premiered date and the rating in square brackets, spaced apart, plain
-    text (the skin colours the header). The date is dropped when unknown;
-    the rating always shows, defaulting to 0.0 -- matching the reference,
-    which renders [0.0] for an unrated title.
-    """
-    parts = [name]
-    if date:
-        parts.append('[%s]' % date)
-    try:
-        rating_val = float(rating)
-    except (TypeError, ValueError):
-        rating_val = 0.0
-    parts.append('[%.1f]' % rating_val)
-    return '   '.join(parts)
-
-
-def _meta_item(meta, ctype=None):
-    meta = meta or {}
-    mtype = meta.get('type') or ctype or 'movie'
-    name = meta.get('name') or meta.get('id') or '?'
-    year = _extract_year(meta.get('releaseInfo') or meta.get('released'))
-    rating = meta.get('imdbRating')
-    date = _date_only(meta.get('released')) or meta.get('releaseInfo')
-    li = xbmcgui.ListItem(label=_decorate_label(name, date, rating))
-
-    poster = meta.get('poster')
-    logo = meta.get('logo')
-    background = meta.get('background') or logo
-    art = {'fanart': _row_fanart(background)}
-    if poster:
-        art.update({'poster': poster, 'thumb': poster, 'icon': poster})
-    if logo:
-        art['clearlogo'] = logo
-    if meta.get('landscape'):
-        art['landscape'] = meta.get('landscape')
-    if meta.get('banner'):
-        art['banner'] = meta.get('banner')
-    li.setArt(art)
-
-    info = {
-        'title': name,
-        'originaltitle': meta.get('name'),
-        'plot': meta.get('description'),
-        'genre': meta.get('genres') or [],
-        'year': year,
-        'mediatype': 'tvshow' if mtype == 'series' else 'movie',
-        'duration': _parse_runtime_seconds(meta.get('runtime')),
-    }
-    if rating:
-        info['rating'] = rating
-    if meta.get('certification'):
-        info['mpaa'] = meta.get('certification')
-    if meta.get('country'):
-        info['country'] = meta.get('country')
-    if meta.get('director'):
-        info['director'] = meta.get('director')
-    if meta.get('writer'):
-        info['writer'] = meta.get('writer')
-    if meta.get('tagline'):
-        info['plotoutline'] = meta.get('tagline')
-    set_video_info(li, info)
-    # Stremio's `cast` is a plain name array, which cannot ride in the info
-    # dict above: Kodi >=20 wants xbmc.Actor objects. See compat.set_video_cast.
-    set_video_cast(li, meta.get('cast'))
-
-    url = _url_for('meta', type=mtype, id=meta.get('id'))
-    li.addContextMenuItems([(L(30196), 'Container.Update(%s)' % _url_for('people', type=mtype, id=meta.get('id')))])
-    return (url, li, True)
-
-
-def _stream_item(info, stream, stype, sid, poster=None, title=None, logo=None):
-    """Build a (url, ListItem, False) tuple for one parsed stream result.
-
-    `poster`/`title` come from the calling meta/videos view (poster
-    continuity); `logo` is that stream's addon manifest logo, used only
-    when the caller passed no poster of its own.
-    """
-    stream = stream or {}
-    from lib.stremio import streaminfo
-    label = streaminfo.format_label(info) or info.get('raw') or info.get('addon') or '?'
-    # Defensive: format_label() never emits '\n', but never trust upstream
-    # data enough to let a stray newline wrap a Kodi list row onto two lines.
-    label = label.replace('\r', ' ').replace('\n', ' ')
-
-    li = xbmcgui.ListItem(label=label)
-    li.setProperty('IsPlayable', 'true')
-
-    thumb = poster or logo or 'DefaultVideo.png'
-    li.setArt({'icon': thumb, 'thumb': thumb, 'fanart': compat.addon_fanart()})
-
-    set_video_info(li, {
-        'title': title or info.get('title') or label,
-        'plot': streaminfo.format_plot(info),
-        'mediatype': 'episode' if stype == 'series' else 'movie',
-    })
-    behavior_hints = stream.get('behaviorHints') or {}
-    if behavior_hints.get('videoSize'):
-        li.setProperty('size', str(behavior_hints['videoSize']))
-    elif info.get('size_bytes'):
-        li.setProperty('size', str(info['size_bytes']))
-
-    url = _url_for('play', stream=urlutil.encode_stream(stream), type=stype, id=sid)
     return (url, li, False)
 
 
@@ -306,12 +128,12 @@ def _fetch_meta(stype, sid):
     their own 15s timeout in a background thread we no longer wait on.
 
     A short-TTL disk cache (`lib.ui.metacache`) sits in front of the
-    fan-out: `meta()` -> `videos()` is a plugin round-trip per season,
-    and each one re-fetches this exact same object from every addon to
-    get at its `videos` list - Kodi's own directory cache does not help
-    here since each season is a different listing URL. `store.data_dir`
-    doubles as the cache's on/off switch: it is only set on the real
-    `Store` (test fakes omit it), so tests never touch the filesystem.
+    fan-out: DetailWindow, infowindow's enrichment, and any other custom
+    window that re-opens the same title within one browsing session
+    would otherwise re-fetch this exact same object from every addon
+    each time. `store.data_dir` doubles as the cache's on/off switch: it
+    is only set on the real `Store` (test fakes omit it), so tests never
+    touch the filesystem.
     """
     store = get_store()
     client = get_client()
@@ -375,523 +197,13 @@ def _fetch_meta(stype, sid):
     return result
 
 
-def _ordered_seasons(videos):
-    seasons = sorted({v.get('season') for v in videos if v.get('season') is not None})
-    if 0 in seasons:
-        seasons.remove(0)
-        seasons.append(0)
-    return seasons
-
-
-# --------------------------------------------------------------------------
-# Router actions
-# --------------------------------------------------------------------------
-
-@_safe_listing
-def home():
-    handle = router.ADDON_HANDLE
-    store = get_store()
-    items = [
-        _folder_item(L(30000), _url_for('discover'), compat.addon_media_path('discover.png')),
-        _folder_item(L(30001), _url_for('search'), compat.addon_media_path('search.png')),
-    ]
-    if store.get_auth():
-        items.append(_folder_item(L(30002), _url_for('library'), compat.addon_media_path('library.png')))
-    items.append(_folder_item(L(30003), _url_for('addons'), compat.addon_media_path('addons.png')))
-    items.append(_action_item(L(30004), _url_for('settings'), compat.addon_media_path('settings.png')))
-    xbmcplugin.addDirectoryItems(handle, items, len(items))
-    xbmcplugin.setContent(handle, 'files')
-    xbmcplugin.setPluginCategory(handle, compat.ADDON_NAME)
-    xbmcplugin.endOfDirectory(handle)
-
-
-def open_settings():
-    compat.ADDON.openSettings()
-    xbmcplugin.endOfDirectory(router.ADDON_HANDLE, succeeded=False, updateListing=False, cacheToDisc=False)
-
-
-@_safe_listing
-def discover():
-    handle = router.ADDON_HANDLE
-    store = get_store()
-    items = []
-    for transport_url, manifest, catalog in addons_lib.iter_catalogs(store.get_addons()):
-        addon_name = manifest.get('name', '?')
-        catalog_name = catalog.get('name') or catalog.get('id')
-        label = '%s: %s (%s)' % (addon_name, catalog_name, catalog.get('type'))
-        li = xbmcgui.ListItem(label=label)
-        logo = manifest.get('logo')
-        art = {'fanart': _row_fanart(manifest.get('background'))}
-        if logo:
-            art.update({'icon': logo, 'thumb': logo})
-        li.setArt(art)
-        showcase_url = _url_for('showcase', transport=transport_url, type=catalog.get('type'), id=catalog.get('id'))
-        li.addContextMenuItems([(L(30026), 'RunPlugin(%s)' % showcase_url)])
-        url = _url_for('catalog', transport=transport_url, type=catalog.get('type'), id=catalog.get('id'))
-        items.append((url, li, True))
-    xbmcplugin.addDirectoryItems(handle, items, len(items))
-    xbmcplugin.setContent(handle, 'files')
-    xbmcplugin.endOfDirectory(handle)
-
-
 def _fetch_catalog(transport, ctype, cid, extra=None):
-    """Fetch one catalog's metas via the shared AddonClient - the exact
-    call catalog() and showcase() both build their listing/overlay from.
-    Raises AddonError on failure; callers decide how to surface it
-    (catalog() ends the directory as failed, showcase() notifies)."""
+    """Fetch one catalog's metas via the shared AddonClient - imported
+    lazily by CatalogPickerWindow and infowindow's discover-link picker
+    to build their listing/overlay. Raises AddonError on failure; each
+    caller decides how to surface it."""
     client = get_client()
     return client.catalog(transport, ctype, cid, extra=extra)
-
-
-@_safe_listing
-def catalog(transport, ctype, cid, extra=None):
-    handle = router.ADDON_HANDLE
-    store = get_store()
-    try:
-        metas = _fetch_catalog(transport, ctype, cid, extra)
-    except AddonError as exc:
-        log('views.catalog: %s %s/%s failed: %s' % (safe_url_for_log(transport), ctype, cid, type(exc).__name__), xbmc.LOGERROR)
-        notify(str(exc))
-        xbmcplugin.endOfDirectory(handle, succeeded=False)
-        return
-
-    items = []
-
-    if metas:
-        manifest = _find_manifest(store, transport)
-        extra_pairs = _parse_extra(extra)
-
-        # Filter entry point: only when this catalog actually declares
-        # 'genre' options (year lists and real genre lists both use it -
-        # see catalog_extra_options()) - prepended before the metas so
-        # it's reachable without scrolling a full page. Reuses the same
-        # manifest fetch below for 'skip' paging; no second lookup.
-        if manifest and addons_lib.catalog_extra_options(_find_catalog(manifest, ctype, cid), 'genre'):
-            active_genre = next((v for k, v in extra_pairs if k == 'genre'), None)
-            label = L(30193) % active_genre if active_genre else L(30194)
-            filter_url = _url_for('filters', transport=transport, type=ctype, id=cid, extra=extra)
-            items.append(_folder_item(label, filter_url, 'DefaultFolder.png'))
-
-        items.extend(_meta_item(meta, ctype) for meta in metas)
-
-        if manifest and _catalog_declares_extra(manifest, ctype, cid, 'skip'):
-            current_skip = 0
-            for name, value in extra_pairs:
-                if name == 'skip':
-                    try:
-                        current_skip = int(value)
-                    except ValueError:
-                        current_skip = 0
-            next_pairs = [(k, v) for k, v in extra_pairs if k != 'skip']
-            next_pairs.append(('skip', str(current_skip + len(metas))))
-            next_extra = addons_lib.encode_extra(next_pairs)
-            next_url = _url_for('catalog', transport=transport, type=ctype, id=cid, extra=next_extra)
-            items.append(_folder_item(L(30040), next_url, 'DefaultFolder.png'))
-
-    if not items:
-        notify(L(30030))
-    xbmcplugin.addDirectoryItems(handle, items, len(items))
-    xbmcplugin.setContent(handle, _content_for_type(ctype))
-    xbmcplugin.endOfDirectory(handle)
-
-
-@_safe_listing
-def filters(transport, ctype, cid, extra=None):
-    """The year/genre filter surface for one catalog: lists the 'genre'
-    extra's declared option values (Cinemeta's 'year' catalog encodes
-    years there too - see catalog_extra_options()), each navigating to
-    the catalog filtered to that option. A pure UI surface over the
-    protocol's existing extra-options mechanism - no new query semantics.
-    """
-    handle = router.ADDON_HANDLE
-    store = get_store()
-    manifest = _find_manifest(store, transport)
-    options = addons_lib.catalog_extra_options(_find_catalog(manifest, ctype, cid) if manifest else None, 'genre')
-    if not options:
-        notify(L(30030))
-        xbmcplugin.endOfDirectory(handle, succeeded=False)
-        return
-
-    extra_pairs = _parse_extra(extra)
-    active = next((v for k, v in extra_pairs if k == 'genre'), None)
-
-    items = []
-    if active is not None:
-        remaining_pairs = [(k, v) for k, v in extra_pairs if k != 'genre']
-        clear_extra = addons_lib.encode_extra(remaining_pairs) if remaining_pairs else None
-        clear_url = _url_for('catalog', transport=transport, type=ctype, id=cid, extra=clear_extra)
-        items.append(_folder_item(L(30195), clear_url, 'DefaultFolder.png'))
-
-    for option in options:
-        option_url = _url_for('catalog', transport=transport, type=ctype, id=cid, extra=addons_lib.encode_extra([('genre', option)]))
-        url, li, is_folder = _folder_item(option, option_url, 'DefaultFolder.png')
-        if option == active:
-            li.select(True)
-        items.append((url, li, is_folder))
-
-    xbmcplugin.addDirectoryItems(handle, items, len(items))
-    xbmcplugin.setContent(handle, 'files')
-    xbmcplugin.endOfDirectory(handle)
-
-
-def showcase(transport, ctype, cid, extra=None):
-    """RunPlugin action (Discover's "Showcase" context-menu item): open a
-    fullscreen coverflow overlay (lib.ui.infowindow.ShowcaseWindow) over
-    one catalog's metas - fetched exactly like catalog() - and, if the
-    user picks a title, navigate the current directory there.
-
-    A one-shot side effect, not a directory listing: unlike catalog() it
-    never touches xbmcplugin, so it is deliberately not @_safe_listing.
-    Any overlay/skin failure is logged and surfaced as a notification
-    rather than vanishing silently.
-    """
-    try:
-        metas = _fetch_catalog(transport, ctype, cid, extra)
-    except AddonError as exc:
-        log('views.showcase: %s %s/%s failed: %s' % (safe_url_for_log(transport), ctype, cid, type(exc).__name__), xbmc.LOGERROR)
-        notify(str(exc))
-        return
-
-    if not metas:
-        notify(L(30030))
-        return
-
-    log('views.showcase: opening coverflow for %s/%s (%d items)' % (ctype, cid, len(metas)), xbmc.LOGINFO)
-    try:
-        from lib.ui.infowindow import open_showcase
-        selected = open_showcase(metas)
-    except Exception as exc:  # a skin/UI failure must surface, not vanish
-        log('views.showcase: overlay failed to open: %r' % (exc,), xbmc.LOGERROR)
-        notify(L(30032))
-        return
-
-    if selected:
-        xbmc.executebuiltin('Container.Update(%s)' % _url_for('meta', type=selected.get('type') or ctype, id=selected.get('id')))
-
-
-def _rank_by_credit(metas, query):
-    """Stable-sort `metas` so any meta crediting `query` in its
-    `cast`/`director`/`writer` list (case-insensitive, exact match
-    against a list entry) is ranked ahead of the rest, preserving each
-    group's original relative order otherwise.
-
-    The protocol has no field-scoped query - `search=` is always plain
-    full-text, so a query that came from a Cast/Directors/Writers meta
-    link (see lib.stremio.metalinks) genuinely returns both the
-    person's credited titles and unrelated title matches (Cinemeta's
-    own "Marlon Brando" search returns both One-Eyed Jacks, where he is
-    cast+director, and "Listen to Me Marlon", a title-only match). We
-    RANK rather than filter: filtering would hide results the addon
-    actually returned, and would silently break for addons whose
-    search previews omit cast/director/writer entirely.
-    """
-    needle = query.casefold()
-
-    def _credit_rank(meta_obj):
-        for field in ('cast', 'director', 'writer'):
-            for entry in meta_obj.get(field) or []:
-                if isinstance(entry, str) and entry.casefold() == needle:
-                    return 0
-        return 1
-
-    return sorted(metas, key=_credit_rank)
-
-
-@_safe_listing
-def search(query=None):
-    handle = router.ADDON_HANDLE
-    if query is None:
-        query = xbmcgui.Dialog().input(L(30001))
-    if not query:
-        xbmcplugin.endOfDirectory(handle, succeeded=False, updateListing=False, cacheToDisc=False)
-        return
-
-    store = get_store()
-    store.add_search_query(query)
-    client = get_client()
-    catalog_targets = list(addons_lib.iter_catalogs(store.get_addons(), extra_required='search'))
-
-    def _fetch_catalog_result(target):
-        transport_url, _manifest, cat = target
-        try:
-            return client.catalog(transport_url, cat.get('type'), cat.get('id'), extra=[('search', query)])
-        except AddonError as exc:
-            log('views.search: %s failed: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGWARNING)
-            return None
-
-    metas = []
-    fetched = _map_addons(_fetch_catalog_result, catalog_targets)
-    for (_transport_url, _manifest, cat), results in zip(catalog_targets, fetched):
-        for meta_obj in results or []:
-            meta_obj['type'] = meta_obj.get('type') or cat.get('type')
-            metas.append(meta_obj)
-
-    if not metas:
-        notify(L(30030))
-        xbmcplugin.endOfDirectory(handle, succeeded=False, updateListing=False, cacheToDisc=False)
-        return
-
-    metas = _rank_by_credit(metas, query)
-
-    # Search results are presented directly in the coverflow showcase overlay
-    # (the default search UX). Dismiss Kodi's GetDirectory busy dialog first so
-    # the modal is interactable, mirroring the reference addon's prevent_busy().
-    xbmc.executebuiltin('Dialog.Close(all, true)')
-    try:
-        from lib.ui.infowindow import open_showcase
-        selected = open_showcase(metas)
-    except Exception as exc:  # a skin/UI failure must surface, not vanish
-        log('views.search: showcase overlay failed: %r' % (exc,), xbmc.LOGERROR)
-        notify(L(30032))
-        xbmcplugin.endOfDirectory(handle, succeeded=False, updateListing=False, cacheToDisc=False)
-        return
-
-    if not selected:
-        xbmcplugin.endOfDirectory(handle, succeeded=False, updateListing=False, cacheToDisc=False)
-        return
-
-    # Picking a poster resolves this search directory into that title's content.
-    meta(selected.get('type') or 'movie', selected.get('id'))
-
-
-@_safe_listing
-def meta(stype, sid):
-    handle = router.ADDON_HANDLE
-    meta_obj = _fetch_meta(stype, sid)
-    if not meta_obj:
-        notify(L(30030))
-        xbmcplugin.endOfDirectory(handle, succeeded=False)
-        return
-
-    videos = meta_obj.get('videos') or []
-    if not videos:
-        # Movies (and channel/tv/anything without a video list) go straight
-        # to the stream picker instead of an intermediate listing.
-        return streams(stype, sid, poster=meta_obj.get('poster'), title=meta_obj.get('name'))
-
-    seasons = _ordered_seasons(videos)
-    poster = meta_obj.get('poster')
-    background = meta_obj.get('background') or meta_obj.get('logo') or poster
-    show_name = meta_obj.get('name')
-
-    items = []
-    for season in seasons:
-        label = L(30189) if season == 0 else L(30188) % season
-        li = xbmcgui.ListItem(label=label)
-        art = {'fanart': _row_fanart(background)}
-        if poster:
-            art.update({'poster': poster, 'thumb': poster})
-        li.setArt(art)
-        set_video_info(li, {
-            'title': label, 'tvshowtitle': show_name, 'season': season, 'mediatype': 'season',
-        })
-        url = _url_for('videos', type=stype, id=sid, season=str(season))
-        items.append((url, li, True))
-
-    xbmcplugin.addDirectoryItems(handle, items, len(items))
-    xbmcplugin.setContent(handle, 'seasons')
-    xbmcplugin.endOfDirectory(handle)
-
-
-@_safe_listing
-def people(stype, sid):
-    """List a title's cast/crew from its meta.links (see
-    lib.stremio.metalinks) - the protocol's only cast/crew surface, no
-    separate "person" resource exists. Each row navigates back into
-    search (person credits) or discover/detail (genres, similar titles).
-    """
-    handle = router.ADDON_HANDLE
-    meta_obj = _fetch_meta(stype, sid)
-    store = get_store()
-    installed_transports = {d.get('transportUrl') for d in store.get_addons()}
-
-    items = []
-    for category, members in metalinks.iter_link_groups(meta_obj):
-        for name, parsed in members:
-            label = '%s: %s' % (category, name)
-            kind = parsed['kind']
-            if kind == 'search':
-                url = _url_for('search', query=parsed['query'])
-            elif kind == 'discover':
-                # SECURITY: an addon-supplied discover link's transport_url
-                # must never cause a fetch to an arbitrary host - only
-                # dispatch it once it's confirmed to name one of the
-                # user's own installed addons (resolved against
-                # store.get_addons(), never fetched from the link itself).
-                if parsed['transport_url'] not in installed_transports:
-                    log('views.people: discover link transport not installed: %s' % safe_url_for_log(parsed['transport_url']), xbmc.LOGWARNING)
-                    continue
-                url = _url_for(
-                    'catalog', transport=parsed['transport_url'], type=parsed['type'],
-                    id=parsed['catalog_id'], extra=addons_lib.encode_extra(parsed['extra']),
-                )
-            elif kind == 'detail':
-                url = _url_for('meta', type=parsed['type'], id=parsed['id'])
-            else:
-                continue
-            items.append(_folder_item(label, url))
-
-    if not items:
-        notify(L(30197))
-        xbmcplugin.endOfDirectory(handle, succeeded=False)
-        return
-
-    xbmcplugin.addDirectoryItems(handle, items, len(items))
-    xbmcplugin.setContent(handle, 'files')
-    xbmcplugin.endOfDirectory(handle)
-
-
-@_safe_listing
-def videos(stype, sid, season):
-    handle = router.ADDON_HANDLE
-    meta_obj = _fetch_meta(stype, sid)
-    if not meta_obj:
-        notify(L(30030))
-        xbmcplugin.endOfDirectory(handle, succeeded=False)
-        return
-
-    try:
-        season_num = int(season)
-    except (TypeError, ValueError):
-        season_num = None
-
-    show_name = meta_obj.get('name')
-    fallback_thumb = meta_obj.get('poster')
-    fallback_fanart = _row_fanart(meta_obj.get('background') or meta_obj.get('logo') or fallback_thumb)
-    episodes = [v for v in (meta_obj.get('videos') or []) if v.get('season') == season_num]
-    episodes.sort(key=lambda v: v.get('episode') or 0)
-
-    items = []
-    for video in episodes:
-        title = video.get('title') or video.get('name') or video.get('id') or '?'
-        label = '%dx%02d. %s' % (video.get('season') or 0, video.get('episode') or 0, title)
-        li = xbmcgui.ListItem(label=label)
-        thumb = video.get('thumbnail') or fallback_thumb
-        art = {'fanart': fallback_fanart}
-        if thumb:
-            art.update({'thumb': thumb, 'icon': thumb})
-        li.setArt(art)
-        set_video_info(li, {
-            'title': title,
-            'tvshowtitle': show_name,
-            'season': video.get('season'),
-            'episode': video.get('episode'),
-            'plot': video.get('overview'),
-            'aired': _date_only(video.get('released')),
-            'mediatype': 'episode',
-        })
-        url = _url_for('streams', type=stype, id=video.get('id') or sid, poster=thumb, title=label)
-        items.append((url, li, True))
-
-    xbmcplugin.addDirectoryItems(handle, items, len(items))
-    xbmcplugin.setContent(handle, 'episodes')
-    xbmcplugin.endOfDirectory(handle)
-
-
-def _stream_query_extras():
-    """Best-effort read of extra plugin-request query params (poster/title)
-    that router.run()'s per-action dispatch table doesn't forward
-    positionally to streams() -- see the `videos()` call site, which puts
-    them on the URL instead of calling this view directly.
-    """
-    try:
-        raw_qs = sys.argv[2]
-    except IndexError:
-        return {}
-    if raw_qs.startswith('?'):
-        raw_qs = raw_qs[1:]
-    return dict(_parse_extra(raw_qs))
-
-
-@_safe_listing
-def streams(stype, sid, poster=None, title=None):
-    from lib.stremio import streaminfo
-    handle = router.ADDON_HANDLE
-    if poster is None or title is None:
-        extra = _stream_query_extras()
-        poster = poster or extra.get('poster')
-        title = title or extra.get('title')
-
-    store = get_store()
-    client = get_client()
-    targets = [
-        descriptor for descriptor in store.get_addons()
-        if addons_lib.addon_supports(descriptor.get('manifest') or {}, 'stream', stype, sid)
-    ]
-
-    def _fetch_streams(descriptor):
-        transport_url = descriptor.get('transportUrl')
-        try:
-            return client.streams(transport_url, stype, sid)
-        except AddonError as exc:
-            log('views.streams: %s failed: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGWARNING)
-            return None
-
-    pairs = []
-    logos = {}
-    for descriptor, results in zip(targets, _map_addons(_fetch_streams, targets)):
-        if results is None:
-            continue
-        manifest = descriptor.get('manifest') or {}
-        addon_name = manifest.get('name', '?')
-        logos.setdefault(streaminfo.clean_text(addon_name), manifest.get('logo'))
-        for stream in results or []:
-            pairs.append((streaminfo.parse_stream(stream, addon_name=addon_name), stream))
-
-    if not pairs:
-        notify(L(30030))
-
-    sort_key = compat.ADDON.getSetting('stream_sort') or 'quality'
-    pairs = streaminfo.sort_streams(pairs, key=sort_key)
-
-    items = [
-        _stream_item(info, stream, stype, sid, poster=poster, title=title, logo=logos.get(info['addon']))
-        for info, stream in pairs
-    ]
-    xbmcplugin.addDirectoryItems(handle, items, len(items))
-    xbmcplugin.setContent(handle, 'videos')
-    xbmcplugin.addSortMethod(handle, xbmcplugin.SORT_METHOD_NONE)
-    xbmcplugin.endOfDirectory(handle)
-
-
-@_safe_listing
-def addons():
-    handle = router.ADDON_HANDLE
-    store = get_store()
-    items = []
-
-    for descriptor in store.get_addons():
-        manifest = descriptor.get('manifest') or {}
-        flags = descriptor.get('flags') or {}
-        transport_url = descriptor.get('transportUrl')
-        label = '%s v%s' % (manifest.get('name', '?'), manifest.get('version', '?'))
-        li = xbmcgui.ListItem(label=label)
-        logo = manifest.get('logo')
-        art = {'fanart': _row_fanart(manifest.get('background'))}
-        if logo:
-            art.update({'icon': logo, 'thumb': logo})
-        li.setArt(art)
-        set_video_info(li, {'title': label, 'plot': manifest.get('description', '')})
-        if not flags.get('protected'):
-            remove_url = _url_for('addon_remove', transport=transport_url)
-            li.addContextMenuItems([(L(30011), 'RunPlugin(%s)' % remove_url)])
-            items.append((remove_url, li, False))
-        else:
-            items.append((_url_for('discover'), li, True))
-
-    items.append(_action_item(L(30010), _url_for('addon_install'), 'DefaultAddonNone.png'))
-
-    auth = store.get_auth()
-    if auth:
-        user = auth.get('user') or {}
-        label = L(30022) % (user.get('email') or user.get('name') or '?')
-        items.append(_action_item(label, _url_for('logout'), 'DefaultAddonService.png'))
-    else:
-        items.append(_action_item(L(30020), _url_for('login'), 'DefaultAddonService.png'))
-
-    xbmcplugin.addDirectoryItems(handle, items, len(items))
-    xbmcplugin.setContent(handle, 'files')
-    xbmcplugin.endOfDirectory(handle)
 
 
 def _sync_addons_if_logged_in(store, notify_success=False):
@@ -908,8 +220,9 @@ def _sync_addons_if_logged_in(store, notify_success=False):
     authKey itself was invalidated server-side, not a transient blip)
     additionally clears the stored auth via `store.set_auth(None)`, since
     retrying the same dead key can never succeed; the next user-facing
-    screen (Library, Addons, Settings > Account) then correctly shows
-    "not logged in" instead of repeating this failure forever."""
+    screen (LibraryWindow, AddonsWindow, Settings > Account) then
+    correctly shows "not logged in" instead of repeating this failure
+    forever."""
     auth = store.get_auth()
     if not auth:
         if notify_success:
@@ -923,8 +236,8 @@ def _sync_addons_if_logged_in(store, notify_success=False):
             # Clear the dead authKey so the next user-facing screen (Library,
             # Addons, Settings > Account) shows "not logged in" instead of
             # retrying the same bad token forever. Reuse the existing
-            # generic failure notification below rather than library()'s
-            # dedicated re-login prompt: this also runs from background
+            # generic failure notification below rather than a dedicated
+            # re-login prompt: this also runs from background
             # install/remove/login paths, where a "session expired" popup
             # would be out of context.
             store.set_auth(None)
@@ -933,21 +246,6 @@ def _sync_addons_if_logged_in(store, notify_success=False):
     if notify_success:
         notify(L(30034))
     return True
-
-def sync_addons_now():
-    """RunPlugin action (Settings > Account > Sync addons now): force a
-    push of the local addon collection, with explicit feedback either
-    way - unlike the automatic post-install/remove/login push, a
-    manually-triggered sync must confirm success too, not just surface
-    failures. Also refreshes every installed addon's cached manifest
-    from its own transportUrl first (see `_refresh_addon_manifests`), so
-    a freshly-updated local manifest set - not a stale install-time
-    snapshot - is what gets pushed to the account."""
-    handle = router.ADDON_HANDLE
-    store = get_store()
-    _refresh_addon_manifests(store, get_client())
-    _sync_addons_if_logged_in(store, notify_success=True)
-    _finish_action(handle, refresh=False)
 
 
 def _refresh_addon_manifests(store, client):
@@ -997,59 +295,62 @@ def _refresh_addon_manifests(store, client):
     store.update_addons(_apply)
 
 
+# --------------------------------------------------------------------------
+# Router actions
+# --------------------------------------------------------------------------
 
-def addon_install():
+@_safe_listing
+def home():
+    """Recovery directory - NOT Rivulet's home screen any more (that is
+    now the custom `HomeWindow`). This is what `default.py` falls back to
+    when opening `HomeWindow` itself raises, e.g. a broken skin missing
+    the InfoWindow/DetailWindow XML the custom UI depends on.
+
+    It deliberately offers only Settings: every other screen is now a
+    custom WindowXML dialog that depends on those same skin resources,
+    so retrying any of them here would just fail the exact same way. The
+    first row is a plain notice explaining that something went wrong;
+    the second is the one recovery action that can actually fix it
+    (change the skin, fix a server URL, reinstall, ...).
+    """
     handle = router.ADDON_HANDLE
-    url = xbmcgui.Dialog().input(L(30010))
-    if not url:
-        _finish_action(handle, refresh=False)
-        return
-
-    try:
-        transport_url = validate_transport_url(url)
-    except AddonError as exc:
-        log('views.addon_install: invalid transport url %s: %s' % (safe_url_for_log(url), exc), xbmc.LOGERROR)
-        notify(L(30014))
-        _finish_action(handle, refresh=False)
-        return
-
-    try:
-        manifest = get_client().manifest(transport_url)
-    except AddonError as exc:
-        log('views.addon_install: manifest fetch failed for %s: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGERROR)
-        notify(L(30014))
-        _finish_action(handle, refresh=False)
-        return
-
-    if not manifest or not manifest.get('id'):
-        notify(L(30014))
-        _finish_action(handle, refresh=False)
-        return
-
-    get_store().install_addon(transport_url, manifest)
-    _sync_addons_if_logged_in(get_store())
-    notify(L(30012))
-    _finish_action(handle)
+    notice = xbmcgui.ListItem(label=L(30032))
+    notice.setArt({'fanart': compat.addon_fanart()})
+    items = [
+        # The notice is a FOLDER pointing back at this same action, not an
+        # _action_item: an isFolder=False row is a playable item to Kodi, so
+        # selecting it would have it try to play `?action=home`, which
+        # answers with endOfDirectory() and fails playback - a broken row in
+        # the one screen that exists to survive breakage. As a folder it
+        # simply redraws this directory, i.e. a harmless retry.
+        (_url_for('home'), notice, True),
+        _action_item(L(30004), _url_for('settings'), compat.addon_media_path('settings.png')),
+    ]
+    xbmcplugin.addDirectoryItems(handle, items, len(items))
+    xbmcplugin.setContent(handle, 'files')
+    xbmcplugin.setPluginCategory(handle, compat.ADDON_NAME)
+    xbmcplugin.endOfDirectory(handle)
 
 
-def addon_remove(transport):
+def open_settings():
+    compat.ADDON.openSettings()
+    xbmcplugin.endOfDirectory(router.ADDON_HANDLE, succeeded=False, updateListing=False, cacheToDisc=False)
+
+
+def sync_addons_now():
+    """RunPlugin action (Settings > Account > Sync addons now): force a
+    push of the local addon collection, with explicit feedback either
+    way - unlike the automatic post-install/remove/login push, a
+    manually-triggered sync must confirm success too, not just surface
+    failures. Also refreshes every installed addon's cached manifest
+    from its own transportUrl first (see `_refresh_addon_manifests`), so
+    a freshly-updated local manifest set - not a stale install-time
+    snapshot - is what gets pushed to the account."""
     handle = router.ADDON_HANDLE
-    if not transport:
-        _finish_action(handle, refresh=False)
-        return
-
-    if not xbmcgui.Dialog().yesno(L(30011), L(30011)):
-        _finish_action(handle, refresh=False)
-        return
-
-    try:
-        get_store().remove_addon(transport)
-        _sync_addons_if_logged_in(get_store())
-        notify(L(30013))
-    except Exception as exc:  # noqa: BLE001 - e.g. protected-addon refusal
-        log('views.addon_remove: %r' % (exc,), xbmc.LOGERROR)
-        notify(str(exc))
-    _finish_action(handle)
+    store = get_store()
+    _refresh_addon_manifests(store, get_client())
+    _sync_addons_if_logged_in(store, notify_success=True)
+    _finish_action(handle, refresh=False)
 
 
 def login():
@@ -1149,40 +450,3 @@ def logout():
 
     store.set_auth(None)
     _finish_action(handle)
-
-
-@_safe_listing
-def library():
-    handle = router.ADDON_HANDLE
-    store = get_store()
-    items = []
-    auth = store.get_auth()
-    if auth:
-        try:
-            entries = StremioAPI().datastore_get(auth.get('authKey'), collection='libraryItem', all=True)
-        except ApiError as exc:
-            log('views.library: datastore_get failed: %r' % (exc,), xbmc.LOGERROR)
-            if exc.is_auth_error:
-                store.set_auth(None)
-                notify(L(30085))
-            entries = []
-        for entry in entries or []:
-            if entry.get('removed'):
-                continue
-            name = entry.get('name') or entry.get('_id')
-            li = xbmcgui.ListItem(label=name)
-            poster = entry.get('poster')
-            art = {'fanart': _row_fanart(entry.get('background'))}
-            if poster:
-                art.update({'poster': poster, 'thumb': poster, 'icon': poster})
-            li.setArt(art)
-            entry_type = entry.get('type')
-            set_video_info(li, {
-                'title': name, 'mediatype': 'tvshow' if entry_type == 'series' else 'movie',
-            })
-            url = _url_for('meta', type=entry_type, id=entry.get('_id'))
-            items.append((url, li, True))
-
-    xbmcplugin.addDirectoryItems(handle, items, len(items))
-    xbmcplugin.setContent(handle, 'videos')
-    xbmcplugin.endOfDirectory(handle)
