@@ -77,6 +77,7 @@ every reopen after a played pick (or a binge-watched one) works off
 whatever `StreamsWindow.pairs` had already accumulated by then, a
 static snapshot, never resumes listening for more addons.
 """
+import queue
 import threading
 
 import xbmcgui
@@ -577,18 +578,67 @@ def _supported_stream_addons(stype, sid):
     return addons
 
 
-def _submit_stream_fetches(pool, stype, sid, addons):
-    """Submit `_query_addon_streams()` for every `(descriptor, manifest)`
-    in `addons` onto `pool` all at once - concurrently, not gated behind
-    each other - returning a `{future: addon_name}` map for
-    `as_completed()` to consume."""
+#: How long each fan-out consumer's `Queue.get()` blocks before giving up
+#: and retrying - short enough that `dialog.iscanceled()` keeps getting
+#: rechecked while addons are still mid-flight, long enough not to spin
+#: the CPU polling an empty queue.
+_STREAM_RESULT_POLL_SECONDS = 0.2
+
+
+def _start_stream_fetch_workers(stype, sid, addons):
+    """Fan `_query_addon_streams()` out across a small, genuinely BOUNDED
+    pool of raw daemon threads fed by a `queue.Queue` work queue, and
+    return the results `Queue` they feed into as `(addon_name, pairs,
+    failed)` tuples. Exactly `min(len(addons), _MAX_STREAM_ADDON_WORKERS)`
+    threads are started, each looping `work.get_nowait()` until the work
+    queue is empty - bounding BOTH the thread count and the number of
+    concurrent addon HTTP calls in flight, unlike spawning one thread per
+    addon.
+
+    Deliberately raw `threading.Thread(daemon=True)`, NOT
+    `concurrent.futures.ThreadPoolExecutor`: `concurrent.futures.thread`
+    registers an atexit hook that JOINS every worker at interpreter
+    shutdown regardless of its daemon flag. Measured directly: a single
+    addon still inside `AddonClient`'s own 15s timeout blocked process
+    exit for a full 6.0s on BOTH Python 3.8 (daemon=True workers) and
+    3.13 (daemon=False workers) - `pool.shutdown(wait=False)` does not
+    avoid that join, it only stops the POOL itself from waiting, not the
+    interpreter's own atexit hook. A raw daemon thread has no such hook:
+    the interpreter abandons it outright at exit rather than joining it,
+    which is the actual property a fan-out that can return before every
+    addon has answered (`open_streams()`) needs."""
     client = get_client()
-    return {
-        pool.submit(
-            _query_addon_streams, client, descriptor.get('transportUrl'), manifest.get('name', '?'), stype, sid,
-        ): manifest.get('name', '?')
-        for descriptor, manifest in addons
-    }
+    work = queue.Queue()
+    for descriptor, manifest in addons:
+        work.put((descriptor.get('transportUrl'), manifest.get('name', '?')))
+    results = queue.Queue()
+
+    def _worker():
+        while True:
+            try:
+                transport_url, addon_name = work.get_nowait()
+            except queue.Empty:
+                return
+            addon_pairs, failed = _query_addon_streams(client, transport_url, addon_name, stype, sid)
+            results.put((addon_name, addon_pairs, failed))
+
+    for _ in range(min(len(addons), _MAX_STREAM_ADDON_WORKERS)):
+        threading.Thread(target=_worker, daemon=True).start()
+    return results
+
+
+def _await_stream_result(results):
+    """Block for the next worker's own `(addon_name, pairs, failed)`
+    tuple - in short `_STREAM_RESULT_POLL_SECONDS` slices via a retried
+    `Queue.get(timeout=...)` rather than one indefinite `get()`, so a
+    caller looping on this (`_fetch_stream_pairs()`/`open_streams()`
+    below) keeps re-checking its own `dialog.iscanceled()` between polls
+    instead of only once a full addon answer lands."""
+    while True:
+        try:
+            return results.get(timeout=_STREAM_RESULT_POLL_SECONDS)
+        except queue.Empty:
+            continue
 
 
 def _fetch_stream_pairs(stype, sid):
@@ -610,8 +660,6 @@ def _fetch_stream_pairs(stype, sid):
     function's callers (`_try_binge_watch()`, and `open_streams()`
     itself for as long as it used to) want the plain "wait for
     everything, then decide" contract."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
     import xbmc
 
     from lib.ui.compat import L, log
@@ -622,32 +670,34 @@ def _fetch_stream_pairs(stype, sid):
     if not addons:
         return pairs
 
-    pool = ThreadPoolExecutor(max_workers=min(len(addons), _MAX_STREAM_ADDON_WORKERS))
-    try:
-        futures = _submit_stream_fetches(pool, stype, sid, addons)
-        with busy_dialog(L(30033)) as dialog:
+    results = _start_stream_fetch_workers(stype, sid, addons)
+    total = len(addons)
+    completed = 0
+
+    def consume_next():
+        """Advance by one addon's own answer, folding its pairs/failure
+        into the running totals above. Returns that addon's own `(name,
+        pairs)`, or None once every addon has answered."""
+        nonlocal failed_addons, completed
+        if completed >= total:
+            return None
+        addon_name, addon_pairs, failed = _await_stream_result(results)
+        completed += 1
+        if failed:
+            failed_addons += 1
+        else:
+            pairs.extend(addon_pairs)
+        return addon_name, addon_pairs
+
+    with busy_dialog(L(30033)) as dialog:
+        while True:
             if dialog.iscanceled():
-                return pairs
-            total = len(futures)
-            completed = 0
-            for future in as_completed(futures):
-                addon_name = futures[future]
-                addon_pairs, failed = future.result()
-                completed += 1
-                if failed:
-                    failed_addons += 1
-                else:
-                    pairs.extend(addon_pairs)
-                dialog.update(int(completed * 100 / total), 'Checking %s...' % addon_name)
-                if dialog.iscanceled():
-                    break
-    finally:
-        # wait=False: a cancelled (or simply finished) fetch returns
-        # immediately with whatever landed so far rather than blocking on
-        # addons still mid-flight - each is bounded by AddonClient's own
-        # 15s timeout regardless, no worse than the single in-flight call
-        # the old serial loop could never interrupt either.
-        pool.shutdown(wait=False)
+                break
+            result = consume_next()
+            if result is None:
+                break
+            addon_name, _addon_pairs = result
+            dialog.update(int(completed * 100 / total), 'Checking %s...' % addon_name)
 
     if failed_addons:
         log('streamswindow: %d addon(s) failed' % failed_addons, xbmc.LOGWARNING)
@@ -893,8 +943,6 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
     SAME snapshot once playback ends (see `_wait_for_playback_end()`)
     rather than returning - see the module docstring for why this means
     the function now only ever returns False."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
     import xbmc
 
     from lib.ui.compat import ADDON, L, log, notify
@@ -904,26 +952,20 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
         notify(L(30030))
         return False
 
-    pool = ThreadPoolExecutor(max_workers=min(len(addons), _MAX_STREAM_ADDON_WORKERS))
-    futures = _submit_stream_fetches(pool, stype, sid, addons)
-    completed_iter = as_completed(futures)
-    total = len(futures)
+    results = _start_stream_fetch_workers(stype, sid, addons)
+    total = len(addons)
     pairs = []
     failed_addons = 0
     consumed = 0
 
     def consume_next():
-        """Advance `completed_iter` by one addon's own answer, folding
-        its pairs/failure into the running totals above. Returns that
-        addon's own `(name, pairs)`, or None once every addon has
-        answered."""
+        """Advance by one addon's own answer, folding its pairs/failure
+        into the running totals above. Returns that addon's own `(name,
+        pairs)`, or None once every addon has answered."""
         nonlocal failed_addons, consumed
-        try:
-            future = next(completed_iter)
-        except StopIteration:
+        if consumed >= total:
             return None
-        addon_name = futures[future]
-        addon_pairs, failed = future.result()
+        addon_name, addon_pairs, failed = _await_stream_result(results)
         consumed += 1
         if failed:
             failed_addons += 1
@@ -942,7 +984,6 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
             dialog.update(int(consumed * 100 / total), 'Checking %s...' % addon_name)
 
     if not pairs:
-        pool.shutdown(wait=False)
         if failed_addons:
             log('streamswindow: %d addon(s) failed' % failed_addons, xbmc.LOGWARNING)
         notify(L(30030))
@@ -966,7 +1007,6 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
         except Exception as exc:  # noqa: BLE001 - nothing else can catch a failure on this background thread; log it as loudly as open_streams()'s own window-construction failures below, rather than let it vanish silently.
             log('streamswindow: fan-out failed: %r' % (exc,), xbmc.LOGERROR)
         finally:
-            pool.shutdown(wait=False)
             if not stop_event.is_set():
                 feed.mark_done()
             if failed_addons:
@@ -976,7 +1016,6 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
     if still_loading:
         threading.Thread(target=drain_remaining, daemon=True).start()
     else:
-        pool.shutdown(wait=False)
         feed.mark_done()
         if failed_addons:
             log('streamswindow: %d addon(s) failed' % failed_addons, xbmc.LOGWARNING)

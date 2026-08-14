@@ -1465,6 +1465,88 @@ def test_fetch_stream_pairs_aggregates_every_addon_and_logs_a_single_warning_on_
     assert len(warnings) == 1 and 'streamswindow: 1 addon(s) failed' in warnings[0]
 
 
+# ---------------------------------------------------------------------------
+# _start_stream_fetch_workers() - the bounded raw-daemon-thread fan-out
+# both _fetch_stream_pairs() and open_streams() feed from. Regression
+# coverage for the defect this whole helper replaces
+# ThreadPoolExecutor to fix: concurrent.futures.thread's atexit hook
+# JOINS every worker at interpreter shutdown regardless of daemon flag,
+# so a still-running addon fetch blocked process exit for 6.0s on both
+# Python 3.8 and 3.13 even with pool.shutdown(wait=False). Raw daemon
+# threads have no such hook - which only holds if every thread this
+# helper starts is ACTUALLY daemon, and there are never more of them
+# than _MAX_STREAM_ADDON_WORKERS regardless of how many addons are fed
+# in - both asserted directly here rather than through a real interpreter
+# exit (which this suite has no way to observe).
+# ---------------------------------------------------------------------------
+
+
+def _spy_on_threads(monkeypatch, streamswindow_mod):
+    """Wraps `streamswindow_mod.threading.Thread` so every instance it
+    constructs (not just `.start()`ed ones) is recorded, and returns the
+    list those instances land in - the deterministic "threads the helper
+    creates" this file's daemon-thread/bounded-pool tests inspect,
+    instead of the process-wide (and thus test-order-sensitive)
+    `threading.enumerate()`."""
+    created = []
+    real_thread = streamswindow_mod.threading.Thread
+
+    def _make_thread(*args, **kwargs):
+        thread = real_thread(*args, **kwargs)
+        created.append(thread)
+        return thread
+
+    monkeypatch.setattr(streamswindow_mod.threading, 'Thread', _make_thread)
+    return created
+
+
+def test_start_stream_fetch_workers_starts_only_daemon_threads(load_streamswindow, monkeypatch):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    addons = [
+        ({'transportUrl': 't0'}, {'name': 'A0'}),
+        ({'transportUrl': 't1'}, {'name': 'A1'}),
+        ({'transportUrl': 't2'}, {'name': 'A2'}),
+    ]
+    client = _FakeAddonClient({'t0': [], 't1': [], 't2': []})
+    sw.get_client = lambda: client
+    created = _spy_on_threads(monkeypatch, sw)
+
+    results = sw._start_stream_fetch_workers('movie', 'tt1', addons)
+
+    for _ in addons:
+        results.get(timeout=2)  # drain every answer so no worker outlives the test
+    for thread in created:
+        thread.join(2)
+
+    assert len(created) == len(addons)
+    assert all(thread.daemon for thread in created)
+
+
+def test_start_stream_fetch_workers_never_starts_more_threads_than_the_worker_cap(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    addon_count = sw._MAX_STREAM_ADDON_WORKERS + 5
+    stream_results = {'t%d' % i: [] for i in range(addon_count)}
+    addons = [({'transportUrl': 't%d' % i}, {'name': 'A%d' % i}) for i in range(addon_count)]
+    client = _FakeAddonClient(stream_results)
+    sw.get_client = lambda: client
+    created = _spy_on_threads(monkeypatch, sw)
+
+    results = sw._start_stream_fetch_workers('movie', 'tt1', addons)
+
+    for _ in addons:
+        results.get(timeout=2)  # drain every answer so no worker outlives the test
+    for thread in created:
+        thread.join(2)
+
+    assert len(created) == sw._MAX_STREAM_ADDON_WORKERS
+    assert all(thread.daemon for thread in created)
+    assert len(client.calls) == addon_count  # every addon still got queried, just via a bounded pool
+
+
 
 # ---------------------------------------------------------------------------
 # _wait_for_playback_end() - the injectable poll-loop helper open_streams()
