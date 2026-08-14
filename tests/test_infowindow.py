@@ -821,11 +821,12 @@ def test_enrich_worker_ignores_an_empty_fetch_result(load_infowindow, monkeypatc
     assert win._enrich_pending == {}
 
 
-def test_apply_enriched_writes_queued_props_onto_the_live_listitem(load_infowindow):
+def test_apply_enriched_writes_queued_props_onto_the_live_listitem(load_infowindow, monkeypatch):
     ctx = load_infowindow()
     win = ctx.infowindow.ShowcaseWindow()
     win.metas = [_sparse()]
     win._reset_enrich_state()
+    _spawned(monkeypatch, ctx, win)  # onInit() must not spawn a real worker
     win.onInit()
     win._enrich_pending = {0: {'genre': 'Drama', 'rating': '7.9', 'plot': 'Plot.', 'year': '2026'}}
 
@@ -837,11 +838,12 @@ def test_apply_enriched_writes_queued_props_onto_the_live_listitem(load_infowind
     assert win._enrich_pending == {}
 
 
-def test_apply_enriched_drops_an_index_no_longer_in_the_list(load_infowindow):
+def test_apply_enriched_drops_an_index_no_longer_in_the_list(load_infowindow, monkeypatch):
     ctx = load_infowindow()
     win = ctx.infowindow.ShowcaseWindow()
     win.metas = [_sparse()]
     win._reset_enrich_state()
+    _spawned(monkeypatch, ctx, win)  # onInit() must not spawn a real worker
     win.onInit()
     win._enrich_pending = {5: {'plot': 'Stale.'}}
 
@@ -910,3 +912,41 @@ def test_start_clears_enrich_state_between_runs(load_infowindow):
 
     assert win._enriched == set()
     assert win._enrich_pending == {}
+
+
+def test_enrich_worker_swallows_an_exception_from_its_own_imports(load_infowindow, monkeypatch):
+    """The worker runs on a daemon thread nobody joins, so nothing can
+    surface an exception it lets escape - pytest reports one as an
+    unhandled thread exception against whichever test happens to be running
+    when it fires. A worker still in flight while the interpreter (or, under
+    test, the injected xbmc stubs) is torn down fails on `import xbmc`
+    before it reaches any of its own error handling.
+    """
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+
+    def _torn_down(index, meta):
+        raise ModuleNotFoundError("No module named 'xbmc'")
+
+    monkeypatch.setattr(type(win), '_enrich_fetch', _torn_down)
+
+    win._enrich_worker(0, win.metas[0])  # must not raise
+
+    # ...and the slot it took is handed back, so enrichment still works after.
+    assert win._enrich_slots.acquire(blocking=False) is True
+    win._enrich_slots.release()
+
+
+def test_enrich_worker_releases_its_slot_after_a_successful_fetch(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: {'description': 'Plot.'})
+
+    for _ in range(ctx.infowindow._ENRICH_MAX_INFLIGHT + 1):
+        win._enrich_worker(0, win.metas[0])
+
+    assert win._enrich_pending[0]['plot'] == 'Plot.'

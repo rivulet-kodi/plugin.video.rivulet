@@ -241,10 +241,6 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         threading.Thread(target=self._enrich_worker, args=(index, meta), daemon=True).start()
 
     def _enrich_worker(self, index, meta):
-        import xbmc
-
-        from lib.ui.compat import log
-
         # Bound concurrent fetches: each _fetch_meta fans out to a pool of
         # its own, and abandons (rather than cancels) whatever is still in
         # flight when it returns.
@@ -252,14 +248,29 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
             self._enriched.discard(index)  # let a later focus retry it
             return
         try:
+            self._enrich_fetch(index, meta)
+        except Exception:
+            # Last-resort guard: this runs on a daemon thread nobody joins,
+            # so an escaping exception has no caller to surface it. Even the
+            # imports below can fail - a thread still running while the
+            # interpreter (or, under test, the injected xbmc stubs) is torn
+            # down raises ModuleNotFoundError on `import xbmc`.
+            pass
+        finally:
+            self._enrich_slots.release()
+
+    def _enrich_fetch(self, index, meta):
+        import xbmc
+
+        from lib.ui.compat import log
+
+        try:
             from lib.ui.views import _fetch_meta
 
             full = _fetch_meta(meta.get('type') or 'movie', meta.get('id'))
         except Exception as exc:  # never let a lookup failure break the UI
             log('infowindow: meta enrich failed for %s: %r' % (meta.get('id'), exc), xbmc.LOGDEBUG)
             return
-        finally:
-            self._enrich_slots.release()
         if not full:
             return
         # Merge rather than replace: the preview's own poster/background are
