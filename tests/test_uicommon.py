@@ -1,19 +1,14 @@
 """Tests for lib.ui.uicommon: the shared helpers every custom
 `WindowXML` screen (`HomeWindow`, `CatalogPickerWindow`, the coverflow,
 ...) builds on - `BACK_ACTIONS`, `dismiss_busy_dialog()`, `addon_skin_path()`,
-`open_window()`, `BaseWindow`, `ModalStackWindow`,
-`close_windows_for_playback()`, and `fallback_to_classical()` - exercised
-against the shared fake xbmc/xbmcgui stubs in tests/kodistubs (no real Kodi
-runtime, no network).
+`open_window()`, `BaseWindow`, `ModalStackWindow`, and
+`close_windows_for_playback()` - exercised against the shared fake
+xbmc/xbmcgui stubs in tests/kodistubs (no real Kodi runtime, no network).
 
 lib.ui.uicommon imports xbmc/xbmcgui at module scope (`class BaseWindow
 (xbmcgui.WindowXML)`, `xbmc.executebuiltin(...)` inside
-dismiss_busy_dialog()/fallback_to_classical()), so load_uicommon reloads it
-fresh each call alongside lib.ui.compat (addon_skin_path()'s `ADDON`) and
-lib.ui.router (fallback_to_classical()'s lazy `from lib.ui import router`) -
-the same trio tests/test_router.py itself relies on for router's own
-BASE_URL-dependent behavior. Setting `ctx.router.BASE_URL` before calling
-fallback_to_classical() mirrors tests/test_router.py's url_for() tests.
+dismiss_busy_dialog()), so load_uicommon reloads it fresh each call
+alongside lib.ui.compat (addon_skin_path()'s `ADDON`).
 
 BaseWindow is also the shared base for HomeWindow/CatalogPickerWindow/
 StreamsWindow/AddonsWindow/SearchWindow's back-navigation onAction() -
@@ -42,16 +37,16 @@ import pytest
 
 from tests.kodistubs import install_kodi_stubs
 
-_RELOAD_MODULE_NAMES = ('lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.router')
+_RELOAD_MODULE_NAMES = ('lib.ui.compat', 'lib.ui.uicommon')
 
 
 @pytest.fixture
 def load_uicommon():
     """Factory fixture: `load_uicommon(addon_info=None)` installs fresh
     stubs (via tests.kodistubs.install_kodi_stubs) reloading lib.ui.compat/
-    lib.ui.uicommon/lib.ui.router, and returns a namespace with
-    `.uicommon`, `.compat`, `.router`, and `.env`. Every call is torn down
-    automatically, in reverse order, at test end.
+    lib.ui.uicommon, and returns a namespace with `.uicommon`, `.compat`,
+    and `.env`. Every call is torn down automatically, in reverse order,
+    at test end.
     """
     with contextlib.ExitStack() as stack:
         def _load(addon_info=None):
@@ -420,28 +415,3 @@ def test_basewindow_onaction_non_back_action_does_not_close(load_uicommon):
     assert win.closed is False
 
 
-# ---------------------------------------------------------------------------
-# fallback_to_classical()
-# ---------------------------------------------------------------------------
-
-
-def test_fallback_to_classical_updates_the_container_with_an_action_only_url(load_uicommon):
-    ctx = load_uicommon()
-    ctx.router.BASE_URL = 'plugin://plugin.video.rivulet/'
-
-    ctx.uicommon.fallback_to_classical('library')
-
-    assert ctx.env.executed_builtins == [
-        'ActivateWindow(Videos,plugin://plugin.video.rivulet/?action=library)'
-    ]
-
-
-def test_fallback_to_classical_forwards_params_into_the_url(load_uicommon):
-    ctx = load_uicommon()
-    ctx.router.BASE_URL = 'plugin://plugin.video.rivulet/'
-
-    ctx.uicommon.fallback_to_classical('meta', type='movie', id='tt123')
-
-    assert ctx.env.executed_builtins == [
-        'ActivateWindow(Videos,plugin://plugin.video.rivulet/?action=meta&type=movie&id=tt123)'
-    ]

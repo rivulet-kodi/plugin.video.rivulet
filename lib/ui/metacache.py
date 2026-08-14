@@ -1,17 +1,25 @@
 """Short-TTL disk cache for `views._fetch_meta()` results.
 
 Kodi runs every ``plugin://`` call in a fresh sub-interpreter, so an
-in-memory cache would not survive a back-navigation - each classical
-view is a brand-new process. Kodi's own directory cache
+in-memory cache would not survive a back-navigation - each directory
+listing is a brand-new process. Kodi's own directory cache
 (`xbmcplugin.endOfDirectory(..., cacheToDisc=True)`, the default)
-already covers repeat visits to the exact same listing URL, but it does
-NOT cover `views.meta()` -> `views.videos()`: picking season 1, backing
-out, then picking season 2 hits a *different* URL each time, and
-`views.videos()` re-fetches the identical full meta object from every
-addon again to get at its `videos` list - once per season, every time,
-for the same show, within one continuous browsing session. This module
-closes exactly that gap: a small, short-lived, on-disk memo keyed by
-(stype, sid), written next to the rest of `Store`'s on-disk state.
+covers repeat visits to the exact same listing URL, but nothing covers
+`views._fetch_meta()` itself being called repeatedly for the SAME
+(stype, sid) within one continuous custom-window session (one
+`HomeWindow` invocation, which nests every other screen as blocking
+`doModal()` calls in the same process - see `lib.ui.uicommon`'s module
+docstring): `lib.ui.infowindow.ShowcaseWindow` fetches a focused
+poster's full meta once in its background enrich worker (to fill in a
+catalog preview's missing description/genres) and again, independently,
+if the user opens that same poster's cast & crew picker
+(`_open_credits()`) - both landing on the identical (stype, sid); and
+`lib.ui.detailwindow.open_detail()` re-fetches from scratch every time
+the same title's `DetailWindow` is reopened (backing out to a
+picker/search/library screen and picking it again), since a closed
+`DetailWindow` keeps nothing in memory. This module closes exactly that
+gap: a small, short-lived, on-disk memo keyed by (stype, sid), written
+next to the rest of `Store`'s on-disk state.
 
 Deliberately NOT used for catalog/search results: those run 50-500 KB
 per response, so caching them would trade network latency for worse

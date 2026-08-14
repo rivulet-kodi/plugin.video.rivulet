@@ -36,6 +36,18 @@ bits every one of those screens needs so they stay consistent:
   then reopens each one - exactly where the user left it - once
   playback ends and control naturally unwinds back to it.
 
+Jumping into a plugin directory from one of these dialogs (e.g. a
+RunPlugin-only action) must use `ActivateWindow(Videos, url)`, NOT
+`Container.Update(...)`: these custom windows are modal dialogs
+overlaying whatever screen was active before the addon launched (often
+not a video directory at all), so there is no existing compatible
+container for Container.Update to target - it fails outright
+("GetDirectory - Error getting ..."/"CGUIMediaWindow::GetDirectory(...)
+failed", confirmed against a real device's kodi.log). ActivateWindow
+(Videos, url) instead explicitly opens a fresh Videos window at `url`,
+the standard way to jump into a plugin directory from a non-container
+context (a dialog, a script, anywhere).
+
 Navigation model: each screen is a blocking `doModal()` call. "Forward"
 navigation is a screen's onClick calling another screen's `open_*()`
 helper (which blocks until that screen closes); "back" is simply that
@@ -218,26 +230,3 @@ class BaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         if action.getId() in BACK_ACTIONS:
             self.close()
 
-
-def fallback_to_classical(action, **params):
-    """Temporary bridge for screens with no custom-window replacement yet:
-    open the classical plugin directory for `action` (see
-    `lib.ui.urlutil.url_for`) in Kodi's Videos window. Callers should
-    close every custom window in their call chain afterwards
-    (conventionally: return True from an `open_*()` function and have
-    its caller close too).
-
-    Uses `ActivateWindow(Videos, ...)`, NOT `Container.Update(...)`:
-    our custom windows are modal dialogs overlaying whatever screen was
-    active before the addon launched (often not a video directory at
-    all), so there is no existing compatible container for
-    Container.Update to target - it fails outright
-    ("GetDirectory - Error getting ..."/"CGUIMediaWindow::GetDirectory(...)
-    failed", confirmed against a real device's kodi.log).
-    ActivateWindow(Videos, url) instead explicitly opens a fresh Videos
-    window at `url`, the standard way to jump into a plugin directory
-    from a non-container context (a dialog, a script, anywhere).
-    """
-    from lib.ui import router, urlutil
-    url = urlutil.url_for(router.BASE_URL, action, **params)
-    xbmc.executebuiltin('ActivateWindow(Videos,%s)' % url)
