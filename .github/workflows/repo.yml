@@ -62,6 +62,32 @@ jobs:
               shutil.copyfile(info["icon"], addon_dir / "icon.png")
               shutil.copyfile(info["fanart"], addon_dir / "fanart.jpg")
 
+              # Kodi resolves <assets> paths RELATIVE TO THE ADDON'S FOLDER IN
+              # THE REPOSITORY, and fetches them as loose files - it does not
+              # look inside the zip. addon.xml declares
+              # <icon>resources/icon.png</icon> plus four
+              # resources/screenshots/*.png, so publishing only the flat
+              # icon.png/fanart.jpg above left Kodi's add-on browser fetching
+              # .../plugin.video.rivulet/resources/icon.png and getting a 404:
+              # no icon, no fanart and an empty screenshot gallery for anyone
+              # installing from the repository. The flat copies stay for the
+              # older bare-icon.png convention; these are the declared ones.
+              source_root = info["addon_xml"].parent
+              metadata = addon_el.find("extension[@point='xbmc.addon.metadata']")
+              assets = metadata.find("assets") if metadata is not None else None
+              for asset in (list(assets) if assets is not None else []):
+                  rel = (asset.text or "").strip()
+                  if not rel:
+                      continue
+                  src = source_root / rel
+                  if not src.is_file():
+                      raise SystemExit(
+                          "%s declares asset %r but %s does not exist" % (addon_id, rel, src)
+                      )
+                  dest = addon_dir / rel
+                  dest.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copyfile(src, dest)
+
               zip_path = addon_dir / f"{addon_id}-{version}.zip"
               cmd = [
                   "git", "archive", "--format=zip",
