@@ -18,7 +18,7 @@ from lib.stremio.server import (
     UnsupportedStreamError,
     guess_file_idx,
 )
-from lib.stremio.subtitles import collect_subtitles, sort_subtitles
+from lib.stremio.subtitles import collect_subtitles, filter_subtitles
 from lib.ui.compat import (
     ADDON,
     L,
@@ -193,6 +193,14 @@ def _record_now_playing_and_maybe_resume(stype, sid, video_id, item_meta):
 def _attach_subtitles(list_item, behavior_hints, stype, sid):
     """Best-effort addon-subtitle lookup: never raises, never blocks
     playback - a broken subtitle addon just means a missing subtitle track.
+
+    Only tracks in the user's `subs_language` are attached. Kodi reads an
+    external subtitle's language from its filename, and addon subtitle
+    URLs end in opaque numeric ids, so every attached track arrives with
+    an empty language and Kodi's auto-selection picks arbitrarily among
+    them (issue #6). A single-language list makes that pick correct;
+    when nothing matches, nothing is attached and the file's own embedded
+    tracks - which do carry language metadata - are left to Kodi.
     """
     if not setting_bool('subs_enable', True):
         return
@@ -205,7 +213,7 @@ def _attach_subtitles(list_item, behavior_hints, stype, sid):
         subs = collect_subtitles(
             get_client(), get_store().get_addons(), stype, sid, extra=extra or None
         )
-        subs = sort_subtitles(subs, ADDON.getSetting('subs_language') or 'en')
+        subs = filter_subtitles(subs, ADDON.getSetting('subs_language') or 'en')
         urls = [sub['url'] for sub in subs[:20]]
         if urls:
             list_item.setSubtitles(urls)

@@ -1313,6 +1313,87 @@ def test_apply_item_metadata_skips_malformed_meta_fields_without_poisoning_other
     assert info.get('genre') == ['Sci-Fi']  # other fields unaffected
 
 
+# --- _attach_subtitles: subs_language filtering (issue #6) ----------------
+# Kodi reads an external subtitle's language from its filename, and addon
+# subtitle URLs end in opaque numeric ids, so every attached track used to
+# arrive with an empty language - Kodi's auto-selection then picked
+# arbitrarily among a mixed-language batch. _attach_subtitles now narrows
+# collect_subtitles()'s result to subs_language via filter_subtitles()
+# (the real, unpatched function) before ever calling setSubtitles().
+
+
+class _StubAddonStore:
+    """No-op lib.store.Store stand-in: only get_addons() is reached, and
+    only to build the (unused, since collect_subtitles is monkeypatched
+    below) addon list collect_subtitles() would otherwise query."""
+
+    def get_addons(self):
+        return []
+
+
+def _install_collect_subtitles(monkeypatch, player_module, subs):
+    monkeypatch.setattr(player_module, 'collect_subtitles', lambda *a, **k: subs)
+    monkeypatch.setattr(player_module, 'get_client', lambda: None)
+    monkeypatch.setattr(player_module, 'get_store', lambda: _StubAddonStore())
+
+
+def test_attach_subtitles_filters_to_preferred_language_in_collect_order(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    env.addon.settings['subs_enable'] = True
+    env.addon.settings['subs_language'] = 'en'
+    subs = [
+        {'lang': 'es', 'url': 'https://x/es.srt'},
+        {'lang': 'en', 'url': 'https://x/en1.srt'},
+        {'lang': 'fr', 'url': 'https://x/fr.srt'},
+        {'lang': 'en', 'url': 'https://x/en2.srt'},
+    ]
+    _install_collect_subtitles(monkeypatch, kodi_stubs.player, subs)
+    list_item = kodi_stubs.player.xbmcgui.ListItem()
+
+    kodi_stubs.player._attach_subtitles(list_item, {}, 'movie', 'tt1')
+
+    assert list_item.subtitles == ['https://x/en1.srt', 'https://x/en2.srt']
+
+
+def test_attach_subtitles_no_matching_language_never_calls_setsubtitles(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    env.addon.settings['subs_enable'] = True
+    env.addon.settings['subs_language'] = 'en'
+    subs = [{'lang': 'es', 'url': 'https://x/es.srt'}, {'lang': 'fr', 'url': 'https://x/fr.srt'}]
+    _install_collect_subtitles(monkeypatch, kodi_stubs.player, subs)
+    list_item = kodi_stubs.player.xbmcgui.ListItem()
+
+    kodi_stubs.player._attach_subtitles(list_item, {}, 'movie', 'tt1')
+
+    assert list_item.subtitles is None
+
+
+def test_attach_subtitles_more_than_twenty_matches_attaches_only_first_twenty(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    env.addon.settings['subs_enable'] = True
+    env.addon.settings['subs_language'] = 'en'
+    subs = [{'lang': 'en', 'url': 'https://x/%d.srt' % i} for i in range(25)]
+    _install_collect_subtitles(monkeypatch, kodi_stubs.player, subs)
+    list_item = kodi_stubs.player.xbmcgui.ListItem()
+
+    kodi_stubs.player._attach_subtitles(list_item, {}, 'movie', 'tt1')
+
+    assert list_item.subtitles == ['https://x/%d.srt' % i for i in range(20)]
+
+
+def test_attach_subtitles_disabled_setting_skips_collect_subtitles_entirely(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    env.addon.settings['subs_enable'] = False
+    calls = []
+    monkeypatch.setattr(kodi_stubs.player, 'collect_subtitles', lambda *a, **k: calls.append(1) or [])
+    list_item = kodi_stubs.player.xbmcgui.ListItem()
+
+    kodi_stubs.player._attach_subtitles(list_item, {}, 'movie', 'tt1')
+
+    assert calls == []
+    assert list_item.subtitles is None
+
+
 # --- play_direct(on_ready=...): fires immediately before xbmc.Player().play(),
 # --- only on successful resolution, and never blocks playback on its own -
 
