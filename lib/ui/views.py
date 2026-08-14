@@ -8,7 +8,6 @@ _finish_action() instead.
 """
 import re
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import wraps
 from urllib.parse import parse_qsl
 
@@ -18,7 +17,6 @@ import xbmcplugin
 
 from lib.store import ConcurrentUpdateError
 from lib.stremio import addons as addons_lib
-from lib.stremio import streaminfo
 from lib.stremio.addons import AddonError, safe_url_for_log, validate_transport_url
 from lib.stremio.api import ApiError, StremioAPI
 from lib.ui import compat, router, urlutil
@@ -58,6 +56,7 @@ def _map_addons(fn, items):
         return []
     if len(items) == 1:
         return [fn(items[0])]
+    from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=min(len(items), _MAX_ADDON_WORKERS)) as pool:
         return list(pool.map(fn, items))
 
@@ -235,6 +234,7 @@ def _stream_item(info, stream, stype, sid, poster=None, title=None, logo=None):
     when the caller passed no poster of its own.
     """
     stream = stream or {}
+    from lib.stremio import streaminfo
     label = streaminfo.format_label(info) or info.get('raw') or info.get('addon') or '?'
     # Defensive: format_label() never emits '\n', but never trust upstream
     # data enough to let a stray newline wrap a Kodi list row onto two lines.
@@ -657,6 +657,7 @@ def _stream_query_extras():
 
 @_safe_listing
 def streams(stype, sid, poster=None, title=None):
+    from lib.stremio import streaminfo
     handle = router.ADDON_HANDLE
     if poster is None or title is None:
         extra = _stream_query_extras()

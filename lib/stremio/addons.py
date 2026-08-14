@@ -8,19 +8,41 @@ Implements the addon resource protocol exactly as stremio-core does it:
 - Catalog declarations (modern `extra` array vs legacy extraSupported/
   extraRequired): src/types/addon/manifest.rs (ManifestCatalog, ManifestExtra).
 
-`requests` is imported at module scope but guarded so this module - and all
-its pure helper functions (encode_extra, build_resource_url, addon_supports,
-iter_catalogs, validate_transport_url, safe_url_for_log) - stay importable
-even where `requests` is missing; only constructing/using an AddonClient
-actually needs it.
+`requests` is imported lazily (see `_ensure_requests()` below), not at
+module scope, so this module - and all its pure helper functions
+(encode_extra, build_resource_url, addon_supports, iter_catalogs,
+validate_transport_url, safe_url_for_log) - stay importable, and cheap to
+import, even where `requests` is missing; only constructing/using an
+AddonClient actually needs it.
 """
 import ipaddress
 from urllib.parse import quote, urlsplit, urlunsplit
 
-try:
-    import requests
-except ImportError:  # pragma: no cover - exercised only without the dependency
-    requests = None  # type: ignore[assignment]
+#: `requests` costs ~35ms and ~200 transitive modules to import - resolved
+#: lazily on first `AddonClient.__init__()` call via `_ensure_requests()`
+#: rather than at module import time, so this module's pure helpers
+#: (encode_extra, build_resource_url, addon_supports, iter_catalogs,
+#: validate_transport_url, safe_url_for_log) - most of which run on every
+#: UI navigation, HTTP or not - never pay that cost. `_UNSET` marks "not
+#: resolved yet" (distinct from a real `None`, the cached "package not
+#: installed" outcome).
+_UNSET = object()
+requests = _UNSET
+
+
+def _ensure_requests():
+    """Resolve and cache the `requests` module on first call, matching the
+    previous eager `try: import requests / except ImportError: requests =
+    None` at module scope. Safe to call repeatedly; only imports once."""
+    global requests
+    if requests is _UNSET:
+        try:
+            import requests as _requests
+        except ImportError:  # pragma: no cover - exercised only without the dependency
+            _requests = None
+        requests = _requests
+    return requests
+
 
 #: stremio-core's URI_COMPONENT_ENCODE_SET (constants.rs): percent-encode
 #: everything except alphanumerics and these characters.
@@ -196,7 +218,7 @@ class AddonClient:
     """
 
     def __init__(self, timeout=15):
-        if requests is None:
+        if _ensure_requests() is None:
             raise AddonError('the "requests" package is required for AddonClient')
         self.timeout = timeout
         self.session = requests.Session()

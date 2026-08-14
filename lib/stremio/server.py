@@ -65,12 +65,37 @@ import binascii
 import json
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
-try:
-    import requests
-except ImportError:  # pragma: no cover - exercised only without the dependency
-    requests = None  # type: ignore[assignment]
+#: `requests` costs ~35ms and ~200 transitive modules to import - resolved
+#: lazily on first `ServerClient.__init__()` call via `_ensure_requests()`
+#: rather than at module import time, so importing this module's pure
+#: helpers (normalize_info_hash, normalize_trackers, buffered_bytes,
+#: guess_file_idx, ...) never pays that cost. `_UNSET` marks "not resolved
+#: yet" (distinct from a real `None`, the cached "package not installed"
+#: outcome) so a test directly assigning `requests = None` is honoured
+#: without triggering a redundant re-import.
+_UNSET = object()
+requests = _UNSET
 
-from lib.stremio.lzstring import compress_to_encoded_uri_component
+
+def _ensure_requests():
+    """Resolve and cache the `requests` module on first call, matching the
+    previous eager `try: import requests / except ImportError: requests =
+    None` at module scope. Safe to call repeatedly; only imports once."""
+    global requests
+    if requests is _UNSET:
+        try:
+            import requests as _requests
+        except ImportError:  # pragma: no cover - exercised only without the dependency
+            _requests = None
+        requests = _requests
+    return requests
+
+
+#: `compress_to_encoded_uri_component` (a 334-line pure-Python codec) is
+#: imported lazily inside `_lz_query_url()` below, the single call site
+#: shared by `_ftp_create_url`/`_archive_create_url`/`_resolve_nzb_stream` -
+#: it is only ever needed on the rare archive/nzb/ftp resolve path, never
+#: for a torrent/magnet/direct-url/YouTube stream.
 
 #: Same percent-encoding safe set stremio-core uses for the /yt/{id} path
 #: segment (URI_COMPONENT_ENCODE_SET, constants.rs).
@@ -270,7 +295,7 @@ class ServerClient:
 
     def __init__(self, base_url):
         self.base_url = (base_url or '').rstrip('/')
-        self.session = requests.Session() if requests is not None else None
+        self.session = requests.Session() if _ensure_requests() is not None else None
 
     def is_available(self):
         """Probe the server: GET /settings, falling back to /stats.json.
@@ -445,6 +470,7 @@ class ServerClient:
         (`serde_json::to_string(&payload)` then `lz_str::
         compress_to_encoded_uri_component(&stream_data)`).
         """
+        from lib.stremio.lzstring import compress_to_encoded_uri_component
         compressed = compress_to_encoded_uri_component(json.dumps(body, separators=(',', ':')))
         return '%s/%s?%s' % (self.base_url, path, urlencode({'lz': compressed}))
 

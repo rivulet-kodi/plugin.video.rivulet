@@ -57,7 +57,6 @@ still only ever returns False.
 import xbmcgui
 
 from lib.stremio import streaminfo
-from lib.stremio.addons import AddonError, addon_supports, safe_url_for_log
 from lib.ui.binge import next_video, pick_binge_stream
 from lib.ui.dependencies import get_client, get_store
 from lib.ui.uicommon import BaseWindow, busy_dialog, close_windows_for_playback, open_window
@@ -323,6 +322,7 @@ def _fetch_stream_pairs(stype, sid):
     the picker instead (see `_try_binge_watch()`)."""
     import xbmc
 
+    from lib.stremio.addons import AddonError, addon_supports, safe_url_for_log
     from lib.ui.compat import L, log
 
     store = get_store()
