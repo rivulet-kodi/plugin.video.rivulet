@@ -15,9 +15,15 @@ closes exactly that gap: a small, short-lived, on-disk memo keyed by
 
 Deliberately NOT used for catalog/search results: those run 50-500 KB
 per response, so caching them would trade network latency for worse
-eMMC wear on the exact hardware this optimisation targets. Meta
-responses are an order of magnitude smaller (1-10 KB), so the tradeoff
-runs the other way.
+eMMC wear on the exact hardware this optimisation targets.
+
+Meta responses were assumed to be 1-10 KB, but a real profile showed
+otherwise: a SERIES meta embeds its whole `videos` array, one entry per
+episode, and measured 25-30 KB apiece. Since the whole cache is one
+JSON file rewritten on every store, an entry-count cap alone let the
+per-write cost grow with the cache - 64 series would mean rewriting
+~2 MB to record one fetch, which is precisely the flash wear this was
+meant to avoid. The cap below is therefore a BYTE budget.
 
 Every operation is best-effort: a missing/corrupt cache file, or a
 write that fails outright (read-only filesystem, permissions), must
@@ -37,9 +43,16 @@ FILENAME = 'meta_cache.json'
 #: changes.
 TTL_SECONDS = 300
 
-#: Hard cap on the number of cached shows/movies kept at once. A
-#: browsing session touches a handful of titles, not hundreds - once
-#: over the cap, the oldest entries are dropped first.
+#: Byte budget for the whole cache file. This bounds the cost of a
+#: single store: the file is rewritten wholesale each time, so the
+#: budget - not the entry count - is what caps write amplification.
+#: 256 KB holds a healthy browsing session (a handful of 25-30 KB
+#: series plus a good number of ~3 KB movies) while keeping any one
+#: write small enough to be cheap on eMMC/SD.
+MAX_BYTES = 256 * 1024
+
+#: Belt-and-braces cap on entry count, so a pathological run of tiny
+#: metas cannot grow the index unboundedly under the byte budget.
 MAX_ENTRIES = 64
 
 
@@ -58,6 +71,33 @@ def _read_entries(data_dir):
     except (OSError, ValueError):
         return {}
     return entries if isinstance(entries, dict) else {}
+
+
+def _evict(entries):
+    """Drop the oldest entries until the cache fits both budgets.
+
+    Expired entries go first regardless of size - they can never be
+    served again, so keeping them only inflates the next write. Then,
+    while the serialised file would still exceed `MAX_BYTES` (or hold
+    more than `MAX_ENTRIES`), the oldest surviving entry is dropped.
+    Size is measured on the real serialised form, since that is exactly
+    what each store has to write out.
+    """
+    now = time.time()
+    kept = {
+        key: entry for key, entry in entries.items()
+        if now - entry.get('ts', 0) <= TTL_SECONDS
+    }
+    # Never evict away the entry just stored: if a single meta is bigger
+    # than the whole budget, caching just that one is still the right
+    # answer, and an empty cache would make the next visit refetch it.
+    oldest_first = sorted(kept.items(), key=lambda kv: kv[1].get('ts', 0))
+    while len(oldest_first) > 1 and (
+        len(oldest_first) > MAX_ENTRIES
+        or len(json.dumps(dict(oldest_first), separators=(',', ':'))) > MAX_BYTES
+    ):
+        oldest_first.pop(0)
+    return dict(oldest_first)
 
 
 def _atomic_write(path, data):
@@ -96,9 +136,7 @@ def store_cached_meta(data_dir, stype, sid, meta):
     try:
         entries = _read_entries(data_dir)
         entries[_key(stype, sid)] = {'ts': time.time(), 'meta': meta}
-        if len(entries) > MAX_ENTRIES:
-            oldest_first = sorted(entries.items(), key=lambda kv: kv[1].get('ts', 0))
-            entries = dict(oldest_first[-MAX_ENTRIES:])
+        entries = _evict(entries)
         _atomic_write(_path(data_dir), entries)
     except OSError:
         pass

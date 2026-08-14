@@ -77,6 +77,52 @@ def test_entries_evicted_past_max_cap(tmp_path, monkeypatch):
     assert metacache.load_cached_meta(data_dir, 'movie', 'tt4') == {'name': '4'}
 
 
+def test_cache_file_stays_within_the_byte_budget(tmp_path, monkeypatch):
+    """The whole file is rewritten on every store, so the budget - not the
+    entry count - is what bounds write amplification on flash. A real
+    profile found SERIES metas at 25-30KB each (they embed every episode),
+    so an entry cap alone let one store rewrite megabytes."""
+    data_dir = _data_dir(tmp_path)
+    monkeypatch.setattr(metacache, 'MAX_BYTES', 8 * 1024)
+    big = {'name': 'Show', 'videos': [{'id': 'ep%d' % i, 'title': 'x' * 60} for i in range(40)]}
+
+    for i in range(12):
+        metacache.store_cached_meta(data_dir, 'series', 'tt%d' % i, big)
+
+    assert os.path.getsize(metacache._path(data_dir)) <= metacache.MAX_BYTES
+    # The most recent write always survives eviction.
+    assert metacache.load_cached_meta(data_dir, 'series', 'tt11') == big
+
+
+def test_a_single_meta_larger_than_the_budget_is_still_cached(tmp_path, monkeypatch):
+    """Evicting it would leave an empty cache AND force a refetch next
+    visit - strictly worse than one oversized file."""
+    data_dir = _data_dir(tmp_path)
+    monkeypatch.setattr(metacache, 'MAX_BYTES', 128)
+    huge = {'name': 'Show', 'blob': 'x' * 4000}
+
+    metacache.store_cached_meta(data_dir, 'series', 'tt1', huge)
+
+    assert metacache.load_cached_meta(data_dir, 'series', 'tt1') == huge
+
+
+def test_expired_entries_are_dropped_on_write(tmp_path, monkeypatch):
+    """An expired entry can never be served again, so carrying it forward
+    only inflates every subsequent write."""
+    data_dir = _data_dir(tmp_path)
+    metacache.store_cached_meta(data_dir, 'movie', 'old', {'name': 'old'})
+    # Captured BEFORE patching: the replacement must not call through to the
+    # attribute it is replacing.
+    later = metacache.time.time() + metacache.TTL_SECONDS + 1
+    monkeypatch.setattr(metacache.time, 'time', lambda: later)
+
+    metacache.store_cached_meta(data_dir, 'movie', 'new', {'name': 'new'})
+
+    with open(metacache._path(data_dir)) as fh:
+        entries = json.load(fh)
+    assert list(entries) == ['movie:new']
+
+
 def test_unwritable_dir_is_a_silent_no_op(tmp_path):
     # A directory that does not exist and cannot be created (nested under
     # a bogus parent) must degrade to "no cache", never raise.
