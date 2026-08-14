@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.rivulet" name="Rivulet" version="0.7.0" provider-name="M0Rf30">
+<addon id="plugin.video.rivulet" name="Rivulet" version="0.7.1" provider-name="M0Rf30">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" version="2.22.0"/>
@@ -12,7 +12,11 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse Discover and Search catalogs, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote stremio-server-go streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.7.0:
+    <news>v0.7.1:
+- Fix: catalog rows named "Search" did nothing whatsoever when picked. Some add-ons - The Movie Database add-on among them - publish catalogs that can only be searched, never browsed, and Rivulet listed them anyway and then silently gave up. Picking one now asks what you are looking for and searches that catalog, and those rows are marked "search only" so they read differently before you pick them. A catalog that comes back empty, or an add-on that fails, now says so instead of appearing to ignore you.
+- Fix: browsing by year was effectively unreachable, and so was a title's cast and crew. Both arrived in 0.7.0 but only on Rivulet's plain directory listings, not on the screens you actually navigate. Cinemeta's "New" catalog now opens straight into its list of years - 2026 back to 1920 - because that catalog cannot be browsed without one; and every other catalog that offers genres exposes them on the context menu (the "C" key, or your remote's menu button), leaving normal browsing exactly as it was. Cast and crew is on the same context-menu button while you are looking at a title, on the poster coverflow and on a series' episode screen. Pick an actor, director or writer to see what else they worked on.
+- Fix: two Cinemeta catalogs, "Last videos" and "Calendar videos", were listed but could never show anything - they need information only Stremio's own home screen supplies. They are no longer offered.
+v0.7.0:
 - New: browse a catalog by year, or by genre. Stremio add-ons can declare which filters each of their catalogs supports, and Cinemeta declares over a hundred years as well as every genre - so the "New" catalog now opens with a Filter row listing 2026 back to 1920, and "Popular" and "Featured" list genres. Pick one and the catalog reloads filtered; the row then reads "Filter: 1972" so you can see what is applied, and offers Clear filter to drop it again. Catalogs that declare no filters are unchanged.
 - New: find a title's cast and crew, and everything else they worked on. Every film and series row now has a "Cast &amp; crew" entry in its context menu, listing the actors, directors and writers the add-on reported. Pick a name and Rivulet searches for that person across every add-on you have installed; pick a genre and it opens that catalog. Results that genuinely credit the person are listed first, ahead of titles that merely mention the name - nothing is hidden, because a Stremio search matches titles and credits alike and there is no way to ask an add-on for one without the other.
 - New: Rivulet now hands a title's actors to Kodi itself, so the cast appears in Kodi's own info dialog and anywhere else your skin shows it.
