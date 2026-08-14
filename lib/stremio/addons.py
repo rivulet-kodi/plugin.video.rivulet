@@ -323,6 +323,30 @@ def _catalog_extra_names(catalog):
     return names
 
 
+def catalog_required_extra_names(catalog):
+    """Extra prop names a catalog marks REQUIRED, from either the modern
+    `extra: [{name, isRequired, ...}]` array (ManifestExtra.is_required in
+    manifest.rs) or the legacy `extraRequired` string-array form. Unlike
+    `_catalog_extra_names()`, both forms are unioned rather than one
+    taking precedence - a catalog may declare `isRequired` entries in
+    `extra` and still carry a legacy `extraRequired` list, and either one
+    marking a prop required is enough to make it required.
+
+    Never raises: returns an empty set for a missing/non-dict catalog, a
+    non-list `extra`/`extraRequired`, non-dict entries, or empty/None
+    names."""
+    if not isinstance(catalog, dict):
+        return set()
+    names = set()
+    extra = catalog.get('extra')
+    if isinstance(extra, list):
+        names.update(p.get('name') for p in extra if isinstance(p, dict) and p.get('isRequired') and p.get('name'))
+    extra_required = catalog.get('extraRequired')
+    if isinstance(extra_required, list):
+        names.update(n for n in extra_required if n)
+    return names
+
+
 def catalog_extra_options(catalog, name):
     """Declared option values for extra prop `name` on `catalog`, from the
     modern `extra: [{name, options, ...}]` array (ManifestExtra.options in

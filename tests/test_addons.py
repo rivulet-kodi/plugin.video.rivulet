@@ -9,9 +9,11 @@ import pytest
 from lib.stremio.addons import (
     AddonClient,
     AddonError,
+    _catalog_extra_names,
     addon_supports,
     build_resource_url,
     catalog_extra_options,
+    catalog_required_extra_names,
     encode_extra,
     iter_catalogs,
     safe_url_for_log,
@@ -344,6 +346,87 @@ def test_catalog_extra_options_real_cinemeta_year_catalog_shape():
         "extraSupported": ["genre", "skip"],
     }
     assert catalog_extra_options(catalog, "genre") == ["2026", "2025", "1920"]
+
+
+# --- catalog_required_extra_names --------------------------------------
+
+
+def test_catalog_required_extra_names_modern_is_required_true():
+    catalog = {"extra": [{"name": "search", "isRequired": True}]}
+    assert catalog_required_extra_names(catalog) == {"search"}
+
+
+def test_catalog_required_extra_names_modern_is_required_false_not_picked_up():
+    catalog = {"extra": [{"name": "search", "isRequired": False}]}
+    assert catalog_required_extra_names(catalog) == set()
+
+
+def test_catalog_required_extra_names_modern_is_required_absent_not_picked_up():
+    catalog = {"extra": [{"name": "skip"}]}
+    assert catalog_required_extra_names(catalog) == set()
+
+
+def test_catalog_required_extra_names_legacy_extra_required():
+    catalog = {"extraRequired": ["search"]}
+    assert catalog_required_extra_names(catalog) == {"search"}
+
+
+def test_catalog_required_extra_names_unions_modern_and_legacy():
+    catalog = {
+        "extra": [{"name": "search", "isRequired": True}],
+        "extraRequired": ["genre"],
+    }
+    assert catalog_required_extra_names(catalog) == {"search", "genre"}
+
+
+def test_catalog_required_extra_names_none_catalog_returns_empty():
+    assert catalog_required_extra_names(None) == set()
+
+
+def test_catalog_required_extra_names_non_dict_catalog_returns_empty():
+    assert catalog_required_extra_names(["not", "a", "dict"]) == set()
+
+
+def test_catalog_required_extra_names_extra_as_string_returns_empty():
+    assert catalog_required_extra_names({"extra": "search"}) == set()
+
+
+def test_catalog_required_extra_names_extra_required_as_string_returns_empty():
+    assert catalog_required_extra_names({"extraRequired": "search"}) == set()
+
+
+def test_catalog_required_extra_names_non_dict_entries_in_extra_ignored():
+    catalog = {"extra": ["search", None, {"name": "genre", "isRequired": True}]}
+    assert catalog_required_extra_names(catalog) == {"genre"}
+
+
+def test_catalog_required_extra_names_empty_or_none_names_ignored():
+    catalog = {
+        "extra": [{"name": None, "isRequired": True}, {"isRequired": True}],
+        "extraRequired": ["", None],
+    }
+    assert catalog_required_extra_names(catalog) == set()
+
+
+def test_catalog_required_extra_names_search_only_catalog_real_shape():
+    catalog = {
+        "type": "movie",
+        "id": "search",
+        "name": "Foo Search",
+        "extra": [{"name": "search", "isRequired": True}, {"name": "skip"}],
+    }
+    assert catalog_required_extra_names(catalog) == {"search"}
+
+
+def test_catalog_required_extra_names_does_not_confuse_with_catalog_extra_names():
+    catalog = {
+        "type": "movie",
+        "id": "search",
+        "name": "Foo Search",
+        "extra": [{"name": "search", "isRequired": True}, {"name": "skip"}],
+    }
+    assert _catalog_extra_names(catalog) == {"search", "skip"}
+    assert catalog_required_extra_names(catalog) == {"search"}
 
 
 # --- AddonClient -----------------------------------------------------------
