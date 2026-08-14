@@ -426,8 +426,16 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
                 log('player: front read failed for %s: %r' % (info_hash, exc), xbmc.LOGWARNING)
 
             if got >= _HEADER_MIN_BYTES:
+                # Not "complete" unless it actually reached the target: this
+                # is the header floor letting playback start early on the
+                # server's readahead. Say which of the two happened, so a
+                # log showing a stall right after playback starts is not
+                # also showing a line that claims the buffer was full.
                 log(
-                    'player: pre-buffer complete for %s: buffered=%d target=%d' % (info_hash, got, target),
+                    'player: pre-buffer %s for %s: buffered=%d target=%d' % (
+                        'complete' if got >= target else 'header floor reached, starting early',
+                        info_hash, got, target,
+                    ),
                     xbmc.LOGINFO,
                 )
                 return True, url, filename

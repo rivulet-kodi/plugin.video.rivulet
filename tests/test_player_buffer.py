@@ -848,7 +848,11 @@ def test_prebuffer_entry_always_logs_enable_and_file_idx_at_loginfo(kodi_stubs, 
     assert any('buffer_enable=False' in msg and 'fileIdx=26' in msg for msg in entries), entries
 
 
-def test_prebuffer_target_and_completion_logged_at_loginfo(kodi_stubs, monkeypatch):
+def test_prebuffer_logs_an_early_start_as_such_not_as_complete(kodi_stubs, monkeypatch):
+    """600KB clears the header floor but is nowhere near the target, so
+    playback starts on the server's readahead. Saying "complete" there made
+    a real log read as though the buffer was full moments before the stream
+    starved - the message must distinguish the two."""
     env = kodi_stubs.env
     _ServerScript(
         resolve_url='http://server/x/0', iter_front_attempts=[[600_000]],
@@ -860,7 +864,24 @@ def test_prebuffer_target_and_completion_logged_at_loginfo(kodi_stubs, monkeypat
     entries = [msg for msg, level in env.log_calls if level == loginfo]
     assert any('buffer_enable=True' in msg and 'fileIdx=0' in msg for msg in entries), entries
     assert any('buffer_mb=' in msg and 'target_bytes=' in msg for msg in entries), entries
+    assert any('header floor reached, starting early' in msg for msg in entries), entries
+    assert not any('pre-buffer complete' in msg for msg in entries), entries
+
+
+def test_prebuffer_logs_complete_only_when_the_target_is_reached(kodi_stubs, monkeypatch):
+    """The other branch: a front read that actually reaches the configured
+    target is the only thing allowed to call itself complete."""
+    env = kodi_stubs.env
+    _ServerScript(
+        resolve_url='http://server/x/0', iter_front_attempts=[[5 * 1024 * 1024]],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(17, _torrent_stream(fileIdx=0), 'movie', 'tt17')
+
+    loginfo = kodi_stubs.player.xbmc.LOGINFO
+    entries = [msg for msg, level in env.log_calls if level == loginfo]
     assert any('pre-buffer complete' in msg for msg in entries), entries
+    assert not any('starting early' in msg for msg in entries), entries
 
 
 def test_prebuffer_timeout_logged_at_loginfo(kodi_stubs, monkeypatch):
