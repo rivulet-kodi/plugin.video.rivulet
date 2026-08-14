@@ -40,17 +40,32 @@ import re
 
 # Astral-plane emoji (\U0001F300-\U0001FAFF etc.), regional-indicator flag
 # pairs and the like are all above the BMP -- stripped wholesale below by
-# the `cp > 0xFFFF` check. What's left is BMP junk Kodi's font still can't
-# render: Misc Symbols + Dingbats (weather/emoji glyphs like the U+26A1
-# "high voltage" bolt in AIOStreams' "3.3 Mbps" line), stray zero-width
-# joiners/spaces some addons use to defeat text-truncation, and the
-# variation-selector-16 that forces emoji presentation on an otherwise
-# printable codepoint (e.g. U+2764 U+FE0F).
+# the `\U00010000-\U0010FFFF` class in `_JUNK_RE`. What's left is BMP junk
+# Kodi's font still can't render: Misc Symbols + Dingbats (weather/emoji
+# glyphs like the U+26A1 "high voltage" bolt in AIOStreams' "3.3 Mbps"
+# line), stray zero-width joiners/spaces some addons use to defeat
+# text-truncation, and the variation-selector-16 that forces emoji
+# presentation on an otherwise printable codepoint (e.g. U+2764 U+FE0F).
 _JUNK_RANGES = (
     (0x2600, 0x27BF),  # Misc Symbols + Dingbats
     (0x200B, 0x200D),  # zero-width space / ZWNJ / ZWJ
 )
 _JUNK_SINGLES = frozenset([0xFE0F])  # variation selector-16 (emoji style)
+
+
+def _build_junk_re():
+    """One compiled character class covering `_JUNK_RANGES`, `_JUNK_SINGLES`
+    and everything above the BMP, so `clean_text()` strips junk in a single
+    C-level `re.sub()` pass instead of a per-codepoint Python loop.
+    """
+    spans = [(chr(lo), chr(hi)) for lo, hi in _JUNK_RANGES]
+    spans.append((chr(0x10000), chr(0x10FFFF)))  # everything outside the BMP
+    parts = ['%s-%s' % (re.escape(lo), re.escape(hi)) for lo, hi in spans]
+    parts.extend(re.escape(chr(cp)) for cp in sorted(_JUNK_SINGLES))
+    return re.compile('[%s]' % ''.join(parts))
+
+
+_JUNK_RE = _build_junk_re()
 
 _WHITESPACE_RE = re.compile(r'\s+')
 
@@ -63,17 +78,6 @@ _WHITESPACE_RE = re.compile(r'\s+')
 # ever usefully render anyway. Comfortably above any real stream title or
 # multi-line AIOStreams-style description, well below "adversarial input".
 _MAX_TEXT_LEN = 4000
-
-
-def _is_junk_codepoint(cp):
-    if cp > 0xFFFF:
-        return True
-    if cp in _JUNK_SINGLES:
-        return True
-    for lo, hi in _JUNK_RANGES:
-        if lo <= cp <= hi:
-            return True
-    return False
 
 
 def clean_text(s):
@@ -93,7 +97,7 @@ def clean_text(s):
     if not s:
         return ''
     truncated = str(s)[:_MAX_TEXT_LEN]
-    filtered = ''.join(ch for ch in truncated if not _is_junk_codepoint(ord(ch)))
+    filtered = _JUNK_RE.sub('', truncated)
     return _WHITESPACE_RE.sub(' ', filtered).strip()
 
 
@@ -405,16 +409,33 @@ def _build_language_patterns(names):
     return patterns
 
 
-_LANGUAGE_PATTERNS = _build_language_patterns(_LANGUAGE_NAMES)
-_LANGUAGE_TAG_PATTERNS = _build_language_patterns(_LANGUAGE_TAG_NAMES)
+# Compiled lazily on first use so a navigation that never shows a stream
+# never pays to compile ~50 language-name patterns (see `_scan_languages()`).
+_LANGUAGE_PATTERNS_CACHE = None
+_LANGUAGE_TAG_PATTERNS_CACHE = None
 _LANGUAGE_NAME_TO_CODE = {
     name.lower(): code for name, code in _LANGUAGE_TAG_NAMES + _LANGUAGE_NAMES
 }
 
+
+def _language_patterns():
+    global _LANGUAGE_PATTERNS_CACHE
+    if _LANGUAGE_PATTERNS_CACHE is None:
+        _LANGUAGE_PATTERNS_CACHE = _build_language_patterns(_LANGUAGE_NAMES)
+    return _LANGUAGE_PATTERNS_CACHE
+
+
+def _language_tag_patterns():
+    global _LANGUAGE_TAG_PATTERNS_CACHE
+    if _LANGUAGE_TAG_PATTERNS_CACHE is None:
+        _LANGUAGE_TAG_PATTERNS_CACHE = _build_language_patterns(_LANGUAGE_TAG_NAMES)
+    return _LANGUAGE_TAG_PATTERNS_CACHE
+
 # Regional-indicator flag pairs (U+1F1E6-U+1F1FF, one per letter A-Z)
 # decode arithmetically to a 2-letter country code; AIOStreams'
 # `languageEmojis` renders these instead of full names for some formats.
-# `clean_text()` drops them wholesale (`cp > 0xFFFF`), so they only
+# `clean_text()` drops them wholesale (they're above the BMP, covered by
+# `_JUNK_RE`'s astral range), so they only
 # survive in pre-clean text. Override table for the country codes that
 # don't match their language's own code; anything else falls back to the
 # country code itself, per AIOStreams' own emoji choices.
@@ -457,7 +478,7 @@ def _scan_languages(pre_clean):
         offset, segment = _segment_after(pre_clean, marker)
         if not segment:
             continue
-        for code, pattern in _LANGUAGE_PATTERNS:
+        for code, pattern in _language_patterns():
             match = pattern.search(segment)
             if match:
                 matches.append((offset + match.start(), code))
@@ -468,7 +489,7 @@ def _scan_languages(pre_clean):
     # so wherever they appear they are a language claim.
     for match in _FLAG_PAIR_RE.finditer(pre_clean):
         matches.append((match.start(), _decode_flag_pair(match.group(0))))
-    for code, pattern in _LANGUAGE_TAG_PATTERNS:
+    for code, pattern in _language_tag_patterns():
         match = pattern.search(pre_clean)
         if match:
             matches.append((match.start(), code))
