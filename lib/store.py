@@ -67,6 +67,7 @@ SEARCH_HISTORY_FILENAME = "search_history.json"
 NOW_PLAYING_FILENAME = "now_playing.json"
 RESUME_OFFSET_FILENAME = "resume_offset.json"
 PROGRESS_FILENAME = "progress.json"
+LAST_VERSION_FILENAME = "last_version.json"
 
 #: Most-recent-first cap for the persisted search history list.
 MAX_SEARCH_HISTORY = 15
@@ -858,6 +859,7 @@ class Store:
         self._now_playing_path = os.path.join(self.data_dir, NOW_PLAYING_FILENAME)
         self._resume_offset_path = os.path.join(self.data_dir, RESUME_OFFSET_FILENAME)
         self._progress_path = os.path.join(self.data_dir, PROGRESS_FILENAME)
+        self._last_version_path = os.path.join(self.data_dir, LAST_VERSION_FILENAME)
         #: Per-instance memoisation for `_cached_read`: `path -> ((mtime_ns,
         #: size), parsed_value)`. A single process/screen-render often
         #: calls e.g. `get_addons()` many times; a fresh eMMC/SD `open()`
@@ -1139,6 +1141,23 @@ class Store:
             return
         _atomic_write(self._resume_offset_path, {"offset_ms": int(offset_ms)}, compact=True)
         self._invalidate_cache(self._resume_offset_path)
+
+    def get_last_seen_version(self):
+        """Return the addon version last recorded by
+        `lib.ui.homewindow._notify_if_updated`, or ``None`` if nothing has
+        been recorded yet (including a missing/corrupt file). Served from
+        the per-instance read cache -- see `_cached_read`."""
+        payload = self._cached_read(self._last_version_path, None)
+        return payload.get("version") if isinstance(payload, dict) else None
+
+    def set_last_seen_version(self, version):
+        """Record `version` as the addon version the user has now been
+        told about (or silently seeded on first run), so the next launch's
+        `_notify_if_updated` comparison doesn't re-fire for the same
+        version. Written compactly (see `_atomic_write`): machine-only,
+        one small string."""
+        _atomic_write(self._last_version_path, {"version": str(version)}, compact=True)
+        self._invalidate_cache(self._last_version_path)
 
     @staticmethod
     def _progress_key(content_type, content_id, video_id=None):

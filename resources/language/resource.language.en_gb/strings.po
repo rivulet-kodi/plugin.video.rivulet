@@ -511,3 +511,7 @@ msgstr ""
 msgctxt "#30183"
 msgid "Playing %s in %d s"
 msgstr ""
+
+msgctxt "#30184"
+msgid "Updated to version %s"
+msgstr ""

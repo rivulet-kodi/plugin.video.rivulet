@@ -49,6 +49,28 @@ class _FakeStore:
         return self._auth
 
 
+class _FakeVersionStore:
+    """Fake `lib.store.Store`: only `get_last_seen_version()`/
+    `set_last_seen_version()` matter to `_notify_if_updated()`.
+    `raise_on_get` stands in for a Store I/O failure (e.g. a corrupt or
+    unwritable `last_version.json`), which `_notify_if_updated()` must
+    swallow rather than let take down the home screen."""
+
+    def __init__(self, last_seen=None, raise_on_get=False):
+        self._last_seen = last_seen
+        self._raise_on_get = raise_on_get
+        self.set_calls = []
+
+    def get_last_seen_version(self):
+        if self._raise_on_get:
+            raise RuntimeError('store unavailable')
+        return self._last_seen
+
+    def set_last_seen_version(self, version):
+        self.set_calls.append(version)
+        self._last_seen = version
+
+
 @pytest.fixture
 def load_homewindow():
     """Factory fixture: `load_homewindow(addon_info=None, localized=None)`
@@ -346,6 +368,52 @@ def test_onclick_settings_opens_native_settings_without_closing(load_homewindow)
 
 
 # ---------------------------------------------------------------------------
+# _notify_if_updated()
+# ---------------------------------------------------------------------------
+
+
+def test_notify_if_updated_first_run_records_version_and_notifies_nothing(load_homewindow):
+    ctx = load_homewindow(addon_info={'version': '1.0.0'})
+    store = _FakeVersionStore(last_seen=None)
+
+    ctx.homewindow._notify_if_updated(store)
+
+    assert store.set_calls == ['1.0.0']
+    assert ctx.env.notifications == []
+
+
+def test_notify_if_updated_changed_version_notifies_once_and_records(load_homewindow):
+    ctx = load_homewindow(addon_info={'version': '1.1.0'}, localized={30184: 'Updated to version %s'})
+    store = _FakeVersionStore(last_seen='1.0.0')
+
+    ctx.homewindow._notify_if_updated(store)
+
+    assert store.set_calls == ['1.1.0']
+    assert len(ctx.env.notifications) == 1
+    heading, message, icon, time_ms = ctx.env.notifications[0]
+    assert message == 'Updated to version 1.1.0'
+
+
+def test_notify_if_updated_unchanged_version_notifies_nothing(load_homewindow):
+    ctx = load_homewindow(addon_info={'version': '1.0.0'})
+    store = _FakeVersionStore(last_seen='1.0.0')
+
+    ctx.homewindow._notify_if_updated(store)
+
+    assert store.set_calls == []
+    assert ctx.env.notifications == []
+
+
+def test_notify_if_updated_swallows_store_exception(load_homewindow):
+    ctx = load_homewindow(addon_info={'version': '1.0.0'})
+    store = _FakeVersionStore(last_seen=None, raise_on_get=True)
+
+    ctx.homewindow._notify_if_updated(store)  # must not raise
+
+    assert ctx.env.notifications == []
+
+
+# ---------------------------------------------------------------------------
 # open_home()
 # ---------------------------------------------------------------------------
 
@@ -403,3 +471,33 @@ def test_open_home_closes_the_window_exactly_once_and_reraises_when_domodal_rais
     win = captured['window']
     assert win.close_calls == 1
     assert win.closed is True
+
+
+def test_open_home_calls_notify_if_updated_with_the_store(load_homewindow, monkeypatch):
+    ctx = load_homewindow(addon_info={'path': '/addon/path'})
+    store = _FakeVersionStore(last_seen='1.0.0')
+    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: store)
+    calls = []
+    monkeypatch.setattr(ctx.homewindow, '_notify_if_updated', calls.append)
+
+    ctx.homewindow.open_home()
+
+    assert calls == [store]
+
+
+def test_open_home_still_opens_the_window_when_the_store_raises(load_homewindow, monkeypatch):
+    ctx = load_homewindow(addon_info={'path': '/addon/path'})
+    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeVersionStore(raise_on_get=True))
+    captured = {}
+
+    class RecordingWindow(ctx.homewindow.HomeWindow):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            captured['instance'] = self
+
+    monkeypatch.setattr(ctx.homewindow, 'HomeWindow', RecordingWindow)
+
+    ctx.homewindow.open_home()
+
+    assert captured['instance'].modal_calls == 1
+    assert ctx.env.notifications == []

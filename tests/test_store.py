@@ -579,6 +579,34 @@ def test_resume_offset_ms_persists_across_store_instances(tmp_path):
     assert Store(str(data_dir)).get_resume_offset_ms() == 9000
 
 
+# --- last seen version (homewindow update notification) --------------------
+
+
+def test_get_last_seen_version_none_when_never_set(tmp_path):
+    store = make_store(tmp_path)
+    assert store.get_last_seen_version() is None
+
+
+def test_set_and_get_last_seen_version_round_trip(tmp_path):
+    store = make_store(tmp_path)
+    store.set_last_seen_version("1.2.3")
+    assert store.get_last_seen_version() == "1.2.3"
+
+
+def test_last_seen_version_persists_across_store_instances(tmp_path):
+    data_dir = tmp_path / "addon_data"
+    Store(str(data_dir)).set_last_seen_version("1.2.3")
+    assert Store(str(data_dir)).get_last_seen_version() == "1.2.3"
+
+
+def test_corrupt_last_version_json_returns_none_without_raising(tmp_path):
+    data_dir = tmp_path / "addon_data"
+    data_dir.mkdir()
+    (data_dir / "last_version.json").write_text("{not valid json")
+    store = Store(str(data_dir))
+    assert store.get_last_seen_version() is None  # must not raise
+
+
 # --- local progress cache (LibrarySync) -------------------------------------
 
 

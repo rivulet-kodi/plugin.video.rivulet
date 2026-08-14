@@ -491,3 +491,7 @@ msgstr "下一集"
 msgctxt "#30183"
 msgid "Playing %s in %d s"
 msgstr "%s将在%d秒后播放"
+
+msgctxt "#30184"
+msgid "Updated to version %s"
+msgstr "已更新到版本 %s"

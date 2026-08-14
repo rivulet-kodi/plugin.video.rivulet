@@ -491,3 +491,7 @@ msgstr "Siguiente episodio"
 msgctxt "#30183"
 msgid "Playing %s in %d s"
 msgstr "Reproduciendo %s en %d s"
+
+msgctxt "#30184"
+msgid "Updated to version %s"
+msgstr "Actualizado a la versión %s"

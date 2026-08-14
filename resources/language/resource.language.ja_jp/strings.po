@@ -491,3 +491,7 @@ msgstr "次のエピソード"
 msgctxt "#30183"
 msgid "Playing %s in %d s"
 msgstr "%sを%d秒後に再生"
+
+msgctxt "#30184"
+msgid "Updated to version %s"
+msgstr "バージョン %s に更新されました"

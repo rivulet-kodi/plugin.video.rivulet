@@ -142,6 +142,35 @@ _ACTIONS = {
 }
 
 
+def _notify_if_updated(store):
+    """Toast the user once when the running addon version differs from the
+    version `store` last recorded - the "tell them on next launch" approach
+    (as opposed to a boot-time service notification, which is easy to miss
+    behind Kodi's splash/home screen). A brand-new install has nothing
+    recorded yet, so that first call only seeds the current version and
+    stays silent; only version numbers that actually change are ever
+    announced.
+
+    Best-effort: `store` I/O failing here must never stop the home screen
+    from opening, so any exception is logged and swallowed, same as other
+    non-critical HomeWindow paths."""
+    import xbmc
+
+    from lib.ui.compat import log
+    try:
+        from lib.ui.compat import ADDON, L, notify
+
+        current = ADDON.getAddonInfo('version')
+        last_seen = store.get_last_seen_version()
+        if last_seen == current:
+            return
+        store.set_last_seen_version(current)
+        if last_seen is not None:
+            notify(L(30184) % current)
+    except Exception as exc:
+        log('homewindow: update-notification check failed: %r' % (exc,), xbmc.LOGWARNING)
+
+
 def open_home():
     """Build and run the HomeWindow modal; blocks until the user exits.
 
@@ -156,6 +185,17 @@ def open_home():
     from lib.ui.compat import log
 
     log('homewindow: opening HomeWindow', xbmc.LOGINFO)
+    # Runs here, not in HomeWindow.onInit(): onInit() re-fires every time
+    # Home is resumed after a nested modal (Discover/Search/...) closes,
+    # which would re-show the toast on every back-navigation. open_home()
+    # runs exactly once per addon launch. get_store() itself is guarded
+    # here too (not just inside _notify_if_updated): a cosmetic toast must
+    # never stop Home from opening, even if Store construction itself
+    # fails (e.g. an unwritable profile directory).
+    try:
+        _notify_if_updated(get_store())
+    except Exception as exc:
+        log('homewindow: update-notification store unavailable: %r' % (exc,), xbmc.LOGWARNING)
     win = open_window(HomeWindow, 'HomeWindow.xml')
     try:
         win.doModal()

@@ -491,3 +491,7 @@ msgstr "Volgende aflevering"
 msgctxt "#30183"
 msgid "Playing %s in %d s"
 msgstr "%s wordt afgespeeld over %d s"
+
+msgctxt "#30184"
+msgid "Updated to version %s"
+msgstr "Bijgewerkt naar versie %s"
