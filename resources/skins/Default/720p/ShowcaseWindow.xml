@@ -15,52 +15,92 @@
                 <effect type="fade" delay="160" start="100" end="0" time="100" />
             </animation>
             <control type="image"><width>1280</width><height>720</height><texture colordiffuse="E6111111">white.png</texture></control>
-            <control type="image" id="30000"><width>1280</width><height>720</height><texture colordiffuse="FF555555"></texture><aspectratio>scale</aspectratio></control>
-            <control type="image"><width>1280</width><height>720</height><texture colordiffuse="99000000">white.png</texture></control>
+            <control type="image" id="30000"><width>1280</width><height>720</height><texture colordiffuse="FF777777"></texture><aspectratio>scale</aspectratio></control>
+            <!-- Scrim stack over the fanart: a flat wash for overall contrast,
+                 then a bottom-anchored gradient (fade_edge rotated via flipy)
+                 so the poster strip sits on solid dark while the top of the
+                 frame keeps some of the backdrop visible. -->
+            <control type="image"><width>1280</width><height>720</height><texture colordiffuse="66000000">white.png</texture></control>
+            <control type="image"><left>0</left><top>300</top><width>1280</width><height>420</height><texture colordiffuse="E6000000" flipy="true">fade_edge.png</texture></control>
             <control type="image" id="30001"><top>355</top><left>490</left><width>300</width><height>10</height><texture>white.png</texture>
                 <animation effect="zoom" pulse="true" center="auto" start="0,100" end="100,100" time="1000" condition="Control.IsVisible(30001)">Conditional</animation>
             </control>
-            <control type="label"><right>110</right><top>36</top><width>240</width><height>30</height><font>font13</font><textcolor>AAFFFFFF</textcolor><align>right</align>
-                <label>$INFO[Container(30002).CurrentItem]/$INFO[Container(30002).NumItems]</label>
+
+            <!-- Metadata block: full-width hero above the strip, no longer
+                 squeezed beside an oversized poster. -->
+            <control type="label"><left>64</left><top>112</top><width>980</width><height>44</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
+                <label>[B]$INFO[ListItem.Label][/B]</label>
             </control>
+            <control type="label"><left>64</left><top>162</top><width>980</width><height>26</height><font>font12</font><textcolor>FF38BDF8</textcolor>
+                <label>$INFO[ListItem.Property(year)]$INFO[ListItem.Property(rating), ★ ]</label>
+            </control>
+            <!-- Genre sits under the year/rating line when there is one, and
+                 slides up into its place when there is not: catalog metas
+                 (Discover) carry genre+plot, but search results from some
+                 addons carry only a year, and the block should not leave a
+                 gap where the missing line would have been. -->
+            <control type="label"><left>64</left><top>194</top><width>980</width><height>26</height><font>font12</font><textcolor>99FFFFFF</textcolor>
+                <label>$INFO[ListItem.Property(genre)]</label>
+                <visible>!IsEmpty(ListItem.Property(year)) | !IsEmpty(ListItem.Property(rating))</visible>
+            </control>
+            <control type="label"><left>64</left><top>162</top><width>980</width><height>26</height><font>font12</font><textcolor>99FFFFFF</textcolor>
+                <label>$INFO[ListItem.Property(genre)]</label>
+                <visible>IsEmpty(ListItem.Property(year)) + IsEmpty(ListItem.Property(rating))</visible>
+            </control>
+            <control type="textbox"><left>64</left><top>232</top><width>1000</width><height>132</height><font>font12</font><textcolor>DDFFFFFF</textcolor>
+                <label>$INFO[ListItem.Property(plot)]</label>
+                <autoscroll time="3000" delay="3000" repeat="3000">true</autoscroll>
+            </control>
+
             <control type="fixedlist" id="30002">
-                <top>40</top><width>100%</width><height>640</height>
+                <top>371</top><left>64</left><width>1152</width><height>310</height>
                 <viewtype>wrap</viewtype><orientation>horizontal</orientation>
                 <scrolltime tween="cubic" easing="out">300</scrolltime>
+                <!-- focusposition 0: the focused poster leads the strip. The
+                     list's own left inset (below) is what keeps it clear of the
+                     frame edge - a non-zero focusposition would leave a visibly
+                     empty slot at the head of the list while on item 1. -->
+                <focusposition>0</focusposition>
                 <onup>30003</onup>
-                <itemlayout width="180">
+                <!-- Slot is wider than the poster it holds: that difference IS
+                     the gutter (fixedlist has no spacing property of its own).
+                     Posters are true 2:3 with aspectratio=keep so nothing is
+                     stretched; focus scales 160->200 (1.25x), an emphasis
+                     rather than a different object, and both layouts share a
+                     bottom baseline at y=676 so the strip reads as one row. -->
+                <itemlayout width="184" height="310">
                     <control type="image">
-                        <top>360</top><left>0</left><width>180</width><height>245</height>
-                        <texture colordiffuse="CCFFFFFF">$INFO[ListItem.Property(thumbnail)]</texture>
-                        <aspectratio>scale</aspectratio>
-                    </control>
-                    <control type="label">
-                        <top>608</top><left>0</left><width>180</width><height>20</height>
-                        <font>font10</font><textcolor>CCFFFFFF</textcolor><align>center</align>
-                        <label>$INFO[ListItem.Label]</label>
+                        <top>65</top><left>12</left><width>160</width><height>240</height>
+                        <texture colordiffuse="99FFFFFF" border="2">$INFO[ListItem.Property(thumbnail)]</texture>
+                        <aspectratio align="center" aligny="center">keep</aspectratio>
                     </control>
                 </itemlayout>
-                <focusedlayout width="380">
+                <focusedlayout width="224" height="310">
+                    <!-- Focus ring: a tinted plate inset 3px behind the poster. -->
                     <control type="image">
-                        <top>66</top><left>-4</left><width>388</width><height>568</height>
+                        <top>2</top><left>9</left><width>206</width><height>306</height>
                         <texture colordiffuse="FF38BDF8">white.png</texture>
                     </control>
                     <control type="image">
-                        <top>70</top><left>0</left><width>380</width><height>560</height>
+                        <top>5</top><left>12</left><width>200</width><height>300</height>
+                        <texture colordiffuse="FF000000">white.png</texture>
+                    </control>
+                    <control type="image">
+                        <top>5</top><left>12</left><width>200</width><height>300</height>
                         <texture>$INFO[ListItem.Property(thumbnail)]</texture>
-                        <aspectratio>scale</aspectratio>
-                    </control>
-                    <control type="textbox"><left>447</left><top>10</top><width>783</width><height>34</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
-                        <label>[B]$INFO[ListItem.Label][/B] [COLOR FFAAAAAA]$INFO[ListItem.Property(year)][/COLOR] [COLOR FFE5A00D]$INFO[ListItem.Property(rating)][/COLOR]</label>
-                        <align>left</align><aligny>center</aligny>
-                    </control>
-                    <control type="textbox"><left>447</left><top>52</top><width>783</width><height>30</height><font>font13</font><textcolor>FFCCCCCC</textcolor>
-                        <label>$INFO[ListItem.Property(genre)]</label><align>left</align>
-                    </control>
-                    <control type="textbox"><left>447</left><top>92</top><width>783</width><height>250</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
-                        <label>$INFO[ListItem.Property(plot)]</label><autoscroll time="3000" delay="3000" repeat="3000">true</autoscroll><align>left</align>
+                        <aspectratio align="center" aligny="center">keep</aspectratio>
                     </control>
                 </focusedlayout>
+            </control>
+
+            <!-- Title of the focused poster, pinned under the strip so it does
+                 not ride up and down with the item as focus moves. -->
+            <control type="label"><left>0</left><top>684</top><width>1280</width><height>24</height><font>font12</font><textcolor>FFFFFFFF</textcolor><align>center</align>
+                <label>$INFO[ListItem.Label]</label>
+            </control>
+
+            <control type="label"><right>110</right><top>36</top><width>240</width><height>30</height><font>font13</font><textcolor>AAFFFFFF</textcolor><align>right</align>
+                <label>$INFO[Container(30002).CurrentItem]/$INFO[Container(30002).NumItems]</label>
             </control>
             <control type="button" id="30003">
                 <top>40</top><right>40</right><height>50</height><width>50</width><aligny>center</aligny><align>center</align>
@@ -68,10 +108,12 @@
                 <texturenofocus colordiffuse="80FFFFFF">close.png</texturenofocus>
                 <ondown>30002</ondown>
             </control>
-            <control type="image"><left>0</left><top>0</top><width>64</width><height>720</height><texture flipx="true">fade_edge.png</texture></control>
-            <control type="image"><left>1216</left><top>0</top><width>64</width><height>720</height><texture>fade_edge.png</texture></control>
-            <control type="image"><left>60</left><top>662</top><width>26</width><height>26</height><texture>logo.png</texture><aspectratio>keep</aspectratio></control>
-            <control type="label"><left>94</left><top>662</top><width>200</width><height>26</height><font>font12</font><textcolor>55FFFFFF</textcolor><aligny>center</aligny><label>RIVULET</label></control>
+            <control type="image"><left>0</left><top>360</top><width>64</width><height>330</height><texture flipx="true">fade_edge.png</texture></control>
+            <control type="image"><left>1216</left><top>360</top><width>64</width><height>330</height><texture>fade_edge.png</texture></control>
+            <!-- Wordmark lives at the top-left: the poster strip now occupies
+                 the bottom of the frame where it used to sit. -->
+            <control type="image"><left>64</left><top>40</top><width>26</width><height>26</height><texture>logo.png</texture><aspectratio>keep</aspectratio></control>
+            <control type="label"><left>98</left><top>40</top><width>200</width><height>26</height><font>font12</font><textcolor>55FFFFFF</textcolor><aligny>center</aligny><label>RIVULET</label></control>
         </control>
     </controls>
 </window>
