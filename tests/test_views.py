@@ -83,9 +83,10 @@ class FakeStore:
     remove_addon() raising ValueError for a protected descriptor).
     """
 
-    def __init__(self, addons=None, auth=None):
+    def __init__(self, addons=None, auth=None, data_dir=None):
         self._addons = addons if addons is not None else []
         self._auth = auth
+        self.data_dir = data_dir     # None unless a test opts into metacache exercise
         self.installed = []          # [(transport_url, manifest), ...]
         self.auth_set_calls = []     # [auth_dict_or_None, ...]
         self.addons_set_calls = []   # [[descriptor, ...], ...]
@@ -183,6 +184,7 @@ class FakeAddonClient:
         self._barrier = barrier
         self._gates = gates or {}
         self.manifest_calls = []
+        self.meta_calls = []
 
     def _delay(self, transport_url):
         if self._barrier is not None:
@@ -211,6 +213,7 @@ class FakeAddonClient:
         return result
 
     def meta(self, transport_url, stype, sid):
+        self.meta_calls.append(transport_url)
         self._delay(transport_url)
         result = self._meta_results.get(transport_url)
         if isinstance(result, Exception):
@@ -1260,6 +1263,62 @@ def test_fetch_meta_prefers_earlier_addon_when_it_answers_at_least_as_fast(load_
 
     li = ctx.env.directory_items[-1]['items'][0][1]
     assert li.info_tag.calls.get('setTvShowTitle') == 'First Wins'
+
+def test_fetch_meta_cache_hit_skips_addon_fanout(load_views, tmp_path):
+    """`_fetch_meta` only caches when `store.data_dir` is set (the real
+    Store has one, `FakeStore` normally does not) - opting a FakeStore
+    into a real tmp_path here proves a second call for the same
+    (stype, sid) is served from disk without touching any addon."""
+    ctx = load_views()
+    views = ctx.views
+    transport = 't1'
+    descriptor = {
+        'transportUrl': transport,
+        'manifest': {'id': 'org.a', 'resources': ['meta'], 'types': ['movie'], 'idPrefixes': ['tt']},
+    }
+    client = FakeAddonClient(meta_results={transport: {'id': 'tt1', 'name': 'Cached', 'type': 'movie'}})
+    _wire_data_layer(views, FakeStore(addons=[descriptor], data_dir=str(tmp_path)), client)
+
+    first = views._fetch_meta('movie', 'tt1')
+    second = views._fetch_meta('movie', 'tt1')
+
+    assert first == second == {'id': 'tt1', 'name': 'Cached', 'type': 'movie'}
+    assert client.meta_calls == [transport]  # second call never reached the addon
+
+
+def test_fetch_meta_cache_is_scoped_per_stype_and_sid(load_views, tmp_path):
+    ctx = load_views()
+    views = ctx.views
+    transport = 't1'
+    descriptor = {
+        'transportUrl': transport,
+        'manifest': {
+            'id': 'org.a', 'resources': ['meta'], 'types': ['movie', 'series'], 'idPrefixes': ['tt'],
+        },
+    }
+    client = FakeAddonClient(meta_results={transport: {'id': 'tt1', 'name': 'X'}})
+    _wire_data_layer(views, FakeStore(addons=[descriptor], data_dir=str(tmp_path)), client)
+
+    views._fetch_meta('movie', 'tt1')
+    views._fetch_meta('series', 'tt1')
+
+    assert client.meta_calls == [transport, transport]  # distinct keys - no false cache hit
+
+
+def test_fetch_meta_does_not_cache_a_failed_lookup(load_views, tmp_path):
+    ctx = load_views()
+    views = ctx.views
+    descriptor = {
+        'transportUrl': 't1',
+        'manifest': {'id': 'org.a', 'resources': ['meta'], 'types': ['movie'], 'idPrefixes': ['tt']},
+    }
+    client = FakeAddonClient(meta_results={'t1': None})  # claims support, returns nothing usable
+    _wire_data_layer(views, FakeStore(addons=[descriptor], data_dir=str(tmp_path)), client)
+
+    assert views._fetch_meta('movie', 'tt1') is None
+    assert views._fetch_meta('movie', 'tt1') is None
+    assert client.meta_calls == ['t1', 't1']  # every call re-tried the addon, none was cached
+
 
 def test_meta_series_orders_seasons_specials_last_with_poster_fallback_fanart(load_views):
     ctx = load_views()

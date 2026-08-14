@@ -288,9 +288,25 @@ def _fetch_meta(stype, sid):
     return are abandoned, not cancelled (Future.cancel() only works
     before a thread starts running) - they keep running to completion or
     their own 15s timeout in a background thread we no longer wait on.
+
+    A short-TTL disk cache (`lib.ui.metacache`) sits in front of the
+    fan-out: `meta()` -> `videos()` is a plugin round-trip per season,
+    and each one re-fetches this exact same object from every addon to
+    get at its `videos` list - Kodi's own directory cache does not help
+    here since each season is a different listing URL. `store.data_dir`
+    doubles as the cache's on/off switch: it is only set on the real
+    `Store` (test fakes omit it), so tests never touch the filesystem.
     """
     store = get_store()
     client = get_client()
+
+    cache_dir = getattr(store, 'data_dir', None)
+    if cache_dir is not None:
+        from lib.ui.metacache import load_cached_meta
+        cached = load_cached_meta(cache_dir, stype, sid)
+        if cached is not None:
+            return cached
+
     targets = [
         descriptor for descriptor in store.get_addons()
         if addons_lib.addon_supports(descriptor.get('manifest') or {}, 'meta', stype, sid)
@@ -307,33 +323,40 @@ def _fetch_meta(stype, sid):
             return None
 
     if len(targets) == 1:
-        return _fetch_one(targets[0])
+        result = _fetch_one(targets[0])
+    else:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        pool = ThreadPoolExecutor(max_workers=min(len(targets), _MAX_ADDON_WORKERS))
+        futures = []
+        result = None
+        try:
+            futures = [pool.submit(_fetch_one, descriptor) for descriptor in targets]
+            index_of = {future: index for index, future in enumerate(futures)}
+            for future in as_completed(futures):
+                if future.result() is None:
+                    continue
+                winner = future
+                # Only promotes to a future that has *already* finished (a
+                # non-blocking .done() check) - never waits on one still running.
+                for other in futures:
+                    if (index_of[other] < index_of[winner] and other.done()
+                            and other.result() is not None):
+                        winner = other
+                result = winner.result()
+                break
+        finally:
+            # Drop any addon call that never got a worker thread (only
+            # possible when len(targets) > _MAX_ADDON_WORKERS); already-running
+            # calls are left to finish in the background. wait=False so this
+            # cleanup never blocks the caller on a straggler.
+            for future in futures:
+                future.cancel()
+            pool.shutdown(wait=False)
 
-    pool = ThreadPoolExecutor(max_workers=min(len(targets), _MAX_ADDON_WORKERS))
-    futures = []
-    try:
-        futures = [pool.submit(_fetch_one, descriptor) for descriptor in targets]
-        index_of = {future: index for index, future in enumerate(futures)}
-        for future in as_completed(futures):
-            if future.result() is None:
-                continue
-            winner = future
-            # Only promotes to a future that has *already* finished (a
-            # non-blocking .done() check) - never waits on one still running.
-            for other in futures:
-                if (index_of[other] < index_of[winner] and other.done()
-                        and other.result() is not None):
-                    winner = other
-            return winner.result()
-        return None
-    finally:
-        # Drop any addon call that never got a worker thread (only
-        # possible when len(targets) > _MAX_ADDON_WORKERS); already-running
-        # calls are left to finish in the background. wait=False so this
-        # cleanup never blocks the caller on a straggler.
-        for future in futures:
-            future.cancel()
-        pool.shutdown(wait=False)
+    if cache_dir is not None and result:
+        from lib.ui.metacache import store_cached_meta
+        store_cached_meta(cache_dir, stype, sid, result)
+    return result
 
 
 def _ordered_seasons(videos):
