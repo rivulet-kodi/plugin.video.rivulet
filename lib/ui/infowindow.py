@@ -159,8 +159,14 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         if action_id == _INFO_ACTION:
             return
         if action_id in _BACK_ACTIONS:
-            self._cancel_enrich_timer()
             self.close()
+
+    def close(self):
+        # Any exit path - a back action, a selection, or a force-close for
+        # playback - must not leave a settle timer armed to fetch for a
+        # window that is no longer on screen.
+        self._cancel_enrich_timer()
+        super().close()
 
     def _cancel_enrich_timer(self):
         timer, self._enrich_timer = self._enrich_timer, None
@@ -171,13 +177,12 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         """Apply merged properties queued by workers onto the live ListItems.
 
         Always call this from the UI thread. Workers only ever touch
-        `self.metas[index]` and this queue - never a ListItem - because a
-        ListItem inside the ControlList is being rendered every frame and
-        `xbmcgui` objects are not documented as thread-safe. Resolving the
-        item by index here (rather than closing over the handle the worker
-        was spawned with) is also what keeps a fetch that lands across a
-        reopen-for-playback rebuild from writing to a detached item that is
-        no longer on screen.
+        `self.metas[index]` and this queue - never a ListItem - so that
+        every mutation of the rendered list happens in one place, in focus
+        order. Resolving the item by index here (rather than closing over
+        the handle the worker was spawned with) is what keeps a fetch that
+        lands across a reopen-for-playback rebuild from writing to a
+        detached item that is no longer on screen.
         """
         with self._enrich_lock:
             if not self._enrich_pending:
@@ -225,9 +230,12 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
             return
         # Already complete (Discover's catalogs usually are) - nothing to do.
         if meta.get('description'):
-            self._enriched.add(index)
+            with self._enrich_lock:
+                self._enriched.add(index)
             return
-        self._enriched.add(index)
+        # Note the index is *not* marked here: the worker marks it once it
+        # actually has a slot to fetch with, so an item scrolled past
+        # before its timer fires stays eligible for a later focus.
         self._cancel_enrich_timer()
         if not settle:
             self._spawn_enrich(index, meta)
@@ -243,19 +251,29 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
     def _enrich_worker(self, index, meta):
         # Bound concurrent fetches: each _fetch_meta fans out to a pool of
         # its own, and abandons (rather than cancels) whatever is still in
-        # flight when it returns.
+        # flight when it returns. Without a slot the index stays unmarked,
+        # so a later focus can retry it.
         if not self._enrich_slots.acquire(blocking=False):
-            self._enriched.discard(index)  # let a later focus retry it
             return
+        with self._enrich_lock:
+            self._enriched.add(index)
         try:
             self._enrich_fetch(index, meta)
         except Exception:
             # Last-resort guard: this runs on a daemon thread nobody joins,
-            # so an escaping exception has no caller to surface it. Even the
-            # imports below can fail - a thread still running while the
+            # so an escaping exception has no caller to surface it. Even
+            # reporting it can fail - a thread still running while the
             # interpreter (or, under test, the injected xbmc stubs) is torn
-            # down raises ModuleNotFoundError on `import xbmc`.
-            pass
+            # down raises ModuleNotFoundError on `import xbmc` - hence the
+            # nested guard rather than no diagnostic at all.
+            try:
+                import xbmc
+
+                from lib.ui.compat import log
+
+                log('infowindow: meta enrich worker failed', xbmc.LOGDEBUG)
+            except Exception:
+                pass
         finally:
             self._enrich_slots.release()
 
@@ -280,11 +298,14 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         # `full` is unvalidated third-party addon JSON, so check the shape
         # each field is consumed as. _item_properties() joins `genres`, and
         # a str is iterable - an addon sending "Drama" instead of ["Drama"]
-        # would otherwise render as "D, r, a, m, a". `imdbRating` and
-        # `releaseInfo` are routinely numeric in the wild (streamswindow.py
-        # str()s the one, playbackmeta.py float()s the other), so those are
-        # coerced rather than rejected.
-        for key in ('description', 'genres', 'imdbRating', 'releaseInfo'):
+        # would otherwise render as "D, r, a, m, a"; a list of anything but
+        # strings is dropped to a blank label on purpose, for the same
+        # reason. `imdbRating`, `releaseInfo` and `released` are routinely
+        # numeric in the wild (streamswindow.py str()s the one,
+        # playbackmeta.py float()s the other), so those are coerced rather
+        # than rejected. `released` is merged as well as `releaseInfo`
+        # because _item_properties() derives `year` from either.
+        for key in ('description', 'genres', 'imdbRating', 'releaseInfo', 'released'):
             value = full.get(key)
             if not value or meta.get(key):
                 continue
@@ -303,6 +324,14 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
             self._enrich_pending[index] = {
                 key: props.get(key, '') for key in ('genre', 'rating', 'plot', 'year')
             }
+        # ...and wake it, or nothing would apply the queue until the user's
+        # next keypress - by which time focus has usually left the item
+        # that was fetched. executebuiltin() posts to Kodi's application
+        # messenger, which runs Action(noop) on the GUI thread and delivers
+        # it to this dialog's onAction(): the drain, and the repaint, then
+        # happen there. ACTION_NOOP itself does nothing else, and is not a
+        # back action.
+        xbmc.executebuiltin('Action(noop)')
 
     def onClick(self, control_id):
         if control_id == SELECT:

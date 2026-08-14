@@ -45,19 +45,35 @@ _RELOAD_MODULE_NAMES = (
 
 
 @pytest.fixture
-def load_infowindow():
+def load_infowindow(monkeypatch):
     """Factory fixture: `load_infowindow(addon_info=None)` installs fresh
     stubs (via tests.kodistubs.install_kodi_stubs) reloading
     lib.ui.compat/lib.ui.infowindow, and returns a namespace with
     `.infowindow`, `.compat`, and `.env`. Every call is torn down
     automatically, in reverse order, at test end.
+
+    `ShowcaseWindow._spawn_enrich` is neutered on the freshly loaded class:
+    otherwise every test that drives `onInit()` with a description-less
+    meta would spawn a real daemon worker that outlives it, racing that
+    test's own `metas`/`_enrich_pending` and reaching `import xbmc` after
+    these stubs are torn down. The enrichment tests below either record
+    `_spawn_enrich` themselves (see `_spawned`) or call `_enrich_worker`/
+    `_enrich_fetch` directly, so nothing needs a real thread; the one test
+    that pins the spawn itself takes the pristine method back off
+    `ctx.real_spawn_enrich` and joins the thread it starts.
     """
     with contextlib.ExitStack() as stack:
         def _load(addon_info=None):
-            return stack.enter_context(install_kodi_stubs(
+            ctx = stack.enter_context(install_kodi_stubs(
                 reload=_RELOAD_MODULE_NAMES,
                 addon_info=addon_info,
             ))
+            ctx.real_spawn_enrich = ctx.infowindow.ShowcaseWindow._spawn_enrich
+            monkeypatch.setattr(
+                ctx.infowindow.ShowcaseWindow, '_spawn_enrich',
+                lambda self, index, meta: None,
+            )
+            return ctx
 
         yield _load
 
@@ -606,9 +622,10 @@ def test_enrich_fires_on_focus_change_from_onaction(load_infowindow, monkeypatch
     win.onAction(ctx.infowindow.xbmcgui.Action(0))
 
     # A focus change arms the settle timer rather than fetching inline, so
-    # scrolling past an item does not fetch it. Run the timer's callback to
+    # scrolling past an item does not fetch it. Nothing is marked until a
+    # worker actually has a slot to fetch with. Run the timer's callback to
     # stand in for the 200ms elapsing.
-    assert win._enriched == {0, 1}
+    assert win._enriched == set()
     timer = win._enrich_timer
     assert timer is not None
     timer.cancel()
@@ -702,6 +719,8 @@ def test_enrich_ignores_a_position_outside_the_meta_list(load_infowindow, monkey
     win._enrich_focused(item)
 
     assert calls == []
+    # An out-of-range position must not poison the index either.
+    assert win._enriched == set()
 
 
 def test_enrich_ignores_a_meta_without_an_id(load_infowindow, monkeypatch):
@@ -883,7 +902,6 @@ def test_enrich_worker_gives_up_its_index_when_no_slot_is_free(load_infowindow, 
     win = ctx.infowindow.ShowcaseWindow()
     win.metas = [_sparse()]
     win._reset_enrich_state()
-    win._enriched = {0}
     fetched = []
     monkeypatch.setattr(
         ctx.views, '_fetch_meta',
@@ -896,7 +914,7 @@ def test_enrich_worker_gives_up_its_index_when_no_slot_is_free(load_infowindow, 
     win._enrich_worker(0, win.metas[0])
 
     assert fetched == []
-    # Dropped from the cache so a later focus can retry it.
+    # Never entered the cache, so a later focus can retry it.
     assert win._enriched == set()
 
 
@@ -950,3 +968,155 @@ def test_enrich_worker_releases_its_slot_after_a_successful_fetch(load_infowindo
         win._enrich_worker(0, win.metas[0])
 
     assert win._enrich_pending[0]['plot'] == 'Plot.'
+
+
+def test_enrich_retries_an_item_that_was_scrolled_past(load_infowindow, monkeypatch):
+    """A cancelled settle timer must leave its item eligible again.
+
+    Scrolling through a sparse catalog cancels each item's pending fetch as
+    focus moves on. If arming had marked the index handled, the item you
+    land on after a fast scroll would be skipped by the cache check for the
+    life of the window - blank plot, no retry.
+    """
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse('tt1', 'One'), _sparse('tt2', 'Two'), _sparse('tt3', 'Three')]
+    win._reset_enrich_state()
+    win.onInit()
+    calls = _spawned(monkeypatch, ctx, win)
+    control = win.getControl(ctx.infowindow.SELECT)
+    win.setFocusId(ctx.infowindow.SELECT)
+
+    control.selected_index = 1
+    win.onAction(ctx.infowindow.xbmcgui.Action(0))  # arms a fetch for item 1...
+    control.selected_index = 2
+    win.onAction(ctx.infowindow.xbmcgui.Action(0))  # ...which this cancels
+    control.selected_index = 1
+    win.onAction(ctx.infowindow.xbmcgui.Action(0))  # back to the skipped item
+
+    timer = win._enrich_timer
+    timer.cancel()
+    timer.function(*timer.args)
+
+    assert [index for index, _ in calls] == [1]
+
+
+def test_enrich_worker_wakes_the_ui_thread_after_queueing(load_infowindow, monkeypatch):
+    """Only onInit()/onAction() drain the queue, and Kodi calls neither
+    without input - so a landed fetch would not reach the screen until the
+    user's next keypress, by which time focus has moved off the item that
+    was fetched. Action(noop) is posted to Kodi's application messenger and
+    dispatched to this dialog's onAction() on the GUI thread.
+    """
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: {'description': 'Plot.'})
+
+    win._enrich_worker(0, win.metas[0])
+
+    assert win._enrich_pending[0]['plot'] == 'Plot.'
+    assert ctx.env.executed_builtins == ['Action(noop)']
+
+
+def test_enrich_worker_does_not_wake_the_ui_thread_with_nothing_to_apply(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: None)
+
+    win._enrich_worker(0, win.metas[0])
+
+    assert ctx.env.executed_builtins == []
+
+
+def test_close_cancels_an_armed_settle_timer(load_infowindow, monkeypatch):
+    """Selecting a poster, backing out, or a force-close for playback all
+    reach close() - none of them should leave a timer armed to fetch for a
+    window that is no longer on screen."""
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse('tt1', 'One'), _sparse('tt2', 'Two')]
+    win._reset_enrich_state()
+    win.onInit()
+    calls = _spawned(monkeypatch, ctx, win)
+    control = win.getControl(ctx.infowindow.SELECT)
+    control.selected_index = 1
+    win.setFocusId(ctx.infowindow.SELECT)
+    win.onAction(ctx.infowindow.xbmcgui.Action(0))
+    timer = win._enrich_timer
+    assert timer is not None
+
+    win.onClick(ctx.infowindow.CLOSE)
+
+    assert win._enrich_timer is None
+    timer.join(timeout=1)
+    assert calls == []
+
+
+def test_enrich_worker_merges_released_when_the_preview_has_no_year(load_infowindow, monkeypatch):
+    """_item_properties() derives `year` from releaseInfo *or* released, so
+    a full meta that only dates itself with `released` must still fill the
+    label."""
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    monkeypatch.setattr(
+        ctx.views, '_fetch_meta',
+        lambda stype, sid: {'description': 'Plot.', 'released': '1999-03-31T00:00:00.000Z'},
+    )
+
+    win._enrich_worker(0, win.metas[0])
+
+    assert win._enrich_pending[0]['year'] == '1999-03-31'
+
+
+def test_spawn_enrich_runs_the_worker_on_a_daemon_thread(load_infowindow, monkeypatch):
+    """The fixture neuters _spawn_enrich for every other test, so this is
+    the one place the real thread hand-off is exercised - joined, so it
+    cannot outlive the test."""
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: {'description': 'Plot.'})
+    created = []
+    real_thread = ctx.infowindow.threading.Thread
+
+    def recording_thread(*args, **kwargs):
+        thread = real_thread(*args, **kwargs)
+        created.append(thread)
+        return thread
+
+    monkeypatch.setattr(ctx.infowindow.threading, 'Thread', recording_thread)
+
+    ctx.real_spawn_enrich(win, 0, win.metas[0])
+
+    assert len(created) == 1
+    assert created[0].daemon  # Kodi must never wait on an enrich fetch to exit
+    created[0].join(timeout=5)
+    assert win._enrich_pending[0]['plot'] == 'Plot.'
+
+
+def test_enrich_worker_survives_a_guard_that_cannot_even_log(load_infowindow, monkeypatch):
+    """The last-resort guard reports what it swallowed, but reporting is
+    itself allowed to fail - a torn-down interpreter is exactly when both
+    happen."""
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError('nothing works any more')
+
+    monkeypatch.setattr(type(win), '_enrich_fetch', _boom)
+    monkeypatch.setattr(ctx.compat, 'log', _boom)
+
+    win._enrich_worker(0, win.metas[0])  # must not raise
+
+    assert win._enrich_slots.acquire(blocking=False) is True
+    win._enrich_slots.release()
