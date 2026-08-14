@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.rivulet" name="Rivulet" version="0.5.5" provider-name="M0Rf30">
+<addon id="plugin.video.rivulet" name="Rivulet" version="0.5.6" provider-name="M0Rf30">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" version="2.22.0"/>
@@ -12,7 +12,10 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse Discover and Search catalogs, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote stremio-server-go streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.5.5:
+    <news>v0.5.6:
+- Fix: pressing stop on a stalled torrent could leave Kodi frozen for up to three minutes. Rivulet's recommended advancedsettings.xml doubled Kodi's network timeout, and Kodi waits for the reader to give up before it can finish stopping. That timeout is back to Kodi's own value, with one retry instead of two, so stopping a stuck stream is now bounded at about a minute in the worst case. Patience with slow-but-moving torrents is unaffected - that is a separate setting, left as it was. NOTE: if you already installed Rivulet's advancedsettings.xml, it is never overwritten - edit it yourself, or delete it and re-install it from Settings, to pick this up.
+- Fix: the log claimed "pre-buffer complete" when playback had in fact started early on a partly-filled buffer, which was misleading in exactly the logs where it mattered - a stream stalling seconds after it started. It now says which of the two happened.
+v0.5.5:
 - Fix: Rivulet's icon, fanart and screenshot gallery were missing in Kodi's own Add-ons browser when installing from the Rivulet repository. The repository was publishing those images to different paths than the ones the add-on declares, so Kodi asked for them and got nothing back. The screenshots added in 0.4.20 should finally be visible.
 - Improved: the metadata cache now keeps itself under a fixed size budget rather than a fixed number of titles. A TV series entry is far bigger than a film's (it lists every episode), so the old limit could let the cache grow to a few megabytes and rewrite all of it each time a title was cached - the opposite of what it was there for on SD-card and eMMC installs.
 v0.5.4:
