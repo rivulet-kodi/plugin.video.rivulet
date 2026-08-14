@@ -1,10 +1,11 @@
 """Tests for lib.serverbin (stremio-server-go binary download/install).
 
-Reference: M0Rf30/stremio-server-go's .goreleaser.yml `archives.name_template`
-and the live v0.8.5 release (asset list + checksums.txt baked into
-REALISTIC_RELEASE below). No network access - `fake_requests` patches the
-real `requests.get` the same way lib.serverbin's module-scope `requests`
-import resolves it.
+Asset names/URLs are derived deterministically from GITHUB_REPO/SERVER_TAG;
+expected SHA-256 digests come from the PINNED_SHA256 table committed in
+lib/serverbin.py, not from a "latest release" API call or a same-release
+checksums.txt asset. `fake_requests` patches the real `requests.get` the
+same way lib.serverbin's module-scope `requests` import resolves it --
+only the archive download itself ever issues a request.
 """
 import hashlib
 import io
@@ -16,16 +17,15 @@ import sys
 import tarfile
 
 import pytest
-import requests
 
 from lib.serverbin import (
-    GITHUB_API_URL,
     GITHUB_REPO,
+    PINNED_SHA256,
+    SERVER_TAG,
     DownloadError,
     NoAssetError,
     UnsupportedPlatformError,
     install_binary,
-    latest_release,
     platform_key,
     select_asset,
     verify_executable,
@@ -125,33 +125,28 @@ def test_platform_key_darwin_arm64(monkeypatch):
     assert platform_key() == ("Darwin", "arm64")
 
 
-# --- select_asset ------------------------------------------------------
+# --- PINNED_SHA256 / select_asset -------------------------------------------
 
-
-def _asset(name, size):
-    return {
-        "name": name,
-        "browser_download_url":
-            "https://github.com/%s/releases/download/v0.8.5/%s" % (GITHUB_REPO, name),
-        "size": size,
-    }
-
-
-# Real v0.8.5 asset list, verified live against the GitHub release API.
-REALISTIC_RELEASE = {
-    "tag_name": "v0.8.5",
-    "assets": [
-        _asset("checksums.txt", 805),
-        _asset("stremio-server_Android_arm64.tar.gz", 8987177),
-        _asset("stremio-server_Darwin_arm64.tar.gz", 8861602),
-        _asset("stremio-server_Darwin_x86_64.tar.gz", 9527733),
-        _asset("stremio-server_Linux_arm64.tar.gz", 5583253),
-        _asset("stremio-server_Linux_armv7.tar.gz", 5193398),
-        _asset("stremio-server_Linux_x86_64.tar.gz", 6827169),
-        _asset("stremio-server_Windows_arm64.zip", 8537957),
-        _asset("stremio-server_Windows_x86_64.zip", 9542582),
-    ],
+# Exact digests reviewed against the v0.12.0 GitHub release page +
+# checksums.txt. Any drift here (wrong tag, tampered digest, added/removed
+# platform) must be a deliberate, reviewed edit to lib/serverbin.py.
+EXPECTED_PINNED_SHA256 = {
+    ("Darwin", "arm64"): "0efa6838193b8a1c7061da59e55f8548e7178e98bc92192fc89d8cebb451942d",
+    ("Darwin", "x86_64"): "1f2bb5ba83f00e43ce5551d67db103013e8ad7019dddaa91c07d6c281dd6efee",
+    ("Linux", "arm64"): "deb245a9ce1dd3e1090738dc86ae3bbded72acd86170ccaa76dc62d0b623a7d5",
+    ("Linux", "armv7"): "20bf3f9e7f33885312629eb4436ad3e4e935c4b5393bf36fb73c3731d9437676",
+    ("Linux", "x86_64"): "12ba364e1ee5ff53709a6c9ea324c94f339cf88eef50a47d08658572c84030c2",
+    ("Windows", "arm64"): "dc0a4ff038fa89b70dca5c70af64208aff2e6089594f46c9f2c49ee0e7a6ac84",
+    ("Windows", "x86_64"): "c5864989582784f65cde37fced5ca845d411937b0811fa4cbaebf644b98eb7f1",
 }
+
+
+def test_server_tag_is_pinned_to_v0_12_0():
+    assert SERVER_TAG == "v0.12.0"
+
+
+def test_pinned_sha256_table_matches_reviewed_v0_12_0_digests_exactly():
+    assert PINNED_SHA256 == EXPECTED_PINNED_SHA256
 
 
 @pytest.mark.parametrize("os_name,arch,expected_name", [
@@ -162,128 +157,26 @@ REALISTIC_RELEASE = {
     ("Darwin", "arm64", "stremio-server_Darwin_arm64.tar.gz"),
     ("Windows", "x86_64", "stremio-server_Windows_x86_64.zip"),
     ("Windows", "arm64", "stremio-server_Windows_arm64.zip"),
-    ("Android", "arm64", "stremio-server_Android_arm64.tar.gz"),
 ])
-def test_select_asset_matches_realistic_release_assets(os_name, arch, expected_name):
-    asset = select_asset(REALISTIC_RELEASE, os_name, arch)
+def test_select_asset_returns_deterministic_name_url_and_pinned_digest(
+        os_name, arch, expected_name):
+    asset = select_asset(os_name, arch)
     assert asset is not None
     assert asset["name"] == expected_name
+    assert asset["url"] == (
+        "https://github.com/%s/releases/download/v0.12.0/%s" % (GITHUB_REPO, expected_name))
+    assert asset["sha256"] == EXPECTED_PINNED_SHA256[(os_name, arch)]
 
 
 @pytest.mark.parametrize("os_name,arch", [
-    ("Darwin", "armv7"),   # goreleaser ignores {goos: darwin, goarch: arm}
-    ("Windows", "armv7"),  # goreleaser ignores {goos: windows, goarch: arm}
-    ("Linux", "i386"),     # never built - goarch list is amd64/arm64/arm only
-    ("Android", "x86_64"),  # android build id only targets arm64
+    ("Darwin", "armv7"),    # goreleaser ignores {goos: darwin, goarch: arm}
+    ("Windows", "armv7"),   # goreleaser ignores {goos: windows, goarch: arm}
+    ("Linux", "i386"),      # never built - goarch list is amd64/arm64/arm only
+    ("Android", "arm64"),   # Android has no pinned asset at all
+    ("Android", "x86_64"),
 ])
-def test_select_asset_returns_none_for_unavailable_combos(os_name, arch):
-    assert select_asset(REALISTIC_RELEASE, os_name, arch) is None
-
-
-def test_select_asset_returns_none_when_no_assets_key():
-    assert select_asset({}, "Linux", "x86_64") is None
-
-
-# --- latest_release ------------------------------------------------------
-
-
-def _json_response(data, status_code=200):
-    class _Resp:
-        ok = status_code < 400
-
-        def __init__(self):
-            self.status_code = status_code
-
-        def raise_for_status(self):
-            if not self.ok:
-                raise requests.exceptions.HTTPError("%s error" % self.status_code)
-
-        def json(self):
-            return data
-
-    return _Resp()
-
-
-def _text_response(text, status_code=200):
-    class _Resp:
-        ok = status_code < 400
-
-        def __init__(self):
-            self.status_code = status_code
-
-        def raise_for_status(self):
-            if not self.ok:
-                raise requests.exceptions.HTTPError("%s error" % self.status_code)
-
-    resp = _Resp()
-    resp.text = text
-    return resp
-
-
-def _invalid_json_response():
-    class _Resp:
-        ok = True
-        status_code = 200
-
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            raise ValueError("invalid json")
-
-    return _Resp()
-
-
-class _StreamResponse:
-    """Stand-in for a streamed requests.Response (archive-download seam)."""
-
-    def __init__(self, data, status_code=200):
-        self._data = data
-        self.status_code = status_code
-        self.ok = status_code < 400
-        self.closed = False
-
-    def raise_for_status(self):
-        if not self.ok:
-            raise requests.exceptions.HTTPError("%s error" % self.status_code)
-
-    def iter_content(self, chunk_size=1):
-        for i in range(0, len(self._data), chunk_size):
-            yield self._data[i:i + chunk_size]
-
-    def close(self):
-        self.closed = True
-
-
-def test_latest_release_returns_parsed_json_from_correct_url(fake_requests):
-    release = {"tag_name": "v0.8.5", "assets": []}
-    fake_requests.queue_get(_json_response(release))
-
-    result = latest_release()
-
-    assert result == release
-    assert fake_requests.calls[0]["url"] == GITHUB_API_URL
-
-
-def test_latest_release_wraps_connection_error_in_download_error(fake_requests):
-    fake_requests.queue_get(requests.exceptions.ConnectionError("refused"))
-
-    with pytest.raises(DownloadError):
-        latest_release()
-
-
-def test_latest_release_wraps_http_error_in_download_error(fake_requests):
-    fake_requests.queue_get(_json_response({}, status_code=500))
-
-    with pytest.raises(DownloadError):
-        latest_release()
-
-
-def test_latest_release_wraps_invalid_json_in_download_error(fake_requests):
-    fake_requests.queue_get(_invalid_json_response())
-
-    with pytest.raises(DownloadError):
-        latest_release()
+def test_select_asset_returns_none_for_unpinned_combos(os_name, arch):
+    assert select_asset(os_name, arch) is None
 
 
 # --- install_binary --------------------------------------------------------
@@ -300,24 +193,37 @@ def _make_tar_gz(members):
     return buf.getvalue()
 
 
-def test_install_binary_downloads_verifies_checksum_and_installs(tmp_path, monkeypatch, fake_requests):
+class _StreamResponse:
+    """Stand-in for a streamed requests.Response (archive-download seam)."""
+
+    def __init__(self, data, headers=None):
+        self._data = data
+        self.ok = True
+        self.headers = headers or {}
+        self.closed = False
+
+    def raise_for_status(self):
+        pass
+
+    def iter_content(self, chunk_size=1):
+        for i in range(0, len(self._data), chunk_size):
+            yield self._data[i:i + chunk_size]
+
+    def close(self):
+        self.closed = True
+
+
+def test_install_binary_downloads_verifies_pinned_checksum_and_installs(
+        tmp_path, monkeypatch, fake_requests):
     _set_platform(monkeypatch, "Linux", "x86_64")
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
     binary_content = b"#!/bin/sh\necho fake-stremio-server\n"
     archive_bytes = _make_tar_gz({"stremio-server": binary_content})
-    asset_name = "stremio-server_Linux_x86_64.tar.gz"
     correct_checksum = hashlib.sha256(archive_bytes).hexdigest()
-    release = {
-        "assets": [
-            _asset(asset_name, len(archive_bytes)),
-            _asset("checksums.txt", 0),
-        ],
-    }
-    checksums_text = "%s  %s\n" % (correct_checksum, asset_name)
+    monkeypatch.setitem(PINNED_SHA256, ("Linux", "x86_64"), correct_checksum)
 
-    fake_requests.queue_get(_json_response(release))
-    fake_requests.queue_get(_text_response(checksums_text))
-    fake_requests.queue_get(_StreamResponse(archive_bytes))
+    fake_requests.queue_get(
+        _StreamResponse(archive_bytes, headers={"Content-Length": str(len(archive_bytes))}))
 
     progress_calls = []
     result_path = install_binary(
@@ -330,27 +236,23 @@ def test_install_binary_downloads_verifies_checksum_and_installs(tmp_path, monke
     assert stat.S_IMODE(os.stat(result_path).st_mode) == 0o755
     assert progress_calls
     assert progress_calls[-1][1] == len(archive_bytes)
+    assert len(fake_requests.calls) == 1
+    assert fake_requests.calls[0]["url"] == (
+        "https://github.com/%s/releases/download/v0.12.0/stremio-server_Linux_x86_64.tar.gz"
+        % GITHUB_REPO)
     assert not (tmp_path / ".stremio-server.part").exists()
     assert not os.path.exists(result_path + ".part")
 
 
-def test_install_binary_finds_binary_nested_in_a_safe_subdirectory(tmp_path, monkeypatch, fake_requests):
+def test_install_binary_finds_binary_nested_in_a_safe_subdirectory(
+        tmp_path, monkeypatch, fake_requests):
     _set_platform(monkeypatch, "Linux", "x86_64")
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
     binary_content = b"nested-binary"
     archive_bytes = _make_tar_gz({"dist/stremio-server": binary_content})
-    asset_name = "stremio-server_Linux_x86_64.tar.gz"
     correct_checksum = hashlib.sha256(archive_bytes).hexdigest()
-    release = {
-        "assets": [
-            _asset(asset_name, len(archive_bytes)),
-            _asset("checksums.txt", 0),
-        ],
-    }
-    checksums_text = "%s  %s\n" % (correct_checksum, asset_name)
+    monkeypatch.setitem(PINNED_SHA256, ("Linux", "x86_64"), correct_checksum)
 
-    fake_requests.queue_get(_json_response(release))
-    fake_requests.queue_get(_text_response(checksums_text))
     fake_requests.queue_get(_StreamResponse(archive_bytes))
 
     result_path = install_binary(str(tmp_path))
@@ -360,90 +262,29 @@ def test_install_binary_finds_binary_nested_in_a_safe_subdirectory(tmp_path, mon
         assert fh.read() == binary_content
 
 
-def test_install_binary_checksum_mismatch_raises_download_error(tmp_path, monkeypatch, fake_requests):
+def test_install_binary_checksum_mismatch_raises_download_error_and_cleans_up(
+        tmp_path, monkeypatch, fake_requests):
+    """The archive is downloaded, but its digest doesn't match the pinned
+    value -- refuse to install and leave no partial files behind."""
     _set_platform(monkeypatch, "Linux", "x86_64")
     archive_bytes = _make_tar_gz({"stremio-server": b"binary-content"})
-    asset_name = "stremio-server_Linux_x86_64.tar.gz"
-    release = {
-        "assets": [
-            _asset(asset_name, len(archive_bytes)),
-            _asset("checksums.txt", 0),
-        ],
-    }
-    wrong_checksum_text = "%s  %s\n" % ("0" * 64, asset_name)
+    monkeypatch.setitem(PINNED_SHA256, ("Linux", "x86_64"), "0" * 64)
 
-    fake_requests.queue_get(_json_response(release))
-    fake_requests.queue_get(_text_response(wrong_checksum_text))
     fake_requests.queue_get(_StreamResponse(archive_bytes))
 
-    with pytest.raises(DownloadError, match="checksum"):
+    with pytest.raises(DownloadError, match="checksum mismatch"):
         install_binary(str(tmp_path))
 
     assert not (tmp_path / ".stremio-server.part").exists()
     assert not (tmp_path / "stremio-server").exists()
-
-
-def test_install_binary_raises_download_error_when_checksums_asset_missing(
-        tmp_path, monkeypatch, fake_requests):
-    """A release that omits checksums.txt entirely must fail closed instead
-    of silently installing an unverified binary."""
-    _set_platform(monkeypatch, "Linux", "x86_64")
-    asset_name = "stremio-server_Linux_x86_64.tar.gz"
-    release = {"assets": [_asset(asset_name, 123)]}
-
-    fake_requests.queue_get(_json_response(release))
-
-    with pytest.raises(DownloadError, match="missing checksums"):
-        install_binary(str(tmp_path))
-
-    # No archive download (or anything else) should have been attempted.
-    assert len(fake_requests.calls) == 1
-    assert not (tmp_path / "stremio-server").exists()
-    assert not (tmp_path / ".stremio-server.part").exists()
-
-
-def test_install_binary_raises_download_error_when_asset_not_listed_in_checksums(
-        tmp_path, monkeypatch, fake_requests):
-    """checksums.txt exists but doesn't mention this platform's asset -- also
-    a fail-closed refusal, not a silent unverified install."""
-    _set_platform(monkeypatch, "Linux", "x86_64")
-    asset_name = "stremio-server_Linux_x86_64.tar.gz"
-    release = {
-        "assets": [
-            _asset(asset_name, 123),
-            _asset("checksums.txt", 0),
-        ],
-    }
-    # Lists a checksum for a different asset only.
-    checksums_text = "%s  %s\n" % ("a" * 64, "stremio-server_Darwin_arm64.tar.gz")
-
-    fake_requests.queue_get(_json_response(release))
-    fake_requests.queue_get(_text_response(checksums_text))
-
-    with pytest.raises(DownloadError, match="does not list a checksum"):
-        install_binary(str(tmp_path))
-
-    # No archive download should have been attempted.
-    assert len(fake_requests.calls) == 2
-    assert not (tmp_path / "stremio-server").exists()
-    assert not (tmp_path / ".stremio-server.part").exists()
 
 
 def test_install_binary_rejects_path_traversal_member_names(tmp_path, monkeypatch, fake_requests):
     _set_platform(monkeypatch, "Linux", "x86_64")
     archive_bytes = _make_tar_gz({"../stremio-server": b"malicious-payload"})
-    asset_name = "stremio-server_Linux_x86_64.tar.gz"
     correct_checksum = hashlib.sha256(archive_bytes).hexdigest()
-    release = {
-        "assets": [
-            _asset(asset_name, len(archive_bytes)),
-            _asset("checksums.txt", 0),
-        ],
-    }
-    checksums_text = "%s  %s\n" % (correct_checksum, asset_name)
+    monkeypatch.setitem(PINNED_SHA256, ("Linux", "x86_64"), correct_checksum)
 
-    fake_requests.queue_get(_json_response(release))
-    fake_requests.queue_get(_text_response(checksums_text))
     fake_requests.queue_get(_StreamResponse(archive_bytes))
 
     with pytest.raises(DownloadError, match="missing"):
@@ -453,13 +294,16 @@ def test_install_binary_rejects_path_traversal_member_names(tmp_path, monkeypatc
     assert not (tmp_path / ".stremio-server.part").exists()
 
 
-def test_install_binary_raises_no_asset_error_when_platform_unsupported(tmp_path, monkeypatch, fake_requests):
+def test_install_binary_raises_no_asset_error_for_unpinned_platform_before_any_network_request(
+        tmp_path, monkeypatch, fake_requests):
+    """A platform/arch with no PINNED_SHA256 entry must be refused locally
+    -- no mutable metadata lookup, no network request of any kind."""
     _set_platform(monkeypatch, "Linux", "riscv64")
-    release = {"assets": [_asset("stremio-server_Linux_x86_64.tar.gz", 123)]}
-    fake_requests.queue_get(_json_response(release))
 
     with pytest.raises(NoAssetError):
         install_binary(str(tmp_path))
+
+    assert fake_requests.calls == []
 
 
 def test_no_asset_error_is_a_download_error_subclass():
@@ -470,18 +314,9 @@ def test_install_binary_progress_cb_exception_aborts_and_cleans_up_partial_file(
         tmp_path, monkeypatch, fake_requests):
     _set_platform(monkeypatch, "Linux", "x86_64")
     archive_bytes = _make_tar_gz({"stremio-server": b"some-bytes"})
-    asset_name = "stremio-server_Linux_x86_64.tar.gz"
     correct_checksum = hashlib.sha256(archive_bytes).hexdigest()
-    release = {
-        "assets": [
-            _asset(asset_name, len(archive_bytes)),
-            _asset("checksums.txt", 0),
-        ],
-    }
-    checksums_text = "%s  %s\n" % (correct_checksum, asset_name)
+    monkeypatch.setitem(PINNED_SHA256, ("Linux", "x86_64"), correct_checksum)
 
-    fake_requests.queue_get(_json_response(release))
-    fake_requests.queue_get(_text_response(checksums_text))
     fake_requests.queue_get(_StreamResponse(archive_bytes))
 
     def cancel(done, total):

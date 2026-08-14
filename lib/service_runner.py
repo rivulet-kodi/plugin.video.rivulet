@@ -26,6 +26,7 @@ This module is split in two halves:
     loop on top of the pure core.
 """
 
+import datetime
 import os
 import shutil
 import subprocess
@@ -33,6 +34,11 @@ import time
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
+
+from lib import library
+from lib import settings as _settings
+from lib.store import Store
+from lib.stremio.api import StremioAPI
 
 ADDON_ID = "plugin.video.rivulet"
 DEFAULT_SERVER_URL = "http://127.0.0.1:11470"
@@ -44,6 +50,23 @@ PROBE_TIMEOUT = 2.0
 
 # Restart backoff schedule for a crashing child: 5s, 10s, 30s, then capped at 30s.
 RESTART_BACKOFF = (5, 10, 30)
+
+# Backoff schedule for a failing binary download attempt: retry after
+# 30s, 60s, then every 5 minutes -- recovers automatically from a
+# transient network/GitHub hiccup without hammering GitHub's API.
+DOWNLOAD_RETRY_BACKOFF = (30, 60, 300)
+
+#: Minimum interval between datastorePut pushes for one continuously-
+#: playing session -- matches stremio-core's own player model
+#: (`PUSH_TO_LIBRARY_EVERY`, src/models/player.rs:47), reused here
+#: rather than inventing a different cadence.
+LIBRARY_PUSH_INTERVAL_SECONDS = 90
+#: Minimum interval between local `progress.json` writes for one
+#: continuously-playing session -- far shorter than
+#: `LIBRARY_PUSH_INTERVAL_SECONDS` (the remote push is rate-limited
+#: separately), but well above `HEALTHY_POLL_INTERVAL` so a long
+#: playback does not rewrite the whole cache file on every ~2s poll.
+LOCAL_PROGRESS_WRITE_INTERVAL_SECONDS = 15
 # A run shorter than this does not count as "stable" -- backoff keeps climbing
 # instead of resetting, so a crash loop is actually throttled.
 MIN_STABLE_UPTIME = 60.0
@@ -105,6 +128,29 @@ EXTRA_ENV_SETTINGS = (
     ("pprof_addr", "STREMIO_PPROF", "string"),
     ("cert_authkey", "STREMIO_CERT_AUTHKEY", "string"),
 )
+
+#: settings.xml's <default> for `server_enable` plus every EXTRA_ENV_SETTINGS
+#: row of kind "bool"/"int"/"mb_to_bytes" -- the fallback ServiceMonitor._refresh()
+#: passes to lib.settings.setting_bool()/setting_int() so an untouched setting
+#: resolves to the same value the old getSettingBool()/getSettingInt() calls
+#: produced, string-kind rows need no typed default (read raw via getSetting()).
+EXTRA_ENV_TYPED_DEFAULTS = {
+    "server_enable": True,
+    "bt_listen_port": 0,
+    "peers_per_torrent": 0,
+    "torrent_idle_timeout": 300,
+    "bt_anonymous": False,
+    "disable_trackers": False,
+    "disable_webtorrent": True,
+    "trackers_max": 5,
+    "memory_cache_size_mb": 0,
+    "mem_limit_mb": 0,
+    "proxy_prebuffer": 3,
+    "proxy_seg_cache_ttl": 300,
+    "enable_dlna": False,
+    "local_imdb": True,
+    "https_port": 12470,
+}
 
 
 def extra_env_from_settings(values):
@@ -217,14 +263,21 @@ class ServerProcess:
             return
         os.makedirs(self.app_path, exist_ok=True)
         self._rotate_log()
-        self._log_fh = open(self.log_path, "a", buffering=1)
-        self._proc = subprocess.Popen(
-            [self.binary],
-            env=self.build_env(),
-            stdout=self._log_fh,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-        )
+        try:
+            self._log_fh = open(self.log_path, "a", buffering=1)
+            self._proc = subprocess.Popen(
+                [self.binary],
+                env=self.build_env(),
+                stdout=self._log_fh,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+            )
+        except Exception:
+            if self._log_fh is not None:
+                self._log_fh.close()
+            self._proc = None
+            self._log_fh = None
+            raise
         self._started_at = time.monotonic()
 
     def poll(self):
@@ -240,21 +293,32 @@ class ServerProcess:
         return time.monotonic() - self._started_at
 
     def stop(self, grace=5.0):
-        """Terminate the child, escalating to kill() after `grace` seconds."""
-        proc, self._proc = self._proc, None
+        """Terminate the child, escalating to kill() after `grace` seconds.
+
+        Log-file cleanup always runs, in `finally`, even when the child
+        cannot be confirmed dead. A second `TimeoutExpired` after kill()
+        propagates instead of being swallowed, and `_proc`/`_started_at`
+        are left untouched in that case: `running` keeps reporting True
+        so a caller does not spawn a duplicate next to a possibly-still-
+        alive, unkillable child -- only confirmed termination discards
+        the process/start state."""
+        proc = self._proc
+        try:
+            if proc is not None and proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=grace)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=grace)
+            elif proc is not None:
+                proc.wait()
+        finally:
+            if self._log_fh is not None:
+                self._log_fh.close()
+                self._log_fh = None
+        self._proc = None
         self._started_at = None
-        if proc is not None and proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=grace)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=grace)
-        elif proc is not None:
-            proc.wait()
-        if self._log_fh is not None:
-            self._log_fh.close()
-            self._log_fh = None
 
 
 class _AbortRequested(Exception):
@@ -264,6 +328,220 @@ class _AbortRequested(Exception):
     monitor.abortRequested() from ever being re-polled until the transfer
     finishes on its own.
     """
+
+
+def should_push_now(last_pushed_at, now, final, interval=LIBRARY_PUSH_INTERVAL_SECONDS):
+    """True if a `datastorePut` push should happen now: always on the
+    FINAL sample of a session (the last chance to sync before playback
+    ends), the very first sample (`last_pushed_at is None`), or once
+    `interval` seconds have passed since the last push. Keeps
+    `build_progress_player`'s tracker from hammering the Stremio API on
+    every `sample_if_playing()` tick.
+    """
+    if final or last_pushed_at is None:
+        return True
+    return (now - last_pushed_at).total_seconds() >= interval
+
+
+#: Ceiling on how old a persisted now-playing context's `started_at`
+#: may be before `_RivuletPlayer` treats it as still actionable. Bounds
+#: the window between `lib.ui.player` writing the context (right
+#: before handing the resolved stream to Kodi -- see its own docstring)
+#: and this SAME player instance accepting it via `onAVStarted`, so a
+#: crashed previous session's leftover context can never steer an
+#: unrelated LATER video's resume seek or progress sample.
+MAX_STARTUP_AGE_SECONDS = 60
+
+
+def is_context_stale(started_at, now, max_age_seconds=MAX_STARTUP_AGE_SECONDS):
+    """True if `started_at` (the ISO 8601 UTC string `library.iso8601_utc()`
+    produces) is missing, malformed, or more than `max_age_seconds` older
+    than `now` (both `datetime.datetime`). Pure and side-effect-free --
+    callers decide what "stale" means for their own now-playing context."""
+    if not started_at:
+        return True
+    try:
+        parsed = datetime.datetime.strptime(started_at, "%Y-%m-%dT%H:%M:%SZ")
+    except (TypeError, ValueError):
+        return True
+    parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return (now - parsed).total_seconds() > max_age_seconds
+
+
+def _context_key(context):
+    """Stable identity for a now-playing context dict -- lets
+    `_RivuletPlayer.sample_if_playing` tell whether it is looking at the
+    EXACT context `onAVStarted` already accepted for this instance."""
+    return (context.get("type"), context.get("id"), context.get("video_id"), context.get("started_at"))
+
+
+def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn):
+    """Return an `xbmc.Player` subclass instance reporting playback
+    progress for Rivulet-originated playback only, and performing the
+    one-shot resume seek `lib.ui.player` queues via
+    `Store.set_resume_offset_ms`.
+
+    `xbmc_module` is the `xbmc` package itself (the real one, or in
+    tests the shared `tests/kodistubs` fake) -- taken as a PARAMETER
+    rather than imported at this module's top so the whole module stays
+    plain-python3 importable (see the module docstring's "pure core"
+    split): only `main()` (and this factory, once it is actually
+    called) ever needs a real or stubbed `xbmc.Player` to exist.
+
+    Kodi invokes `onAVStarted`/`onPlayBackStopped`/`onPlayBackEnded` on
+    every live `Player` instance for ANY playback in the whole Kodi
+    session, not just this addon's -- hence every method below first
+    checks `store.get_now_playing()` and no-ops when no Rivulet context
+    is active. `sample_if_playing()` is NOT a Kodi callback -- `main()`'s
+    own poll loop calls it once per iteration, approximating
+    "periodically while playing"; `xbmc.Player` has no native
+    periodic-tick hook to drive that instead.
+
+    `sync_enabled_fn`/`log_fn` are plain callables (`sync_enabled_fn() ->
+    bool`, `log_fn(level, message)`) rather than an `xbmcaddon.Addon`/
+    `xbmc.log` reference directly, so this factory itself needs no
+    xbmc-specific type beyond the `xbmc_module.Player` base class.
+    """
+
+    class _RivuletPlayer(xbmc_module.Player):
+        def __init__(self):
+            super().__init__()
+            self._last_pushed_at = None
+            self._last_local_write_at = None
+            self._accepted_key = None
+
+        def onAVStarted(self):
+            context = store.get_now_playing()
+            if context is None:
+                return
+            now = datetime.datetime.now(datetime.timezone.utc)
+            if is_context_stale(context.get("started_at"), now):
+                store.set_now_playing(None)
+                store.set_resume_offset_ms(None)
+                return
+            self._accepted_key = _context_key(context)
+            self._last_local_write_at = None
+            offset_ms = store.get_resume_offset_ms()
+            if not offset_ms:
+                return
+            store.set_resume_offset_ms(None)
+            try:
+                self.seekTime(offset_ms / library.MS_PER_SECOND)
+            except Exception as exc:  # noqa: BLE001 - a seek failure must never crash the service or interrupt playback
+                log_fn(xbmc_module.LOGWARNING, "resume seek failed: %r" % (exc,))
+
+        def onPlayBackStopped(self):
+            self._terminate()
+
+        def onPlayBackEnded(self):
+            self._terminate()
+
+        def onPlayBackError(self):
+            # Kodi calls this instead of (not necessarily followed by)
+            # onPlayBackStopped/onPlayBackEnded when playback fails
+            # outright (dead/expired link, unsupported codec, network
+            # drop mid-attempt). Without this, a failed attempt's
+            # context/resume offset would stay persisted for the next
+            # unrelated video the long-lived Player instance sees start.
+            self._terminate()
+
+        def _terminate(self):
+            # Shared terminal-callback cleanup: the final flush only
+            # happens for a context this SAME instance already accepted
+            # via onAVStarted (an error/stop firing before that point
+            # must never persist/push a sample of playback that never
+            # really started for Rivulet). Clearing BOTH the now-playing
+            # context and any queued resume offset stays unconditional.
+            context = store.get_now_playing()
+            if context is not None and _context_key(context) == self._accepted_key:
+                try:
+                    self._flush(final=True)
+                except Exception as exc:  # noqa: BLE001 - final flush is best-effort; cleanup below is unconditional
+                    log_fn(xbmc_module.LOGWARNING, "final flush failed: %r" % (exc,))
+            self._accepted_key = None
+            self._last_local_write_at = None
+            store.set_now_playing(None)
+            store.set_resume_offset_ms(None)
+
+        def sample_if_playing(self):
+            """Call once per `main()` loop tick -- a no-op unless BOTH a
+            Rivulet now-playing context is active AND Kodi is actually
+            mid-playback. Only flushes a context this instance already
+            accepted via onAVStarted (exact identity match) -- a
+            different/not-yet-accepted context is left alone (waiting
+            for onAVStarted) unless it is stale, in which case it is
+            cleared instead of ever being sampled. One onAVStarted
+            already accepted keeps sampling for as long as it keeps
+            playing, however old `started_at` gets."""
+            context = store.get_now_playing()
+            if context is None:
+                return
+            try:
+                playing = self.isPlayingVideo()
+            except Exception:  # noqa: BLE001 - isPlayingVideo() must never crash the service loop
+                playing = False
+            if not playing:
+                return
+            if _context_key(context) != self._accepted_key:
+                now = datetime.datetime.now(datetime.timezone.utc)
+                if is_context_stale(context.get("started_at"), now):
+                    store.set_now_playing(None)
+                    store.set_resume_offset_ms(None)
+                return
+            self._flush(final=False)
+
+        def _flush(self, final):
+            context = store.get_now_playing()
+            if context is None:
+                return
+            try:
+                position_ms = int(self.getTime() * library.MS_PER_SECOND)
+                duration_ms = int(self.getTotalTime() * library.MS_PER_SECOND)
+            except Exception as exc:  # noqa: BLE001 - getTime()/getTotalTime() must never crash the service
+                log_fn(xbmc_module.LOGWARNING, "playback sample failed: %r" % (exc,))
+                return
+            if duration_ms <= 0:
+                return
+            now = datetime.datetime.now(datetime.timezone.utc)
+            if should_push_now(self._last_local_write_at, now, final,
+                                interval=LOCAL_PROGRESS_WRITE_INTERVAL_SECONDS):
+                self._last_local_write_at = now
+                store.set_progress(
+                    context["type"], context["id"], context.get("video_id"),
+                    position_ms, duration_ms, library.iso8601_utc(),
+                )
+            if not should_push_now(self._last_pushed_at, now, final):
+                return
+            self._last_pushed_at = now
+            self._push(context, position_ms, duration_ms)
+
+        def _push(self, context, position_ms, duration_ms):
+            """Best-effort `datastorePut`: only when logged in AND the
+            'sync_progress' setting is on. A failure here is logged and
+            swallowed -- `_flush` above has already written the local
+            progress cache regardless, so a Stremio API hiccup never
+            costs the user their local resume position."""
+            if not sync_enabled_fn():
+                return
+            auth = store.get_auth()
+            if not auth or not auth.get("authKey"):
+                return
+            try:
+                existing = api.datastore_get(auth["authKey"], ids=[context["id"]], all=False)
+                base = existing[0] if existing else library.build_library_item({
+                    "id": context["id"],
+                    "type": context["type"],
+                    "name": context.get("name", ""),
+                    "poster": context.get("poster"),
+                })
+                merged = library.merge_playback(
+                    base, position_ms, duration_ms, video_id=context.get("video_id"),
+                )
+                api.datastore_put(auth["authKey"], [merged])
+            except Exception as exc:  # noqa: BLE001 - a Stremio API hiccup must never interrupt playback or crash the service
+                log_fn(xbmc_module.LOGWARNING, "library push failed: %r" % (exc,))
+
+    return _RivuletPlayer()
 
 
 def main():
@@ -283,6 +561,11 @@ def main():
     def log(level, message):
         xbmc.log(f"[{ADDON_ID}] {message}", level)
 
+    store = Store(profile_dir)
+    progress_player = build_progress_player(
+        xbmc, store, StremioAPI(), log, lambda: _settings.setting_bool(addon, "sync_progress", True),
+    )
+
     class ServiceMonitor(xbmc.Monitor):
         def __init__(self):
             super().__init__()
@@ -295,15 +578,16 @@ def main():
             self._refresh()
 
         def _refresh(self):
-            self.enabled = addon.getSettingBool("server_enable")
+            self.enabled = _settings.setting_bool(addon, "server_enable", EXTRA_ENV_TYPED_DEFAULTS["server_enable"])
             self.binary_setting = addon.getSetting("server_binary")
             self.server_url = addon.getSetting("server_url") or DEFAULT_SERVER_URL
             values = {}
             for setting_id, _env_var, kind in EXTRA_ENV_SETTINGS:
+                default = EXTRA_ENV_TYPED_DEFAULTS.get(setting_id)
                 if kind == "bool":
-                    values[setting_id] = addon.getSettingBool(setting_id)
+                    values[setting_id] = _settings.setting_bool(addon, setting_id, default)
                 elif kind in ("int", "mb_to_bytes"):
-                    values[setting_id] = addon.getSettingInt(setting_id)
+                    values[setting_id] = _settings.setting_int(addon, setting_id, default)
                 else:
                     values[setting_id] = addon.getSetting(setting_id)
             self.extra_settings = values
@@ -321,30 +605,56 @@ def main():
             if prev != self._snapshot():
                 self.restart_requested = True
 
+    def _stop_process(target):
+        """Best-effort `target.stop()`. Returns True once stop()
+        completed (state is safe to discard), False if it raised (an
+        unkillable/wedged child) -- callers must then keep polling the
+        same instance next iteration instead of spawning a duplicate
+        next to a possibly-still-alive process."""
+        try:
+            target.stop()
+        except Exception as exc:  # noqa: BLE001 - a failed stop must never crash the supervision loop
+            log(xbmc.LOGERROR, f"failed to stop embedded server: {exc}")
+            return False
+        return True
+
     monitor = ServiceMonitor()
     proc = None
     backoff_idx = 0
     notified_missing = False
-    attempted_download = False
+    unsupported_platform = False
+    download_backoff_idx = 0
+    next_download_at = None
+    download_attempt_notified = False
+    download_failure_notified = False
 
     while not monitor.abortRequested():
+        try:
+            progress_player.sample_if_playing()
+        except Exception as exc:  # noqa: BLE001 - playback-progress sampling must never crash the service loop
+            log(xbmc.LOGWARNING, "progress sampling failed: %r" % (exc,))
+
         if monitor.restart_requested:
             monitor.restart_requested = False
             if proc is not None:
                 log(xbmc.LOGINFO, "settings changed, restarting embedded server")
-                proc.stop()
-                proc = None
+                if _stop_process(proc):
+                    proc = None
             backoff_idx = 0
             notified_missing = False
-            attempted_download = False
+            unsupported_platform = False
+            download_backoff_idx = 0
+            next_download_at = None
+            download_attempt_notified = False
+            download_failure_notified = False
 
         interval = IDLE_POLL_INTERVAL
 
         if not monitor.enabled:
             if proc is not None:
                 log(xbmc.LOGINFO, "embedded server disabled, stopping")
-                proc.stop()
-                proc = None
+                if _stop_process(proc):
+                    proc = None
         elif proc is not None:
             code = proc.poll()
             if code is None:
@@ -355,8 +665,8 @@ def main():
                 log(xbmc.LOGWARNING, f"embedded server exited (code {code}), restarting")
                 interval = RESTART_BACKOFF[min(backoff_idx, len(RESTART_BACKOFF) - 1)]
                 backoff_idx = min(backoff_idx + 1, len(RESTART_BACKOFF) - 1)
-                proc.stop()
-                proc = None
+                if _stop_process(proc):
+                    proc = None
         else:
             # Nothing of ours running: prefer an already-reachable instance
             # (external or manually-started) over spawning a duplicate.
@@ -367,12 +677,33 @@ def main():
                 binary = resolve_binary(monitor.binary_setting, profile_dir)
                 if binary is None:
                     interval = MISSING_BINARY_RECHECK_INTERVAL
-                    if not attempted_download:
-                        attempted_download = True
-                        xbmcgui.Dialog().notification(
-                            addon.getAddonInfo("name"),
-                            addon.getLocalizedString(30069),
-                        )
+                    if unsupported_platform:
+                        # This platform can never execute a downloaded
+                        # binary (e.g. Android 10+'s W^X ban on exec()
+                        # inside the app's writable storage) -- no retry
+                        # would ever succeed, so stay latched and warn
+                        # once per session instead of retrying.
+                        if not notified_missing:
+                            xbmcgui.Dialog().notification(
+                                addon.getAddonInfo("name"),
+                                addon.getLocalizedString(30031),
+                                xbmcgui.NOTIFICATION_ERROR,
+                            )
+                            log(xbmc.LOGERROR, "stremio-server binary not found")
+                            notified_missing = True
+                    elif next_download_at is not None and time.monotonic() < next_download_at:
+                        # Still cooling down from the last failed attempt --
+                        # gated on a monotonic deadline (not just this
+                        # iteration's sleep) so no combination of other
+                        # branches running in between can retry early.
+                        pass
+                    else:
+                        if not download_attempt_notified:
+                            xbmcgui.Dialog().notification(
+                                addon.getAddonInfo("name"),
+                                addon.getLocalizedString(30069),
+                            )
+                            download_attempt_notified = True
                         log(xbmc.LOGINFO, "auto-downloading stremio-server binary")
                         from lib import serverbin
 
@@ -391,8 +722,6 @@ def main():
                             serverbin.install_binary(
                                 os.path.join(profile_dir, "bin"), progress_cb=_abort_progress,
                             )
-                            log(xbmc.LOGINFO, "stremio-server binary download complete")
-                            interval = POST_DOWNLOAD_RECHECK_INTERVAL
                         except _AbortRequested:
                             # Not a failure -- Kodi is shutting down. No
                             # error notification, and unwind the loop right
@@ -402,15 +731,8 @@ def main():
                             log(xbmc.LOGINFO, "stremio-server binary download aborted, shutting down")
                             break
                         except serverbin.UnsupportedPlatformError as exc:
-                            # This platform can never execute a downloaded
-                            # binary (e.g. Android 10+'s W^X ban on exec()
-                            # inside the app's writable storage) -- no
-                            # retry would ever succeed, so leaning on the
-                            # existing attempted_download one-shot guard
-                            # below (instead of resetting it) is exactly
-                            # right: warn once per session and fall
-                            # through to the regular missing-binary poll
-                            # for the rest of it.
+                            unsupported_platform = True
+                            next_download_at = None
                             log(xbmc.LOGWARNING, f"stremio-server binary cannot run on this device: {exc}")
                             xbmcgui.Dialog().notification(
                                 addon.getAddonInfo("name"),
@@ -418,32 +740,60 @@ def main():
                                 xbmcgui.NOTIFICATION_ERROR,
                             )
                         except Exception as exc:
-                            log(xbmc.LOGERROR, f"stremio-server binary download failed: {exc}")
-                            xbmcgui.Dialog().notification(
-                                addon.getAddonInfo("name"),
-                                addon.getLocalizedString(30063),
-                                xbmcgui.NOTIFICATION_ERROR,
+                            # Transient failure (network hiccup, GitHub
+                            # outage, no release asset published yet, ...)
+                            # -- retry automatically after a bounded
+                            # backoff instead of giving up for the
+                            # session, but only surface the failure
+                            # notification once per cycle so a prolonged
+                            # outage does not spam the user.
+                            wait_s = DOWNLOAD_RETRY_BACKOFF[
+                                min(download_backoff_idx, len(DOWNLOAD_RETRY_BACKOFF) - 1)
+                            ]
+                            download_backoff_idx = min(download_backoff_idx + 1, len(DOWNLOAD_RETRY_BACKOFF) - 1)
+                            next_download_at = time.monotonic() + wait_s
+                            log(
+                                xbmc.LOGERROR,
+                                f"stremio-server binary download failed: {exc}, retrying in {wait_s}s",
                             )
-                    elif not notified_missing:
-                        xbmcgui.Dialog().notification(
-                            addon.getAddonInfo("name"),
-                            addon.getLocalizedString(30031),
-                            xbmcgui.NOTIFICATION_ERROR,
-                        )
-                        log(xbmc.LOGERROR, "stremio-server binary not found")
-                        notified_missing = True
+                            if not download_failure_notified:
+                                xbmcgui.Dialog().notification(
+                                    addon.getAddonInfo("name"),
+                                    addon.getLocalizedString(30063),
+                                    xbmcgui.NOTIFICATION_ERROR,
+                                )
+                                download_failure_notified = True
+                        else:
+                            log(xbmc.LOGINFO, "stremio-server binary download complete")
+                            download_backoff_idx = 0
+                            next_download_at = None
+                            download_attempt_notified = False
+                            download_failure_notified = False
+                            interval = POST_DOWNLOAD_RECHECK_INTERVAL
                 else:
                     notified_missing = False
+                    unsupported_platform = False
+                    download_backoff_idx = 0
+                    next_download_at = None
+                    download_attempt_notified = False
+                    download_failure_notified = False
                     log(xbmc.LOGINFO, f"starting embedded server: {binary}")
-                    proc = ServerProcess(
+                    candidate = ServerProcess(
                         binary, monitor.server_url, app_path, log_path, extra_env=monitor.extra_env,
                     )
-                    proc.start()
-                    interval = HEALTHY_POLL_INTERVAL
+                    try:
+                        candidate.start()
+                    except Exception as exc:  # noqa: BLE001 - a failed spawn must never crash the supervision loop
+                        log(xbmc.LOGERROR, f"failed to start embedded server: {exc}")
+                        interval = RESTART_BACKOFF[min(backoff_idx, len(RESTART_BACKOFF) - 1)]
+                        backoff_idx = min(backoff_idx + 1, len(RESTART_BACKOFF) - 1)
+                    else:
+                        proc = candidate
+                        interval = HEALTHY_POLL_INTERVAL
 
         if monitor.waitForAbort(interval):
             break
 
     if proc is not None:
         log(xbmc.LOGINFO, "shutting down embedded server")
-        proc.stop()
+        _stop_process(proc)

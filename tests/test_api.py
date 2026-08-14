@@ -7,6 +7,8 @@ Request/response shapes cross-checked against stremio-core auth unit tests.
 No network access - StremioAPI is exercised by substituting `api.session`
 with `tests.conftest.FakeSession`.
 """
+import json
+
 import pytest
 import requests
 
@@ -207,6 +209,104 @@ def test_datastore_get_error_raises_api_error():
     )
     with pytest.raises(ApiError):
         api.datastore_get("bad-token")
+
+
+# --- datastorePut ----------------------------------------------------------
+
+
+def test_datastore_put_posts_exact_pinned_wire_body():
+    """The wire body is pinned by stremio-core's own unit test fixture
+    (src/unit_tests/ctx/add_to_library.rs:35-37) -- assert the serialized
+    JSON, key by key and in order, matches it exactly (a plain dict `==`
+    comparison would not catch key-order regressions)."""
+    change = {
+        "_id": "id", "name": "name", "type": "type", "poster": None,
+        "posterShape": "poster", "removed": False, "temp": False,
+        "_ctime": "2020-01-01T00:00:00Z", "_mtime": "2020-01-01T00:00:00Z",
+        "state": {
+            "lastWatched": "2020-01-01T00:00:00Z", "timeWatched": 0, "timeOffset": 0,
+            "overallTimeWatched": 0, "timesWatched": 0, "flaggedWatched": 0,
+            "duration": 0, "video_id": None, "watched": None, "noNotif": False,
+        },
+        "behaviorHints": {"defaultVideoId": None, "featuredVideoId": None, "hasScheduledVideos": False},
+    }
+    pinned = (
+        '{"authKey":"auth_key","collection":"libraryItem","changes":[{"_id":"id",'
+        '"name":"name","type":"type","poster":null,"posterShape":"poster","removed":false,'
+        '"temp":false,"_ctime":"2020-01-01T00:00:00Z","_mtime":"2020-01-01T00:00:00Z",'
+        '"state":{"lastWatched":"2020-01-01T00:00:00Z","timeWatched":0,"timeOffset":0,'
+        '"overallTimeWatched":0,"timesWatched":0,"flaggedWatched":0,"duration":0,'
+        '"video_id":null,"watched":null,"noNotif":false},"behaviorHints":{"defaultVideoId":null,'
+        '"featuredVideoId":null,"hasScheduledVideos":false}}]}'
+    )
+
+    api = make_api()
+    api.session = FakeSession(responses=[_ok({"result": {"success": True}})])
+    api.datastore_put("auth_key", [change])
+
+    call = api.session.calls[0]
+    assert call["url"] == API_BASE + "/api/datastorePut"
+    body = call["kwargs"]["json"]
+    assert json.dumps(body, separators=(",", ":")) == pinned
+
+
+def test_datastore_put_defaults_collection_to_libraryitem():
+    api = make_api()
+    api.session = FakeSession(responses=[_ok({"result": {"success": True}})])
+    api.datastore_put("tok-123", [{"_id": "id"}])
+
+    body = api.session.calls[0]["kwargs"]["json"]
+    assert body["collection"] == "libraryItem"
+    assert body["authKey"] == "tok-123"
+    assert body["changes"] == [{"_id": "id"}]
+
+
+def test_datastore_put_error_raises_api_error():
+    api = make_api()
+    api.session = FakeSession(
+        responses=[_ok({"error": {"message": "Unauthorized", "code": 1}})]
+    )
+    with pytest.raises(ApiError):
+        api.datastore_put("bad-token", [{"_id": "id"}])
+
+
+# --- datastoreMeta -----------------------------------------------------------
+
+
+def test_datastore_meta_posts_correct_path_and_body():
+    api = make_api()
+    api.session = FakeSession(responses=[_ok({"result": [["tt1", 1577836800000]]})])
+    result = api.datastore_meta("auth_key")
+
+    call = api.session.calls[0]
+    assert call["url"] == API_BASE + "/api/datastoreMeta"
+    body = call["kwargs"]["json"]
+    assert body == {"authKey": "auth_key", "collection": "libraryItem"}
+    assert result == [["tt1", 1577836800000]]
+
+
+def test_datastore_meta_honors_explicit_collection():
+    api = make_api()
+    api.session = FakeSession(responses=[_ok({"result": []})])
+    api.datastore_meta("auth_key", collection="other")
+
+    body = api.session.calls[0]["kwargs"]["json"]
+    assert body["collection"] == "other"
+
+
+def test_datastore_meta_non_list_result_degrades_to_empty_list():
+    api = make_api()
+    api.session = FakeSession(responses=[_ok({"result": None})])
+    assert api.datastore_meta("auth_key") == []
+
+
+def test_datastore_meta_error_raises_api_error():
+    api = make_api()
+    api.session = FakeSession(
+        responses=[_ok({"error": {"message": "Unauthorized", "code": 1}})]
+    )
+    with pytest.raises(ApiError):
+        api.datastore_meta("bad-token")
 
 
 # --- helpers -----------------------------------------------------------

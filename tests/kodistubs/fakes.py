@@ -17,14 +17,16 @@ _DEFAULT_ADDON_INFO = {
 }
 
 # Default settings dict (`xbmcaddon.Addon.getSetting`/getSettingBool/
-# getSettingInt), covering every key lib/ui/player.py's pre-buffer flow
-# reads. Any key not read by the code under test is simply inert.
+# getSettingInt), covering every key lib/ui/player.py's pre-buffer/
+# resume flow reads. Any key not read by the code under test is simply
+# inert.
 _DEFAULT_SETTINGS = {
     'server_url': '',
     'buffer_enable': True,
     'buffer_mb': 1,
     'subs_enable': False,
     'subs_language': 'en',
+    'resume_ask': True,
 }
 
 # Default localized-string map (`xbmcaddon.Addon.getLocalizedString`). Only
@@ -36,6 +38,7 @@ _DEFAULT_SETTINGS = {
 _DEFAULT_LOCALIZED = {
     30081: 'buffered %s of %s',
     30082: 'speed %s, %s peers',
+    30183: 'Playing %s in %d s',
 }
 
 
@@ -87,13 +90,14 @@ class Env:
     queued Dialog.input() answers) the fakes below consult. One fresh
     `Env` is created per `install_kodi_stubs()` call.
 
-    `cancel`, `monitor_abort`, and `player_is_playing` may each be a plain
-    bool (fixed answer for every call) or a callable taking the 1-based
-    call count and returning a truthy/falsy value, for tests that need
-    cancellation/abort/playback-state to change only after N attempts.
+    `cancel`, `monitor_abort`, `monitor_abort_requested`, and
+    `player_is_playing` may each be a plain bool (fixed answer for every
+    call) or a callable taking the 1-based call count and returning a
+    truthy/falsy value, for tests that need cancellation/abort/
+    playback-state to change only after N attempts.
     """
 
-    def __init__(self, cancel=False, monitor_abort=False):
+    def __init__(self, cancel=False, monitor_abort=False, monitor_abort_requested=False):
         # xbmcplugin recorders
         self.directory_items = []   # [{'handle', 'items', 'totalItems'}]
         self.end_of_directory = []  # [{'handle', 'succeeded', 'updateListing', 'cacheToDisc'}]
@@ -114,8 +118,12 @@ class Env:
         self.log_calls = []          # [(msg, level)]
         self.executed_builtins = []  # [cmd, ...]
         self.monitor_abort_calls = 0
+        self.monitor_abort_requested_calls = 0
         self.player_play_calls = []  # [(url, list_item)] - xbmc.Player().play() calls
         self.player_is_playing_calls = 0  # xbmc.Player().isPlaying() poll count
+        self.player_get_time_calls = 0     # xbmc.Player().getTime() poll count
+        self.player_get_total_time_calls = 0  # xbmc.Player().getTotalTime() poll count
+        self.player_seek_calls = []        # [seek_seconds, ...] - xbmc.Player().seekTime() calls
 
         # xbmcaddon.Addon.openSettings recorder
         self.opened_settings = False
@@ -124,7 +132,10 @@ class Env:
         # xbmc.Monitor.waitForAbort()/xbmc.Player().isPlaying()
         self.cancel = cancel
         self.monitor_abort = monitor_abort
+        self.monitor_abort_requested = monitor_abort_requested
         self.player_is_playing = False  # see streamswindow._wait_for_playback_end()
+        self.player_get_time = 0.0      # seconds - see lib.service_runner's progress player
+        self.player_get_total_time = 0.0  # seconds - see lib.service_runner's progress player
 
         # bound by install_kodi_stubs() once the FakeAddon exists
         self.addon = None

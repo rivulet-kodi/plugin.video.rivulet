@@ -6,7 +6,8 @@ that catalog's items; picking a TITLE from the coverflow opens
 """
 import xbmcgui
 
-from lib.stremio.addons import AddonError
+from lib.stremio.addons import AddonError, safe_url_for_log
+from lib.ui.dependencies import get_store
 from lib.ui.uicommon import BaseWindow, busy_dialog, open_window
 
 LIST = 30002
@@ -45,7 +46,13 @@ class CatalogPickerWindow(BaseWindow):
             self._make_item(index, manifest, catalog)
             for index, (_transport_url, manifest, catalog) in enumerate(self.catalogs)
         ]
-        self.getControl(LIST).addItems(items)
+        control = self.getControl(LIST)
+        # reset() before addItems(): onInit() runs again when
+        # uicommon.ModalStackWindow reopens a screen force-closed for
+        # playback, and re-adding onto a retained list would double every
+        # item.
+        control.reset()
+        control.addItems(items)
         self.setFocusId(LIST)
 
     def onClick(self, control_id):
@@ -58,6 +65,8 @@ class CatalogPickerWindow(BaseWindow):
         self._open_catalog(transport_url, catalog)
 
     def _open_catalog(self, transport_url, catalog):
+        import xbmc
+
         from lib.ui.compat import L, log
         from lib.ui.views import _fetch_catalog
 
@@ -66,12 +75,10 @@ class CatalogPickerWindow(BaseWindow):
             with busy_dialog(L(30033)):
                 metas = _fetch_catalog(transport_url, ctype, catalog.get('id'))
         except AddonError as exc:
-            log('catalogpicker: %s failed: %r' % (transport_url, exc))
+            log('catalogpicker: %s failed: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGERROR)
             return
         if not metas:
             return
-
-        import xbmc
 
         from lib.ui.compat import notify
 
@@ -98,11 +105,10 @@ def open_catalog_picker():
     the module docstring)."""
     import xbmc
 
-    from lib.store import Store
     from lib.stremio.addons import iter_catalogs
-    from lib.ui.compat import L, addon_profile_dir, log, notify
+    from lib.ui.compat import L, log, notify
 
-    catalogs = list(iter_catalogs(Store(addon_profile_dir()).get_addons()))
+    catalogs = list(iter_catalogs(get_store().get_addons()))
     if not catalogs:
         notify(L(30030))
         return False

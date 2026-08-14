@@ -5,66 +5,42 @@ base64url-decoded stream dict for action=play. This module owns the only
 xbmc* calls involved in actually starting playback.
 """
 import contextlib
-import os
 from urllib.parse import urlencode
 
 import xbmc
 import xbmcgui
 import xbmcplugin
 
-from lib.store import Store
-from lib.stremio.addons import AddonClient
-from lib.stremio.server import UNKNOWN_FILE_IDX, ServerClient, guess_file_idx
+from lib.library import iso8601_utc
+from lib.stremio.server import (
+    UNKNOWN_FILE_IDX,
+    ServerClient,
+    UnsupportedStreamError,
+    guess_file_idx,
+)
 from lib.stremio.subtitles import collect_subtitles, sort_subtitles
 from lib.ui.compat import (
     ADDON,
     L,
-    addon_profile_dir,
     log,
     notify,
     set_video_info,
     setting_bool,
     setting_int,
 )
-
-#: Extension -> MIME type for the video containers Stremio streams commonly
-#: use. Keyed by `os.path.splitext()` output (lowercased, leading dot kept).
-_MIME_TYPES = {
-    '.mkv': 'video/x-matroska',
-    '.mp4': 'video/mp4',
-    '.m4v': 'video/mp4',
-    '.avi': 'video/x-msvideo',
-    '.mov': 'video/quicktime',
-    '.ts': 'video/mp2t',
-    '.m2ts': 'video/mp2t',
-    '.webm': 'video/webm',
-    '.flv': 'video/x-flv',
-    '.wmv': 'video/x-ms-wmv',
-    '.mpg': 'video/mpeg',
-    '.mpeg': 'video/mpeg',
-}
-
-
-def _mime_for(filename):
-    """Best-effort MIME type for `filename`'s extension, or None.
-
-    Unknown/absent extensions return None so the caller skips
-    `setMimeType` entirely rather than hinting a wrong/generic type.
-    """
-    if not filename:
-        return None
-    ext = os.path.splitext(filename)[1].lower()
-    return _MIME_TYPES.get(ext)
-
-
-def _filename_from_url(url):
-    """Last path segment of a resolved playback `url`, with any baked
-    `|urlencoded-headers` suffix (see the header-baking below in `play()`)
-    and query string stripped first.
-    """
-    base = url.split('|', 1)[0].split('?', 1)[0]
-    return base.rsplit('/', 1)[-1]
-
+from lib.ui.dependencies import get_client, get_store
+from lib.ui.playbackmeta import (
+    extract_file_name,
+    filename_from_url,
+    format_hms,
+    human_size,
+    mime_for,
+    parse_duration_seconds,
+    parse_rating,
+    parse_year,
+    resolve_art,
+    sanitize_title,
+)
 
 #: Bounded (connect, read) timeouts for the pre-buffer network calls. The
 #: SHORT read timeout is what makes the "Preparing stream" dialog
@@ -133,22 +109,85 @@ def _server_client():
     return ServerClient(base_url)
 
 
-_STORE = None
-_CLIENT = None
+#: Resume-prompt progress band (percent of duration already watched):
+#: below RESUME_MIN_PERCENT is "barely started, not worth asking"; at/
+#: above RESUME_MAX_PERCENT is "basically finished, nothing meaningful
+#: left to resume".
+RESUME_MIN_PERCENT = 1.0
+RESUME_MAX_PERCENT = 95.0
 
 
-def _get_store():
-    global _STORE
-    if _STORE is None:
-        _STORE = Store(addon_profile_dir())
-    return _STORE
+def _maybe_resume_offset_ms(store, stype, sid, video_id):
+    """Return the cached position (milliseconds) to resume from if the
+    user has local progress for `(stype, sid, video_id)` between
+    `RESUME_MIN_PERCENT` and `RESUME_MAX_PERCENT` of duration, the
+    'resume_ask' setting is on, and they answer yes to the
+    `xbmcgui.Dialog().yesno()` prompt below - else `None` (nothing
+    cached, out of band, declined, or the setting is off). Never raises:
+    a broken local progress cache must never block playback.
+    """
+    if not setting_bool('resume_ask', True):
+        return None
+    try:
+        progress = store.get_progress(stype, sid, video_id)
+    except Exception as exc:  # noqa: BLE001 - a corrupt local cache must never block playback
+        log('player: get_progress failed for %s/%s: %r' % (stype, sid, exc), xbmc.LOGWARNING)
+        return None
+    if not progress:
+        return None
+    position_ms = progress.get('position_ms') or 0
+    duration_ms = progress.get('duration_ms') or 0
+    if duration_ms <= 0 or position_ms <= 0:
+        return None
+    percent = (position_ms / duration_ms) * 100.0
+    if percent < RESUME_MIN_PERCENT or percent > RESUME_MAX_PERCENT:
+        return None
+    if not xbmcgui.Dialog().yesno(
+        L(30172), _lfmt(30173, format_hms(position_ms / 1000.0)),
+        yeslabel=L(30174), nolabel=L(30175),
+    ):
+        return None
+    return position_ms
 
 
-def _get_client():
-    global _CLIENT
-    if _CLIENT is None:
-        _CLIENT = AddonClient()
-    return _CLIENT
+def _record_now_playing_and_maybe_resume(stype, sid, video_id, item_meta):
+    """Best-effort: persist the "now playing" context
+    (`lib.store.Store.set_now_playing`, consumed by
+    `lib.service_runner`'s background progress tracker) and, when local
+    progress exists for `(stype, content_id, video_id)` in a resumable
+    band, prompt the user and queue a one-shot resume-seek offset the
+    service's `onAVStarted` performs - `ListItem.setProperty(
+    'StartOffset')` is unreliable for the direct `xbmc.Player().play()`
+    path this addon's custom windows use, hence an explicit post-start
+    seek rather than a resume property (see `lib.service_runner`).
+
+    `content_id` is `item_meta['meta']['id']` when present, else `sid` -
+    for a series this is the show's own library id (`sid` passed in is
+    the season/stream-picker id), so local resume/progress and the
+    stored now-playing context stay rooted at the show, keyed together
+    with the exact episode `video_id`. A movie has no series meta id, so
+    `content_id` falls back to `sid` exactly as before.
+
+    Never raises: a broken store write must never block playback that
+    has already been resolved.
+    """
+    try:
+        store = get_store()
+        meta = (item_meta or {}).get('meta') or {}
+        content_id = meta.get('id') or sid
+        resume_offset_ms = _maybe_resume_offset_ms(store, stype, content_id, video_id)
+        art = (item_meta or {}).get('art') or {}
+        store.set_now_playing({
+            'type': stype,
+            'id': content_id,
+            'video_id': video_id,
+            'name': (item_meta or {}).get('label') or meta.get('name') or '',
+            'poster': art.get('poster') or meta.get('poster'),
+            'started_at': iso8601_utc(),
+        })
+        store.set_resume_offset_ms(resume_offset_ms)
+    except Exception as exc:  # noqa: BLE001 - a broken store write must never block playback
+        log('player: recording now-playing context failed for %s/%s: %r' % (stype, sid, exc), xbmc.LOGWARNING)
 
 
 def _attach_subtitles(list_item, behavior_hints, stype, sid):
@@ -164,7 +203,7 @@ def _attach_subtitles(list_item, behavior_hints, stype, sid):
         if 'filename' in behavior_hints:
             extra.append(('filename', behavior_hints['filename']))
         subs = collect_subtitles(
-            _get_client(), _get_store().get_addons(), stype, sid, extra=extra or None
+            get_client(), get_store().get_addons(), stype, sid, extra=extra or None
         )
         subs = sort_subtitles(subs, ADDON.getSetting('subs_language') or 'en')
         urls = [sub['url'] for sub in subs[:20]]
@@ -172,16 +211,6 @@ def _attach_subtitles(list_item, behavior_hints, stype, sid):
             list_item.setSubtitles(urls)
     except Exception as exc:  # noqa: BLE001 - subtitles are a bonus, never fatal
         log('player: subtitle fetch failed for %s/%s: %r' % (stype, sid, exc), xbmc.LOGWARNING)
-
-
-def _human_size(num_bytes):
-    """Format a byte count as e.g. '12.3 MB' (B/KB/MB/GB, 1 decimal)."""
-    value = float(num_bytes or 0)
-    for unit in ('B', 'KB', 'MB'):
-        if value < 1024.0:
-            return '%.1f %s' % (value, unit)
-        value /= 1024.0
-    return '%.1f GB' % value
 
 
 def _lfmt(string_id, *args):
@@ -207,7 +236,7 @@ def _stats_line(stats):
     peers = (stats or {}).get('peers')
     if peers is None:
         return ''
-    speed = _human_size((stats or {}).get('downloadSpeed') or 0)
+    speed = human_size((stats or {}).get('downloadSpeed') or 0)
     return _lfmt(30082, speed, peers)
 
 
@@ -247,14 +276,18 @@ def _await_file_idx(server, stream, info_hash, url, dialog, monitor):
     still-warming `/create` cannot freeze the loop between cancel checks -
     a timed-out poll just re-hits the same warming engine next iteration.
 
-    Returns `(file_idx, url, proceed)`. `proceed` is False only on
-    cancellation (caller must resolve False). When the budget runs out
-    with no usable metadata, `file_idx` is UNKNOWN_FILE_IDX and `proceed`
-    is True - the caller then falls back to "proceed without polling".
+    Returns `(file_idx, url, proceed, stats)`. `proceed` is False only on
+    cancellation (caller must resolve False; `stats` is then irrelevant
+    and always None). When the budget runs out with no usable metadata,
+    `file_idx` is UNKNOWN_FILE_IDX, `proceed` is True and `stats` is
+    None - the caller then falls back to "proceed without polling".
+    Otherwise `stats` is the exact `/create` response `file_idx` was
+    guessed from, threaded back out so the caller can recover a real
+    filename (`extract_file_name`) without an extra `/create` round-trip.
     """
     for attempt in range(_MAX_METADATA_ATTEMPTS):
         if dialog.iscanceled():
-            return UNKNOWN_FILE_IDX, url, False
+            return UNKNOWN_FILE_IDX, url, False, None
 
         try:
             stats = server.create_engine(info_hash, timeout=_METADATA_TIMEOUT)
@@ -266,7 +299,7 @@ def _await_file_idx(server, stream, info_hash, url, dialog, monitor):
         if idx is not None:
             trackers = stream.get('announce') or stream.get('sources') or []
             rebuilt = server.torrent_url(stream['infoHash'], idx, trackers)
-            return idx, rebuilt, True
+            return idx, rebuilt, True, stats
 
         percent = min(_METADATA_PERCENT_BASE + _METADATA_PERCENT_SPAN, _METADATA_PERCENT_BASE + attempt)
         message = '%s\n%s' % (L(30088), _lfmt(30090, attempt + 1, _MAX_METADATA_ATTEMPTS))
@@ -276,9 +309,9 @@ def _await_file_idx(server, stream, info_hash, url, dialog, monitor):
         dialog.update(percent, message)
 
         if monitor.waitForAbort(1.0):
-            return UNKNOWN_FILE_IDX, url, False
+            return UNKNOWN_FILE_IDX, url, False, None
 
-    return UNKNOWN_FILE_IDX, url, True
+    return UNKNOWN_FILE_IDX, url, True, None
 
 
 def _prebuffer_torrent(server, stream, url, dialog, monitor):
@@ -290,11 +323,15 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
 
     Only called for torrent streams (`infoHash` present) once the server
     is already known available and the stream itself has been resolved.
-    Returns `(proceed, url)`: `proceed` is False when the user cancelled
-    OR no usable front data could be obtained (caller must resolve
-    False); `url` is the original url, or the rebuilt one when the server
-    had to guess the file index. ANY unexpected error degrades to `(True,
-    url)` - a broken pre-buffer must never block playback.
+    Returns `(proceed, url, filename)`: `proceed` is False when the user
+    cancelled OR no usable front data could be obtained (caller must
+    resolve False; `url`/`filename` are then not meaningful); `url` is
+    the original url, or the rebuilt one when the server had to guess
+    the file index; `filename` is the resolved torrent file's own name
+    (from a `/create` stats dict this function already fetched for
+    another reason - see `extract_file_name`) when one could be
+    recovered, else None. ANY unexpected error degrades to `(True, url,
+    None)` - a broken pre-buffer must never block playback.
     """
     buffer_enable = setting_bool('buffer_enable', True)
     log(
@@ -302,33 +339,37 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
         xbmc.LOGINFO,
     )
     if not buffer_enable:
-        return True, url
+        return True, url, None
 
     info_hash = stream['infoHash']
     try:
         if dialog.iscanceled():
-            return False, url
+            return False, url, None
 
         file_idx = stream.get('fileIdx')
         if file_idx is None:
             file_idx = UNKNOWN_FILE_IDX
+        filename = None
         if file_idx == UNKNOWN_FILE_IDX:
-            file_idx, url, proceed = _await_file_idx(server, stream, info_hash, url, dialog, monitor)
+            file_idx, url, proceed, stats = _await_file_idx(server, stream, info_hash, url, dialog, monitor)
             if not proceed:
-                return False, url
+                return False, url, None
             if file_idx == UNKNOWN_FILE_IDX:
                 # Metadata never arrived within budget; nothing to stream
                 # the front of, so just start playback.
                 notify(L(30083))
-                return True, url
+                return True, url, None
+            filename = extract_file_name(stats, file_idx)
         else:
             # Warm the engine, but bounded: a cold /create would otherwise
             # block for its full timeout with no cancel check. The front
             # reads below drive the engine anyway, so a failed/slow warm is
-            # non-fatal.
+            # non-fatal. Its response also doubles as the source of a real
+            # filename (see `extract_file_name`) - no extra request needed.
             dialog.update(_ENGINE_WARM_PERCENT, L(30089))
             try:
-                server.create_engine(info_hash, timeout=_METADATA_TIMEOUT)
+                warm_stats = server.create_engine(info_hash, timeout=_METADATA_TIMEOUT)
+                filename = extract_file_name(warm_stats, file_idx)
             except Exception as exc:  # noqa: BLE001 - front reads drive the engine regardless
                 log('player: engine warm failed for %s: %r (continuing)' % (info_hash, exc), xbmc.LOGWARNING)
 
@@ -349,7 +390,7 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
         # rather than hanging or handing Kodi a doomed URL.
         for attempt in range(_MAX_FRONT_ATTEMPTS):
             if dialog.iscanceled():
-                return False, url
+                return False, url, None
 
             # Best-effort live speed/peers for this attempt's updates,
             # throttled to one poll per attempt (see
@@ -358,19 +399,19 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
             # past the front-read call that follows it.
             stats_line = _stats_line(_poll_stats_best_effort(server, info_hash))
             if dialog.iscanceled():
-                return False, url
+                return False, url, None
 
             got = 0
             try:
                 for chunk_len in server.iter_front(info_hash, file_idx, target, timeout=_FRONT_TIMEOUT):
                     got += chunk_len
                     percent = min(100, _BUFFER_PERCENT_BASE + got * _BUFFER_PERCENT_SPAN // target) if target else 100
-                    message = _lfmt(30081, _human_size(got), _human_size(target))
+                    message = _lfmt(30081, human_size(got), human_size(target))
                     if stats_line:
                         message += '\n' + stats_line
                     dialog.update(percent, message)
                     if dialog.iscanceled():
-                        return False, url
+                        return False, url, None
                     if got >= target:
                         break
             except Exception as exc:  # noqa: BLE001 - a front-read hiccup must not brick playback
@@ -381,13 +422,13 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
                     'player: pre-buffer complete for %s: buffered=%d target=%d' % (info_hash, got, target),
                     xbmc.LOGINFO,
                 )
-                return True, url
+                return True, url, filename
 
             # About to sleep _ATTEMPT_PAUSE_SECONDS before retrying - show a
             # retrying hint so that silent pause isn't a dead-looking dialog.
             percent = min(100, _BUFFER_PERCENT_BASE + got * _BUFFER_PERCENT_SPAN // target) if target else 100
             retry_message = '%s\n%s' % (
-                _lfmt(30081, _human_size(got), _human_size(target)),
+                _lfmt(30081, human_size(got), human_size(target)),
                 _lfmt(30090, attempt + 1, _MAX_FRONT_ATTEMPTS),
             )
             if stats_line:
@@ -395,7 +436,7 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
             dialog.update(percent, retry_message)
 
             if monitor.waitForAbort(_ATTEMPT_PAUSE_SECONDS):
-                return False, url
+                return False, url, None
 
         log(
             'player: pre-buffer timed out for %s after %d attempts with no usable front data'
@@ -403,10 +444,10 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
             xbmc.LOGINFO,
         )
         notify(L(30084))
-        return False, url
+        return False, url, None
     except Exception as exc:  # noqa: BLE001 - pre-buffer is a bonus, never fatal
         log('player: pre-buffer failed for %s: %r' % (stream.get('infoHash'), exc), xbmc.LOGWARNING)
-        return True, url
+        return True, url, None
 
 
 def _wait_for_server(server, dialog, monitor):
@@ -432,7 +473,109 @@ def _wait_for_server(server, dialog, monitor):
     return False
 
 
-def _resolve_playable_item(stream, stype, sid):
+def _stream_plot(stream):
+    """Last-resort plot text for the OSD: the stream's own parsed
+    description (release name, size, seeders, provider), or '' when the
+    stream yields nothing worth showing.
+
+    Parsing here rather than accepting a pre-parsed `info` from the
+    caller keeps `item_meta` a pure content-metadata contract and means
+    the classical `action=play` path (which never had an `info` dict)
+    benefits too. `parse_stream`/`format_plot` are pure text helpers and
+    cannot raise on odd input, but a malformed stream must never cost us
+    playback, so this still degrades to ''.
+    """
+    try:
+        from lib.stremio.streaminfo import format_plot, parse_stream
+        return format_plot(parse_stream(stream or {}))
+    except Exception as exc:  # noqa: BLE001 - a plot is cosmetic, playback is not
+        log('player: stream plot fallback failed: %r' % (exc,), xbmc.LOGWARNING)
+        return ''
+
+
+def _apply_item_metadata(list_item, stream, stype, item_meta, filename):
+    """Populate `list_item`'s label and video-info metadata (title, art,
+    plot, year, rating, genre, duration, mediatype/tvshowtitle) so
+    Kodi's fullscreen OSD shows a real title and artwork instead of "Not
+    available" plus the default camera placeholder - the live Defect A:
+    a stream with no `behaviorHints.filename` (the common case for a
+    torrent resolved to `http://host/<infoHash>/<fileIdx>`, which has no
+    filename of its own) used to reach Kodi with an empty label/title
+    and no art at all, even though the caller (`lib.ui.streamswindow`)
+    already knew the content's real title/poster/fanart/meta - `item_meta`
+    (see `_resolve_playable_item`'s docstring for its shape) is how that
+    caller now forwards them. Every field is best-effort: a missing or
+    malformed value is silently skipped, never raised - a metadata
+    hiccup must never prevent playback.
+
+    `filename` is the release/torrent filename `_resolve_playable_item`
+    already derived (`behaviorHints.filename`, or the resolved torrent
+    file's own name - see `extract_file_name`): the title fallback when
+    `item_meta` has no `label`, and preserved as `originaltitle` when a
+    more specific `item_meta['label']` title is chosen instead, so the
+    user can still see which exact release is playing.
+    """
+    item_meta = item_meta or {}
+    meta = item_meta.get('meta') or {}
+
+    title = sanitize_title(
+        item_meta.get('label') or filename or stream.get('title') or stream.get('name') or ''
+    )
+    if title:
+        list_item.setLabel(title)
+
+    art = resolve_art(item_meta.get('art'), meta)
+    if art:
+        list_item.setArt(art)
+
+    info = {'mediatype': 'episode' if stype == 'series' else 'movie'}
+    if title:
+        info['title'] = title
+
+    originaltitle = sanitize_title(filename or '')
+    if originaltitle and originaltitle != title:
+        info['originaltitle'] = originaltitle
+
+    # Kodi's fullscreen OSD info panel (Estuary's DialogSeekBar.xml renders
+    # `$INFO[VideoPlayer.Tagline][CR]$INFO[VideoPlayer.Plot]` with
+    # `fallback="10005"`, and Kodi string 10005 IS the literal "Not
+    # available") shows that fallback whenever the playing item has no
+    # plot - live-confirmed on a real device even after the title/art fix
+    # above landed. Catalog previews frequently carry no `description` at
+    # all, so rather than leave the panel reading "Not available", fall
+    # back to the stream's own parsed description (release name, size,
+    # seeders, provider) - genuinely the most useful thing to show about
+    # the file actually playing.
+    plot = item_meta.get('plot') or meta.get('description') or _stream_plot(stream)
+    if plot:
+        info['plot'] = plot
+
+    if meta.get('tagline'):
+        info['plotoutline'] = meta['tagline']
+
+    year = parse_year(meta.get('releaseInfo') or meta.get('year'))
+    if year is not None:
+        info['year'] = year
+
+    rating = parse_rating(meta.get('imdbRating'))
+    if rating is not None:
+        info['rating'] = rating
+
+    genres = meta.get('genres')
+    if genres:
+        info['genre'] = genres
+
+    duration = parse_duration_seconds(meta.get('runtime'))
+    if duration is not None:
+        info['duration'] = duration
+
+    if stype == 'series' and meta.get('name'):
+        info['tvshowtitle'] = meta['name']
+
+    set_video_info(list_item, info)
+
+
+def _resolve_playable_item(stream, stype, sid, item_meta=None, video_id=None):
     """Resolve `stream` (Stremio Stream object for content `stype`/`sid`)
     to a `(url, list_item)` pair ready to hand to Kodi's player, or
     `(None, None)` on failure - a notification has already been shown
@@ -452,6 +595,25 @@ def _resolve_playable_item(stream, stype, sid):
     `xbmcplugin.setResolvedUrl`) and `play_direct()` (the custom-window
     path - `xbmc.Player().play()`): neither `xbmcplugin` nor an
     `ADDON_HANDLE` is touched here, only stream resolution.
+
+    `item_meta` is the caller's own already-known content metadata: an
+    optional `{'label': str, 'art': dict, 'meta': dict}`, every key
+    optional (see `_apply_item_metadata`'s docstring for exactly how
+    each is used). It exists to fix a live bug: `stream` alone routinely
+    carries nothing usable for Kodi's fullscreen OSD - a torrent with no
+    `behaviorHints.filename` resolves to a bare
+    `http://host/<infoHash>/<fileIdx>` URL - so without it the OSD
+    showed the title as "Not available" and the artwork as the default
+    camera placeholder, even though the caller (`lib.ui.streamswindow`)
+    already knew the real title/poster/fanart/meta all along. `None`/
+    `{}` (the default) behaves exactly as before this parameter existed.
+
+    `video_id` (optional) is the specific episode id actually being
+    played, when the caller has one - threaded into the "now playing"
+    context (`lib.store.Store.set_now_playing`) and the local progress-
+    cache lookup/write key (see `_record_now_playing_and_maybe_resume`).
+    `None` (a movie, or a caller with no episode id of its own) behaves
+    exactly as before this parameter existed.
     """
     stream = stream or {}
     behavior_hints = stream.get('behaviorHints') or {}
@@ -460,6 +622,7 @@ def _resolve_playable_item(stream, stype, sid):
     server = _server_client()
     dialog = xbmcgui.DialogProgress()
     dialog.create(L(30080), title)
+    resolved_filename = None
     try:
         monitor = xbmc.Monitor()
 
@@ -470,6 +633,18 @@ def _resolve_playable_item(stream, stype, sid):
         dialog.update(_RESOLVE_PERCENT, L(30087))
         try:
             url = server.resolve_stream(stream)
+        except UnsupportedStreamError as exc:
+            # A known limitation (externalUrl/playerFrameUrl streams can
+            # only be opened by the Stremio app itself) OR a rejected
+            # direct-url scheme (lib.stremio.server._DIRECT_URL_SCHEMES -
+            # e.g. a malicious addon smuggling a plugin:/script:/special:/
+            # file: url) - either way not a fault. LOGINFO, and a message
+            # telling the user WHY instead of the generic "no playable
+            # stream" one below - raised, and this early return happens,
+            # strictly before any metadata/ListItem construction below.
+            log('player: unsupported stream for %s/%s: %r' % (stype, sid, exc), xbmc.LOGINFO)
+            notify(L(30160))
+            return None, None
         except Exception as exc:  # noqa: BLE001 - a broken server response must not crash Kodi
             log('player: resolve_stream failed for %s/%s: %r' % (stype, sid, exc), xbmc.LOGERROR)
             url = None
@@ -482,7 +657,7 @@ def _resolve_playable_item(stream, stype, sid):
             return None, None
 
         if stream.get('infoHash'):
-            proceed, url = _prebuffer_torrent(server, stream, url, dialog, monitor)
+            proceed, url, resolved_filename = _prebuffer_torrent(server, stream, url, dialog, monitor)
             if not proceed:
                 return None, None
     finally:
@@ -498,7 +673,7 @@ def _resolve_playable_item(stream, stype, sid):
         # the player send these headers with every request for that URL.
         url = '%s|%s' % (url, urlencode(request_headers))
 
-    filename = behavior_hints.get('filename')
+    filename = behavior_hints.get('filename') or resolved_filename
 
     list_item = xbmcgui.ListItem(path=url)
     # Disable Kodi's content-type HEAD probe: it races/aborts against a
@@ -507,41 +682,66 @@ def _resolve_playable_item(stream, stype, sid):
     # extension is known) gives Kodi the same information up front so the
     # probe was never needed.
     list_item.setContentLookup(False)
-    mime = _mime_for(filename or _filename_from_url(url))
+    mime = mime_for(filename or filename_from_url(url))
     if mime:
         list_item.setMimeType(mime)
 
-    if filename:
-        list_item.setLabel(filename)
-
-    set_video_info(list_item, {
-        'title': filename or list_item.getLabel(),
-        'mediatype': 'episode' if stype == 'series' else 'movie',
-    })
+    _apply_item_metadata(list_item, stream, stype, item_meta, filename)
 
     _attach_subtitles(list_item, behavior_hints, stype, sid)
+
+    _record_now_playing_and_maybe_resume(stype, sid, video_id, item_meta)
 
     return url, list_item
 
 
-def play(handle, stream, stype, sid):
+def play(handle, stream, stype, sid, item_meta=None, video_id=None):
     """Resolve `stream` and hand it to Kodi via `setResolvedUrl` - the
-    classical GetDirectory play path (action=play)."""
-    _url, list_item = _resolve_playable_item(stream, stype, sid)
+    classical GetDirectory play path (action=play).
+
+    `item_meta` (optional `{'label', 'art', 'meta'}`, every key optional
+    - see `_resolve_playable_item`'s docstring) forwards the content
+    title/artwork/meta the caller already resolved, fixing the live OSD
+    bug where a stream with no filename of its own left Kodi showing
+    "Not available" and the default camera placeholder. `None` (the
+    default) behaves exactly as before this parameter existed.
+
+    `video_id` (optional) is forwarded to `_resolve_playable_item()`
+    unchanged - see that function's docstring.
+    """
+    _url, list_item = _resolve_playable_item(stream, stype, sid, item_meta=item_meta, video_id=video_id)
     if list_item is None:
         xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())
         return
     xbmcplugin.setResolvedUrl(handle, True, list_item)
 
 
-def play_direct(stream, stype, sid):
+def play_direct(stream, stype, sid, item_meta=None, on_ready=None, video_id=None):
     """Resolve `stream` and hand it DIRECTLY to `xbmc.Player()` - the
     custom-window path (`lib.ui.streamswindow`), where there is no
     `ADDON_HANDLE`/GetDirectory call to satisfy. Returns True if
     playback was started, False on a resolution failure (already
-    notified by `_resolve_playable_item`)."""
-    url, list_item = _resolve_playable_item(stream, stype, sid)
+    notified by `_resolve_playable_item`).
+
+    `item_meta` is forwarded to `_resolve_playable_item()` unchanged -
+    see `play()`'s docstring for what it fixes and why. `on_ready`, when
+    given, is called with no arguments immediately before
+    `xbmc.Player().play()` and ONLY once resolution actually succeeded,
+    so a caller (e.g. `lib.ui.streamswindow`) can act at the exact
+    moment playback is handed off rather than guessing earlier. Any
+    exception it raises is logged at LOGWARNING and swallowed - a broken
+    hook must never prevent playback that has already been resolved.
+
+    `video_id` (optional) is forwarded to `_resolve_playable_item()`
+    unchanged - see that function's docstring.
+    """
+    url, list_item = _resolve_playable_item(stream, stype, sid, item_meta=item_meta, video_id=video_id)
     if list_item is None:
         return False
+    if on_ready is not None:
+        try:
+            on_ready()
+        except Exception as exc:  # noqa: BLE001 - a hook failure must never block playback
+            log('player: on_ready hook failed: %r' % (exc,), xbmc.LOGWARNING)
     xbmc.Player().play(url, list_item)
     return True

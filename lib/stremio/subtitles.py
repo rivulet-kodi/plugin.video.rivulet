@@ -10,6 +10,11 @@ usual stream ``extra`` props -- ``filename`` and ``videoSize`` -- to
 improve its match. ``videoHash`` is intentionally not computed here: it
 requires reading bytes off the resolved media file, which this layer
 doesn't have access to.
+
+Upstream's subtitle resource also carries an optional ``fonts`` field
+(custom font URLs for styled subtitles, stremio-core commit b1bd9b3f);
+it is intentionally dropped here because Kodi's libass renderer cannot
+fetch remote fonts, so carrying it through would be dead weight.
 """
 from lib.stremio.addons import addon_supports
 
@@ -66,10 +71,30 @@ def _lang_aliases(code):
     return aliases
 
 
+def _sanitize_label(label):
+    """Return `label` (the addon's human-readable subtitle name, e.g.
+    "English (SDH)" or "Forced") stripped of embedded CR/LF and leading
+    /trailing whitespace, or `None` if it doesn't resolve to a non-empty
+    string.
+
+    `label` is optional per the upstream resource schema
+    (stremio-core commit b1bd9b3f, src/types/resource/subtitles.rs), so
+    unlike `lang` (which always defaults to `''`) an absent/blank label
+    means the key is omitted from the result entirely rather than kept
+    as an empty string.
+    """
+    if not label:
+        return None
+    text = str(label).replace('\r', '').replace('\n', '').strip()
+    return text or None
+
+
 def collect_subtitles(client, addons, rtype, rid, extra=None):
     """Query every addon in `addons` (Store descriptors, as returned by
     `Store.get_addons()`) that declares subtitle support for `rtype`/`rid`,
-    merge their results, and return a flat list of `{id, lang, url}` dicts.
+    merge their results, and return a flat list of `{id, lang, url}` dicts,
+    each with an optional `label` key (see `_sanitize_label`) when the
+    addon supplied a usable one.
 
     A per-addon request failure (network error, malformed JSON, whatever)
     is swallowed so one broken addon never hides subtitles from the rest.
@@ -96,11 +121,15 @@ def collect_subtitles(client, addons, rtype, rid, extra=None):
             if not url or url in seen_urls:
                 continue
             seen_urls.add(url)
-            subs.append({
+            entry = {
                 'id': item.get('id') or url,
                 'lang': str(item.get('lang') or ''),
                 'url': url,
-            })
+            }
+            label = _sanitize_label(item.get('label'))
+            if label is not None:
+                entry['label'] = label
+            subs.append(entry)
     return subs
 
 

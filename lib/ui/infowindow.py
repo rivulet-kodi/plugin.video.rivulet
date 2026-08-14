@@ -26,6 +26,8 @@ module docstring for what a real device must confirm.
 """
 import xbmcgui
 
+from lib.ui.uicommon import ModalStackWindow
+
 BACKGROUND = 30000
 LOADING = 30001
 SELECT = 30002
@@ -63,7 +65,7 @@ def _item_properties(meta):
     }
 
 
-class ShowcaseWindow(xbmcgui.WindowXMLDialog):
+class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
     """Fullscreen coverflow modal (`ShowcaseWindow.xml`). Build/run it via
     `open_showcase()` below rather than constructing it directly."""
 
@@ -95,7 +97,13 @@ class ShowcaseWindow(xbmcgui.WindowXMLDialog):
         if not self.metas:
             return
         items = [self._make_item(index, meta) for index, meta in enumerate(self.metas)]
-        self.getControl(SELECT).addItems(items)
+        control = self.getControl(SELECT)
+        # reset() before addItems(): onInit() runs again when
+        # uicommon.ModalStackWindow reopens a screen force-closed for
+        # playback, and re-adding onto a retained list would double every
+        # item.
+        control.reset()
+        control.addItems(items)
         self.getControl(BACKGROUND).setImage(_item_properties(self.metas[0]).get('fanart', ''))
         self.getControl(LOADING).setVisible(False)
         self.setFocusId(SELECT)
@@ -133,7 +141,19 @@ class ShowcaseWindow(xbmcgui.WindowXMLDialog):
         series still needs - see `lib.ui.detailwindow.open_detail`).
         This fully handles the click itself, so `self.selected` stays
         None: every caller's own `if selected: ...` branch is a no-op,
-        same as the user closing the overlay without picking anything."""
+        same as the user closing the overlay without picking anything.
+
+        `onClick()` unconditionally closes `self` right after this
+        returns - `open_streams()` only ever returns False (see its own
+        module docstring), so that close() is the ONE real close this
+        window gets from the user's perspective even though
+        `close_windows_for_playback()` may also force-close it mid-call
+        while it sits underneath the StreamsWindow round trip: that
+        force-close cannot take effect until `open_streams()` (called
+        below, still on this stack frame) returns, at which point
+        `onClick()`'s own `self.close()` immediately follows - so
+        `ModalStackWindow.doModal()` never gets a chance to reopen a
+        window that was about to close anyway."""
         from lib.ui.streamswindow import open_streams
 
         poster = meta.get('poster')

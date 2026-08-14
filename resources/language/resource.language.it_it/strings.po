@@ -467,3 +467,47 @@ msgstr "Gestisci gli add-on Stremio installati"
 msgctxt "#30152"
 msgid "Configure Rivulet"
 msgstr "Configura Rivulet"
+
+msgctxt "#30170"
+msgid "Sync playback progress to your Stremio account"
+msgstr "Sincronizza i progressi di visione con il tuo account Stremio"
+
+msgctxt "#30171"
+msgid "Ask to resume"
+msgstr "Chiedi se riprendere la visione"
+
+msgctxt "#30172"
+msgid "Resume playback?"
+msgstr "Riprendere la visione?"
+
+msgctxt "#30173"
+msgid "Resume from %s?"
+msgstr "Riprendere da %s?"
+
+msgctxt "#30174"
+msgid "Resume"
+msgstr "Riprendi"
+
+msgctxt "#30175"
+msgid "Start from beginning"
+msgstr "Inizia dall'inizio"
+
+msgctxt "#30160"
+msgid "This stream can only be opened in the Stremio app"
+msgstr "Questo flusso può essere aperto solo nell'app Stremio"
+
+msgctxt "#30180"
+msgid "Play the next episode automatically"
+msgstr "Riproduci automaticamente l'episodio successivo"
+
+msgctxt "#30181"
+msgid "Auto-play countdown (seconds)"
+msgstr "Conto alla rovescia per la riproduzione automatica (secondi)"
+
+msgctxt "#30182"
+msgid "Next episode"
+msgstr "Episodio successivo"
+
+msgctxt "#30183"
+msgid "Playing %s in %d s"
+msgstr "Riproduzione di %s in %d s"

@@ -3,15 +3,15 @@ replacement for the classical `views.addons()` directory, exercised
 against the shared fake xbmc/xbmcgui stubs in tests/kodistubs (no real
 Kodi runtime, no network).
 
-lib.ui.addonswindow imports xbmcgui and lib.ui.uicommon at module scope,
-and every other collaborator (`lib.store.Store`, `lib.stremio.addons.
-AddonClient`/`AddonError`, `lib.ui.compat.L`/`log`/`notify`/
-`addon_profile_dir`, `lib.ui.views._sync_addons_if_logged_in`) is
-imported lazily inside the method that needs it - so this file fakes
-`lib.store.Store` and `lib.stremio.addons.AddonClient` by monkeypatching
-those modules' attributes directly (the same way test_catalogpicker.py
-patches `lib.store.Store`), rather than reloading lib.ui.addonswindow
-itself.
+lib.ui.addonswindow imports xbmcgui, lib.ui.uicommon, and `get_store`/
+`get_client` (from lib.ui.dependencies) at module scope; every other
+collaborator (`lib.stremio.addons.AddonError`, `lib.ui.compat.L`/`log`/
+`notify`, `lib.ui.views._sync_addons_if_logged_in`) is imported lazily
+inside the method that needs it - so this file fakes the shared
+Store/AddonClient providers by assigning directly to
+`addonswindow.get_store`/`addonswindow.get_client` (the same way
+tests/test_views.py wires `views.get_store`/`views.get_client`), rather
+than monkeypatching `lib.store`/`lib.stremio.addons`.
 
 AddonsWindow.onInit()/onClick() are called directly here, never through a
 real modal event loop, exactly like test_catalogpicker.py drives
@@ -24,13 +24,12 @@ import contextlib
 
 import pytest
 
-import lib.store as store_module
-import lib.stremio.addons as addons_module
 from lib.stremio.addons import AddonError
 from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
-    'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.router', 'lib.ui.views', 'lib.ui.addonswindow',
+    'lib.ui.compat', 'lib.ui.dependencies', 'lib.ui.uicommon', 'lib.ui.router', 'lib.ui.views',
+    'lib.ui.addonswindow',
 )
 
 
@@ -99,12 +98,12 @@ def _make_window(addonswindow_mod):
     return addonswindow_mod.AddonsWindow('AddonsWindow.xml', '/addon/path', 'Default', '720p')
 
 
-def _wire_store(monkeypatch, store):
-    monkeypatch.setattr(store_module, 'Store', lambda *a, **k: store)
+def _wire_store(addonswindow_mod, store):
+    addonswindow_mod.get_store = lambda: store
 
 
-def _wire_client(monkeypatch, client):
-    monkeypatch.setattr(addons_module, 'AddonClient', lambda *a, **k: client)
+def _wire_client(addonswindow_mod, client):
+    addonswindow_mod.get_client = lambda: client
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +118,7 @@ def test_oninit_builds_install_row_and_one_row_per_addon(load_addonswindow, monk
         'manifest': {'name': 'Addon A', 'version': '1.2.3', 'description': 'Line one\r\nLine two'},
         'flags': {},
     }
-    _wire_store(monkeypatch, _FakeStore(addons=[descriptor]))
+    _wire_store(ctx.addonswindow, _FakeStore(addons=[descriptor]))
     win = _make_window(ctx.addonswindow)
 
     win.onInit()
@@ -142,7 +141,7 @@ def test_oninit_truncates_long_descriptions_to_one_line(load_addonswindow, monke
         'manifest': {'name': 'Addon A', 'version': '1.0', 'description': 'x' * 200},
         'flags': {},
     }
-    _wire_store(monkeypatch, _FakeStore(addons=[descriptor]))
+    _wire_store(ctx.addonswindow, _FakeStore(addons=[descriptor]))
     win = _make_window(ctx.addonswindow)
 
     win.onInit()
@@ -160,7 +159,7 @@ def test_oninit_truncates_long_descriptions_to_one_line(load_addonswindow, monke
 
 def test_onclick_ignores_control_ids_other_than_list(load_addonswindow, monkeypatch):
     ctx = load_addonswindow()
-    _wire_store(monkeypatch, _FakeStore())
+    _wire_store(ctx.addonswindow, _FakeStore())
     win = _make_window(ctx.addonswindow)
     win.onInit()
     calls = []
@@ -173,7 +172,7 @@ def test_onclick_ignores_control_ids_other_than_list(load_addonswindow, monkeypa
 
 def test_onclick_list_with_no_focused_item_does_not_crash(load_addonswindow, monkeypatch):
     ctx = load_addonswindow()
-    _wire_store(monkeypatch, _FakeStore())
+    _wire_store(ctx.addonswindow, _FakeStore())
     win = _make_window(ctx.addonswindow)
     # No onInit() call -> the list control is never populated.
 
@@ -188,8 +187,8 @@ def test_onclick_list_with_no_focused_item_does_not_crash(load_addonswindow, mon
 def test_install_empty_url_is_a_noop(load_addonswindow, monkeypatch):
     ctx = load_addonswindow()  # no dialog_inputs -> Dialog.input() returns ''
     store = _FakeStore()
-    _wire_store(monkeypatch, store)
-    _wire_client(monkeypatch, _FakeAddonClient())
+    _wire_store(ctx.addonswindow, store)
+    _wire_client(ctx.addonswindow, _FakeAddonClient())
     win = _make_window(ctx.addonswindow)
     win.onInit()
 
@@ -202,8 +201,8 @@ def test_install_empty_url_is_a_noop(load_addonswindow, monkeypatch):
 def test_install_addon_error_notifies_and_does_not_install(load_addonswindow, monkeypatch):
     ctx = load_addonswindow(dialog_inputs=['https://bad.example/manifest.json'])
     store = _FakeStore()
-    _wire_store(monkeypatch, store)
-    _wire_client(monkeypatch, _FakeAddonClient(manifest_error=AddonError('404')))
+    _wire_store(ctx.addonswindow, store)
+    _wire_client(ctx.addonswindow, _FakeAddonClient(manifest_error=AddonError('404')))
     win = _make_window(ctx.addonswindow)
     win.onInit()
 
@@ -216,8 +215,8 @@ def test_install_addon_error_notifies_and_does_not_install(load_addonswindow, mo
 def test_install_manifest_missing_id_notifies_and_does_not_install(load_addonswindow, monkeypatch):
     ctx = load_addonswindow(dialog_inputs=['https://bad.example/manifest.json'])
     store = _FakeStore()
-    _wire_store(monkeypatch, store)
-    _wire_client(monkeypatch, _FakeAddonClient(manifest_result={'name': 'No Id Here'}))
+    _wire_store(ctx.addonswindow, store)
+    _wire_client(ctx.addonswindow, _FakeAddonClient(manifest_result={'name': 'No Id Here'}))
     win = _make_window(ctx.addonswindow)
     win.onInit()
 
@@ -232,8 +231,8 @@ def test_install_success_persists_notifies_and_reloads(load_addonswindow, monkey
     ctx = load_addonswindow(dialog_inputs=[url])
     store = _FakeStore()
     manifest = {'id': 'org.new', 'name': 'New Addon', 'version': '1.0'}
-    _wire_store(monkeypatch, store)
-    _wire_client(monkeypatch, _FakeAddonClient(manifest_result=manifest))
+    _wire_store(ctx.addonswindow, store)
+    _wire_client(ctx.addonswindow, _FakeAddonClient(manifest_result=manifest))
     win = _make_window(ctx.addonswindow)
     win.onInit()
 
@@ -264,7 +263,7 @@ def test_remove_confirmed_removes_notifies_and_reloads(load_addonswindow, monkey
     descriptor = _descriptor()
     ctx = load_addonswindow(dialog_yesno=[True])
     store = _FakeStore(addons=[descriptor])
-    _wire_store(monkeypatch, store)
+    _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
     win.onInit()
     win.getControl(ctx.addonswindow.LIST).selected_index = 1  # the addon row
@@ -283,7 +282,7 @@ def test_remove_declined_leaves_addon_untouched(load_addonswindow, monkeypatch):
     descriptor = _descriptor()
     ctx = load_addonswindow(dialog_yesno=[False])
     store = _FakeStore(addons=[descriptor])
-    _wire_store(monkeypatch, store)
+    _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
     win.onInit()
     win.getControl(ctx.addonswindow.LIST).selected_index = 1
@@ -298,7 +297,7 @@ def test_remove_protected_addon_notifies_and_never_calls_remove(load_addonswindo
     descriptor = _descriptor(protected=True)
     ctx = load_addonswindow(dialog_yesno=[True])  # scripted answer must never even be consulted
     store = _FakeStore(addons=[descriptor])
-    _wire_store(monkeypatch, store)
+    _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
     win.onInit()
     win.getControl(ctx.addonswindow.LIST).selected_index = 1
@@ -324,7 +323,7 @@ def test_remove_store_raises_valueerror_notifies_protected(load_addonswindow, mo
         raise ValueError('cannot remove protected addon: %s' % transport_url)
 
     monkeypatch.setattr(store, 'remove_addon', _raise)
-    _wire_store(monkeypatch, store)
+    _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
     win.onInit()
     win.getControl(ctx.addonswindow.LIST).selected_index = 1
@@ -344,7 +343,7 @@ def test_remove_store_raises_valueerror_notifies_protected(load_addonswindow, mo
 def test_open_addons_opens_window_and_runs_modal(load_addonswindow, monkeypatch):
     ctx = load_addonswindow(addon_info={'path': '/addon/path'})
     descriptor = _descriptor()
-    _wire_store(monkeypatch, _FakeStore(addons=[descriptor]))
+    _wire_store(ctx.addonswindow, _FakeStore(addons=[descriptor]))
     captured = {}
 
     class RecordingWindow(ctx.addonswindow.AddonsWindow):
@@ -366,7 +365,7 @@ def test_open_addons_opens_window_and_runs_modal(load_addonswindow, monkeypatch)
 
 def test_open_addons_window_is_closed_exactly_once_when_domodal_raises(load_addonswindow, monkeypatch):
     ctx = load_addonswindow(addon_info={'path': '/addon/path'})
-    _wire_store(monkeypatch, _FakeStore())
+    _wire_store(ctx.addonswindow, _FakeStore())
     captured = {}
 
     class ExplodingWindow(ctx.addonswindow.AddonsWindow):
@@ -391,3 +390,59 @@ def test_open_addons_window_is_closed_exactly_once_when_domodal_raises(load_addo
     assert win.close_calls == 1
     assert win.closed is True
     assert ctx.env.notifications == [('Rivulet', 'STR30032', 'info', 4000)]
+
+
+# ---------------------------------------------------------------------------
+# Shared process-wide Store/AddonClient (lib.ui.dependencies)
+# ---------------------------------------------------------------------------
+
+
+def test_reopening_addonswindow_reuses_the_shared_store(load_addonswindow, monkeypatch):
+    """`_reload()` re-runs every time the window reopens (`onInit()` fires
+    again) - it must always fetch the SAME `get_store()` singleton rather
+    than constructing a fresh `Store` in place."""
+    ctx = load_addonswindow()
+
+    class _CountingStore:
+        instances = 0
+
+        def __init__(self, *args):
+            type(self).instances += 1
+
+        def get_addons(self):
+            return []
+
+    monkeypatch.setattr(ctx.dependencies, 'Store', _CountingStore)
+    win = _make_window(ctx.addonswindow)
+
+    win.onInit()
+    first_store = win.store
+    win.onInit()  # simulates the window reopening
+
+    assert win.store is first_store
+    assert _CountingStore.instances == 1
+
+
+def test_install_reuses_the_shared_client_across_calls(load_addonswindow, monkeypatch):
+    """Two separate `_install()` runs must reuse the SAME `get_client()`
+    singleton rather than each constructing its own `AddonClient`."""
+    ctx = load_addonswindow(dialog_inputs=['https://a.example/manifest.json', 'https://b.example/manifest.json'])
+    _wire_store(ctx.addonswindow, _FakeStore())
+
+    class _CountingClient:
+        instances = 0
+
+        def __init__(self):
+            type(self).instances += 1
+
+        def manifest(self, url):
+            return None  # falsy manifest -> _install() notifies and returns early
+
+    monkeypatch.setattr(ctx.dependencies, 'AddonClient', _CountingClient)
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+
+    win._install()
+    win._install()
+
+    assert _CountingClient.instances == 1

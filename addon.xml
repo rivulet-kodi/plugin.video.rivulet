@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.rivulet" name="Rivulet" version="0.4.21" provider-name="M0Rf30">
+<addon id="plugin.video.rivulet" name="Rivulet" version="0.4.23" provider-name="M0Rf30">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" version="2.22.0"/>
@@ -12,7 +12,19 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse Discover and Search catalogs, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote stremio-server-go streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.4.21:
+    <news>v0.4.23:
+- New: the next episode now plays automatically when one finishes, with a cancellable countdown, preferring a release from the same group as the episode you just watched. Turn it off, or change the countdown, under Playback.
+- New: what you watch is now written back to your Stremio account - progress, resume position and watched state - and Rivulet offers to resume where you left off. Progress is kept locally too, so resume works logged out.
+- New: RAR/ZIP/7z/TAR/TGZ, NZB and FTP streams now play through the streaming server instead of silently failing.
+- Fix: magnet links whose info hash is in Base32 form no longer produce an unplayable link, and percent-encoded trackers are decoded before use.
+- Fix: the player's info panel no longer reads "Not available" - it now shows the title's own description, falling back to the release/size/seeders of the file playing.
+- Improved: streams that can only be opened in the Stremio app now say so instead of failing as "no playable stream".
+- Improved: seeder counts in the stream list are marked with a triangle instead of the old "S50" prefix, and subtitle add-ons' own labels are carried through.
+v0.4.22:
+- Fix: while a stream was playing, play/pause and the on-screen playback controls did nothing until you backed out of the addon and returned to the video - every Rivulet screen is a Kodi modal dialog, and Kodi sends all input to the topmost dialog rather than to the player. All open screens now step aside when playback starts and come back exactly where you left them when it ends.
+- Fix: the player's info panel showed "Not available" with a placeholder image instead of the title and poster of what you picked.
+- Improved: torrent streams now report their real file name to Kodi, so the correct media type is used instead of leaving Kodi to guess.
+v0.4.21:
 - Fix: 32-bit Android and Android TV devices (e.g. Chromecast with Google TV) were detected as an unknown CPU architecture (armv8l) and the server-binary download failed with "No release asset for this platform".
 - Fix: on Android the addon now says up front that the embedded streaming server cannot run there and to point Server URL at a server running elsewhere, instead of failing with a confusing download error.
 - Improved: a downloaded server binary is now verified to be executable, and the "no release asset" message now names the detected platform.

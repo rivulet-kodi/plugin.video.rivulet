@@ -4,6 +4,7 @@ on:
   push:
     branches: [ main ]
     tags: [ 'v*' ]
+  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -23,7 +24,28 @@ jobs:
         run: |
           git archive --format=zip --prefix=plugin.video.rivulet/ \
             -o "plugin.video.rivulet-${{ steps.addon.outputs.version }}.zip" \
-            HEAD -- addon.xml default.py service.py resources lib
+            HEAD -- addon.xml default.py service.py resources lib LICENSE
+
+      - name: Verify addon package contents
+        env:
+          ZIP_PATH: plugin.video.rivulet-${{ steps.addon.outputs.version }}.zip
+        run: |
+          python3 - <<'PY'
+          import os
+          import sys
+          import zipfile
+
+          zip_path = os.environ["ZIP_PATH"]
+          with zipfile.ZipFile(zip_path) as zf:
+              names = zf.namelist()
+
+          prefix = "plugin.video.rivulet/"
+          required = ["addon.xml", "default.py", "service.py", "lib/", "resources/", "LICENSE"]
+          missing = [r for r in required if not any(n.startswith(prefix + r) for n in names)]
+          if missing:
+              sys.exit(f"Missing required addon members: {missing}")
+          print("Verified addon package members:", required)
+          PY
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

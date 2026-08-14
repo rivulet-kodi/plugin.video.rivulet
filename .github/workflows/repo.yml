@@ -29,7 +29,7 @@ jobs:
                   "icon": Path("resources/icon.png"),
                   "fanart": Path("resources/fanart.jpg"),
                   "archive_ref": "HEAD",
-                  "archive_paths": ["addon.xml", "default.py", "service.py", "resources", "lib"],
+                  "archive_paths": ["addon.xml", "default.py", "service.py", "resources", "lib", "LICENSE"],
               },
               "repository.rivulet": {
                   "addon_xml": Path("repository.rivulet/addon.xml"),

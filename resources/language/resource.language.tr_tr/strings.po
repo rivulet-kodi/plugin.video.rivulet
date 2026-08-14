@@ -447,3 +447,47 @@ msgstr "pprof tanılama adresi"
 msgctxt "#30147"
 msgid "Stremio account auth key (HTTPS auto-cert)"
 msgstr "Stremio hesap yetkilendirme anahtarı (HTTPS otomatik sertifika)"
+
+msgctxt "#30170"
+msgid "Sync playback progress to your Stremio account"
+msgstr "Oynatma ilerlemesini Stremio hesabınla senkronize et"
+
+msgctxt "#30171"
+msgid "Ask to resume"
+msgstr "Devam etmeyi sor"
+
+msgctxt "#30172"
+msgid "Resume playback?"
+msgstr "Oynatma devam ettirilsin mi?"
+
+msgctxt "#30173"
+msgid "Resume from %s?"
+msgstr "%s konumundan devam edilsin mi?"
+
+msgctxt "#30174"
+msgid "Resume"
+msgstr "Devam Et"
+
+msgctxt "#30175"
+msgid "Start from beginning"
+msgstr "Baştan Başla"
+
+msgctxt "#30160"
+msgid "This stream can only be opened in the Stremio app"
+msgstr "Bu akış yalnızca Stremio uygulamasında açılabilir"
+
+msgctxt "#30180"
+msgid "Play the next episode automatically"
+msgstr "Sonraki bölümü otomatik oynat"
+
+msgctxt "#30181"
+msgid "Auto-play countdown (seconds)"
+msgstr "Otomatik oynatma geri sayımı (saniye)"
+
+msgctxt "#30182"
+msgid "Next episode"
+msgstr "Sonraki bölüm"
+
+msgctxt "#30183"
+msgid "Playing %s in %d s"
+msgstr "%s, %d sn içinde oynatılıyor"

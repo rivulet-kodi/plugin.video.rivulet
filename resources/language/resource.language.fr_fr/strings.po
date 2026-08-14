@@ -447,3 +447,47 @@ msgstr "Adresse de diagnostics pprof"
 msgctxt "#30147"
 msgid "Stremio account auth key (HTTPS auto-cert)"
 msgstr "Clé d'authentification du compte Stremio (certificat HTTPS automatique)"
+
+msgctxt "#30170"
+msgid "Sync playback progress to your Stremio account"
+msgstr "Synchroniser la progression de lecture avec votre compte Stremio"
+
+msgctxt "#30171"
+msgid "Ask to resume"
+msgstr "Demander de reprendre"
+
+msgctxt "#30172"
+msgid "Resume playback?"
+msgstr "Reprendre la lecture ?"
+
+msgctxt "#30173"
+msgid "Resume from %s?"
+msgstr "Reprendre à %s ?"
+
+msgctxt "#30174"
+msgid "Resume"
+msgstr "Reprendre"
+
+msgctxt "#30175"
+msgid "Start from beginning"
+msgstr "Recommencer depuis le début"
+
+msgctxt "#30160"
+msgid "This stream can only be opened in the Stremio app"
+msgstr "Ce flux ne peut être ouvert que dans l'application Stremio"
+
+msgctxt "#30180"
+msgid "Play the next episode automatically"
+msgstr "Lire l'épisode suivant automatiquement"
+
+msgctxt "#30181"
+msgid "Auto-play countdown (seconds)"
+msgstr "Compte à rebours avant lecture automatique (secondes)"
+
+msgctxt "#30182"
+msgid "Next episode"
+msgstr "Épisode suivant"
+
+msgctxt "#30183"
+msgid "Playing %s in %d s"
+msgstr "Lecture de %s dans %d s"

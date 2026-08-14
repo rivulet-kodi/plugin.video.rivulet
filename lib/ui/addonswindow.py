@@ -7,6 +7,7 @@ protected/official addons (mirrors `views.addon_remove`). Built/run via
 """
 import xbmcgui
 
+from lib.ui.dependencies import get_client, get_store
 from lib.ui.uicommon import BaseWindow, open_window
 
 LIST = 30002
@@ -38,10 +39,7 @@ class AddonsWindow(BaseWindow):
         self._reload()
 
     def _reload(self):
-        from lib.store import Store
-        from lib.ui.compat import addon_profile_dir
-
-        self.store = Store(addon_profile_dir())
+        self.store = get_store()
         self.addons = self.store.get_addons()
 
         control = self.getControl(LIST)
@@ -80,7 +78,11 @@ class AddonsWindow(BaseWindow):
     def _install(self):
         import xbmc
 
-        from lib.stremio.addons import AddonClient, AddonError
+        from lib.stremio.addons import (
+            AddonError,
+            safe_url_for_log,
+            validate_transport_url,
+        )
         from lib.ui.compat import L, log, notify
 
         url = xbmcgui.Dialog().input(L(30010))
@@ -88,9 +90,16 @@ class AddonsWindow(BaseWindow):
             return
 
         try:
-            manifest = AddonClient().manifest(url)
+            transport_url = validate_transport_url(url)
         except AddonError as exc:
-            log('addonswindow: manifest fetch failed for %s: %r' % (url, exc), xbmc.LOGERROR)
+            log('addonswindow: invalid transport url %s: %s' % (safe_url_for_log(url), exc), xbmc.LOGERROR)
+            notify(L(30014))
+            return
+
+        try:
+            manifest = get_client().manifest(transport_url)
+        except AddonError as exc:
+            log('addonswindow: manifest fetch failed for %s: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGERROR)
             notify(L(30014))
             return
 
@@ -100,7 +109,7 @@ class AddonsWindow(BaseWindow):
 
         from lib.ui.views import _sync_addons_if_logged_in
 
-        self.store.install_addon(url, manifest)
+        self.store.install_addon(transport_url, manifest)
         _sync_addons_if_logged_in(self.store)
         notify(L(30012))
         self._reload()
@@ -137,10 +146,9 @@ def open_addons():
     this always returns None."""
     import xbmc
 
-    from lib.store import Store
-    from lib.ui.compat import L, addon_profile_dir, log, notify
+    from lib.ui.compat import L, log, notify
 
-    count = len(Store(addon_profile_dir()).get_addons())
+    count = len(get_store().get_addons())
     log('addonswindow: opening AddonsWindow (%d addons)' % count, xbmc.LOGINFO)
     win = None
     try:

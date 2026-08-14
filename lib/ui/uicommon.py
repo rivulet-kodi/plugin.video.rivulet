@@ -22,14 +22,33 @@ bits every one of those screens needs so they stay consistent:
   (`resources/skins/Default/720p/<xml_name>`), matching
   `infowindow.open_showcase`'s resolution so every screen is constructed
   identically.
+- `ModalStackWindow`/`close_windows_for_playback()`: every one of these
+  screens IS an `xbmcgui.WindowXMLDialog` - confirmed on a real device,
+  Kodi routes ALL input (play/pause, the OSD) to whichever dialog is
+  topmost, never to `fullscreenvideo`, so starting playback while even
+  one ancestor screen is still open underneath leaves the video looking
+  entirely unresponsive until the user backs all the way out to it.
+  Every screen mixes in `ModalStackWindow`, which tracks it on a
+  module-level stack for the duration of its `doModal()` call;
+  `close_windows_for_playback(exclude=<the picker about to play>)`,
+  called right before `xbmc.Player().play()`, force-closes every OTHER
+  live screen so Kodi's player ends up the only modal thing on screen,
+  then reopens each one - exactly where the user left it - once
+  playback ends and control naturally unwinds back to it.
 
 Navigation model: each screen is a blocking `doModal()` call. "Forward"
 navigation is a screen's onClick calling another screen's `open_*()`
 helper (which blocks until that screen closes); "back" is simply that
 inner call returning, so nested doModal() calls form a navigation stack
-for free - no separate router/state machine needed. These are plain
-windows, not dialogs, so Kodi's fullscreen video window renders alone
-during playback and the topmost screen is restored when playback ends.
+for free - no separate router/state machine needed. A picker's
+force-close of every ancestor is safe to fire from deep inside that
+stack (several `open_*()` calls below the screen the user actually
+started at): `close()` only dismisses a screen's underlying C++ window
+immediately - the Python `doModal()` call that opened it is still
+blocked several stack frames further down and does not actually return
+until every nested call between here and there unwinds naturally, which
+is exactly when `ModalStackWindow.doModal()` gets to notice the
+force-close and reopen.
 """
 import contextlib
 
@@ -91,7 +110,104 @@ def open_window(window_cls, xml_name, *args, **kwargs):
     return window_cls(xml_name, addon_skin_path(), 'Default', '720p', *args, **kwargs)
 
 
-class BaseWindow(xbmcgui.WindowXMLDialog):
+#: Live Rivulet screens, in the order their `doModal()` calls are
+#: currently blocked - outermost (first opened) first, innermost (most
+#: recently opened, currently topmost) last. See `ModalStackWindow`/
+#: `close_windows_for_playback()` in the module docstring.
+_MODAL_WINDOW_STACK = []
+
+
+class ModalStackWindow:
+    """Mixin registering a screen on `_MODAL_WINDOW_STACK` for the
+    duration of its `doModal()` call, and reopening it - exactly where
+    the user left it - if `close_windows_for_playback()` force-closed it
+    to make room for the player rather than the user genuinely backing
+    out of it.
+
+    Mixed into `BaseWindow` (so `HomeWindow`/`SearchWindow`/
+    `StreamsWindow`/every other screen built on it gets this for free)
+    and directly onto `DetailWindow`/`ShowcaseWindow`, which subclass
+    `xbmcgui.WindowXMLDialog` themselves with no shared base to route it
+    through. MUST be listed FIRST in a class's bases
+    (`class Foo(ModalStackWindow, xbmcgui.WindowXMLDialog)`) so
+    `super().doModal()` below resolves to Kodi's real implementation,
+    not back to this mixin.
+    """
+
+    #: Set True by `close_windows_for_playback()` immediately before it
+    #: calls `close()` on this window; cleared at the top of every
+    #: `doModal()` call. Class-level default so a window that has never
+    #: entered `doModal()` yet still reads False instead of raising.
+    _closed_for_playback = False
+
+    def doModal(self):
+        _MODAL_WINDOW_STACK.append(self)
+        self._closed_for_playback = False
+        try:
+            super().doModal()
+            while self._closed_for_playback and not xbmc.Monitor().abortRequested():
+                # Force-closed to hand the screen to the player, not a
+                # genuine user "back" - reopen exactly where they left
+                # off. abortRequested() guards a Kodi shutdown landing
+                # mid-playback: nothing should pop a fresh modal window
+                # up in front of a Kodi that is already on its way down.
+                self._closed_for_playback = False
+                super().doModal()
+        finally:
+            _pop_modal_window(self)
+
+
+def _pop_modal_window(window):
+    """Remove `window` from `_MODAL_WINDOW_STACK` by identity, scanning
+    from the top down - never `list.remove()`, which matches by `==`
+    and would remove the first EQUAL entry rather than specifically
+    `window` (a screen that ever defined its own `__eq__` could make
+    that the wrong one), and silently returns rather than raising if
+    `window` is not present.
+    """
+    for index in range(len(_MODAL_WINDOW_STACK) - 1, -1, -1):
+        if _MODAL_WINDOW_STACK[index] is window:
+            del _MODAL_WINDOW_STACK[index]
+            return
+
+
+def close_windows_for_playback(exclude=None):
+    """Force-close every live Rivulet screen except `exclude` (the
+    screen whose own `onClick()` is calling this, immediately before
+    `xbmc.Player().play()`) so Kodi's player ends up the only modal
+    thing on screen - see the module docstring for why every screen
+    being a real `WindowXMLDialog` otherwise leaves playback controls
+    unresponsive.
+
+    Walks a snapshot of `_MODAL_WINDOW_STACK` innermost-first (the
+    reversed live order), marking each survivor `_closed_for_playback =
+    True` and then calling `close()` on it - wrapped so one screen's
+    broken `close()` can never stop the rest of the stack from tearing
+    down (logged at LOGWARNING, not raised).
+
+    `close()` only dismisses that screen's underlying C++ window right
+    away; the Python `doModal()` call that opened it is normally still
+    several stack frames further down (blocked inside whatever chain of
+    nested `open_*()` calls eventually reached the screen calling this)
+    and will not actually return until every frame between here and
+    there unwinds on its own - this is exactly what makes it safe to
+    call from deep inside a nested `onClick()`. Once each ancestor's
+    `doModal()` call does return, `ModalStackWindow.doModal()` is what
+    notices the force-close and reopens it.
+    """
+    from lib.ui.compat import log
+
+    for window in reversed(list(_MODAL_WINDOW_STACK)):
+        if window is exclude:
+            continue
+        window._closed_for_playback = True
+        try:
+            window.close()
+        except Exception as exc:  # one ancestor's broken close() must never block the rest
+            log('uicommon: close_windows_for_playback failed to close %r: %r' % (window, exc), xbmc.LOGWARNING)
+
+
+class BaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
     """Common `onAction` back-handling for a simple (non-coverflow) modal
     screen: any of `BACK_ACTIONS` closes the window. Screens with extra
     per-focus behaviour (e.g. the coverflow's background swap) should
@@ -106,7 +222,7 @@ class BaseWindow(xbmcgui.WindowXMLDialog):
 def fallback_to_classical(action, **params):
     """Temporary bridge for screens with no custom-window replacement yet:
     open the classical plugin directory for `action` (see
-    `lib.ui.router.url_for`) in Kodi's Videos window. Callers should
+    `lib.ui.urlutil.url_for`) in Kodi's Videos window. Callers should
     close every custom window in their call chain afterwards
     (conventionally: return True from an `open_*()` function and have
     its caller close too).
@@ -122,5 +238,6 @@ def fallback_to_classical(action, **params):
     window at `url`, the standard way to jump into a plugin directory
     from a non-container context (a dialog, a script, anywhere).
     """
-    from lib.ui import router
-    xbmc.executebuiltin('ActivateWindow(Videos,%s)' % router.url_for(action, **params))
+    from lib.ui import router, urlutil
+    url = urlutil.url_for(router.BASE_URL, action, **params)
+    xbmc.executebuiltin('ActivateWindow(Videos,%s)' % url)

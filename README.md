@@ -11,9 +11,9 @@
   [![Test](https://github.com/rivulet-kodi/plugin.video.rivulet/actions/workflows/test.yml/badge.svg)](https://github.com/rivulet-kodi/plugin.video.rivulet/actions/workflows/test.yml)
   [![Build addon zip](https://github.com/rivulet-kodi/plugin.video.rivulet/actions/workflows/build.yml/badge.svg)](https://github.com/rivulet-kodi/plugin.video.rivulet/actions/workflows/build.yml)
   [![Latest release](https://img.shields.io/github/v/release/rivulet-kodi/plugin.video.rivulet?label=release)](https://github.com/rivulet-kodi/plugin.video.rivulet/releases)
-  [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](addon.xml)
+  [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
   [![Python 3.8 | 3.11 | 3.13](https://img.shields.io/badge/python-3.8%20%7C%203.11%20%7C%203.13-3776AB.svg)](.github/workflows/test.yml)
-  [![Coverage >= 60%](https://img.shields.io/badge/coverage-%E2%89%A560%25-brightgreen.svg)](pyproject.toml)
+  [![Coverage >= 90%](https://img.shields.io/badge/coverage-%E2%89%A590%25-brightgreen.svg)](pyproject.toml)
 </div>
 
 ---
@@ -49,6 +49,10 @@ account.
   longer stalls the rest of your catalogs or sources.
 - **Stremio account sync** — log in to keep your addon collection in sync
   both ways between Kodi and Stremio.
+- **Resume and watch progress** — resume locally when logged out, or sync
+  progress and watched state to your Stremio account.
+- **Automatic next episode** — continue a series after a cancellable
+  countdown, preferring the same release group.
 - **Subtitles out of the box** — pulled from your installed Stremio
   subtitle addons at playback time, with OpenSubtitles v3 preinstalled and
   sorted by your preferred language.
@@ -166,9 +170,9 @@ python -m venv .venv && . .venv/bin/activate
 pip install -r requirements-dev.txt
 
 make test        # run the test suite
-make cov         # tests + coverage report (gate: >=60%)
+make cov         # tests + coverage report (gate: >=90%)
 make lint        # ruff check
-make typecheck   # mypy (pure lib/stremio + lib/store layer)
+make typecheck   # mypy across all production Python modules
 make check       # lint + typecheck + tests
 make random      # tests in randomized order (order-independence)
 make parallel    # tests across CPUs (pytest-xdist)
@@ -188,5 +192,5 @@ there plus Kodi's native Add-ons browser, and writes the curated result to
 ---
 
 <div align="center">
-  <sub>Licensed under <a href="addon.xml">MIT</a>. Not affiliated with Stremio.</sub>
+  <sub>Licensed under <a href="LICENSE">MIT</a>. Not affiliated with Stremio.</sub>
 </div>

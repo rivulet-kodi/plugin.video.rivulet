@@ -12,24 +12,26 @@ a trailing "Clear search history" row appears once there is history.
 Exercised against the shared fake xbmc/xbmcgui stubs in tests/kodistubs
 (no real Kodi runtime, no network).
 
-lib.ui.searchwindow imports xbmcgui and lib.ui.uicommon at module scope;
-every other collaborator (`lib.store.Store`, `lib.stremio.addons.
-AddonClient`/`AddonError`/`iter_catalogs`, `lib.ui.compat.L`/`log`/
-`notify`/`addon_profile_dir`, `lib.ui.infowindow.open_showcase`,
+lib.ui.searchwindow imports xbmcgui, lib.ui.uicommon, and `get_store`/
+`get_client` (from lib.ui.dependencies) at module scope; every other
+collaborator (`lib.stremio.addons.AddonError`/`iter_catalogs`,
+`lib.ui.compat.L`/`log`/`notify`, `lib.ui.infowindow.open_showcase`,
 `lib.ui.detailwindow.open_detail`) is imported lazily inside the method
-that needs it - so this file fakes `lib.store.Store` and
-`lib.stremio.addons.AddonClient` by monkeypatching those modules'
-attributes directly (the same way test_addonswindow.py patches them via
-`_wire_store`/`_wire_client`), rather than reloading lib.ui.searchwindow's
-own module-scope bindings.
+that needs it - so this file fakes the shared Store/AddonClient
+providers by assigning directly to `searchwindow.get_store`/
+`searchwindow.get_client` (the same way test_addonswindow.py wires
+`_wire_store`/`_wire_client`, and tests/test_views.py wires
+`views.get_store`/`views.get_client`), rather than monkeypatching
+`lib.store`/`lib.stremio.addons` or reloading lib.ui.searchwindow's own
+module-scope bindings.
 
 SearchWindow._run_search() also lazily `from lib.ui.infowindow import
 open_showcase` / `from lib.ui.detailwindow import open_detail`, exactly
 like `CatalogPickerWindow._open_catalog` does, so load_searchwindow
 reloads lib.ui.infowindow/lib.ui.detailwindow fresh alongside
-lib.ui.compat/lib.ui.uicommon/lib.ui.searchwindow to get handles
-(`ctx.infowindow`/`ctx.detailwindow`) this file monkeypatches directly -
-copying tests/test_catalogpicker.py's exact mechanism.
+lib.ui.compat/lib.ui.dependencies/lib.ui.uicommon/lib.ui.searchwindow to
+get handles (`ctx.infowindow`/`ctx.detailwindow`) this file monkeypatches
+directly - copying tests/test_catalogpicker.py's exact mechanism.
 
 SearchWindow.onInit()/onClick() are called directly here, never through a
 real modal event loop, exactly like test_catalogpicker.py drives
@@ -42,13 +44,12 @@ import contextlib
 
 import pytest
 
-import lib.store as store_module
-import lib.stremio.addons as addons_module
 from lib.stremio.addons import AddonError
 from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
-    'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.infowindow', 'lib.ui.detailwindow', 'lib.ui.searchwindow',
+    'lib.ui.compat', 'lib.ui.dependencies', 'lib.ui.uicommon', 'lib.ui.infowindow', 'lib.ui.detailwindow',
+    'lib.ui.searchwindow',
 )
 
 
@@ -126,12 +127,12 @@ def _make_window(searchwindow_mod):
     return searchwindow_mod.SearchWindow('SearchWindow.xml', '/addon/path', 'Default', '720p')
 
 
-def _wire_store(monkeypatch, store):
-    monkeypatch.setattr(store_module, 'Store', lambda *a, **k: store)
+def _wire_store(searchwindow_mod, store):
+    searchwindow_mod.get_store = lambda: store
 
 
-def _wire_client(monkeypatch, client):
-    monkeypatch.setattr(addons_module, 'AddonClient', lambda *a, **k: client)
+def _wire_client(searchwindow_mod, client):
+    searchwindow_mod.get_client = lambda: client
 
 
 def _search_catalog_descriptor(transport, name='Addon'):
@@ -148,7 +149,7 @@ def _search_catalog_descriptor(transport, name='Addon'):
 
 def test_reload_builds_only_the_new_search_row_when_history_is_empty(load_searchwindow, monkeypatch):
     ctx = load_searchwindow()
-    _wire_store(monkeypatch, _FakeStore())
+    _wire_store(ctx.searchwindow, _FakeStore())
     win = _make_window(ctx.searchwindow)
 
     win.onInit()
@@ -163,7 +164,7 @@ def test_reload_builds_only_the_new_search_row_when_history_is_empty(load_search
 
 def test_reload_builds_new_row_plus_history_rows_plus_trailing_clear_row(load_searchwindow, monkeypatch):
     ctx = load_searchwindow()
-    _wire_store(monkeypatch, _FakeStore(history=['batman', 'robin']))
+    _wire_store(ctx.searchwindow, _FakeStore(history=['batman', 'robin']))
     win = _make_window(ctx.searchwindow)
 
     win.onInit()
@@ -182,7 +183,7 @@ def test_reload_builds_new_row_plus_history_rows_plus_trailing_clear_row(load_se
 
 def test_onclick_ignores_control_ids_other_than_list(load_searchwindow, monkeypatch):
     ctx = load_searchwindow()
-    _wire_store(monkeypatch, _FakeStore())
+    _wire_store(ctx.searchwindow, _FakeStore())
     win = _make_window(ctx.searchwindow)
     win.onInit()
     calls = []
@@ -195,7 +196,7 @@ def test_onclick_ignores_control_ids_other_than_list(load_searchwindow, monkeypa
 
 def test_onclick_list_with_no_focused_item_does_not_crash(load_searchwindow, monkeypatch):
     ctx = load_searchwindow()
-    _wire_store(monkeypatch, _FakeStore())
+    _wire_store(ctx.searchwindow, _FakeStore())
     win = _make_window(ctx.searchwindow)
     # No onInit() call -> the list control is never populated.
 
@@ -204,7 +205,7 @@ def test_onclick_list_with_no_focused_item_does_not_crash(load_searchwindow, mon
 
 def test_onclick_new_position_dispatches_to_new_search(load_searchwindow, monkeypatch):
     ctx = load_searchwindow()
-    _wire_store(monkeypatch, _FakeStore())
+    _wire_store(ctx.searchwindow, _FakeStore())
     win = _make_window(ctx.searchwindow)
     win.onInit()  # focused row defaults to index 0, the New-search row
     calls = []
@@ -217,7 +218,7 @@ def test_onclick_new_position_dispatches_to_new_search(load_searchwindow, monkey
 
 def test_onclick_clear_position_dispatches_to_clear_history(load_searchwindow, monkeypatch):
     ctx = load_searchwindow()
-    _wire_store(monkeypatch, _FakeStore(history=['batman']))
+    _wire_store(ctx.searchwindow, _FakeStore(history=['batman']))
     win = _make_window(ctx.searchwindow)
     win.onInit()
     win.getControl(ctx.searchwindow.LIST).selected_index = 2  # the trailing Clear row
@@ -231,7 +232,7 @@ def test_onclick_clear_position_dispatches_to_clear_history(load_searchwindow, m
 
 def test_onclick_numeric_position_reruns_that_historys_exact_query(load_searchwindow, monkeypatch):
     ctx = load_searchwindow()
-    _wire_store(monkeypatch, _FakeStore(history=['batman', 'robin']))
+    _wire_store(ctx.searchwindow, _FakeStore(history=['batman', 'robin']))
     win = _make_window(ctx.searchwindow)
     win.onInit()
     win.getControl(ctx.searchwindow.LIST).selected_index = 2  # the 'robin' row
@@ -251,7 +252,7 @@ def test_onclick_numeric_position_reruns_that_historys_exact_query(load_searchwi
 def test_new_search_cancelled_dialog_never_runs_search_or_touches_the_store(load_searchwindow, monkeypatch):
     ctx = load_searchwindow()  # default dialog_inputs=None -> Dialog.input() returns ''
     store = _FakeStore()
-    _wire_store(monkeypatch, store)
+    _wire_store(ctx.searchwindow, store)
     win = _make_window(ctx.searchwindow)
     win.onInit()
     calls = []
@@ -266,7 +267,7 @@ def test_new_search_cancelled_dialog_never_runs_search_or_touches_the_store(load
 
 def test_new_search_with_a_query_runs_search_with_it(load_searchwindow, monkeypatch):
     ctx = load_searchwindow(dialog_inputs=['batman'])
-    _wire_store(monkeypatch, _FakeStore())
+    _wire_store(ctx.searchwindow, _FakeStore())
     win = _make_window(ctx.searchwindow)
     win.onInit()
     calls = []
@@ -290,13 +291,13 @@ def test_run_search_addonerror_from_one_addon_is_skipped_others_still_aggregate(
         _search_catalog_descriptor(transport_a, 'A'),
         _search_catalog_descriptor(transport_b, 'B'),
     ])
-    _wire_store(monkeypatch, store)
+    _wire_store(ctx.searchwindow, store)
     metas_b = [{'id': 'tt1', 'name': 'Batman', 'type': 'movie'}]
     client = _FakeAddonClient(catalog_results={
         transport_a: AddonError('upstream down'),
         transport_b: metas_b,
     })
-    _wire_client(monkeypatch, client)
+    _wire_client(ctx.searchwindow, client)
     win = _make_window(ctx.searchwindow)
     win.onInit()
     captured = {}
@@ -315,15 +316,39 @@ def test_run_search_addonerror_from_one_addon_is_skipped_others_still_aggregate(
         (transport_a, 'movie', 'search', [('search', 'batman')]),
         (transport_b, 'movie', 'search', [('search', 'batman')]),
     ]
-    assert any('failed' in msg and transport_a in msg for msg, _level in ctx.env.log_calls)
+    assert any('a.example' in msg and 'AddonError' in msg for msg, _level in ctx.env.log_calls)
+    assert not any('upstream down' in msg or transport_a in msg for msg, _level in ctx.env.log_calls)
+
+
+def test_run_search_addon_failure_log_never_leaks_credentials_path_or_query(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow()
+    import xbmc
+    secret_transport = 'https://user:hunter2@evil.example:8443/private/path/manifest.json?token=abc123'
+    store = _FakeStore(addons=[_search_catalog_descriptor(secret_transport)])
+    _wire_store(ctx.searchwindow, store)
+    _wire_client(ctx.searchwindow, _FakeAddonClient(catalog_results={
+        secret_transport: AddonError('GET %s failed: bad request' % secret_transport),
+    }))
+    win = _make_window(ctx.searchwindow)
+    win.onInit()
+
+    win._run_search('nomatch')
+
+    all_messages = ' '.join(msg for msg, _level in ctx.env.log_calls)
+    assert 'hunter2' not in all_messages
+    assert 'token=abc123' not in all_messages
+    assert '/private/path' not in all_messages
+    assert 'bad request' not in all_messages
+    error_msgs = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGERROR]
+    assert any('evil.example:8443' in msg and 'AddonError' in msg for msg in error_msgs)
 
 
 def test_run_search_records_query_even_when_every_addon_fails(load_searchwindow, monkeypatch):
     ctx = load_searchwindow()
     transport = 'https://a.example/manifest.json'
     store = _FakeStore(addons=[_search_catalog_descriptor(transport)])
-    _wire_store(monkeypatch, store)
-    _wire_client(monkeypatch, _FakeAddonClient(catalog_results={transport: AddonError('upstream down')}))
+    _wire_store(ctx.searchwindow, store)
+    _wire_client(ctx.searchwindow, _FakeAddonClient(catalog_results={transport: AddonError('upstream down')}))
     win = _make_window(ctx.searchwindow)
     win.onInit()
 
@@ -336,8 +361,8 @@ def test_run_search_records_query_even_when_every_addon_fails(load_searchwindow,
 def test_run_search_no_results_notifies_and_does_not_open_the_coverflow(load_searchwindow, monkeypatch):
     ctx = load_searchwindow()
     store = _FakeStore(addons=[])
-    _wire_store(monkeypatch, store)
-    _wire_client(monkeypatch, _FakeAddonClient(catalog_results={}))
+    _wire_store(ctx.searchwindow, store)
+    _wire_client(ctx.searchwindow, _FakeAddonClient(catalog_results={}))
     win = _make_window(ctx.searchwindow)
     win.onInit()
     opened = []
@@ -357,8 +382,8 @@ def test_run_search_reloads_the_list_after_the_fetch_loop(load_searchwindow, mon
     flaky addon)."""
     ctx = load_searchwindow()
     store = _FakeStore(addons=[])
-    _wire_store(monkeypatch, store)
-    _wire_client(monkeypatch, _FakeAddonClient(catalog_results={}))
+    _wire_store(ctx.searchwindow, store)
+    _wire_client(ctx.searchwindow, _FakeAddonClient(catalog_results={}))
     win = _make_window(ctx.searchwindow)
     win.onInit()
 
@@ -372,9 +397,9 @@ def test_run_search_nonempty_aggregate_opens_the_coverflow(load_searchwindow, mo
     ctx = load_searchwindow()
     transport = 'https://a.example/manifest.json'
     store = _FakeStore(addons=[_search_catalog_descriptor(transport)])
-    _wire_store(monkeypatch, store)
+    _wire_store(ctx.searchwindow, store)
     metas = [{'id': 'tt1', 'name': 'Batman', 'type': 'movie'}]
-    _wire_client(monkeypatch, _FakeAddonClient(catalog_results={transport: metas}))
+    _wire_client(ctx.searchwindow, _FakeAddonClient(catalog_results={transport: metas}))
     win = _make_window(ctx.searchwindow)
     win.onInit()
     captured = {}
@@ -395,9 +420,9 @@ def test_run_search_no_selection_from_the_coverflow_does_not_close(load_searchwi
     ctx = load_searchwindow()
     transport = 'https://a.example/manifest.json'
     store = _FakeStore(addons=[_search_catalog_descriptor(transport)])
-    _wire_store(monkeypatch, store)
+    _wire_store(ctx.searchwindow, store)
     metas = [{'id': 'tt1', 'name': 'Batman', 'type': 'movie'}]
-    _wire_client(monkeypatch, _FakeAddonClient(catalog_results={transport: metas}))
+    _wire_client(ctx.searchwindow, _FakeAddonClient(catalog_results={transport: metas}))
     win = _make_window(ctx.searchwindow)
     win.onInit()
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: None)
@@ -412,9 +437,9 @@ def test_run_search_selection_that_opens_detail_sets_should_close_caller_and_clo
     ctx = load_searchwindow()
     transport = 'https://a.example/manifest.json'
     store = _FakeStore(addons=[_search_catalog_descriptor(transport)])
-    _wire_store(monkeypatch, store)
+    _wire_store(ctx.searchwindow, store)
     metas = [{'id': 'tt9', 'name': 'Batman', 'type': 'movie'}]
-    _wire_client(monkeypatch, _FakeAddonClient(catalog_results={transport: metas}))
+    _wire_client(ctx.searchwindow, _FakeAddonClient(catalog_results={transport: metas}))
     win = _make_window(ctx.searchwindow)
     win.onInit()
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
@@ -437,9 +462,9 @@ def test_run_search_selection_without_a_type_falls_back_to_movie(load_searchwind
     ctx = load_searchwindow()
     transport = 'https://a.example/manifest.json'
     store = _FakeStore(addons=[_search_catalog_descriptor(transport)])
-    _wire_store(monkeypatch, store)
+    _wire_store(ctx.searchwindow, store)
     metas = [{'id': 'tt9', 'name': 'No Type'}]  # no 'type' key on the selected meta
-    _wire_client(monkeypatch, _FakeAddonClient(catalog_results={transport: metas}))
+    _wire_client(ctx.searchwindow, _FakeAddonClient(catalog_results={transport: metas}))
     win = _make_window(ctx.searchwindow)
     win.onInit()
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
@@ -460,9 +485,9 @@ def test_run_search_detail_returning_false_does_not_close(load_searchwindow, mon
     ctx = load_searchwindow()
     transport = 'https://a.example/manifest.json'
     store = _FakeStore(addons=[_search_catalog_descriptor(transport)])
-    _wire_store(monkeypatch, store)
+    _wire_store(ctx.searchwindow, store)
     metas = [{'id': 'tt9', 'name': 'Batman', 'type': 'movie'}]
-    _wire_client(monkeypatch, _FakeAddonClient(catalog_results={transport: metas}))
+    _wire_client(ctx.searchwindow, _FakeAddonClient(catalog_results={transport: metas}))
     win = _make_window(ctx.searchwindow)
     win.onInit()
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
@@ -478,9 +503,9 @@ def test_run_search_coverflow_open_failure_is_logged_notified_and_does_not_close
     ctx = load_searchwindow()
     transport = 'https://a.example/manifest.json'
     store = _FakeStore(addons=[_search_catalog_descriptor(transport)])
-    _wire_store(monkeypatch, store)
+    _wire_store(ctx.searchwindow, store)
     metas = [{'id': 'tt9', 'name': 'Batman', 'type': 'movie'}]
-    _wire_client(monkeypatch, _FakeAddonClient(catalog_results={transport: metas}))
+    _wire_client(ctx.searchwindow, _FakeAddonClient(catalog_results={transport: metas}))
     win = _make_window(ctx.searchwindow)
     win.onInit()
 
@@ -504,7 +529,7 @@ def test_run_search_coverflow_open_failure_is_logged_notified_and_does_not_close
 def test_clear_history_declined_leaves_history_untouched_and_does_not_reload(load_searchwindow, monkeypatch):
     ctx = load_searchwindow(dialog_yesno=[False])
     store = _FakeStore(history=['batman'])
-    _wire_store(monkeypatch, store)
+    _wire_store(ctx.searchwindow, store)
     win = _make_window(ctx.searchwindow)
     win.onInit()
 
@@ -518,7 +543,7 @@ def test_clear_history_declined_leaves_history_untouched_and_does_not_reload(loa
 def test_clear_history_confirmed_clears_and_reloads_to_new_search_only(load_searchwindow, monkeypatch):
     ctx = load_searchwindow(dialog_yesno=[True])
     store = _FakeStore(history=['batman'])
-    _wire_store(monkeypatch, store)
+    _wire_store(ctx.searchwindow, store)
     win = _make_window(ctx.searchwindow)
     win.onInit()
 
@@ -538,7 +563,7 @@ def test_clear_history_confirmed_clears_and_reloads_to_new_search_only(load_sear
 
 def test_start_resets_should_close_caller_calls_domodal_once_and_returns_it(load_searchwindow, monkeypatch):
     ctx = load_searchwindow()
-    _wire_store(monkeypatch, _FakeStore())
+    _wire_store(ctx.searchwindow, _FakeStore())
     win = _make_window(ctx.searchwindow)
     win.should_close_caller = True  # leftover from a previous run
 
@@ -553,9 +578,9 @@ def test_start_returns_true_when_the_modal_run_sets_should_close_caller(load_sea
     ctx = load_searchwindow()
     transport = 'https://a.example/manifest.json'
     store = _FakeStore(addons=[_search_catalog_descriptor(transport)], history=['batman'])
-    _wire_store(monkeypatch, store)
+    _wire_store(ctx.searchwindow, store)
     metas = [{'id': 'tt9', 'name': 'Batman', 'type': 'movie'}]
-    _wire_client(monkeypatch, _FakeAddonClient(catalog_results={transport: metas}))
+    _wire_client(ctx.searchwindow, _FakeAddonClient(catalog_results={transport: metas}))
     win = _make_window(ctx.searchwindow)
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
     monkeypatch.setattr(ctx.detailwindow, 'open_detail', lambda stype, sid: True)
@@ -635,3 +660,77 @@ def test_open_search_window_is_closed_exactly_once_when_start_raises(load_search
     assert win.close_calls == 1
     assert win.closed is True
     assert ctx.env.notifications == [('Rivulet', 'STR30032', 'info', 4000)]
+
+
+# ---------------------------------------------------------------------------
+# Shared process-wide Store/AddonClient (lib.ui.dependencies)
+# ---------------------------------------------------------------------------
+
+
+def test_reload_prefers_an_already_injected_store_over_the_shared_provider(load_searchwindow, monkeypatch):
+    """`_reload()`'s `self.store = self.store or get_store()` must never
+    call `get_store()` once a test (or a caller) has already injected
+    `self.store` directly."""
+    ctx = load_searchwindow()
+
+    def _unexpected():
+        raise AssertionError('get_store() must not be called when self.store is already set')
+
+    monkeypatch.setattr(ctx.searchwindow, 'get_store', _unexpected)
+    win = _make_window(ctx.searchwindow)
+    win.store = _FakeStore(history=['batman'])
+
+    win.onInit()  # must not raise
+
+    assert [item.getLabel() for item in win.getControl(ctx.searchwindow.LIST).items] == [
+        'STR30042', 'batman', 'STR30044',
+    ]
+
+
+def test_reopening_searchwindow_reuses_the_shared_store(load_searchwindow, monkeypatch):
+    """`_reload()` re-runs every time the window reopens (`onInit()` fires
+    again) - with no store injected it must always fetch the SAME
+    `get_store()` singleton rather than constructing a fresh `Store`."""
+    ctx = load_searchwindow()
+
+    class _CountingStore:
+        instances = 0
+
+        def __init__(self, *args):
+            type(self).instances += 1
+
+        def get_search_history(self):
+            return []
+
+    monkeypatch.setattr(ctx.dependencies, 'Store', _CountingStore)
+    win = _make_window(ctx.searchwindow)
+
+    win.onInit()
+    first_store = win.store
+    win.onInit()  # simulates the window reopening
+
+    assert win.store is first_store
+    assert _CountingStore.instances == 1
+
+
+def test_run_search_reuses_the_shared_client_across_multiple_searches(load_searchwindow, monkeypatch):
+    """Two separate `_run_search()` calls must reuse the SAME
+    `get_client()` singleton rather than each constructing its own
+    `AddonClient`."""
+    ctx = load_searchwindow()
+    _wire_store(ctx.searchwindow, _FakeStore())  # no catalogs -> loop body never runs
+
+    class _CountingClient:
+        instances = 0
+
+        def __init__(self):
+            type(self).instances += 1
+
+    monkeypatch.setattr(ctx.dependencies, 'AddonClient', _CountingClient)
+    win = _make_window(ctx.searchwindow)
+    win.onInit()
+
+    win._run_search('batman')
+    win._run_search('robin')
+
+    assert _CountingClient.instances == 1

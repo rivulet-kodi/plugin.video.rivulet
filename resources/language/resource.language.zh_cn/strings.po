@@ -447,3 +447,47 @@ msgstr "pprof 诊断地址"
 msgctxt "#30147"
 msgid "Stremio account auth key (HTTPS auto-cert)"
 msgstr "Stremio 账户认证密钥（HTTPS 自动证书）"
+
+msgctxt "#30170"
+msgid "Sync playback progress to your Stremio account"
+msgstr "将播放进度同步到您的 Stremio 账户"
+
+msgctxt "#30171"
+msgid "Ask to resume"
+msgstr "询问是否继续播放"
+
+msgctxt "#30172"
+msgid "Resume playback?"
+msgstr "继续播放？"
+
+msgctxt "#30173"
+msgid "Resume from %s?"
+msgstr "从 %s 继续播放？"
+
+msgctxt "#30174"
+msgid "Resume"
+msgstr "继续播放"
+
+msgctxt "#30175"
+msgid "Start from beginning"
+msgstr "从头开始"
+
+msgctxt "#30160"
+msgid "This stream can only be opened in the Stremio app"
+msgstr "此视频源只能在 Stremio 应用中打开"
+
+msgctxt "#30180"
+msgid "Play the next episode automatically"
+msgstr "自动播放下一集"
+
+msgctxt "#30181"
+msgid "Auto-play countdown (seconds)"
+msgstr "自动播放倒计时（秒）"
+
+msgctxt "#30182"
+msgid "Next episode"
+msgstr "下一集"
+
+msgctxt "#30183"
+msgid "Playing %s in %d s"
+msgstr "%s将在%d秒后播放"

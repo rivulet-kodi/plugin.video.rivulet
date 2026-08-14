@@ -16,20 +16,17 @@ import xbmc
 import xbmcgui
 import xbmcplugin
 
-from lib.store import ConcurrentUpdateError, Store
+from lib.store import ConcurrentUpdateError
 from lib.stremio import addons as addons_lib
 from lib.stremio import streaminfo
-from lib.stremio.addons import AddonClient, AddonError
+from lib.stremio.addons import AddonError, safe_url_for_log, validate_transport_url
 from lib.stremio.api import ApiError, StremioAPI
-from lib.ui import compat, router
+from lib.ui import compat, router, urlutil
 from lib.ui.compat import L, log, notify, set_video_info
+from lib.ui.dependencies import get_client, get_store
 
 _YEAR_RE = re.compile(r'(\d{4})')
 _RUNTIME_RE = re.compile(r'(\d+)')
-
-_STORE = None
-_CLIENT = None
-
 
 #: Cap on concurrent addon HTTP calls per fan-out (search()/streams()/
 #: _fetch_meta()) - bounded so a user with dozens of installed addons
@@ -40,18 +37,10 @@ _CLIENT = None
 _MAX_ADDON_WORKERS = 8
 
 
-def _get_store():
-    global _STORE
-    if _STORE is None:
-        _STORE = Store(compat.addon_profile_dir())
-    return _STORE
-
-
-def _get_client():
-    global _CLIENT
-    if _CLIENT is None:
-        _CLIENT = AddonClient()
-    return _CLIENT
+def _url_for(action, **params):
+    """Local convenience wrapper binding urlutil.url_for() to the router's
+    current BASE_URL, so call sites below don't repeat it."""
+    return urlutil.url_for(router.BASE_URL, action, **params)
 
 
 def _map_addons(fn, items):
@@ -234,7 +223,7 @@ def _meta_item(meta, ctype=None):
         info['plotoutline'] = meta.get('tagline')
     set_video_info(li, info)
 
-    url = router.url_for('meta', type=mtype, id=meta.get('id'))
+    url = _url_for('meta', type=mtype, id=meta.get('id'))
     return (url, li, True)
 
 
@@ -268,7 +257,7 @@ def _stream_item(info, stream, stype, sid, poster=None, title=None, logo=None):
     elif info.get('size_bytes'):
         li.setProperty('size', str(info['size_bytes']))
 
-    url = router.url_for('play', stream=router.encode_stream(stream), type=stype, id=sid)
+    url = _url_for('play', stream=urlutil.encode_stream(stream), type=stype, id=sid)
     return (url, li, False)
 
 
@@ -300,8 +289,8 @@ def _fetch_meta(stype, sid):
     before a thread starts running) - they keep running to completion or
     their own 15s timeout in a background thread we no longer wait on.
     """
-    store = _get_store()
-    client = _get_client()
+    store = get_store()
+    client = get_client()
     targets = [
         descriptor for descriptor in store.get_addons()
         if addons_lib.addon_supports(descriptor.get('manifest') or {}, 'meta', stype, sid)
@@ -314,7 +303,7 @@ def _fetch_meta(stype, sid):
         try:
             return client.meta(transport_url, stype, sid)
         except AddonError as exc:
-            log('views._fetch_meta: %s failed: %r' % (transport_url, exc), xbmc.LOGWARNING)
+            log('views._fetch_meta: %s failed: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGWARNING)
             return None
 
     if len(targets) == 1:
@@ -362,15 +351,15 @@ def _ordered_seasons(videos):
 @_safe_listing
 def home():
     handle = router.ADDON_HANDLE
-    store = _get_store()
+    store = get_store()
     items = [
-        _folder_item(L(30000), router.url_for('discover'), compat.addon_media_path('discover.png')),
-        _folder_item(L(30001), router.url_for('search'), compat.addon_media_path('search.png')),
+        _folder_item(L(30000), _url_for('discover'), compat.addon_media_path('discover.png')),
+        _folder_item(L(30001), _url_for('search'), compat.addon_media_path('search.png')),
     ]
     if store.get_auth():
-        items.append(_folder_item(L(30002), router.url_for('library'), compat.addon_media_path('library.png')))
-    items.append(_folder_item(L(30003), router.url_for('addons'), compat.addon_media_path('addons.png')))
-    items.append(_action_item(L(30004), router.url_for('settings'), compat.addon_media_path('settings.png')))
+        items.append(_folder_item(L(30002), _url_for('library'), compat.addon_media_path('library.png')))
+    items.append(_folder_item(L(30003), _url_for('addons'), compat.addon_media_path('addons.png')))
+    items.append(_action_item(L(30004), _url_for('settings'), compat.addon_media_path('settings.png')))
     xbmcplugin.addDirectoryItems(handle, items, len(items))
     xbmcplugin.setContent(handle, 'files')
     xbmcplugin.setPluginCategory(handle, compat.ADDON_NAME)
@@ -385,7 +374,7 @@ def open_settings():
 @_safe_listing
 def discover():
     handle = router.ADDON_HANDLE
-    store = _get_store()
+    store = get_store()
     items = []
     for transport_url, manifest, catalog in addons_lib.iter_catalogs(store.get_addons()):
         addon_name = manifest.get('name', '?')
@@ -397,13 +386,9 @@ def discover():
         if logo:
             art.update({'icon': logo, 'thumb': logo})
         li.setArt(art)
-        showcase_url = router.url_for(
-            'showcase', transport=transport_url, type=catalog.get('type'), id=catalog.get('id')
-        )
+        showcase_url = _url_for('showcase', transport=transport_url, type=catalog.get('type'), id=catalog.get('id'))
         li.addContextMenuItems([(L(30026), 'RunPlugin(%s)' % showcase_url)])
-        url = router.url_for(
-            'catalog', transport=transport_url, type=catalog.get('type'), id=catalog.get('id')
-        )
+        url = _url_for('catalog', transport=transport_url, type=catalog.get('type'), id=catalog.get('id'))
         items.append((url, li, True))
     xbmcplugin.addDirectoryItems(handle, items, len(items))
     xbmcplugin.setContent(handle, 'files')
@@ -415,18 +400,18 @@ def _fetch_catalog(transport, ctype, cid, extra=None):
     call catalog() and showcase() both build their listing/overlay from.
     Raises AddonError on failure; callers decide how to surface it
     (catalog() ends the directory as failed, showcase() notifies)."""
-    client = _get_client()
+    client = get_client()
     return client.catalog(transport, ctype, cid, extra=extra)
 
 
 @_safe_listing
 def catalog(transport, ctype, cid, extra=None):
     handle = router.ADDON_HANDLE
-    store = _get_store()
+    store = get_store()
     try:
         metas = _fetch_catalog(transport, ctype, cid, extra)
     except AddonError as exc:
-        log('views.catalog: %s %s/%s failed: %r' % (transport, ctype, cid, exc), xbmc.LOGERROR)
+        log('views.catalog: %s %s/%s failed: %s' % (safe_url_for_log(transport), ctype, cid, type(exc).__name__), xbmc.LOGERROR)
         notify(str(exc))
         xbmcplugin.endOfDirectory(handle, succeeded=False)
         return
@@ -447,7 +432,7 @@ def catalog(transport, ctype, cid, extra=None):
             next_pairs = [(k, v) for k, v in extra_pairs if k != 'skip']
             next_pairs.append(('skip', str(current_skip + len(metas))))
             next_extra = addons_lib.encode_extra(next_pairs)
-            next_url = router.url_for('catalog', transport=transport, type=ctype, id=cid, extra=next_extra)
+            next_url = _url_for('catalog', transport=transport, type=ctype, id=cid, extra=next_extra)
             items.append(_folder_item(L(30040), next_url, 'DefaultFolder.png'))
 
     if not items:
@@ -471,7 +456,7 @@ def showcase(transport, ctype, cid, extra=None):
     try:
         metas = _fetch_catalog(transport, ctype, cid, extra)
     except AddonError as exc:
-        log('views.showcase: %s %s/%s failed: %r' % (transport, ctype, cid, exc), xbmc.LOGERROR)
+        log('views.showcase: %s %s/%s failed: %s' % (safe_url_for_log(transport), ctype, cid, type(exc).__name__), xbmc.LOGERROR)
         notify(str(exc))
         return
 
@@ -489,9 +474,7 @@ def showcase(transport, ctype, cid, extra=None):
         return
 
     if selected:
-        xbmc.executebuiltin('Container.Update(%s)' % router.url_for(
-            'meta', type=selected.get('type') or ctype, id=selected.get('id')
-        ))
+        xbmc.executebuiltin('Container.Update(%s)' % _url_for('meta', type=selected.get('type') or ctype, id=selected.get('id')))
 
 
 @_safe_listing
@@ -502,9 +485,9 @@ def search():
         xbmcplugin.endOfDirectory(handle, succeeded=False, updateListing=False, cacheToDisc=False)
         return
 
-    store = _get_store()
+    store = get_store()
     store.add_search_query(query)
-    client = _get_client()
+    client = get_client()
     catalog_targets = list(addons_lib.iter_catalogs(store.get_addons(), extra_required='search'))
 
     def _fetch_catalog_result(target):
@@ -512,7 +495,7 @@ def search():
         try:
             return client.catalog(transport_url, cat.get('type'), cat.get('id'), extra=[('search', query)])
         except AddonError as exc:
-            log('views.search: %s failed: %r' % (transport_url, exc), xbmc.LOGWARNING)
+            log('views.search: %s failed: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGWARNING)
             return None
 
     metas = []
@@ -579,7 +562,7 @@ def meta(stype, sid):
         set_video_info(li, {
             'title': label, 'tvshowtitle': show_name, 'season': season, 'mediatype': 'season',
         })
-        url = router.url_for('videos', type=stype, id=sid, season=str(season))
+        url = _url_for('videos', type=stype, id=sid, season=str(season))
         items.append((url, li, True))
 
     xbmcplugin.addDirectoryItems(handle, items, len(items))
@@ -626,9 +609,7 @@ def videos(stype, sid, season):
             'aired': _date_only(video.get('released')),
             'mediatype': 'episode',
         })
-        url = router.url_for(
-            'streams', type=stype, id=video.get('id') or sid, poster=thumb, title=label
-        )
+        url = _url_for('streams', type=stype, id=video.get('id') or sid, poster=thumb, title=label)
         items.append((url, li, True))
 
     xbmcplugin.addDirectoryItems(handle, items, len(items))
@@ -659,8 +640,8 @@ def streams(stype, sid, poster=None, title=None):
         poster = poster or extra.get('poster')
         title = title or extra.get('title')
 
-    store = _get_store()
-    client = _get_client()
+    store = get_store()
+    client = get_client()
     targets = [
         descriptor for descriptor in store.get_addons()
         if addons_lib.addon_supports(descriptor.get('manifest') or {}, 'stream', stype, sid)
@@ -671,7 +652,7 @@ def streams(stype, sid, poster=None, title=None):
         try:
             return client.streams(transport_url, stype, sid)
         except AddonError as exc:
-            log('views.streams: %s failed: %r' % (transport_url, exc), xbmc.LOGWARNING)
+            log('views.streams: %s failed: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGWARNING)
             return None
 
     pairs = []
@@ -704,7 +685,7 @@ def streams(stype, sid, poster=None, title=None):
 @_safe_listing
 def addons():
     handle = router.ADDON_HANDLE
-    store = _get_store()
+    store = get_store()
     items = []
 
     for descriptor in store.get_addons():
@@ -720,21 +701,21 @@ def addons():
         li.setArt(art)
         set_video_info(li, {'title': label, 'plot': manifest.get('description', '')})
         if not flags.get('protected'):
-            remove_url = router.url_for('addon_remove', transport=transport_url)
+            remove_url = _url_for('addon_remove', transport=transport_url)
             li.addContextMenuItems([(L(30011), 'RunPlugin(%s)' % remove_url)])
             items.append((remove_url, li, False))
         else:
-            items.append((router.url_for('discover'), li, True))
+            items.append((_url_for('discover'), li, True))
 
-    items.append(_action_item(L(30010), router.url_for('addon_install'), 'DefaultAddonNone.png'))
+    items.append(_action_item(L(30010), _url_for('addon_install'), 'DefaultAddonNone.png'))
 
     auth = store.get_auth()
     if auth:
         user = auth.get('user') or {}
         label = L(30022) % (user.get('email') or user.get('name') or '?')
-        items.append(_action_item(label, router.url_for('logout'), 'DefaultAddonService.png'))
+        items.append(_action_item(label, _url_for('logout'), 'DefaultAddonService.png'))
     else:
-        items.append(_action_item(L(30020), router.url_for('login'), 'DefaultAddonService.png'))
+        items.append(_action_item(L(30020), _url_for('login'), 'DefaultAddonService.png'))
 
     xbmcplugin.addDirectoryItems(handle, items, len(items))
     xbmcplugin.setContent(handle, 'files')
@@ -791,8 +772,8 @@ def sync_addons_now():
     a freshly-updated local manifest set - not a stale install-time
     snapshot - is what gets pushed to the account."""
     handle = router.ADDON_HANDLE
-    store = _get_store()
-    _refresh_addon_manifests(store, _get_client())
+    store = get_store()
+    _refresh_addon_manifests(store, get_client())
     _sync_addons_if_logged_in(store, notify_success=True)
     _finish_action(handle, refresh=False)
 
@@ -822,7 +803,7 @@ def _refresh_addon_manifests(store, client):
         try:
             return client.manifest(transport_url)
         except AddonError as exc:
-            log('views._refresh_addon_manifests: %s failed: %r' % (transport_url, exc), xbmc.LOGWARNING)
+            log('views._refresh_addon_manifests: %s failed: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGWARNING)
             return None
 
     fetched = _map_addons(_fetch, descriptors)
@@ -853,9 +834,17 @@ def addon_install():
         return
 
     try:
-        manifest = _get_client().manifest(url)
+        transport_url = validate_transport_url(url)
     except AddonError as exc:
-        log('views.addon_install: manifest fetch failed for %s: %r' % (url, exc), xbmc.LOGERROR)
+        log('views.addon_install: invalid transport url %s: %s' % (safe_url_for_log(url), exc), xbmc.LOGERROR)
+        notify(L(30014))
+        _finish_action(handle, refresh=False)
+        return
+
+    try:
+        manifest = get_client().manifest(transport_url)
+    except AddonError as exc:
+        log('views.addon_install: manifest fetch failed for %s: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGERROR)
         notify(L(30014))
         _finish_action(handle, refresh=False)
         return
@@ -865,8 +854,8 @@ def addon_install():
         _finish_action(handle, refresh=False)
         return
 
-    _get_store().install_addon(url, manifest)
-    _sync_addons_if_logged_in(_get_store())
+    get_store().install_addon(transport_url, manifest)
+    _sync_addons_if_logged_in(get_store())
     notify(L(30012))
     _finish_action(handle)
 
@@ -882,8 +871,8 @@ def addon_remove(transport):
         return
 
     try:
-        _get_store().remove_addon(transport)
-        _sync_addons_if_logged_in(_get_store())
+        get_store().remove_addon(transport)
+        _sync_addons_if_logged_in(get_store())
         notify(L(30013))
     except Exception as exc:  # noqa: BLE001 - e.g. protected-addon refusal
         log('views.addon_remove: %r' % (exc,), xbmc.LOGERROR)
@@ -912,7 +901,7 @@ def login():
         _finish_action(handle, refresh=False)
         return
 
-    store = _get_store()
+    store = get_store()
     store.set_auth(result)
 
     try:
@@ -930,12 +919,29 @@ def login():
             # Re-run against a freshly-read `local_addons` on every retry
             # (see Store.update_addons), so a concurrent install/remove
             # racing this login is merged rather than clobbered.
+            #
+            # Remote descriptors are untrusted (server-side account data,
+            # or another client's tampered sync push): a `transportUrl`
+            # that fails validate_transport_url() (credentials, plaintext
+            # public host, non-HTTP(S), ...) is discarded here rather than
+            # persisted/installed - only its safe identity/origin is
+            # logged, never the raw descriptor.
             seen = {a.get('transportUrl') for a in local_addons}
             merged = list(local_addons)
             for descriptor in remote_addons:
-                if descriptor.get('transportUrl') not in seen:
-                    merged.append(descriptor)
-                    seen.add(descriptor.get('transportUrl'))
+                transport_url = descriptor.get('transportUrl')
+                if not transport_url:
+                    continue
+                try:
+                    normalized_url = validate_transport_url(transport_url)
+                except AddonError:
+                    manifest_id = (descriptor.get('manifest') or {}).get('id') or '?'
+                    log('views.login: discarding unsafe synced addon %s (%s)' % (
+                        manifest_id, safe_url_for_log(transport_url)), xbmc.LOGWARNING)
+                    continue
+                if normalized_url not in seen:
+                    merged.append(dict(descriptor, transportUrl=normalized_url))
+                    seen.add(normalized_url)
             return merged
 
         try:
@@ -955,7 +961,7 @@ def login():
 
 def logout():
     handle = router.ADDON_HANDLE
-    store = _get_store()
+    store = get_store()
     auth = store.get_auth()
     if not auth:
         _finish_action(handle, refresh=False)
@@ -976,7 +982,7 @@ def logout():
 @_safe_listing
 def library():
     handle = router.ADDON_HANDLE
-    store = _get_store()
+    store = get_store()
     items = []
     auth = store.get_auth()
     if auth:
@@ -1002,7 +1008,7 @@ def library():
             set_video_info(li, {
                 'title': name, 'mediatype': 'tvshow' if entry_type == 'series' else 'movie',
             })
-            url = router.url_for('meta', type=entry_type, id=entry.get('_id'))
+            url = _url_for('meta', type=entry_type, id=entry.get('_id'))
             items.append((url, li, True))
 
     xbmcplugin.addDirectoryItems(handle, items, len(items))

@@ -125,7 +125,7 @@ class StremioAPI:
         )
 
     def datastore_get(self, auth_key, collection="libraryItem", ids=None, all=True):
-        """Fetch datastore records (library items) for ``collection``."""
+        """Fetch datastore records (library items) for `collection`."""
         result = self._call(
             "datastoreGet",
             {
@@ -135,4 +135,39 @@ class StremioAPI:
                 "all": bool(all),
             },
         )
+        return result if isinstance(result, list) else []
+
+    def datastore_put(self, auth_key, changes, collection="libraryItem"):
+        """Push local libraryItem changes to the account datastore.
+
+        `changes` is an iterable of already-built LibraryItem dicts (see
+        `lib.library.build_library_item`/`lib.library.merge_playback`) --
+        this method only wraps them in the `datastorePut` envelope. Wire
+        shape pinned by stremio-core's own unit test fixture
+        (src/unit_tests/ctx/add_to_library.rs:35-37):
+            POST /api/datastorePut
+            {"authKey": ..., "collection": ..., "changes": [...]}
+        """
+        self._call(
+            "datastorePut",
+            {"authKey": auth_key, "collection": collection, "changes": list(changes)},
+        )
+
+    def datastore_meta(self, auth_key, collection="libraryItem"):
+        """Fetch modification metadata for every record in `collection`,
+        without downloading full records -- `[[id, mtime_epoch_ms], ...]`.
+
+        `datastoreMeta` takes no body fields beyond authKey/collection
+        (src/types/api/request.rs:332-334's `DatastoreCommand::Meta` unit
+        variant, confirmed by the pinned
+        `{"authKey":"auth_key","collection":"libraryItem"}` body in
+        src/unit_tests/ctx/sync_library_with_api.rs:160-162). Each
+        response entry is a plain 2-element JSON array on the wire --
+        stremio-core deserializes it as the tuple struct
+        `LibraryItemModified(String, DateTime<Utc>)` with
+        `#[serde(with = "ts_milliseconds")]` (src/types/api/response.rs:
+        78-82), i.e. the second element is milliseconds-since-epoch, not
+        an ISO string.
+        """
+        result = self._call("datastoreMeta", {"authKey": auth_key, "collection": collection})
         return result if isinstance(result, list) else []

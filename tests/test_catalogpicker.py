@@ -23,7 +23,6 @@ import contextlib
 
 import pytest
 
-import lib.store as store_module
 from lib.stremio.addons import AddonError
 from tests.kodistubs import install_kodi_stubs
 
@@ -183,6 +182,28 @@ def test_open_catalog_addon_error_is_logged_and_does_not_close(load_catalogpicke
     assert win.should_close_caller is False
     assert win.closed is False
     assert ctx.env.executed_builtins == []
+
+
+def test_open_catalog_addon_error_log_never_leaks_credentials_path_or_query(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker()
+    import xbmc
+    win = _make_window(ctx.catalogpicker)
+    secret_transport = 'https://user:hunter2@evil.example:8443/private/path/manifest.json?token=abc123'
+
+    def _raise(transport, ctype, cid):
+        raise AddonError('GET %s failed: bad request' % transport)
+
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', _raise)
+
+    win._open_catalog(secret_transport, {'type': 'movie', 'id': 'top'})
+
+    all_messages = ' '.join(msg for msg, _level in ctx.env.log_calls)
+    assert 'hunter2' not in all_messages
+    assert 'token=abc123' not in all_messages
+    assert '/private/path' not in all_messages
+    assert 'bad request' not in all_messages
+    error_msgs = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGERROR]
+    assert any('evil.example:8443' in msg and 'AddonError' in msg for msg in error_msgs)
 
 
 def test_open_catalog_empty_results_does_not_close_or_fallback(load_catalogpicker, monkeypatch):
@@ -379,7 +400,7 @@ def test_start_with_catalogs_calls_domodal_and_returns_should_close_caller(load_
 
 def test_open_catalog_picker_with_no_catalogs_notifies_and_returns_false(load_catalogpicker, monkeypatch):
     ctx = load_catalogpicker()
-    monkeypatch.setattr(store_module, 'Store', lambda *a, **k: _FakeStore(addons=[]))
+    monkeypatch.setattr(ctx.catalogpicker, 'get_store', lambda: _FakeStore(addons=[]))
 
     result = ctx.catalogpicker.open_catalog_picker()
 
@@ -393,7 +414,7 @@ def test_open_catalog_picker_opens_window_with_discovered_catalogs(load_catalogp
         'transportUrl': 'https://a.example/manifest.json',
         'manifest': {'name': 'Addon A', 'catalogs': [{'id': 'top', 'type': 'movie'}]},
     }
-    monkeypatch.setattr(store_module, 'Store', lambda *a, **k: _FakeStore(addons=[descriptor]))
+    monkeypatch.setattr(ctx.catalogpicker, 'get_store', lambda: _FakeStore(addons=[descriptor]))
     captured = {}
 
     class RecordingWindow(ctx.catalogpicker.CatalogPickerWindow):
@@ -424,7 +445,7 @@ def test_open_catalog_picker_window_is_closed_exactly_once_when_start_raises(
         'transportUrl': 'https://a.example/manifest.json',
         'manifest': {'name': 'Addon A', 'catalogs': [{'id': 'top', 'type': 'movie'}]},
     }
-    monkeypatch.setattr(store_module, 'Store', lambda *a, **k: _FakeStore(addons=[descriptor]))
+    monkeypatch.setattr(ctx.catalogpicker, 'get_store', lambda: _FakeStore(addons=[descriptor]))
     captured = {}
 
     class ExplodingWindow(ctx.catalogpicker.CatalogPickerWindow):

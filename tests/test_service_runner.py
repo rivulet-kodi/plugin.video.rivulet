@@ -17,6 +17,7 @@ The module is split in two halves (see its own docstring):
     `xbmcgui.NOTIFICATION_ERROR` (see `_main_env` below).
 """
 import contextlib
+import datetime
 import os
 import subprocess
 import sys
@@ -26,6 +27,7 @@ import pytest
 
 import lib.serverbin as serverbin
 import lib.service_runner as service_runner
+import lib.settings as lib_settings
 from tests.kodistubs import install_kodi_stubs
 
 # ===========================================================================
@@ -523,6 +525,75 @@ def test_stop_closes_the_log_file_handle(fake_popen, tmp_path):
     assert log_fh.closed is True
 
 
+def test_start_closes_opened_log_and_resets_state_when_popen_raises(monkeypatch, tmp_path):
+    """start() is transactional: if Popen() fails after the log file was
+    already opened, the fd must not leak and the object must look
+    exactly like it never started (so a caller can safely retry)."""
+    sp = _server_process(tmp_path)
+    opened = []
+    real_open = open
+
+    def tracking_open(*args, **kwargs):
+        fh = real_open(*args, **kwargs)
+        opened.append(fh)
+        return fh
+
+    monkeypatch.setattr(service_runner, 'open', tracking_open, raising=False)
+    monkeypatch.setattr(
+        service_runner.subprocess, 'Popen',
+        lambda *a, **kw: (_ for _ in ()).throw(OSError('exec failed')),
+    )
+
+    with pytest.raises(OSError):
+        sp.start()
+
+    assert len(opened) == 1
+    assert opened[0].closed is True
+    assert sp._proc is None
+    assert sp._log_fh is None
+    assert sp.running is False
+
+
+def test_start_resets_state_when_log_open_raises(monkeypatch, tmp_path):
+    sp = _server_process(tmp_path)
+    monkeypatch.setattr(
+        service_runner, 'open', lambda *a, **kw: (_ for _ in ()).throw(OSError('disk full')),
+        raising=False,
+    )
+
+    with pytest.raises(OSError):
+        sp.start()
+
+    assert sp._proc is None
+    assert sp._log_fh is None
+    assert sp.running is False
+
+
+def test_stop_propagates_second_post_kill_timeout_but_still_closes_log(fake_popen, tmp_path):
+    """A child that survives even kill() (wedged/zombie) must not have its
+    failure silently swallowed: the log fd still closes (in `finally`),
+    but the exception propagates and `_proc`/`_started_at` are left
+    alone -- `running` keeps reporting True so a caller never spawns a
+    duplicate next to a possibly-still-alive process."""
+    sp = _server_process(tmp_path)
+    sp.start()
+    fake_proc = fake_popen[0]['proc']
+    fake_proc._wait_results = [
+        subprocess.TimeoutExpired(cmd='stremio-server', timeout=3.0),
+        subprocess.TimeoutExpired(cmd='stremio-server', timeout=3.0),
+    ]
+    log_fh = sp._log_fh
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        sp.stop(grace=3.0)
+
+    assert fake_proc.terminate_calls == 1
+    assert fake_proc.kill_calls == 1
+    assert fake_proc.wait_calls == [3.0, 3.0]
+    assert log_fh.closed is True
+    assert sp._log_fh is None
+    assert sp.running is True  # not confirmed dead -- state intentionally kept
+
 # ===========================================================================
 # main(): the xbmc.Monitor-driven supervision loop
 # ===========================================================================
@@ -591,6 +662,7 @@ class ScriptedProcess:
     def __init__(
         self, binary, server_url, app_path, log_path,
         poll_sequence=None, uptime_value=None, extra_env=None,
+        start_exceptions=None, stop_exceptions=None,
     ):
         self.binary = binary
         self.server_url = server_url
@@ -601,9 +673,15 @@ class ScriptedProcess:
         self.stop_calls = 0
         self._poll_sequence = list(poll_sequence or [])
         self._uptime_value = uptime_value
+        self._start_exceptions = list(start_exceptions or [])  # queue: None entries succeed
+        self._stop_exceptions = list(stop_exceptions or [])
 
     def start(self):
         self.start_calls += 1
+        if self._start_exceptions:
+            exc = self._start_exceptions.pop(0)
+            if exc is not None:
+                raise exc
 
     def poll(self):
         return self._poll_sequence.pop(0) if self._poll_sequence else None
@@ -613,6 +691,10 @@ class ScriptedProcess:
 
     def stop(self, grace=5.0):
         self.stop_calls += 1
+        if self._stop_exceptions:
+            exc = self._stop_exceptions.pop(0)
+            if exc is not None:
+                raise exc
 
 
 def _make_process_factory(specs):
@@ -806,54 +888,83 @@ def test_main_embedded_enabled_binary_missing_auto_downloads_then_starts(monkeyp
     assert any('download complete' in msg for msg in info_logs)
 
 
-def test_main_embedded_enabled_binary_missing_download_fails_then_notifies_once_and_stops_retrying(
+def test_main_transient_download_failure_retries_after_backoff_deadline_and_notifies_once(
     monkeypatch, tmp_path
 ):
-    """When the one auto-download attempt raises (network down, no release
-    asset for this platform, etc.), main() must not crash, must notify the
-    failure once, and must NOT hammer GitHub again on every subsequent
-    2s/5s poll -- `attempted_download` guards it. Instead it falls back to
-    the pre-existing notify-once-then-recheck behavior, in case a binary
-    is manually dropped into place later.
+    """A transient DownloadError (network hiccup, GitHub outage, no
+    release asset published yet, ...) is not a one-shot: main() retries
+    automatically once DOWNLOAD_RETRY_BACKOFF[n] has actually elapsed
+    (gated on a monotonic deadline, not merely the loop's own sleep), but
+    only shows the failure notification once per cooldown cycle so a
+    prolonged outage does not spam the user. Success resets the schedule.
     """
+    clock = {'t': 1000.0}
+    monkeypatch.setattr(service_runner.time, 'monotonic', lambda: clock['t'])
     monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
-    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: None)
 
     install_calls = []
 
     def fake_install_binary(dest_dir, progress_cb=None):
         install_calls.append(dest_dir)
-        raise serverbin.DownloadError('no network')
+        if len(install_calls) < 3:
+            raise serverbin.DownloadError('no network')
+        return os.path.join(dest_dir, service_runner.BINARY_NAME)
+
+    def fake_resolve_binary(explicit_path, addon_data_dir):
+        return None if len(install_calls) < 3 else '/opt/bin/stremio-server'
 
     monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
-    factory, spawned = _make_process_factory([])
+    monkeypatch.setattr(service_runner, 'resolve_binary', fake_resolve_binary)
+    factory, spawned = _make_process_factory([{}])
     monkeypatch.setattr(service_runner, 'ServerProcess', factory)
 
+    def advance(seconds):
+        def _step(monitor):
+            clock['t'] += seconds
+        return _step
+
+    # iter0: 1st attempt fails, arms a DOWNLOAD_RETRY_BACKOFF[0]s cooldown.
+    # iter1: cooldown still active (no time advanced) -> skipped entirely,
+    # no install_binary() call, no repeated notification. iter2: clock
+    # advanced past the deadline during iter1's wait -> 2nd attempt fails
+    # too, arms a DOWNLOAD_RETRY_BACKOFF[1]s cooldown. iter3: still
+    # cooling down -> skipped. iter4: clock advanced again -> 3rd attempt
+    # succeeds. iter5: resolve_binary now finds it -> spawns.
     intervals = []
-    wait = _scripted_wait(intervals, [None, None, None])
+    wait = _scripted_wait(intervals, [
+        None,
+        advance(service_runner.DOWNLOAD_RETRY_BACKOFF[0]),
+        None,
+        advance(service_runner.DOWNLOAD_RETRY_BACKOFF[1]),
+        None,
+        None,
+    ])
     with _main_env(tmp_path, wait, settings={'server_enable': True}) as ctx:
         service_runner.main()
 
-    assert spawned == []
-    assert intervals == [service_runner.MISSING_BINARY_RECHECK_INTERVAL] * 3
-
-    # Attempted exactly once across all 3 iterations, not once per poll.
-    assert install_calls == [os.path.join(str(tmp_path), 'bin')]
+    assert install_calls == [os.path.join(str(tmp_path), 'bin')] * 3
+    assert intervals == [
+        service_runner.MISSING_BINARY_RECHECK_INTERVAL,
+        service_runner.MISSING_BINARY_RECHECK_INTERVAL,  # skipped: still cooling down
+        service_runner.MISSING_BINARY_RECHECK_INTERVAL,
+        service_runner.MISSING_BINARY_RECHECK_INTERVAL,  # skipped: still cooling down
+        service_runner.POST_DOWNLOAD_RECHECK_INTERVAL,
+        service_runner.HEALTHY_POLL_INTERVAL,
+    ]
 
     setup_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30069']
     failed_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30063']
-    missing_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30031']
-    assert len(setup_notifications) == 1
-    assert len(failed_notifications) == 1
-    assert failed_notifications[0][2] == 'error'
-    # After the one failed attempt, the loop falls back to the original
-    # notify-once "binary not found" behavior for the remaining iterations.
-    assert len(missing_notifications) == 1
-    assert missing_notifications[0][2] == 'error'
+    assert len(setup_notifications) == 1  # rate-limited across retries
+    assert len(failed_notifications) == 1  # rate-limited across retries
 
     error_logs = [msg for msg, level in ctx.env.log_calls if level == ctx.xbmc.LOGERROR]
-    assert any('download failed' in msg for msg in error_logs)
-    assert f'[{service_runner.ADDON_ID}] stremio-server binary not found' in error_logs
+    assert sum('download failed' in msg for msg in error_logs) == 2  # only the real attempts
+    assert any(f'retrying in {service_runner.DOWNLOAD_RETRY_BACKOFF[0]}s' in msg for msg in error_logs)
+    assert any(f'retrying in {service_runner.DOWNLOAD_RETRY_BACKOFF[1]}s' in msg for msg in error_logs)
+
+    assert len(spawned) == 1
+    assert spawned[0].binary == '/opt/bin/stremio-server'
+    assert spawned[0].start_calls == 1
 
 
 def test_main_embedded_enabled_binary_missing_unsupported_platform_notifies_once_and_stops_retrying(
@@ -863,9 +974,9 @@ def test_main_embedded_enabled_binary_missing_unsupported_platform_notifies_once
     W^X ban on exec()-ing anything inside app storage), main() must not
     crash, must notify the dedicated 30091 message exactly once, and must
     never call install_binary() again on later polls -- unlike a plain
-    DownloadError, retrying can never succeed here, so the existing
-    `attempted_download` one-shot guard is exactly the right (and only)
-    behavior."""
+    DownloadError (which retries automatically forever behind a bounded
+    backoff), so latching `unsupported_platform` and warning once per
+    session is exactly right."""
     monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
     monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: None)
 
@@ -909,11 +1020,13 @@ def test_main_embedded_enabled_binary_missing_unsupported_platform_notifies_once
     ]
 
 
-def test_main_settings_changed_resets_attempted_download_guard_for_retry(monkeypatch, tmp_path):
-    """A settings change resets `attempted_download` (alongside
-    `notified_missing`/`backoff_idx`) so a user who fixes whatever made the
-    first download fail (e.g. flips a proxy setting, or just wants Kodi to
-    try again) gets a fresh attempt without restarting the whole service.
+def test_main_settings_changed_resets_unsupported_platform_latch_for_retry(monkeypatch, tmp_path):
+    """`UnsupportedPlatformError` latches `unsupported_platform` (no
+    further install attempts at all, unlike a transient DownloadError
+    which keeps retrying on its own) -- but only until the user changes a
+    setting. A settings change resets the latch alongside the download
+    notification flags, giving install_binary() a fresh attempt without
+    restarting the whole service.
     """
     monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
 
@@ -922,11 +1035,10 @@ def test_main_settings_changed_resets_attempted_download_guard_for_retry(monkeyp
     def fake_install_binary(dest_dir, progress_cb=None):
         install_calls.append(dest_dir)
         if len(install_calls) == 1:
-            raise serverbin.DownloadError('first attempt fails')
+            raise serverbin.UnsupportedPlatformError('exec() forbidden')
         return os.path.join(dest_dir, service_runner.BINARY_NAME)
 
     def fake_resolve_binary(explicit_path, addon_data_dir):
-        # Only "sees" a binary once the second install call has succeeded.
         return None if len(install_calls) < 2 else '/opt/bin/stremio-server'
 
     monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
@@ -940,26 +1052,25 @@ def test_main_settings_changed_resets_attempted_download_guard_for_retry(monkeyp
         env_box['env'].addon.settings['server_url'] = 'http://127.0.0.1:9999'
         monitor.onSettingsChanged()
 
+    # iter1: unsupported, latches (no cooldown involved). iter2: still
+    # latched -> no retry; the settings change fires during this wait.
+    # iter3: latch reset -> retries and succeeds. iter4: binary now
+    # resolvable -> spawns.
     intervals = []
     wait = _scripted_wait(intervals, [None, trigger_settings_change, None, None])
     with _main_env(tmp_path, wait, settings={'server_enable': True}) as ctx:
         env_box['env'] = ctx.env
         service_runner.main()
 
-    # Two separate install attempts: the first (pre-settings-change) fails,
-    # the second (post-settings-change) succeeds -- proving the guard was
-    # reset rather than permanently latched after one failure.
     assert install_calls == [os.path.join(str(tmp_path), 'bin')] * 2
     assert len(spawned) == 1
     assert spawned[0].binary == '/opt/bin/stremio-server'
 
-    setup_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30069']
-    failed_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30063']
+    unsupported_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30091']
     missing_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30031']
-    assert len(setup_notifications) == 2  # one per download attempt
-    assert len(failed_notifications) == 1  # only the first attempt failed
-    # notified_missing also got a chance to fire, between the failed
-    # attempt and the settings change that reset it.
+    assert len(unsupported_notifications) == 1
+    # notified_missing fired once while latched, then was reset by the
+    # settings change alongside unsupported_platform.
     assert len(missing_notifications) == 1
 
 
@@ -1092,6 +1203,71 @@ def test_main_crash_path_closes_the_log_file_handle(fake_popen, monkeypatch, tmp
     assert log_fh.closed is True
 
 
+# --- supervisor containment: process/download failures never crash main() -
+
+
+def test_main_survives_failed_spawn_and_retries_with_backoff(monkeypatch, tmp_path):
+    """A ServerProcess.start() failure (e.g. exec() denied, ENOENT after a
+    TOCTOU binary removal) must not crash main() or spawn a duplicate: the
+    failed instance is discarded, a bounded restart backoff applies
+    (not a tight loop), and the very next spawn attempt gets a fresh
+    ServerProcess."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: '/opt/bin/stremio-server')
+    specs = [
+        {'start_exceptions': [OSError('exec failed')]},
+        {},
+    ]
+    factory, spawned = _make_process_factory(specs)
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}) as ctx:
+        service_runner.main()
+
+    assert len(spawned) == 2  # the failed instance is discarded, not retried
+    assert spawned[0].start_calls == 1
+    assert spawned[1].start_calls == 1
+    assert intervals[0] == service_runner.RESTART_BACKOFF[0]
+    assert intervals[1] == service_runner.HEALTHY_POLL_INTERVAL
+
+    error_logs = [msg for msg, level in ctx.env.log_calls if level == ctx.xbmc.LOGERROR]
+    assert any('failed to start embedded server' in msg for msg in error_logs)
+    # main() kept running -- the second spawn succeeded and gets shut
+    # down cleanly at the end.
+    assert spawned[1].stop_calls == 1
+
+
+def test_main_survives_failed_stop_and_defers_respawn_until_confirmed_stopped(monkeypatch, tmp_path):
+    """A stop() failure (e.g. an unkillable/wedged child) during
+    crash-cleanup must not be swallowed into discarding the ServerProcess:
+    main() keeps polling the SAME instance next iteration instead of
+    spawning a duplicate next to a possibly-still-alive process, and only
+    respawns once stop() finally succeeds."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: '/opt/bin/stremio-server')
+    specs = [
+        {'poll_sequence': [1, 1], 'stop_exceptions': [OSError('kill failed'), None]},
+        {},
+    ]
+    factory, spawned = _make_process_factory(specs)
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None, None, None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}) as ctx:
+        service_runner.main()
+
+    assert len(spawned) == 2  # the wedged instance was never duplicated
+    wedged, replacement = spawned
+    assert wedged.stop_calls == 2  # retried stop() until it finally succeeded
+    assert replacement.start_calls == 1
+
+    error_logs = [msg for msg, level in ctx.env.log_calls if level == ctx.xbmc.LOGERROR]
+    assert any('failed to stop embedded server' in msg for msg in error_logs)
+
+
 # --- (e) settings-changed restart -------------------------------------------
 
 
@@ -1210,14 +1386,19 @@ def test_main_aborts_immediately_before_the_loop_body_ever_runs(monkeypatch, tmp
 
 def test_main_settings_changed_with_no_running_server_resets_state_without_crashing(monkeypatch, tmp_path):
     """The restart_requested handling's `if proc is not None` guard must
-    actually gate the stop()/log call -- a settings change while nothing
-    is running (binary still missing, download still failing) must reset
-    backoff_idx/notified_missing/attempted_download without touching a
-    None proc."""
+    actually gate the stop()/log call -- and a settings change while
+    nothing is running (binary still missing, download still failing)
+    must reset backoff_idx/notified_missing/download retry state
+    (including the monotonic cooldown deadline) without touching a None
+    proc, giving install_binary() an immediate fresh attempt instead of
+    waiting out the remaining backoff."""
     monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
     monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: None)  # binary missing throughout
 
+    install_calls = []
+
     def fake_install_binary(dest_dir, progress_cb=None):
+        install_calls.append(dest_dir)
         raise serverbin.DownloadError('still no network')
 
     monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
@@ -1230,11 +1411,13 @@ def test_main_settings_changed_with_no_running_server_resets_state_without_crash
         env_box['env'].addon.settings['server_binary'] = '/new/path'
         monitor.onSettingsChanged()
 
-    # iter1: binary missing -> auto-download attempted and fails. The step
-    # fires during iter2's wait, signaling a settings change while proc is
-    # still None. iter3: binary still missing -> attempted_download/
-    # notified_missing were reset by the settings-changed handling, so a
-    # second download is attempted (and also fails).
+    # iter1: binary missing -> auto-download attempted and fails, arming a
+    # cooldown far longer than this test's real wall-clock runtime. iter2:
+    # still cooling down (negligible real time elapsed) so no second
+    # attempt yet -- must not crash trying to stop() a None proc. The
+    # settings change fires during this wait. iter3: the reset cooldown
+    # deadline lets install_binary() run again immediately (and it fails
+    # again too).
     intervals = []
     wait = _scripted_wait(intervals, [None, change_binary_setting_and_signal, None])
     with _main_env(tmp_path, wait, settings={'server_enable': True}) as ctx:
@@ -1242,15 +1425,14 @@ def test_main_settings_changed_with_no_running_server_resets_state_without_crash
         service_runner.main()  # must not crash trying to stop() a None proc
 
     assert spawned == []
+    assert install_calls == [os.path.join(str(tmp_path), 'bin')] * 2
     setup_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30069']
     failed_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30063']
-    missing_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30031']
     # Two separate download attempts (one per settings "generation"), each
-    # failing -- proving attempted_download really was reset, not just
-    # notified_missing.
+    # failing -- proving the cooldown deadline really was reset, not just
+    # skipped by coincidence.
     assert len(setup_notifications) == 2
     assert len(failed_notifications) == 2
-    assert len(missing_notifications) == 1
     assert not any('settings changed, restarting' in msg for msg, _level in ctx.env.log_calls)
 
 
@@ -1316,3 +1498,692 @@ def test_main_onsettingschanged_extra_env_resave_without_change_does_not_restart
     assert len(spawned) == 1  # never restarted -> never respawned
     assert spawned[0].stop_calls == 1  # only the final shutdown-path stop
     assert not any('settings changed, restarting' in msg for msg, _level in ctx.env.log_calls)
+
+
+# ===========================================================================
+# should_push_now
+# ===========================================================================
+
+
+def test_should_push_now_true_when_final_regardless_of_timing():
+    now = datetime.datetime(2020, 1, 1, 0, 0, 0)
+    assert service_runner.should_push_now(now, now, final=True) is True
+
+
+def test_should_push_now_true_when_never_pushed_before():
+    now = datetime.datetime(2020, 1, 1, 0, 0, 0)
+    assert service_runner.should_push_now(None, now, final=False) is True
+
+
+def test_should_push_now_false_before_interval_elapses():
+    last = datetime.datetime(2020, 1, 1, 0, 0, 0)
+    now = last + datetime.timedelta(seconds=service_runner.LIBRARY_PUSH_INTERVAL_SECONDS - 1)
+    assert service_runner.should_push_now(last, now, final=False) is False
+
+
+def test_should_push_now_true_once_interval_elapses():
+    last = datetime.datetime(2020, 1, 1, 0, 0, 0)
+    now = last + datetime.timedelta(seconds=service_runner.LIBRARY_PUSH_INTERVAL_SECONDS)
+    assert service_runner.should_push_now(last, now, final=False) is True
+
+
+def test_should_push_now_honors_custom_interval():
+    last = datetime.datetime(2020, 1, 1, 0, 0, 0)
+    now = last + datetime.timedelta(seconds=10)
+    assert service_runner.should_push_now(last, now, final=False, interval=10) is True
+    assert service_runner.should_push_now(last, now, final=False, interval=11) is False
+
+
+# ===========================================================================
+# build_progress_player: the xbmc.Player subclass tracking Rivulet playback
+# ===========================================================================
+
+
+class _FakeProgressStore:
+    """Fake `lib.store.Store` surface `build_progress_player` needs --
+    controllable and inspectable without touching a real filesystem."""
+
+    def __init__(self, now_playing=None, auth=None, resume_offset_ms=None, set_progress_error=None):
+        self._now_playing = now_playing
+        self._auth = auth
+        self._resume_offset_ms = resume_offset_ms
+        self._set_progress_error = set_progress_error
+        self.progress_calls = []       # [(type, id, video_id, position_ms, duration_ms, now), ...]
+        self.now_playing_sets = []     # every set_now_playing() call, in order (incl. None to clear)
+
+    def get_now_playing(self):
+        return self._now_playing
+
+    def set_now_playing(self, context):
+        self.now_playing_sets.append(context)
+        self._now_playing = context
+
+    def get_resume_offset_ms(self):
+        return self._resume_offset_ms
+
+    def set_resume_offset_ms(self, offset_ms):
+        self._resume_offset_ms = offset_ms
+
+    def get_auth(self):
+        return self._auth
+
+    def set_progress(self, content_type, content_id, video_id, position_ms, duration_ms, now):
+        if self._set_progress_error is not None:
+            raise self._set_progress_error
+        self.progress_calls.append((content_type, content_id, video_id, position_ms, duration_ms, now))
+
+
+class _FakeProgressAPI:
+    """Fake `lib.stremio.api.StremioAPI` surface the progress player's
+    push path needs."""
+
+    def __init__(self, datastore_get_result=None, datastore_get_error=None, datastore_put_error=None):
+        self.datastore_get_calls = []
+        self.datastore_put_calls = []
+        self._datastore_get_result = [] if datastore_get_result is None else datastore_get_result
+        self._datastore_get_error = datastore_get_error
+        self._datastore_put_error = datastore_put_error
+
+    def datastore_get(self, auth_key, collection='libraryItem', ids=None, all=True):
+        self.datastore_get_calls.append((auth_key, collection, ids, all))
+        if self._datastore_get_error is not None:
+            raise self._datastore_get_error
+        return self._datastore_get_result
+
+    def datastore_put(self, auth_key, changes, collection='libraryItem'):
+        self.datastore_put_calls.append((auth_key, collection, list(changes)))
+        if self._datastore_put_error is not None:
+            raise self._datastore_put_error
+
+
+_CONTEXT = {
+    'type': 'movie', 'id': 'tt1', 'video_id': None,
+    'name': 'A Movie', 'poster': None, 'started_at': service_runner.library.iso8601_utc(),
+}
+
+
+@contextlib.contextmanager
+def _progress_player_env(store, api, sync_enabled=True):
+    """Builds one `build_progress_player()` instance against the shared
+    fake `xbmc` module, with a plain list-based log recorder (`logs`)
+    instead of a real `xbmc.log()` -- no full `main()` loop involved."""
+    with install_kodi_stubs(reload=()) as ctx:
+        xbmc_mod = sys.modules['xbmc']
+        logs = []
+
+        def log_fn(level, message):
+            logs.append((level, message))
+
+        player = service_runner.build_progress_player(
+            xbmc_mod, store, api, log_fn, lambda: sync_enabled,
+        )
+        yield ctx.env, player, logs
+
+
+def test_main_wires_sync_progress_through_pure_setting_bool(monkeypatch, tmp_path):
+    """main()'s `sync_enabled_fn` passed to `build_progress_player()` must
+    go through `lib.settings.setting_bool()` -- proven by mutating the raw
+    `sync_progress` setting string to malformed/mixed-case values after
+    main() wires the closure and checking each one matches what
+    `lib.settings.setting_bool()` itself documents (never
+    `addon.getSettingBool()`, which would coerce a malformed string to
+    `False` instead of falling back to the True default)."""
+    captured = {}
+
+    def fake_build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn):
+        captured['sync_enabled_fn'] = sync_enabled_fn
+        return object()
+
+    monkeypatch.setattr(service_runner, 'build_progress_player', fake_build_progress_player)
+
+    with _main_env(tmp_path, waitforabort=None, settings={'server_enable': True, 'sync_progress': True}) as ctx:
+        ctx.xbmc.Monitor.abortRequested = lambda self: True
+        service_runner.main()  # returns immediately; wires build_progress_player first
+
+        sync_enabled_fn = captured['sync_enabled_fn']
+        addon = ctx.env.addon
+
+        addon.settings['sync_progress'] = 'not-a-bool'
+        assert sync_enabled_fn() is True  # malformed falls back to the documented True default
+
+        addon.settings['sync_progress'] = 'FALSE'
+        assert sync_enabled_fn() is False  # mixed-case synonym still parses
+
+        addon.settings['sync_progress'] = 'On'
+        assert sync_enabled_fn() is True
+
+
+
+# --- is_context_stale: pure staleness check ---------------------------------
+
+
+@pytest.mark.parametrize('started_at', [None, '', 'not-a-timestamp', 12345])
+def test_is_context_stale_true_when_started_at_missing_or_malformed(started_at):
+    now = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
+    assert service_runner.is_context_stale(started_at, now, max_age_seconds=60) is True
+
+
+def test_is_context_stale_true_once_older_than_max_age():
+    started_at = '2020-01-01T00:00:00Z'
+    now = datetime.datetime(2020, 1, 1, 0, 1, 1, tzinfo=datetime.timezone.utc)  # 61s later
+    assert service_runner.is_context_stale(started_at, now, max_age_seconds=60) is True
+
+
+def test_is_context_stale_false_at_exactly_max_age_boundary():
+    started_at = '2020-01-01T00:00:00Z'
+    now = datetime.datetime(2020, 1, 1, 0, 1, 0, tzinfo=datetime.timezone.utc)  # exactly 60s later
+    assert service_runner.is_context_stale(started_at, now, max_age_seconds=60) is False
+
+
+def test_is_context_stale_false_when_within_max_age():
+    started_at = '2020-01-01T00:00:00Z'
+    now = datetime.datetime(2020, 1, 1, 0, 0, 30, tzinfo=datetime.timezone.utc)
+    assert service_runner.is_context_stale(started_at, now, max_age_seconds=60) is False
+
+
+def test_is_context_stale_uses_module_default_max_age_when_omitted():
+    started_at = '2020-01-01T00:00:00Z'
+    now = (
+        datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
+        + datetime.timedelta(seconds=service_runner.MAX_STARTUP_AGE_SECONDS + 1)
+    )
+    assert service_runner.is_context_stale(started_at, now) is True
+
+
+# --- onAVStarted: one-shot resume seek --------------------------------------
+
+
+def test_onavstarted_seeks_when_resume_offset_queued_for_active_context():
+    store = _FakeProgressStore(now_playing=_CONTEXT, resume_offset_ms=45000)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()
+    assert env.player_seek_calls == [45.0]
+    assert store.get_resume_offset_ms() is None  # consumed exactly once
+
+
+
+
+def test_onavstarted_clears_resume_offset_so_it_never_reseeks_twice():
+    store = _FakeProgressStore(now_playing=_CONTEXT, resume_offset_ms=45000)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()
+        player.onAVStarted()
+    assert env.player_seek_calls == [45.0]  # only once
+
+
+def test_onavstarted_noop_when_no_rivulet_context_active():
+    """Kodi fires onAVStarted for ANY playback, not just Rivulet's --
+    a queued resume offset must not leak into unrelated playback."""
+    store = _FakeProgressStore(now_playing=None, resume_offset_ms=45000)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()
+    assert env.player_seek_calls == []
+    assert store.get_resume_offset_ms() == 45000  # left untouched
+
+
+def test_onavstarted_noop_when_no_resume_offset_queued():
+    store = _FakeProgressStore(now_playing=_CONTEXT, resume_offset_ms=None)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()
+    assert env.player_seek_calls == []
+
+
+@pytest.mark.parametrize('started_at', [
+    '2000-01-01T00:00:00Z',  # far older than MAX_STARTUP_AGE_SECONDS
+    'not-a-timestamp',       # malformed
+    None,                    # missing
+])
+def test_onavstarted_clears_stale_or_malformed_context_instead_of_seeking(started_at):
+    stale_context = dict(_CONTEXT, started_at=started_at)
+    store = _FakeProgressStore(now_playing=stale_context, resume_offset_ms=45000)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()
+    assert env.player_seek_calls == []  # never accepted, so never seeks
+    assert store.get_now_playing() is None
+    assert store.get_resume_offset_ms() is None
+
+
+# --- sample_if_playing / local progress cache (ms conversion) --------------
+
+
+def test_sample_if_playing_writes_local_progress_cache_with_ms_conversion():
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()  # accept the context so sample_if_playing() actually flushes
+        env.player_is_playing = True
+        env.player_get_time = 12.5
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+    assert store.progress_calls == [('movie', 'tt1', None, 12500, 100000, store.progress_calls[0][5])]
+
+
+def test_sample_if_playing_noop_when_not_playing_video():
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        env.player_is_playing = False
+        player.sample_if_playing()
+    assert store.progress_calls == []
+
+
+def test_sample_if_playing_noop_when_no_rivulet_context_active():
+    store = _FakeProgressStore(now_playing=None)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        env.player_is_playing = True
+        env.player_get_time = 10.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+    assert store.progress_calls == []
+
+
+def test_sample_if_playing_skips_zero_duration_sample():
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()  # accept the context so sample_if_playing() actually flushes
+        env.player_is_playing = True
+        env.player_get_time = 0.0
+        env.player_get_total_time = 0.0
+        player.sample_if_playing()
+    assert store.progress_calls == []
+
+
+def test_sample_if_playing_rejects_stale_unaccepted_persisted_context():
+    """A context this Player instance never accepted via onAVStarted --
+    e.g. a crashed previous session's leftover now_playing.json -- must
+    not be sampled once its started_at is stale, and must be cleared so
+    it can never leak into a later unrelated video."""
+    stale_context = dict(_CONTEXT, started_at='2000-01-01T00:00:00Z')
+    store = _FakeProgressStore(now_playing=stale_context, resume_offset_ms=45000)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        env.player_is_playing = True
+        env.player_get_time = 10.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+    assert store.progress_calls == []
+    assert store.get_now_playing() is None
+    assert store.get_resume_offset_ms() is None
+
+
+def test_sample_if_playing_preserves_accepted_context_regardless_of_started_at_age(monkeypatch):
+    """Once onAVStarted() has accepted a context, sample_if_playing() must
+    keep sampling it for the rest of a long playback no matter how old
+    started_at looks by wall-clock time -- proven by making the
+    staleness check itself always report "stale" and showing the
+    already-accepted context is still sampled regardless."""
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()  # accepts the fresh context
+        monkeypatch.setattr(service_runner, 'is_context_stale', lambda *a, **kw: True)
+        env.player_is_playing = True
+        env.player_get_time = 500.0
+        env.player_get_total_time = 1000.0
+        player.sample_if_playing()
+    assert store.progress_calls == [('movie', 'tt1', None, 500000, 1000000, store.progress_calls[0][5])]
+    assert store.get_now_playing() is not None
+
+
+
+def test_sample_if_playing_waits_for_onavstarted_on_fresh_unaccepted_context():
+    """A freshly-written context that onAVStarted has not yet accepted --
+    e.g. Kodi is still opening the resolved URL -- must be left
+    completely alone: no local flush, no remote push, and no premature
+    clearing, until onAVStarted actually accepts it or it goes stale."""
+    store = _FakeProgressStore(now_playing=_CONTEXT, auth={'authKey': 'tok'})
+    api = _FakeProgressAPI()
+    with _progress_player_env(store, api, sync_enabled=True) as (env, player, logs):
+        env.player_is_playing = True
+        env.player_get_time = 10.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+    assert store.progress_calls == []
+    assert api.datastore_put_calls == []
+    assert store.get_now_playing() is not None  # not cleared -- still fresh, just not yet accepted
+
+
+# --- onPlayBackStopped/onPlayBackEnded: final flush + context clear --------
+
+
+def test_onplaybackstopped_flushes_local_cache_and_clears_context():
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()  # accept the context so the stop below actually flushes
+        env.player_get_time = 50.0
+        env.player_get_total_time = 100.0
+        player.onPlayBackStopped()
+    assert store.progress_calls == [('movie', 'tt1', None, 50000, 100000, store.progress_calls[0][5])]
+    assert store.get_now_playing() is None
+
+
+def test_onplaybackended_flushes_local_cache_and_clears_context():
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()  # accept the context so the end below actually flushes
+        env.player_get_time = 99.0
+        env.player_get_total_time = 100.0
+        player.onPlayBackEnded()
+    assert store.progress_calls == [('movie', 'tt1', None, 99000, 100000, store.progress_calls[0][5])]
+    assert store.get_now_playing() is None
+
+
+def test_onplaybackstopped_noop_when_no_rivulet_context_active():
+    store = _FakeProgressStore(now_playing=None)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onPlayBackStopped()
+    assert store.progress_calls == []
+
+
+def test_onplaybackerror_before_av_started_clears_context_and_resume_offset():
+    """A resolved stream that fails before Kodi ever reaches AV start
+    (dead/expired link, unsupported codec) fires ONLY onPlayBackError,
+    never onAVStarted/onPlayBackStopped/onPlayBackEnded -- the queued
+    resume offset and now-playing context must still be cleared, and the
+    never-accepted context must never be locally flushed or pushed to
+    the remote library, so a later unrelated video can't inherit
+    either."""
+    store = _FakeProgressStore(now_playing=_CONTEXT, resume_offset_ms=45000, auth={'authKey': 'tok'})
+    api = _FakeProgressAPI()
+    with _progress_player_env(store, api, sync_enabled=True) as (env, player, logs):
+        env.player_get_time = 50.0
+        env.player_get_total_time = 100.0
+        player.onPlayBackError()
+    assert store.get_now_playing() is None
+    assert store.get_resume_offset_ms() is None
+    assert store.progress_calls == []  # never accepted -> no local flush
+    assert api.datastore_put_calls == []  # never accepted -> no remote push
+
+
+def test_onplaybackerror_flush_failure_still_clears_context_and_resume_offset():
+    """The final flush is best-effort: a sampling failure (e.g. a broken
+    local progress-cache write) must never prevent the unconditional
+    now-playing/resume-offset cleanup below it."""
+    store = _FakeProgressStore(
+        now_playing=_CONTEXT, resume_offset_ms=45000, set_progress_error=OSError('disk full'),
+    )
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()  # accept the context so the error path below actually attempts a flush
+        env.player_get_time = 50.0
+        env.player_get_total_time = 100.0
+        player.onPlayBackError()  # must not raise
+    assert store.get_now_playing() is None
+    assert store.get_resume_offset_ms() is None
+    assert any('final flush failed' in msg for _level, msg in logs)
+
+
+# --- push to the Stremio API: gating, merge, failure handling --------------
+
+
+def test_push_skipped_when_sync_setting_disabled_zero_api_calls():
+    store = _FakeProgressStore(now_playing=_CONTEXT, auth={'authKey': 'tok'})
+    api = _FakeProgressAPI()
+    with _progress_player_env(store, api, sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()
+        env.player_is_playing = True
+        env.player_get_time = 50.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+    assert api.datastore_get_calls == []
+    assert api.datastore_put_calls == []
+    assert store.progress_calls  # local cache still written regardless
+
+
+def test_push_skipped_when_logged_out_zero_api_calls():
+    """A logged-out user gets local progress/resume with ZERO API calls,
+    even with sync_progress enabled."""
+    store = _FakeProgressStore(now_playing=_CONTEXT, auth=None)
+    api = _FakeProgressAPI()
+    with _progress_player_env(store, api, sync_enabled=True) as (env, player, logs):
+        player.onAVStarted()
+        env.player_is_playing = True
+        env.player_get_time = 50.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+    assert api.datastore_get_calls == []
+    assert api.datastore_put_calls == []
+    assert store.progress_calls  # local cache still written regardless
+
+
+
+
+def test_push_merges_existing_remote_item_preserving_watched_bitfield():
+    existing = {
+        '_id': 'tt1', 'name': 'A Movie', 'type': 'movie', 'poster': None,
+        'posterShape': 'poster', 'removed': False, 'temp': False,
+        '_ctime': '2019-01-01T00:00:00Z', '_mtime': '2019-01-01T00:00:00Z',
+        'state': {
+            'lastWatched': '2019-01-01T00:00:00Z', 'timeWatched': 0, 'timeOffset': 0,
+            'overallTimeWatched': 0, 'timesWatched': 0, 'flaggedWatched': 0,
+            'duration': 0, 'video_id': None, 'watched': 'REAL-BITFIELD', 'noNotif': False,
+        },
+        'behaviorHints': {'defaultVideoId': None, 'featuredVideoId': None, 'hasScheduledVideos': False},
+    }
+    store = _FakeProgressStore(now_playing=_CONTEXT, auth={'authKey': 'tok'})
+    api = _FakeProgressAPI(datastore_get_result=[existing])
+    with _progress_player_env(store, api, sync_enabled=True) as (env, player, logs):
+        player.onAVStarted()
+        env.player_is_playing = True
+        env.player_get_time = 50.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+    assert api.datastore_get_calls == [('tok', 'libraryItem', ['tt1'], False)]
+    assert len(api.datastore_put_calls) == 1
+    auth_key, collection, changes = api.datastore_put_calls[0]
+    assert (auth_key, collection) == ('tok', 'libraryItem')
+    assert changes[0]['state']['watched'] == 'REAL-BITFIELD'  # carried over untouched
+    assert changes[0]['state']['timeOffset'] == 50000
+    assert changes[0]['state']['duration'] == 100000
+
+
+def test_push_builds_fresh_item_when_no_existing_remote_item():
+    store = _FakeProgressStore(now_playing=_CONTEXT, auth={'authKey': 'tok'})
+    api = _FakeProgressAPI(datastore_get_result=[])
+    with _progress_player_env(store, api, sync_enabled=True) as (env, player, logs):
+        player.onAVStarted()
+        env.player_is_playing = True
+        env.player_get_time = 50.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+    changes = api.datastore_put_calls[0][2]
+    assert changes[0]['_id'] == 'tt1'
+    assert changes[0]['state']['watched'] is None
+
+
+def test_push_failure_is_logged_and_local_cache_still_written():
+    store = _FakeProgressStore(now_playing=_CONTEXT, auth={'authKey': 'tok'})
+    api = _FakeProgressAPI(datastore_get_error=RuntimeError('network down'))
+    with _progress_player_env(store, api, sync_enabled=True) as (env, player, logs):
+        player.onAVStarted()
+        env.player_is_playing = True
+        env.player_get_time = 50.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()  # must not raise
+    assert store.progress_calls  # local cache written before the push attempt
+    assert api.datastore_put_calls == []
+    assert any('library push failed' in msg for _level, msg in logs)
+
+
+def test_push_throttled_between_consecutive_samples():
+    store = _FakeProgressStore(now_playing=_CONTEXT, auth={'authKey': 'tok'})
+    api = _FakeProgressAPI()
+    with _progress_player_env(store, api, sync_enabled=True) as (env, player, logs):
+        player.onAVStarted()
+        env.player_is_playing = True
+        env.player_get_time = 10.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+        player.sample_if_playing()
+    assert len(store.progress_calls) == 1  # local write also throttled on the second sample
+    assert len(api.datastore_put_calls) == 1  # push throttled on the second sample
+
+
+
+
+def test_final_flush_bypasses_the_push_throttle():
+    store = _FakeProgressStore(now_playing=_CONTEXT, auth={'authKey': 'tok'})
+    api = _FakeProgressAPI()
+    with _progress_player_env(store, api, sync_enabled=True) as (env, player, logs):
+        player.onAVStarted()
+        env.player_is_playing = True
+        env.player_get_time = 10.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+        player.onPlayBackStopped()
+    assert len(api.datastore_put_calls) == 2  # the final flush always pushes
+
+
+# --- local progress-cache write cadence (bounded write cost) ---------------
+
+
+def test_local_progress_write_throttled_between_consecutive_samples():
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()
+        env.player_is_playing = True
+        env.player_get_time = 10.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+        player.sample_if_playing()
+    assert len(store.progress_calls) == 1  # second sample arrives well within the write interval
+
+
+def test_final_flush_bypasses_local_progress_write_throttle():
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()
+        env.player_is_playing = True
+        env.player_get_time = 10.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()   # first local write
+        player.onPlayBackStopped()   # final flush must persist regardless of cadence
+    assert len(store.progress_calls) == 2
+
+
+def test_onavstarted_accepting_new_context_resets_local_write_cadence():
+    """Kodi fires `onAVStarted` for every new video, not only after this
+    Player instance's previous `onPlayBackStopped`/`onPlayBackEnded` ran
+    -- so accepting a brand-new context must reset the local-write
+    cadence, otherwise its first sample could be silently suppressed by
+    cadence state left over from the PREVIOUS session."""
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()  # accepts context A
+        env.player_is_playing = True
+        env.player_get_time = 10.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()  # writes A's first sample
+
+        other_context = dict(_CONTEXT, id='tt2', started_at=service_runner.library.iso8601_utc())
+        store.set_now_playing(other_context)
+        player.onAVStarted()  # accepts context B without an intervening terminate
+
+        env.player_get_time = 20.0
+        env.player_get_total_time = 200.0
+        player.sample_if_playing()  # B's first sample must not be throttled
+    assert len(store.progress_calls) == 2
+    assert store.progress_calls[-1][:2] == ('movie', 'tt2')
+
+
+def test_terminate_resets_local_write_cadence_for_next_session():
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()  # accepts context A
+        env.player_is_playing = True
+        env.player_get_time = 10.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()   # A's first (and only) local write
+        player.onPlayBackStopped()   # terminate: final flush + cadence reset
+
+        other_context = dict(_CONTEXT, id='tt2', started_at=service_runner.library.iso8601_utc())
+        store.set_now_playing(other_context)
+        player.onAVStarted()  # accepts context B
+        env.player_get_time = 20.0
+        env.player_get_total_time = 200.0
+        player.sample_if_playing()   # B's first sample must not be throttled
+    # A: 1 sample write + 1 final-flush write; B: 1 more write.
+    assert len(store.progress_calls) == 3
+    assert store.progress_calls[-1][:2] == ('movie', 'tt2')
+
+
+# ===========================================================================
+# lib.settings: setting_bool / setting_int -- pure, Kodi-independent setting
+# parsing shared by lib.ui.compat's setting_bool()/setting_int() UI wrappers
+# (see tests/test_uicommon.py for delegation parity) and by
+# ServiceMonitor._refresh() above (server_enable + every EXTRA_ENV_SETTINGS
+# bool/int/mb_to_bytes row). Exercised directly here with a minimal
+# `getSetting()`-only stand-in -- no xbmc* stubs needed, this module takes
+# no Kodi imports at all.
+# ===========================================================================
+
+
+class _RawSettingAddon:
+    """Minimal `addon.getSetting(key) -> str` stand-in -- lib.settings
+    never calls any other Addon method."""
+
+    def __init__(self, values=None, raises=False):
+        self._values = values or {}
+        self._raises = raises
+
+    def getSetting(self, key):
+        if self._raises:
+            raise RuntimeError('boom')
+        return self._values.get(key, '')
+
+
+def test_setting_bool_missing_key_returns_default():
+    addon = _RawSettingAddon({})
+    assert lib_settings.setting_bool(addon, 'missing', True) is True
+    assert lib_settings.setting_bool(addon, 'missing', False) is False
+
+
+def test_setting_bool_malformed_value_returns_default():
+    addon = _RawSettingAddon({'k': 'not-a-bool'})
+    assert lib_settings.setting_bool(addon, 'k', True) is True
+
+
+@pytest.mark.parametrize('raw,expected', [
+    ('true', True), ('TRUE', True), ('True', True), ('1', True),
+    ('yes', True), ('YES', True), ('on', True), ('On', True),
+    ('false', False), ('FALSE', False), ('0', False),
+    ('no', False), ('NO', False), ('off', False), ('OFF', False),
+])
+def test_setting_bool_parses_mixed_case_and_synonyms(raw, expected):
+    addon = _RawSettingAddon({'k': raw})
+    assert lib_settings.setting_bool(addon, 'k', not expected) is expected
+
+
+def test_setting_bool_never_raises_when_getsetting_raises():
+    addon = _RawSettingAddon(raises=True)
+    assert lib_settings.setting_bool(addon, 'k', True) is True
+
+
+def test_setting_int_missing_key_returns_default():
+    addon = _RawSettingAddon({})
+    assert lib_settings.setting_int(addon, 'missing', 42) == 42
+
+
+def test_setting_int_malformed_value_returns_default():
+    addon = _RawSettingAddon({'k': 'not-a-number'})
+    assert lib_settings.setting_int(addon, 'k', 7) == 7
+
+
+def test_setting_int_zero_is_not_treated_as_missing():
+    addon = _RawSettingAddon({'k': '0'})
+    assert lib_settings.setting_int(addon, 'k', 99) == 0
+
+
+def test_setting_int_negative_value_parsed_without_minimum():
+    addon = _RawSettingAddon({'k': '-5'})
+    assert lib_settings.setting_int(addon, 'k', 0) == -5
+
+
+def test_setting_int_negative_value_clamped_up_to_minimum():
+    addon = _RawSettingAddon({'k': '-5'})
+    assert lib_settings.setting_int(addon, 'k', 0, minimum=1) == 1
+
+
+def test_setting_int_value_at_or_above_minimum_is_unclamped():
+    addon = _RawSettingAddon({'k': '10'})
+    assert lib_settings.setting_int(addon, 'k', 0, minimum=1) == 10
+
+
+def test_setting_int_never_raises_when_getsetting_raises():
+    addon = _RawSettingAddon(raises=True)
+    assert lib_settings.setting_int(addon, 'k', 42) == 42

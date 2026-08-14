@@ -447,3 +447,47 @@ msgstr "عنوان تشخيص pprof"
 msgctxt "#30147"
 msgid "Stremio account auth key (HTTPS auto-cert)"
 msgstr "مفتاح مصادقة حساب Stremio (شهادة HTTPS تلقائية)"
+
+msgctxt "#30170"
+msgid "Sync playback progress to your Stremio account"
+msgstr "مزامنة تقدم التشفيل مع حساب Stremio الخاص بك"
+
+msgctxt "#30171"
+msgid "Ask to resume"
+msgstr "السؤال عن استئناف المشاهدة"
+
+msgctxt "#30172"
+msgid "Resume playback?"
+msgstr "استئناف التشفيل؟"
+
+msgctxt "#30173"
+msgid "Resume from %s?"
+msgstr "الاستئناف من %s؟"
+
+msgctxt "#30174"
+msgid "Resume"
+msgstr "استئناف"
+
+msgctxt "#30175"
+msgid "Start from beginning"
+msgstr "البدء من جديد"
+
+msgctxt "#30160"
+msgid "This stream can only be opened in the Stremio app"
+msgstr "لا يمكن فتح هذا البث إلا في تطبيق Stremio"
+
+msgctxt "#30180"
+msgid "Play the next episode automatically"
+msgstr "تشغيل الحلقة التالية تلقائيًا"
+
+msgctxt "#30181"
+msgid "Auto-play countdown (seconds)"
+msgstr "العد التنازلي للتشغيل التلقائي (ثوانٍ)"
+
+msgctxt "#30182"
+msgid "Next episode"
+msgstr "الحلقة التالية"
+
+msgctxt "#30183"
+msgid "Playing %s in %d s"
+msgstr "جارٍ تشغيل %s خلال %d ثانية"

@@ -5,11 +5,14 @@ plain python3. lib/service_runner.py's resolve_binary() looks for the
 binary at ``<addon_data_dir>/bin/stremio-server`` (``.exe`` on Windows) --
 install_binary() targets that exact location.
 
-Reference: M0Rf30/stremio-server-go's .goreleaser.yml `archives.name_template`
-for the asset-naming convention this module has to match:
+Asset naming follows M0Rf30/stremio-server-go's .goreleaser.yml
+`archives.name_template`:
     stremio-server_{Os-titlecased}_{arch}[v{goarm}].{tar.gz|zip}
 e.g. stremio-server_Linux_x86_64.tar.gz, stremio-server_Windows_arm64.zip,
-stremio-server_Linux_armv7.tar.gz, stremio-server_Android_arm64.tar.gz.
+stremio-server_Linux_armv7.tar.gz. Download URLs and asset names are
+derived deterministically from GITHUB_REPO/SERVER_TAG/asset-name -- this
+module never queries the "latest release" API or a same-release
+checksums.txt at runtime; see PINNED_SHA256 below for why.
 """
 import hashlib
 import os
@@ -26,15 +29,37 @@ except ImportError:  # pragma: no cover - exercised only without the dependency
     requests = None  # type: ignore[assignment]
 
 GITHUB_REPO = "M0Rf30/stremio-server-go"
-GITHUB_API_URL = "https://api.github.com/repos/%s/releases/latest" % GITHUB_REPO
+SERVER_TAG = "v0.12.0"
 USER_AGENT = "plugin.video.rivulet"
 
 BINARY_NAME = "stremio-server"
-CHECKSUMS_ASSET_NAME = "checksums.txt"
 PART_SUFFIX = ".part"
 DOWNLOAD_CHUNK_SIZE = 64 * 1024
 REQUEST_TIMEOUT = 30
 VERIFY_TIMEOUT = 15
+
+# SHA-256 digests for every stremio-server-go SERVER_TAG release asset,
+# hand-verified against that tag's GitHub release page + checksums.txt on
+# 2026-08-14 and committed here instead of being re-fetched at runtime.
+# Pinning matters because:
+#  - a mutable "latest release" lookup, or trusting a same-release
+#    checksums.txt asset, both trust whatever GitHub happens to be serving
+#    for that tag right now -- a later force-push to the tag, a
+#    re-uploaded asset, or a compromised maintainer/CI credential could
+#    swap the bytes this addon downloads and executes with no
+#    client-side signal at all;
+#  - these digests instead only ever change via a reviewed code edit to
+#    this table (together with SERVER_TAG), so upgrading the bundled
+#    server is a deliberate, auditable decision, not an unattended fetch.
+PINNED_SHA256 = {
+    ("Darwin", "arm64"): "0efa6838193b8a1c7061da59e55f8548e7178e98bc92192fc89d8cebb451942d",
+    ("Darwin", "x86_64"): "1f2bb5ba83f00e43ce5551d67db103013e8ad7019dddaa91c07d6c281dd6efee",
+    ("Linux", "arm64"): "deb245a9ce1dd3e1090738dc86ae3bbded72acd86170ccaa76dc62d0b623a7d5",
+    ("Linux", "armv7"): "20bf3f9e7f33885312629eb4436ad3e4e935c4b5393bf36fb73c3731d9437676",
+    ("Linux", "x86_64"): "12ba364e1ee5ff53709a6c9ea324c94f339cf88eef50a47d08658572c84030c2",
+    ("Windows", "arm64"): "dc0a4ff038fa89b70dca5c70af64208aff2e6089594f46c9f2c49ee0e7a6ac84",
+    ("Windows", "x86_64"): "c5864989582784f65cde37fced5ca845d411937b0811fa4cbaebf644b98eb7f1",
+}
 
 
 class DownloadError(Exception):
@@ -42,7 +67,7 @@ class DownloadError(Exception):
 
 
 class NoAssetError(DownloadError):
-    """Raised when the latest release has no asset for this platform/arch."""
+    """Raised when SERVER_TAG has no pinned asset for this platform/arch."""
 
 
 class UnsupportedPlatformError(DownloadError):
@@ -100,57 +125,28 @@ def _is_android():
     return "android" in sys.platform.lower()
 
 
-def latest_release():
-    """GET the latest release metadata (dict with "assets", "tag_name", ...)."""
-    if requests is None:
-        raise DownloadError('the "requests" package is required to check for releases')
-    headers = {"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"}
-    try:
-        resp = requests.get(GITHUB_API_URL, headers=headers, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-    except requests.RequestException as exc:
-        raise DownloadError("GitHub API request failed: %s" % exc)
-    try:
-        return resp.json()
-    except ValueError as exc:
-        raise DownloadError("GitHub API returned invalid JSON: %s" % exc)
-
-
-def select_asset(release, os_name, arch):
-    """Return the release asset dict matching (os_name, arch), or None."""
+def _asset_name(os_name, arch):
+    """Return the goreleaser archive name for (os_name, arch)."""
     ext = "zip" if os_name == "Windows" else "tar.gz"
-    expected = "stremio-server_%s_%s.%s" % (os_name, arch, ext)
-    for asset in release.get("assets") or []:
-        if asset.get("name") == expected:
-            return asset
-    return None
+    return "stremio-server_%s_%s.%s" % (os_name, arch, ext)
 
 
-def _find_checksums_asset(release):
-    for asset in release.get("assets") or []:
-        if asset.get("name") == CHECKSUMS_ASSET_NAME:
-            return asset
-    return None
+def _asset_download_url(asset_name):
+    """Deterministically derive the SERVER_TAG download URL for an asset."""
+    return "https://github.com/%s/releases/download/%s/%s" % (
+        GITHUB_REPO, SERVER_TAG, asset_name)
 
 
-def _lookup_checksum(checksums_asset, asset_name):
-    """Return the expected sha256 hex digest for `asset_name`, or None."""
-    url = checksums_asset.get("browser_download_url")
-    if not url or not asset_name:
+def select_asset(os_name, arch):
+    """Return {"name", "url", "sha256"} for the pinned SERVER_TAG asset
+    matching (os_name, arch), or None when this platform/arch combo has no
+    pinned asset (upstream doesn't build one, or it's otherwise unsupported).
+    """
+    sha256 = PINNED_SHA256.get((os_name, arch))
+    if sha256 is None:
         return None
-    if requests is None:
-        raise DownloadError('the "requests" package is required to verify checksums')
-    headers = {"User-Agent": USER_AGENT}
-    try:
-        resp = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-    except requests.RequestException as exc:
-        raise DownloadError("failed to fetch checksums.txt: %s" % exc)
-    for line in resp.text.splitlines():
-        parts = line.split()
-        if len(parts) >= 2 and parts[1] == asset_name:
-            return parts[0]
-    return None
+    name = _asset_name(os_name, arch)
+    return {"name": name, "url": _asset_download_url(name), "sha256": sha256}
 
 
 def _safe_remove(path):
@@ -160,7 +156,7 @@ def _safe_remove(path):
         pass
 
 
-def _download_to_file(url, dest_path, progress_cb, total_size=None):
+def _download_to_file(url, dest_path, progress_cb):
     """Stream `url` into `dest_path`, returning the sha256 hex digest."""
     if requests is None:
         raise DownloadError('the "requests" package is required to download the server binary')
@@ -170,6 +166,11 @@ def _download_to_file(url, dest_path, progress_cb, total_size=None):
         resp.raise_for_status()
     except requests.RequestException as exc:
         raise DownloadError("download failed: %s" % exc)
+
+    try:
+        total_size = int(resp.headers.get("Content-Length"))
+    except (AttributeError, TypeError, ValueError):
+        total_size = None
 
     sha256 = hashlib.sha256()
     done = 0
@@ -276,23 +277,28 @@ def install_binary(dest_dir, progress_cb=None):
     Returns the final binary path (matching lib.service_runner.resolve_binary's
     ``<addon_data_dir>/bin/stremio-server[.exe]`` bundled-binary lookup).
     `progress_cb(done_bytes, total_bytes)` is called for every chunk written
-    during the archive download (total_bytes is None if unknown); it may
-    raise (e.g. DownloadError on user cancel) to abort the download cleanly.
+    during the archive download (total_bytes is None when the response
+    doesn't advertise a Content-Length); it may raise (e.g. DownloadError
+    on user cancel) to abort the download cleanly.
 
-    Checksum verification against the release's checksums.txt asset is
-    mandatory: a release missing checksums.txt, or whose checksums.txt does
-    not list this platform's asset, is refused rather than installed
-    unverified -- otherwise a compromised release (hijacked CI/CD,
-    compromised maintainer credentials, or a malicious fork a user was
-    tricked into pointing at) could ship a backdoored binary that installs,
-    and later runs, with no integrity check at all.
+    The downloaded archive's SHA-256 is checked against PINNED_SHA256 -- a
+    fixed, reviewed table for SERVER_TAG committed in this repository --
+    instead of a "latest release" lookup or that release's own
+    checksums.txt asset: both of those are just more data GitHub happens
+    to be serving right now, no more trustworthy than the download itself.
+    A mismatch is refused rather than installed, guarding against a
+    compromised release (hijacked CI/CD, compromised maintainer
+    credentials, or a malicious fork a user was tricked into pointing at)
+    shipping a backdoored binary that would otherwise install, and later
+    run, with no integrity check at all.
 
     Raises UnsupportedPlatformError (a DownloadError subclass) immediately,
     before any network request, when running under Android: Android 10+'s
     W^X enforcement blocks exec() of anything under the app's writable
     home directory, so a downloaded binary could never run there no matter
-    which asset matched. Also raises DownloadError (or its NoAssetError
-    subclass) on any other failure.
+    which asset matched. Also raises NoAssetError (a DownloadError
+    subclass), before any network request, when this platform/arch has no
+    pinned SERVER_TAG asset. Raises DownloadError on any other failure.
     """
     if _is_android():
         raise UnsupportedPlatformError(
@@ -301,32 +307,19 @@ def install_binary(dest_dir, progress_cb=None):
             "running elsewhere instead")
 
     os_name, arch = platform_key()
-    release = latest_release()
-    asset = select_asset(release, os_name, arch)
+    asset = select_asset(os_name, arch)
     if asset is None:
-        raise NoAssetError("no release asset for %s/%s" % (os_name, arch))
+        raise NoAssetError("no pinned %s release asset for %s/%s" % (SERVER_TAG, os_name, arch))
 
-    asset_name = asset.get("name") or ""
-    download_url = asset.get("browser_download_url")
-    if not download_url:
-        raise DownloadError("release asset %r has no download URL" % asset_name)
-
-    checksums_asset = _find_checksums_asset(release)
-    if checksums_asset is None:
-        raise DownloadError(
-            "release is missing %s; refusing to install an unverified binary"
-            % CHECKSUMS_ASSET_NAME)
-    expected_sha256 = _lookup_checksum(checksums_asset, asset_name)
-    if not expected_sha256:
-        raise DownloadError(
-            "%s does not list a checksum for %s; refusing to install an "
-            "unverified binary" % (CHECKSUMS_ASSET_NAME, asset_name))
+    asset_name = asset["name"]
+    download_url = asset["url"]
+    expected_sha256 = asset["sha256"]
 
     os.makedirs(dest_dir, exist_ok=True)
     archive_path = os.path.join(dest_dir, ".stremio-server" + PART_SUFFIX)
 
     try:
-        digest = _download_to_file(download_url, archive_path, progress_cb, asset.get("size"))
+        digest = _download_to_file(download_url, archive_path, progress_cb)
 
         if digest.lower() != expected_sha256.lower():
             raise DownloadError("checksum mismatch for %s" % asset_name)

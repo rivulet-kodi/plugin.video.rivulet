@@ -16,6 +16,7 @@ title opens `lib.ui.detailwindow` for it. Built/run via `open_search()`.
 import xbmc
 import xbmcgui
 
+from lib.ui.dependencies import get_client, get_store
 from lib.ui.uicommon import BaseWindow, busy_dialog, open_window
 
 LIST = 30002
@@ -42,10 +43,7 @@ class SearchWindow(BaseWindow):
         self._reload()
 
     def _reload(self):
-        from lib.store import Store
-        from lib.ui.compat import addon_profile_dir
-
-        self.store = self.store or Store(addon_profile_dir())
+        self.store = self.store or get_store()
         self.history = self.store.get_search_history()
 
         control = self.getControl(LIST)
@@ -101,12 +99,12 @@ class SearchWindow(BaseWindow):
         self._reload()
 
     def _run_search(self, query):
-        from lib.stremio.addons import AddonClient, AddonError, iter_catalogs
+        from lib.stremio.addons import AddonError, iter_catalogs, safe_url_for_log
         from lib.ui.compat import L, log, notify
 
         self.store.add_search_query(query)
 
-        client = AddonClient()
+        client = get_client()
         metas = []
         catalogs = list(iter_catalogs(self.store.get_addons(), extra_required='search'))
         total_catalogs = len(catalogs)
@@ -119,7 +117,7 @@ class SearchWindow(BaseWindow):
                 try:
                     results = client.catalog(transport_url, cat.get('type'), cat.get('id'), extra=[('search', query)])
                 except AddonError as exc:
-                    log('searchwindow: %s failed: %r' % (transport_url, exc), xbmc.LOGERROR)
+                    log('searchwindow: %s failed: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGERROR)
                     continue
                 for meta_obj in results or []:
                     meta_obj['type'] = meta_obj.get('type') or cat.get('type')

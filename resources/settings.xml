@@ -80,6 +80,33 @@
                     <data>RunPlugin(plugin://plugin.video.rivulet/?action=advancedsettings_install)</data>
                     <control type="button" format="action"/>
                 </setting>
+                <setting id="sync_progress" type="boolean" label="30170">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="resume_ask" type="boolean" label="30171">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="binge_enable" type="boolean" label="30180">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="binge_countdown" type="integer" label="30181">
+                    <level>0</level>
+                    <default>10</default>
+                    <constraints>
+                        <minimum>3</minimum>
+                        <step>1</step>
+                        <maximum>60</maximum>
+                    </constraints>
+                    <control type="slider" format="integer">
+                        <popup>false</popup>
+                    </control>
+                </setting>
             </group>
         </category>
         <category id="server_bittorrent" label="30110">
