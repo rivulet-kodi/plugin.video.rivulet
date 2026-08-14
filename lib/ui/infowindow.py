@@ -2,15 +2,18 @@
 
 Ports the reference addon's `platformcode/xbmc_info_window.py::InfoWindow`
 (`resources/skins/Default/720p/InfoWindow.xml`) to Rivulet/Stremio metas:
-`lib.ui.views.showcase()` opens it with one already-fetched catalog page,
-the user scrolls a horizontal poster coverflow (the fanart background
-updates to match the focused item). Picking a movie poster jumps
-straight to `lib.ui.streamswindow.open_streams()` (a movie has nothing
+a caller opens it via `open_showcase()` (below) with one already-fetched
+catalog page - `catalogpicker.CatalogPickerWindow._open_catalog()`,
+`searchwindow.SearchWindow._run_search()`,
+`lib.ui.librarywindow.open_library()`, and this module's own
+`open_credits_picker()` - the user scrolls a horizontal poster
+coverflow (the fanart background updates to match the focused item).
+Picking a movie poster jumps straight to
+`lib.ui.streamswindow.open_streams()` (a movie has nothing
 else to pick, same shortcut `lib.ui.detailwindow.open_detail()` takes -
 see that module's docstring) using this poster's own title/art, no
 extra meta fetch; picking anything else (a series) returns that meta to
-the caller so it can navigate there (`views.showcase()`,
-`searchwindow.open_search()`, ...).
+the caller so it can navigate there.
 
 Control ids mirror the reference addon's InfoWindow 1:1 (see
 `ShowcaseWindow.xml`):
@@ -449,9 +452,10 @@ def open_showcase(metas):
     """Build and run a ShowcaseWindow over `metas`; returns the selected
     meta dict, or None if the user closed the overlay without picking one
     (or `metas` was empty). Every caller already wraps this call in its own
-    try/except (catalogpicker._open_catalog, searchwindow.open_search,
-    views.showcase/search) and logs+notifies on failure, so an exception
-    from .start() keeps propagating unchanged here - this only guarantees
+    try/except (catalogpicker._open_catalog, searchwindow._run_search,
+    librarywindow.open_library) and logs+notifies on failure, so an
+    exception from .start() keeps propagating unchanged here - this
+    only guarantees
     the window is closed first (it may not have had a chance to self-close,
     e.g. if onInit() or a mid-modal callback raised)."""
     from lib.ui.compat import ADDON
@@ -476,8 +480,8 @@ def open_credits_picker(store, client, meta):
     branch below needs `open_showcase` - already this module's own
     function - while only the rare detail-kind branch needs
     `detailwindow.open_detail`, the exact same lazy import every other
-    `open_showcase()` caller (searchwindow, catalogpicker, librarywindow,
-    views) already makes once a coverflow returns a selection. The
+    `open_showcase()` caller (searchwindow, catalogpicker, librarywindow)
+    already makes once a coverflow returns a selection. The
     reverse edge this creates - DetailWindow lazily importing this
     function - is just as function-scoped, so neither module needs the
     other at import time; no real cycle.
@@ -492,10 +496,8 @@ def open_credits_picker(store, client, meta):
         would (`_open_results()` below).
       - discover (a genre): fetches that catalog and does the same -
         but only once its transport_url is confirmed to name one of the
-        user's own installed addons (mirrors `lib.ui.views.people()`'s
-        identical check for the classical directory's own version of
-        this picker) - an addon-supplied URL must never send Rivulet to
-        an arbitrary host.
+        user's own installed addons - an addon-supplied URL must never
+        send Rivulet to an arbitrary host.
       - detail: opens `lib.ui.detailwindow.open_detail()` directly.
     """
     import xbmc
@@ -555,11 +557,11 @@ def open_credits_picker(store, client, meta):
 
 def _open_results(metas):
     """The tail every `open_showcase()` caller already runs on a fresh
-    result set (searchwindow._run_search, catalogpicker._open_catalog,
-    views.showcase/search): notify if empty, else open a coverflow and,
-    if the user picks a series there, follow through to
-    `detailwindow.open_detail()` - same as those callers, so a pick made
-    from this nested picker is never a dead end."""
+    result set (searchwindow._run_search, catalogpicker._open_catalog):
+    notify if empty, else open a coverflow and, if the user picks a
+    series there, follow through to `detailwindow.open_detail()` - same
+    as those callers, so a pick made from this nested picker is never a
+    dead end."""
     from lib.ui.compat import L, notify
 
     if not metas:

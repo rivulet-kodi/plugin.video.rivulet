@@ -1,5 +1,4 @@
-"""HomeWindow: Rivulet's custom entry-point screen, replacing the
-classical root plugin directory (`lib.ui.views.home`). A vertical menu
+"""HomeWindow: Rivulet's custom entry-point screen. A vertical menu
 over the addon's fanart; picking a row opens the next screen as a
 nested modal (see `lib.ui.uicommon`'s module docstring for the
 navigation model this and every other custom screen shares).
@@ -20,7 +19,7 @@ BACKGROUND = 30000
 LIST = 30002
 STATUS_LABEL = 30005  # plain text label; set at runtime via setLabel(), not a skin <label>
 
-#: (localized-string id, action) - mirrors lib.ui.views.home()'s item set.
+#: (localized-string id, action) - the authoritative definition of Home's menu rows.
 _MENU = (
     (30000, 'discover'),
     (30001, 'search'),
@@ -61,9 +60,9 @@ def _menu_items(show_library):
 
 def _status_text(auth):
     """Render HomeWindow's top status line from the same `get_auth()`
-    result onInit() already fetched for `show_library`: mirrors
-    `lib.ui.views.addons()`'s exact "Logged in as <email/name/?>" wording
-    and string id (30022) so the two screens read identically; the
+    result onInit() already fetched for `show_library`: uses the shared
+    "Logged in as <email/name/?>" string (30022), the same one
+    `lib.ui.views.login()` shows as a post-login notification; the
     logged-out case uses its own string id (30190)."""
     from lib.ui.compat import L
 
@@ -173,9 +172,10 @@ def _notify_if_updated(store):
 def open_home():
     """Build and run the HomeWindow modal; blocks until the user exits.
 
-    default.py wraps this call in its own try/except and falls back to the
-    classical home directory on ANY exception, so an exception raised here
-    must keep propagating unchanged - this only logs it for diagnostics and
+    default.py wraps this call in its own try/except and falls back to
+    the minimal recovery directory (Settings row) on ANY exception, so
+    an exception raised here must keep propagating unchanged - this
+    only logs it for diagnostics and
     guarantees the window is closed (it may not have had a chance to
     self-close, e.g. if onInit() or doModal() itself raised) before
     re-raising."""
@@ -198,7 +198,7 @@ def open_home():
     win = open_window(HomeWindow, 'HomeWindow.xml')
     try:
         win.doModal()
-    except Exception as exc:  # default.py's caller falls back to classical home
+    except Exception as exc:  # default.py's caller falls back to the recovery directory
         log('homewindow: HomeWindow failed: %r' % (exc,), xbmc.LOGERROR)
         raise
     finally:

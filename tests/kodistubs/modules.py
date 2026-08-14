@@ -167,7 +167,7 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
             # Exhausted queue defaults to False ("declined"), matching
             # input()'s falsy-on-exhaustion behavior above - a test that
             # forgets to script a confirmation for a destructive action
-            # (e.g. views.addon_remove()) gets a loud, safe no-op instead
+            # (e.g. `AddonsWindow`'s removal prompt) gets a loud, safe no-op
             # of a silently-approved action.
             return yesno_answers.pop(0) if yesno_answers else False
 

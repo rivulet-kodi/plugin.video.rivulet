@@ -1,9 +1,7 @@
 """AddonsWindow: a vertical list of every installed addon - Rivulet's
-custom replacement for the classical `views.addons()` directory. Row 0
-installs a new addon from a manifest URL (mirrors `views.addon_install`);
-every other row opens a yes/no removal prompt for that addon, refused for
-protected/official addons (mirrors `views.addon_remove`). Built/run via
-`open_addons()`.
+add-on manager. Row 0 installs a new addon from a manifest URL; every
+other row opens a yes/no removal prompt for that addon, refused for
+protected/official addons. Built/run via `open_addons()`.
 """
 import xbmcgui
 
@@ -142,7 +140,7 @@ class AddonsWindow(BaseWindow):
 def open_addons():
     """List every installed addon with install/remove actions. Mirrors
     `catalogpicker.open_catalog_picker`'s error-handling shape; unlike
-    that picker there is no classical-fallback navigation to report, so
+    that picker there is no should-close-caller outcome to report, so
     this always returns None."""
     import xbmc
 

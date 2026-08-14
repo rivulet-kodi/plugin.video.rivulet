@@ -1,6 +1,5 @@
 """CatalogPickerWindow: a vertical list of every installed addon's
-catalogs - Rivulet's custom replacement for the classical `discover()`
-directory. Picking a row opens the coverflow (`lib.ui.infowindow`) over
+catalogs. Picking a row opens the coverflow (`lib.ui.infowindow`) over
 that catalog's items; picking a TITLE from the coverflow opens
 `lib.ui.detailwindow` for it.
 """
@@ -89,8 +88,8 @@ class CatalogPickerWindow(BaseWindow):
     def start(self, catalogs):
         """doModal() with `catalogs` (a list of `(transport_url, manifest,
         catalog)` tuples, as `lib.stremio.addons.iter_catalogs` yields)
-        loaded as the picker's rows. Returns True if a classical-fallback
-        navigation happened and the caller should also close."""
+        loaded as the picker's rows. Returns True if playback started
+        somewhere down the chain and the caller should also close."""
         self.catalogs = list(catalogs or [])
         self.should_close_caller = False
         if not self.catalogs:

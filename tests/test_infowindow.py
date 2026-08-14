@@ -1,5 +1,5 @@
 """Tests for lib.ui.infowindow: the fullscreen coverflow overlay
-(ShowcaseWindow) lib.ui.views.showcase() opens over one catalog page,
+(ShowcaseWindow) opened via `open_showcase()` over one catalog page,
 exercised against the shared fake xbmc/xbmcgui stubs in tests/kodistubs
 (no real Kodi runtime, no network).
 
@@ -499,7 +499,7 @@ def test_start_resets_selected_and_metas_on_each_call(load_infowindow):
 
 
 # ---------------------------------------------------------------------------
-# open_showcase() - the factory lib.ui.views.showcase() calls
+# open_showcase() - builds and runs the ShowcaseWindow modal
 # ---------------------------------------------------------------------------
 
 
@@ -551,9 +551,9 @@ def test_open_showcase_closes_the_window_exactly_once_and_reraises_when_start_ra
             # Stands in for a crash inside onInit()/onAction() while the
             # modal loop is running - self.close() (the window's own,
             # normal-path close) never gets a chance to run. Every caller
-            # (catalogpicker._open_catalog, searchwindow.open_search,
-            # views.showcase/search) already wraps open_showcase() in its
-            # own try/except, so the exception must keep propagating here.
+            # (catalogpicker._open_catalog, searchwindow._run_search,
+            # librarywindow.open_library) already wraps open_showcase() in
+            # its own try/except, so the exception must keep propagating here.
             raise RuntimeError('coverflow blew up')
 
     monkeypatch.setattr(infowindow, 'ShowcaseWindow', ExplodingWindow)

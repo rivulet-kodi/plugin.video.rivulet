@@ -1,6 +1,6 @@
-"""Tests for lib.ui.addonswindow: AddonsWindow, Rivulet's custom
-replacement for the classical `views.addons()` directory, exercised
-against the shared fake xbmc/xbmcgui stubs in tests/kodistubs (no real
+"""Tests for lib.ui.addonswindow: AddonsWindow, Rivulet's add-on
+manager, exercised against the shared fake xbmc/xbmcgui stubs in
+tests/kodistubs (no real
 Kodi runtime, no network).
 
 lib.ui.addonswindow imports xbmcgui, lib.ui.uicommon, and `get_store`/

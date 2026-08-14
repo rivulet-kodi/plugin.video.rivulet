@@ -1,5 +1,5 @@
 """Tests for lib.ui.homewindow: HomeWindow, Rivulet's custom entry-point
-screen replacing the classical root plugin directory, exercised against the
+screen, exercised against the
 shared fake xbmc/xbmcgui stubs in tests/kodistubs (no real Kodi runtime, no
 network).
 
@@ -80,8 +80,8 @@ def load_homewindow():
     `.homewindow`, `.compat`, `.router`, `.catalogpicker`, `.searchwindow`,
     and `.env`. `localized` overrides FakeAddon's default 'STR<id>' string
     marker - needed for string id 30022 ("Logged in as %s"), which
-    HomeWindow's status label formats with `%`, exactly like
-    `lib.ui.views.addons()` does for its logout-row label.
+    HomeWindow's status label formats with `%`, the same shared string
+    `lib.ui.views.login()` shows as a post-login notification.
     Every call is torn down automatically, in reverse order, at test end.
     """
     with contextlib.ExitStack() as stack:
@@ -462,7 +462,7 @@ def test_open_home_closes_the_window_exactly_once_and_reraises_when_domodal_rais
 
     monkeypatch.setattr(ctx.homewindow, 'HomeWindow', ExplodingWindow)
 
-    # default.py wraps open_home() itself and falls back to the classical
+    # default.py wraps open_home() itself and falls back to the recovery
     # home directory on ANY exception - that contract requires the
     # exception to keep propagating unchanged, not be swallowed here.
     with pytest.raises(RuntimeError, match='onInit blew up'):

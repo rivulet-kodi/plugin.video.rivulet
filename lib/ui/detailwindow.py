@@ -1,5 +1,5 @@
-"""DetailWindow: one series title's episode list - Rivulet's custom
-replacement for the classical `videos()` directory.
+"""DetailWindow: one series title's episode list, shown so the user
+can pick which episode to play before opening the stream picker.
 
 A movie has nothing to pick here - there is only one thing to do with
 it, play it - so `open_detail()` skips this window entirely for a title
@@ -10,9 +10,9 @@ directly (confirmed on a real device: a DetailWindow showing a single
 episode grouped by season ("S01E02 · Title", Specials last) behind a
 season-selector bar (see the class docstring for the single-season
 fallback). Fetches the full meta via the same `lib.ui.views._fetch_meta`
-every classical view already uses (the catalog/search coverflow's meta
-objects are abbreviated - no `videos` - so a fresh fetch is required
-here, not a reuse of the picked item).
+other windows use (the coverflow's meta objects are abbreviated - no
+`videos` - so a fresh full fetch is required here, not a reuse of the
+picked item).
 
 Picking a row hands StreamsWindow the pre-agreed `heading`/`art` context
 kwargs (`heading='<Show> \u2013 S01E02 <Episode>'`,
@@ -59,8 +59,8 @@ def _ordered_videos(videos):
 
 def _episode_label(video):
     """'S01E03 · The Title' - zero-padded season/episode (Specials as
-    S00Exx), falling back title -> name -> id exactly like the classical
-    `videos()` view's row label."""
+    S00Exx), falling back title -> name -> id when a video is missing
+    a proper title."""
     title = video.get('title') or video.get('name') or video.get('id')
     return 'S%02dE%02d \u00b7 %s' % (video.get('season') or 0, video.get('episode') or 0, title)
 
