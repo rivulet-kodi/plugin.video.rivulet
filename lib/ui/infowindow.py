@@ -26,7 +26,6 @@ module docstring for what a real device must confirm.
 """
 import threading
 
-import xbmc
 import xbmcgui
 
 from lib.ui.uicommon import ModalStackWindow
@@ -35,6 +34,18 @@ BACKGROUND = 30000
 LOADING = 30001
 SELECT = 30002
 CLOSE = 30003
+
+#: Settle time before a focus change fires its meta fetch. Scrolling through
+#: a sparse catalog would otherwise spawn one fetch per item passed over, and
+#: `views._fetch_meta` fans out to a pool of its own per call - so the cost of
+#: a fast scroll is multiplied, and its stragglers are abandoned rather than
+#: cancelled. Only the item focus actually settles on is worth fetching.
+_ENRICH_SETTLE_SECS = 0.2
+
+#: Ceiling on concurrent enrich fetches. Each one can hold up to
+#: `views._MAX_ADDON_WORKERS` request threads, so this bounds the tail left
+#: behind by a scroll that outruns the settle window above.
+_ENRICH_MAX_INFLIGHT = 2
 
 # Back/Nav-Back, PreviousMenu/Esc, Backspace - any of these closes the
 # overlay without a selection, same as the reference InfoWindow.
@@ -76,8 +87,20 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         super().__init__(*args, **kwargs)
         self.metas = []
         self.selected = None
+        self._reset_enrich_state()
+
+    def _reset_enrich_state(self):
         #: indices whose full meta has been fetched (or found already complete)
         self._enriched = set()
+        #: (index -> props) merged by a worker, waiting for the UI thread to
+        #: apply them. Written under `_enrich_lock`, drained in `_apply_enriched`.
+        self._enrich_pending = {}
+        self._enrich_lock = threading.Lock()
+        #: bounds concurrent fetches (see `_ENRICH_MAX_INFLIGHT`)
+        self._enrich_slots = threading.BoundedSemaphore(_ENRICH_MAX_INFLIGHT)
+        #: the timer armed by the most recent focus change, if it has not
+        #: fired yet - superseded (and cancelled) by the next focus change.
+        self._enrich_timer = None
 
     def start(self, metas):
         """doModal() with `metas` (a list of Stremio meta dicts) loaded as
@@ -86,7 +109,7 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         the modal at all and returns None immediately."""
         self.metas = list(metas or [])
         self.selected = None
-        self._enriched = set()
+        self._reset_enrich_state()
         if not self.metas:
             return None
         self.doModal()
@@ -113,25 +136,63 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         self.getControl(BACKGROUND).setImage(_item_properties(self.metas[0]).get('fanart', ''))
         self.getControl(LOADING).setVisible(False)
         self.setFocusId(SELECT)
+        # A rebuild discards the ListItems a pending merge was queued
+        # against, so apply whatever landed while we were away onto the
+        # fresh ones before enriching further.
+        self._apply_enriched()
         # onAction() enriches on every focus change, but never fires for the
         # item that opens focused - enrich item 0 here so the window doesn't
         # open on a blank plot until the user scrolls off it and back.
         if items:
-            self._enrich_focused(items[0])
+            self._enrich_focused(items[0], settle=False)
 
     def onAction(self, action):
         if self.getFocusId() == SELECT:
             focused = self.getControl(SELECT).getSelectedItem()
             if focused is not None:
                 self.getControl(BACKGROUND).setImage(focused.getProperty('fanart'))
+                # Both on the UI thread: drain anything a worker finished
+                # since the last action, then arm a fetch for this item.
+                self._apply_enriched()
                 self._enrich_focused(focused)
         action_id = action.getId()
         if action_id == _INFO_ACTION:
             return
         if action_id in _BACK_ACTIONS:
+            self._cancel_enrich_timer()
             self.close()
 
-    def _enrich_focused(self, item):
+    def _cancel_enrich_timer(self):
+        timer, self._enrich_timer = self._enrich_timer, None
+        if timer is not None:
+            timer.cancel()
+
+    def _apply_enriched(self):
+        """Apply merged properties queued by workers onto the live ListItems.
+
+        Always call this from the UI thread. Workers only ever touch
+        `self.metas[index]` and this queue - never a ListItem - because a
+        ListItem inside the ControlList is being rendered every frame and
+        `xbmcgui` objects are not documented as thread-safe. Resolving the
+        item by index here (rather than closing over the handle the worker
+        was spawned with) is also what keeps a fetch that lands across a
+        reopen-for-playback rebuild from writing to a detached item that is
+        no longer on screen.
+        """
+        with self._enrich_lock:
+            if not self._enrich_pending:
+                return
+            pending, self._enrich_pending = self._enrich_pending, {}
+        control = self.getControl(SELECT)
+        size = control.size()
+        for index, props in pending.items():
+            if not 0 <= index < size:
+                continue
+            item = control.getListItem(index)
+            for key, value in props.items():
+                item.setProperty(key, value)
+
+    def _enrich_focused(self, item, settle=True):
         """Fill in the description/genres a catalog meta preview lacks.
 
         Stremio's `catalog` resource returns meta *previews*, which carry
@@ -143,10 +204,15 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
 
         Fetch the full meta lazily for whichever poster is focused, on a
         daemon thread (`_fetch_meta` is a blocking HTTP call - doing it
-        inline would stall the scroll), write the result back onto both
-        the ListItem and `self.metas[index]`, and cache per index so
-        scrolling back and forth re-fetches nothing. Every failure is
-        non-fatal: the labels simply stay as they were.
+        inline would stall the scroll), and cache per index so scrolling
+        back and forth re-fetches nothing. The result is queued for the UI
+        thread to apply, never written to a ListItem from the worker; see
+        `_apply_enriched`. Every failure is non-fatal: the labels simply
+        stay as they were.
+
+        `settle` delays the fetch by `_ENRICH_SETTLE_SECS` so scrolling
+        past an item does not fetch it - only the one focus stops on. It is
+        off for the item the window opens on, which is already settled.
         """
         try:
             index = int(item.getProperty('position'))
@@ -162,11 +228,29 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
             self._enriched.add(index)
             return
         self._enriched.add(index)
-        threading.Thread(target=self._enrich_worker, args=(index, item, meta), daemon=True).start()
+        self._cancel_enrich_timer()
+        if not settle:
+            self._spawn_enrich(index, meta)
+            return
+        timer = threading.Timer(_ENRICH_SETTLE_SECS, self._spawn_enrich, args=(index, meta))
+        timer.daemon = True
+        self._enrich_timer = timer
+        timer.start()
 
-    def _enrich_worker(self, index, item, meta):
+    def _spawn_enrich(self, index, meta):
+        threading.Thread(target=self._enrich_worker, args=(index, meta), daemon=True).start()
+
+    def _enrich_worker(self, index, meta):
+        import xbmc
+
         from lib.ui.compat import log
 
+        # Bound concurrent fetches: each _fetch_meta fans out to a pool of
+        # its own, and abandons (rather than cancels) whatever is still in
+        # flight when it returns.
+        if not self._enrich_slots.acquire(blocking=False):
+            self._enriched.discard(index)  # let a later focus retry it
+            return
         try:
             from lib.ui.views import _fetch_meta
 
@@ -174,17 +258,40 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         except Exception as exc:  # never let a lookup failure break the UI
             log('infowindow: meta enrich failed for %s: %r' % (meta.get('id'), exc), xbmc.LOGDEBUG)
             return
+        finally:
+            self._enrich_slots.release()
         if not full:
             return
         # Merge rather than replace: the preview's own poster/background are
         # what the strip is already showing, and re-setting them would make
         # the focused art flicker as the fetch lands.
+        #
+        # `full` is unvalidated third-party addon JSON, so check the shape
+        # each field is consumed as. _item_properties() joins `genres`, and
+        # a str is iterable - an addon sending "Drama" instead of ["Drama"]
+        # would otherwise render as "D, r, a, m, a". `imdbRating` and
+        # `releaseInfo` are routinely numeric in the wild (streamswindow.py
+        # str()s the one, playbackmeta.py float()s the other), so those are
+        # coerced rather than rejected.
         for key in ('description', 'genres', 'imdbRating', 'releaseInfo'):
-            if full.get(key) and not meta.get(key):
-                meta[key] = full[key]
+            value = full.get(key)
+            if not value or meta.get(key):
+                continue
+            if key == 'genres':
+                if isinstance(value, list):
+                    meta[key] = [g for g in value if isinstance(g, str)]
+            elif key == 'description':
+                if isinstance(value, str):
+                    meta[key] = value
+            elif isinstance(value, (str, int, float)):
+                meta[key] = str(value)
         props = _item_properties(meta)
-        for key in ('genre', 'rating', 'plot', 'year'):
-            item.setProperty(key, props.get(key, ''))
+        # Hand off to the UI thread rather than touching the ListItem here:
+        # it is inside the ControlList the skin renders every frame.
+        with self._enrich_lock:
+            self._enrich_pending[index] = {
+                key: props.get(key, '') for key in ('genre', 'rating', 'plot', 'year')
+            }
 
     def onClick(self, control_id):
         if control_id == SELECT:
