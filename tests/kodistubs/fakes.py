@@ -94,7 +94,10 @@ class Env:
     `player_is_playing` may each be a plain bool (fixed answer for every
     call) or a callable taking the 1-based call count and returning a
     truthy/falsy value, for tests that need cancellation/abort/
-    playback-state to change only after N attempts.
+    playback-state to change only after N attempts. `player_end_reason`
+    ('ended' or 'stopped') picks which of `onPlayBackEnded()`/
+    `onPlayBackStopped()` the fake `Player` dispatches on itself when a
+    poll transitions from playing to not-playing.
     """
 
     def __init__(self, cancel=False, monitor_abort=False, monitor_abort_requested=False):
@@ -134,6 +137,7 @@ class Env:
         self.monitor_abort = monitor_abort
         self.monitor_abort_requested = monitor_abort_requested
         self.player_is_playing = False  # see streamswindow._wait_for_playback_end()
+        self.player_end_reason = 'ended'  # 'ended' or 'stopped' - see fakes' Player.isPlaying()
         self.player_get_time = 0.0      # seconds - see lib.service_runner's progress player
         self.player_get_total_time = 0.0  # seconds - see lib.service_runner's progress player
 

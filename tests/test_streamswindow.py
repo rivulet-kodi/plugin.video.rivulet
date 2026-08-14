@@ -875,7 +875,7 @@ def test_open_streams_filters_unsupported_addons_and_forwards_aggregate_to_the_w
     # open_streams() now round-trips after a played start() - stub the wait
     # helper to "no reopen" (as if the user backed out immediately) so this
     # stays a single-iteration test of aggregate forwarding.
-    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: False)
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: (False, False))
 
     result = sw.open_streams('movie', 'tt1', poster='https://x/poster.jpg')
 
@@ -908,7 +908,7 @@ def test_open_streams_forwards_heading_art_and_meta_to_the_window(load_streamswi
     monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
     # See test_open_streams_filters_unsupported_addons_and_forwards_aggregate_to_the_window
     # - stub the round-trip wait so a played start() ends the call here.
-    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: False)
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: (False, False))
 
     result = sw.open_streams(
         'movie', 'tt1', heading='Some Movie',
@@ -988,7 +988,7 @@ def test_open_streams_addonerror_is_logged_and_skipped_not_fatal(load_streamswin
     monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
     # Not testing the round-trip here - stub it away (see
     # test_open_streams_filters_unsupported_addons_and_forwards_aggregate_to_the_window).
-    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: False)
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: (False, False))
 
     result = sw.open_streams('movie', 'tt1')
 
@@ -1042,7 +1042,7 @@ def test_open_streams_multiple_addon_failures_still_log_a_single_aggregate_warni
             return True
 
     monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
-    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: False)
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: (False, False))
 
     result = sw.open_streams('movie', 'tt1')
 
@@ -1136,7 +1136,7 @@ def test_open_streams_reads_stream_sort_setting_and_applies_it_to_final_order(lo
     # A played start() would otherwise round-trip forever (RecordingWindow
     # always returns True) - stub it away; this test only cares about sort
     # order, not the round-trip loop.
-    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: False)
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: (False, False))
 
     # Default setting ('' -> 'quality'): resolution tier wins over seeders.
     sw.open_streams('movie', 'tt1')
@@ -1196,7 +1196,7 @@ def test_open_streams_busy_dialog_reports_progress_and_skips_unsupported_addons(
             return True
 
     monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
-    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: False)
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: (False, False))
 
     result = sw.open_streams('movie', 'tt1')
 
@@ -1241,7 +1241,7 @@ def test_open_streams_cancelled_mid_loop_keeps_partial_results_and_closes_dialog
             return True
 
     monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
-    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: False)
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: (False, False))
 
     result = sw.open_streams('movie', 'tt1')
 
@@ -1292,11 +1292,14 @@ class _ScriptedPlayer:
     """Minimal `xbmc.Player`-shaped fake for direct `_wait_for_playback_end()`
     tests: `is_playing` is a plain bool, or a callable taking the 1-based
     call count (mirrors tests/kodistubs' `env.monitor_abort` convention).
-    `.calls` records every `isPlaying()` poll."""
+    `.calls` records every `isPlaying()` poll. `ended_naturally` mirrors
+    the real `_PlaybackEndWatcher`'s own attribute, letting a test drive
+    either a natural-end or a stopped outcome directly."""
 
-    def __init__(self, is_playing):
+    def __init__(self, is_playing, ended_naturally=False):
         self._is_playing = is_playing
         self.calls = 0
+        self.ended_naturally = ended_naturally
 
     def isPlaying(self):
         self.calls += 1
@@ -1323,25 +1326,42 @@ def test_wait_for_playback_end_polls_until_playing_starts_then_until_it_stops(lo
     ctx = load_streamswindow()
     sw = ctx.streamswindow
     # call 1: not yet playing; calls 2-3: playing; call 4: stopped.
-    player = _ScriptedPlayer(is_playing=lambda n: n in (2, 3))
+    player = _ScriptedPlayer(is_playing=lambda n: n in (2, 3), ended_naturally=True)
     monitor = _ScriptedMonitor(abort=False)
 
     result = sw._wait_for_playback_end(player=player, monitor=monitor, start_timeout=5.0, tick=0.1)
 
-    assert result is True
+    assert result == (True, True)
     assert player.calls == 4
     assert monitor.calls == 2  # one abort check per tick that didn't already end the wait
+
+
+def test_wait_for_playback_end_reports_ended_naturally_false_when_the_player_was_stopped(load_streamswindow):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    # Same poll shape as the natural-end test above, but the injected
+    # player reports it was stopped, not ended - _wait_for_playback_end()
+    # must forward that through unchanged.
+    player = _ScriptedPlayer(is_playing=lambda n: n in (2, 3), ended_naturally=False)
+    monitor = _ScriptedMonitor(abort=False)
+
+    result = sw._wait_for_playback_end(player=player, monitor=monitor, start_timeout=5.0, tick=0.1)
+
+    assert result == (True, False)
 
 
 def test_wait_for_playback_end_returns_true_when_playback_never_starts_within_timeout(load_streamswindow):
     ctx = load_streamswindow()
     sw = ctx.streamswindow
-    player = _ScriptedPlayer(is_playing=False)  # never starts
+    player = _ScriptedPlayer(is_playing=False, ended_naturally=True)  # never starts
     monitor = _ScriptedMonitor(abort=False)
 
     result = sw._wait_for_playback_end(player=player, monitor=monitor, start_timeout=1.0, tick=0.5)
 
-    assert result is True  # nothing left to wait out - safe to reopen anyway
+    # nothing left to wait out - safe to reopen anyway, but nothing played
+    # so ended_naturally is always False here regardless of the player's
+    # own attribute.
+    assert result == (True, False)
     assert player.calls == 2  # int(1.0 / 0.5) start-wait attempts
     assert monitor.calls == 2
 
@@ -1354,7 +1374,7 @@ def test_wait_for_playback_end_returns_false_immediately_on_monitor_abort_before
 
     result = sw._wait_for_playback_end(player=player, monitor=monitor, start_timeout=20.0, tick=0.5)
 
-    assert result is False
+    assert result == (False, False)
     assert player.calls == 1
     assert monitor.calls == 1  # stopped on the very first abort check, not the full budget
 
@@ -1367,7 +1387,7 @@ def test_wait_for_playback_end_returns_false_immediately_on_monitor_abort_while_
 
     result = sw._wait_for_playback_end(player=player, monitor=monitor, start_timeout=20.0, tick=0.5)
 
-    assert result is False
+    assert result == (False, False)
     assert player.calls == 2  # loop1's break, then loop2's own isPlaying() check
     assert monitor.calls == 1  # loop2's first abort check ends the wait immediately
 
@@ -1385,7 +1405,7 @@ def test_wait_for_playback_end_swallows_an_exception_and_returns_false(load_stre
         player=_ExplodingPlayer(), monitor=_ScriptedMonitor(), start_timeout=1.0, tick=0.5,
     )
 
-    assert result is False
+    assert result == (False, False)
     warnings = [(msg, lvl) for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGWARNING]
     assert len(warnings) == 1
     assert 'boom' in warnings[0][0]
@@ -1652,6 +1672,45 @@ class _OnceThenBackOutWindow:
         return RecordingWindow
 
 
+def test_open_streams_stopping_a_played_episode_does_not_auto_play_the_next_one(
+    load_streamswindow, monkeypatch,
+):
+    """The bug this whole tuple-return refactor fixes: the user pressing
+    stop on a played episode must reopen the picker, exactly like any
+    other non-played-through end, and must NEVER auto-play the next
+    episode - contrast with the natural-end test right below."""
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    ctx.env.addon.settings['binge_countdown'] = 1
+    played_stream = {'name': 'Episode One', 'behaviorHints': {}, 'url': 'https://a.example/e1.mp4'}
+    next_stream = {'name': 'Episode Two', 'behaviorHints': {}, 'url': 'https://a.example/e2.mp4'}
+    client = _wire_series_addon(sw, {'s1e1': [played_stream], 's1e2': [next_stream]})
+    start_calls = []
+    played_info = streaminfo.parse_stream(played_stream, addon_name='Addon')
+    monkeypatch.setattr(
+        sw, 'StreamsWindow', _OnceThenBackOutWindow.build(sw, (played_info, played_stream), start_calls),
+    )
+    play_direct_calls = []
+    monkeypatch.setattr(
+        ctx.player, 'play_direct',
+        lambda stream, stype, sid, item_meta=None, on_ready=None, video_id=None: (
+            play_direct_calls.append((stream, sid)) or True
+        ),
+    )
+    # The user pressed stop rather than letting the episode play through -
+    # the fake Player dispatches onPlayBackStopped() instead of
+    # onPlayBackEnded() at the isPlaying() transition (call 2).
+    ctx.env.player_end_reason = 'stopped'
+    ctx.env.player_is_playing = lambda n: n == 1
+
+    result = sw.open_streams('series', 's1e1', meta=_TWO_EPISODE_SERIES_META, video_id='s1e1')
+
+    assert result is False
+    assert start_calls == ['s1e1', 's1e1']  # reopened the SAME original picker, no auto-play
+    assert play_direct_calls == []  # the next episode was never auto-played
+    assert [call[2] for call in client.calls] == ['s1e1']  # next episode's streams never even fetched
+
+
 def test_open_streams_binge_watch_auto_plays_the_next_episode_then_reopens_the_original_picker(
     load_streamswindow, monkeypatch,
 ):
@@ -1676,6 +1735,10 @@ def test_open_streams_binge_watch_auto_plays_the_next_episode_then_reopens_the_o
     # Reports "playing" once per _wait_for_playback_end() call (calls 1 and
     # 3 - the first check of each of the two invocations this flow makes),
     # then "stopped" right after - see the module's own such comments above.
+    # `player_end_reason` stays at its default 'ended' - the episode plays
+    # through to its natural end, which is exactly what must trigger the
+    # auto-play-next below; contrast with the stopped test right above.
+    ctx.env.player_end_reason = 'ended'
     ctx.env.player_is_playing = lambda n: n in (1, 3)
 
     result = sw.open_streams('series', 's1e1', meta=_TWO_EPISODE_SERIES_META, video_id='s1e1')
@@ -1759,6 +1822,51 @@ def test_open_streams_binge_watch_chain_continues_through_a_third_episode(
     assert [sid for sid, _stream in play_direct_calls] == ['s1e2', 's1e3']
     assert start_calls == ['s1e1', 's1e1']  # the original picker only ever reopens once the WHOLE chain ends
     assert [call[2] for call in client.calls] == ['s1e1', 's1e2', 's1e3']
+
+
+def test_open_streams_binge_watch_stopping_the_auto_played_episode_ends_the_chain(
+    load_streamswindow, monkeypatch,
+):
+    """Stopping episode 2 (auto-played by the binge chain) must end the
+    chain right there - never continue on into episode 3 - and fall back
+    to reopening the ORIGINAL picker, same as any other "nothing left to
+    binge into" case."""
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    ctx.env.addon.settings['binge_countdown'] = 1
+    stream_e1 = {'name': 'E1', 'behaviorHints': {}, 'url': 'https://a.example/e1.mp4'}
+    stream_e2 = {'name': 'E2', 'behaviorHints': {}, 'url': 'https://a.example/e2.mp4'}
+    stream_e3 = {'name': 'E3', 'behaviorHints': {}, 'url': 'https://a.example/e3.mp4'}
+    client = _wire_series_addon(sw, {'s1e1': [stream_e1], 's1e2': [stream_e2], 's1e3': [stream_e3]})
+    start_calls = []
+    played_info = streaminfo.parse_stream(stream_e1, addon_name='Addon')
+    monkeypatch.setattr(
+        sw, 'StreamsWindow', _OnceThenBackOutWindow.build(sw, (played_info, stream_e1), start_calls),
+    )
+    play_direct_calls = []
+    monkeypatch.setattr(
+        ctx.player, 'play_direct',
+        lambda stream, stype, sid, item_meta=None, on_ready=None, video_id=None: play_direct_calls.append((sid, stream)) or True,
+    )
+
+    def is_playing(n):
+        if n == 3:
+            # Episode 1 already ended naturally (the transition at call 2
+            # read the default 'ended' reason, triggering the chain into
+            # episode 2). Flip the reason here, BEFORE episode 2's own
+            # isPlaying() transition at call 4, to simulate the user
+            # stopping episode 2 instead of letting it end.
+            ctx.env.player_end_reason = 'stopped'
+        return n % 2 == 1
+
+    ctx.env.player_is_playing = is_playing
+
+    result = sw.open_streams('series', 's1e1', meta=_THREE_EPISODE_SERIES_META, video_id='s1e1')
+
+    assert result is False
+    assert [sid for sid, _stream in play_direct_calls] == ['s1e2']  # chain stopped after episode 2
+    assert start_calls == ['s1e1', 's1e1']  # falls back to reopening the ORIGINAL picker
+    assert [call[2] for call in client.calls] == ['s1e1', 's1e2']  # episode 3 was never even fetched
 
 
 def test_open_streams_binge_watch_cancelling_the_countdown_reopens_the_original_picker(

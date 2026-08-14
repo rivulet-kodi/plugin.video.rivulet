@@ -43,14 +43,17 @@ leaves that panel empty exactly like today.
 shown, threaded from `lib.ui.detailwindow`'s episode click (the only
 caller that has one; a movie or any other context-free call keeps
 defaulting to `None`, so nothing below ever runs for it). Once playback
-of that episode ends, if it's a series, the 'binge_enable' setting is
-on, `meta['videos']` has a next episode (`lib.ui.binge.next_video()`),
-and that episode's own streams can be fetched, `_try_binge_watch()`
-shows a cancellable countdown offering to auto-play it - see that
+of that episode ends NATURALLY (played through to completion, not
+stopped by the user - see `_wait_for_playback_end()`), if it's a
+series, the 'binge_enable' setting is on, `meta['videos']` has a next
+episode (`lib.ui.binge.next_video()`), and that episode's own streams
+can be fetched, `_try_binge_watch()` shows a cancellable countdown
+offering to auto-play it - see that
 function's docstring for exactly how it reuses `play_direct()`'s
 `item_meta=`/`on_ready=close_windows_for_playback` contract and loops
-for the episode after that. Cancelling the countdown, a monitor abort,
-no next episode, or no fetchable stream for it all fall back to the
+for the episode after that. The user stopping the episode instead of
+letting it end, cancelling the countdown, a monitor abort, no next
+episode, or no fetchable stream for it all fall back to the
 SAME "reopen the picker" round trip described above - `open_streams()`
 still only ever returns False.
 """
@@ -263,30 +266,66 @@ def _wait_for_playback_end(player=None, monitor=None, start_timeout=20.0, tick=0
     (resolution failed past the point `play_direct()` still returned
     True, or Kodi itself couldn't play the url), there is nothing left
     to wait out: the user already saw `play_direct()`'s own failure
-    notification, so this returns True (safe to reopen) once the budget
-    runs out. Once playback DOES begin, it polls again until
-    `isPlaying()` goes back to False (stopped/finished), then also
-    returns True.
+    notification, so this returns `(True, False)` (safe to reopen,
+    nothing played so nothing to binge into) once the budget runs out.
+    Once playback DOES begin, it polls again until `isPlaying()` goes
+    back to False (stopped/finished).
+
+    Returns a `(proceed, ended_naturally)` tuple rather than a bare
+    bool, since `isPlaying()` alone cannot tell a natural end apart from
+    the user pressing stop. `proceed` keeps the meaning described above
+    (and below): False only on a monitor abort or an unexpected
+    exception, True otherwise. `ended_naturally` is True only when the
+    polled player actually reported Kodi's `onPlayBackEnded()` (played
+    through to completion) rather than `onPlayBackStopped()`/
+    `onPlayBackError()` (user stop / playback failure); callers use it
+    to gate auto-play-next (binge-watching) - it is always False
+    whenever `proceed` is False or playback never started.
 
     Every poll tick is a `monitor.waitForAbort(tick)` call, exactly like
     every other cancellable wait loop in `lib.ui.player` - Kodi shutting
     down mid-wait must be seen within one tick, at either stage, and
-    returns False immediately (the caller must NOT reopen into a
-    shutting-down Kodi). Any unexpected exception anywhere in here (a
-    broken Player/Monitor) degrades to that same False - this helper
-    must never raise into `StreamsWindow.onClick()`'s caller.
+    returns `(False, False)` immediately (the caller must NOT reopen
+    into a shutting-down Kodi). Any unexpected exception anywhere in
+    here (a broken Player/Monitor) degrades to that same `(False,
+    False)` - this helper must never raise into
+    `StreamsWindow.onClick()`'s caller.
 
     `player`/`monitor` are injectable (unit tests pass tiny fakes);
-    production callers omit them and get real
-    `xbmc.Player()`/`xbmc.Monitor()`.
+    an injected `player` is asked for its own `ended_naturally`
+    attribute (`getattr(player, 'ended_naturally', False)`) once it
+    stops. Production callers omit `player` and get a
+    `_PlaybackEndWatcher` - a tiny `xbmc.Player` subclass, defined here
+    rather than at module scope since this module only ever imports
+    `xbmc` lazily inside the functions that need it - whose
+    `onPlayBackEnded()`/`onPlayBackStopped()`/`onPlayBackError()`
+    overrides record which one Kodi actually called.
     """
     import xbmc
 
     from lib.ui.compat import log
 
+    class _PlaybackEndWatcher(xbmc.Player):
+        """Distinguishes a natural end from a user stop/failure, which
+        `isPlaying()` alone cannot - it reports False as soon as
+        playback stops for ANY reason."""
+
+        def __init__(self):
+            super().__init__()
+            self.ended_naturally = False
+
+        def onPlayBackEnded(self):
+            self.ended_naturally = True
+
+        def onPlayBackStopped(self):
+            self.ended_naturally = False
+
+        def onPlayBackError(self):
+            self.ended_naturally = False
+
     try:
         if player is None:
-            player = xbmc.Player()
+            player = _PlaybackEndWatcher()
         if monitor is None:
             monitor = xbmc.Monitor()
 
@@ -295,19 +334,20 @@ def _wait_for_playback_end(player=None, monitor=None, start_timeout=20.0, tick=0
             if player.isPlaying():
                 break
             if monitor.waitForAbort(tick):
-                return False
+                return False, False
         else:
             # Never started within the budget - play_direct()'s own
             # failure notification already told the user; just reopen.
-            return True
+            # Nothing played, so nothing to binge into.
+            return True, False
 
         while player.isPlaying():
             if monitor.waitForAbort(tick):
-                return False
-        return True
+                return False, False
+        return True, getattr(player, 'ended_naturally', False)
     except Exception as exc:  # noqa: BLE001 - a wait hiccup must never crash onClick()
         log('streamswindow: wait-for-playback-end failed: %r (treating as stop)' % (exc,), xbmc.LOGWARNING)
-        return False
+        return False, False
 
 
 def _fetch_stream_pairs(stype, sid):
@@ -437,8 +477,9 @@ def _binge_countdown(label, seconds):
 
 
 def _try_binge_watch(stype, meta, poster, art, video_id, played_info):
-    """After an episode's playback has fully ended (called right after
-    `open_streams()`'s own `_wait_for_playback_end()`/settle-pause), try
+    """After an episode has played through to its NATURAL end (the caller
+    only reaches here when `_wait_for_playback_end()` reported
+    `ended_naturally`; a user stop never gets this far), try
     to keep going straight into the next one(s) - see the module
     docstring's binge-watching paragraph for the user-facing shape.
 
@@ -448,9 +489,11 @@ def _try_binge_watch(stype, meta, poster, art, video_id, played_info):
     Returns `None` the moment there is nothing left to binge into (not a
     series, no `video_id`/`meta`, the 'binge_enable' setting is off,
     `lib.ui.binge.next_video()` found no next episode, its streams could
-    not be fetched, the countdown was cancelled, or `play_direct()`
-    itself failed) - the caller must fall back to its own normal "reopen
-    the picker" step, exactly as if this function had never run. Returns
+    not be fetched, the countdown was cancelled, the auto-played episode
+    was stopped rather than played through to its own natural end, or
+    `play_direct()` itself failed) - the caller must fall back to its own
+    normal "reopen the picker" step, exactly as if this function had
+    never run. Returns
     `False` the moment a `monitor.waitForAbort()` fires anywhere in the
     chain (Kodi shutting down) - the caller must return False
     immediately instead, reopening nothing, same as every other abort
@@ -501,8 +544,14 @@ def _try_binge_watch(stype, meta, poster, art, video_id, played_info):
                 return None
             log('streamswindow: binge-watching auto-played %r' % candidate.get('id'), xbmc.LOGINFO)
 
-            if not _wait_for_playback_end():
+            proceed, ended_naturally = _wait_for_playback_end()
+            if not proceed:
                 return False
+            if not ended_naturally:
+                # The user stopped this auto-played episode instead of
+                # letting it end - stop the chain here, exactly like any
+                # other "nothing left to binge into" case above.
+                return None
             if xbmc.Monitor().waitForAbort(_REOPEN_SETTLE_SECONDS):
                 return False
 
@@ -572,19 +621,24 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
         # whole custom-window stack (see the module docstring). A monitor
         # abort (Kodi shutting down) at any point below returns False
         # immediately, reopening nothing.
-        if not _wait_for_playback_end():
+        proceed, ended_naturally = _wait_for_playback_end()
+        if not proceed:
             return False
         if xbmc.Monitor().waitForAbort(_REOPEN_SETTLE_SECONDS):  # brief settle pause before reopening
             return False
 
         # Binge-watching: try to auto-play straight through as many
         # consecutive "next episodes" as apply (see _try_binge_watch()'s
-        # own docstring) before falling back to reopening THIS picker.
-        # None means exactly that fall-back; False means a monitor abort
+        # own docstring) before falling back to reopening THIS picker -
+        # but only when the just-played episode ran through to its own
+        # natural end; the user pressing stop must fall straight through
+        # to reopening the picker, never auto-play the next episode.
+        # None means the normal fall-back; False means a monitor abort
         # fired mid-chain, which must return False immediately instead,
         # reopening nothing, same as every other abort check above.
-        played_info = win.played_pair[0] if win.played_pair else None
-        if _try_binge_watch(stype, meta, poster, art, video_id, played_info) is False:
-            return False
+        if ended_naturally:
+            played_info = win.played_pair[0] if win.played_pair else None
+            if _try_binge_watch(stype, meta, poster, art, video_id, played_info) is False:
+                return False
 
         log('streamswindow: reopening StreamsWindow after playback (%d streams)' % len(pairs), xbmc.LOGINFO)

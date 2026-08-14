@@ -58,7 +58,22 @@ def make_xbmc(env, info_labels=None):
         `getTime()`/`getTotalTime()` (seconds, matching the real
         `xbmc.Player` API) answer from `env.player_get_time`/
         `env.player_get_total_time` the same way; `seekTime()` just
-        records its argument into `env.player_seek_calls`."""
+        records its argument into `env.player_seek_calls`.
+
+        Whenever an `isPlaying()` poll transitions from playing to
+        not-playing, this dispatches `self.onPlayBackEnded()` or
+        `self.onPlayBackStopped()` (per `env.player_end_reason`, default
+        'ended') on ITSELF, exactly like real Kodi calls back a live
+        `Player` instance - so a subclass overriding either (e.g.
+        `streamswindow._PlaybackEndWatcher`, `lib.service_runner`'s
+        `_RivuletPlayer`) sees it without the test driving the callback
+        by hand. The base no-op implementations below make that dispatch
+        safe when nothing overrides them. Transition state is tracked
+        per INSTANCE (`self._was_playing`), matching real Kodi's
+        per-Player callbacks - not on `env`, which is shared."""
+
+        def __init__(self):
+            self._was_playing = False
 
         def play(self, item='', listitem=None, windowed=False, startpos=-1):
             env.player_play_calls.append((item, listitem))
@@ -66,7 +81,14 @@ def make_xbmc(env, info_labels=None):
         def isPlaying(self):
             env.player_is_playing_calls += 1
             playing = env.player_is_playing
-            return bool(playing(env.player_is_playing_calls)) if callable(playing) else bool(playing)
+            result = bool(playing(env.player_is_playing_calls)) if callable(playing) else bool(playing)
+            if self._was_playing and not result:
+                if env.player_end_reason == 'stopped':
+                    self.onPlayBackStopped()
+                else:
+                    self.onPlayBackEnded()
+            self._was_playing = result
+            return result
 
         def isPlayingVideo(self):
             return self.isPlaying()
@@ -83,6 +105,15 @@ def make_xbmc(env, info_labels=None):
 
         def seekTime(self, seek_time):
             env.player_seek_calls.append(seek_time)
+
+        def onPlayBackEnded(self):
+            pass
+
+        def onPlayBackStopped(self):
+            pass
+
+        def onPlayBackError(self):
+            pass
 
     module.Monitor = Monitor
     module.Player = Player
