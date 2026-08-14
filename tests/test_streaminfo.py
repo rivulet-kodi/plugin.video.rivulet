@@ -11,6 +11,7 @@ import pytest
 from lib.stremio.streaminfo import (
     _MAX_TEXT_LEN,
     clean_text,
+    format_details,
     format_label,
     format_plot,
     parse_stream,
@@ -56,6 +57,15 @@ EXPECTED_INFO_KEYS = {
     "filename",
     "binge_group",
     "raw",
+    "audio",
+    "channels",
+    "languages",
+    "bitrate",
+    "group",
+    "tracker",
+    "service",
+    "cached",
+    "release",
 }
 
 
@@ -74,6 +84,15 @@ def _info(resolution="", seeders=None, size_bytes=None, **extra):
         "filename": "",
         "binge_group": None,
         "raw": "",
+        "audio": [],
+        "channels": "",
+        "languages": [],
+        "bitrate": "",
+        "group": "",
+        "tracker": "",
+        "service": "",
+        "cached": None,
+        "release": [],
     }
     base.update(extra)
     return base
@@ -339,6 +358,267 @@ def test_parse_stream_seeders_labeled_absurdly_large_is_none():
     assert info["seeders"] is None
 
 
+# --- parse_stream: audio / channels / bitrate / release -------------------
+
+
+def test_parse_stream_audio_dts_hd_ma_does_not_also_yield_dts():
+    stream = {"name": "Movie.2024.2160p.DTS-HD.MA.5.1", "title": "", "description": "", "behaviorHints": {}}
+    info = parse_stream(stream)
+    assert info["audio"] == ["DTS-HD MA"]
+
+
+def test_parse_stream_audio_e_ac_3_yields_ddplus_not_dd():
+    stream = {"name": "Movie.2024.2160p.E-AC-3.5.1", "title": "", "description": "", "behaviorHints": {}}
+    info = parse_stream(stream)
+    assert info["audio"] == ["DD+"]
+
+
+def test_parse_stream_audio_and_channels_from_text():
+    stream = {"name": "Movie.2024.2160p.TrueHD.Atmos.7.1", "title": "", "description": "", "behaviorHints": {}}
+    info = parse_stream(stream)
+    assert info["audio"] == ["TrueHD", "Atmos"]
+    assert info["channels"] == "7.1"
+
+
+def test_parse_stream_bitrate_from_text():
+    stream = {
+        "name": "x", "title": "", "behaviorHints": {},
+        "description": "\U0001F4E6 22.42 GB | \u303D\uFE0F 25.5 Mbps",
+    }
+    info = parse_stream(stream)
+    assert info["bitrate"] == "25.5 Mbps"
+
+
+def test_parse_stream_dv_profile_marker_only_when_dv_present():
+    # Issue #4's own case: a DV row whose file is really a P8 remap. The
+    # bare 'DVT' group suffix is NOT a Dolby Vision hint - the standalone
+    # 'DV' tag is.
+    stream = {
+        "name": "Deadpool 2160p Remux DV Hybrid.P8.by.DVT",
+        "title": "", "description": "", "behaviorHints": {},
+    }
+    info = parse_stream(stream)
+    assert info["release"] == ["Hybrid", "P8"]
+
+
+def test_parse_stream_dv_profile_marker_absent_when_only_dvd_in_text():
+    stream = {"name": "Movie.2019.DVDRip.P8.mkv", "title": "", "description": "", "behaviorHints": {}}
+    info = parse_stream(stream)
+    assert info["release"] == []
+
+
+def test_parse_stream_dv_profile_marker_absent_without_dv_hint():
+    stream = {"name": "Movie.P8.mkv", "title": "", "description": "", "behaviorHints": {}}
+    info = parse_stream(stream)
+    assert "P8" not in info["release"]
+
+
+# --- parse_stream: debrid service / cache state ----------------------------
+
+
+def test_parse_stream_torrentio_cached_bracket_plus():
+    stream = {"name": "[RD+] Deadpool 2160p", "title": "", "description": "", "behaviorHints": {}}
+    info = parse_stream(stream)
+    assert info["service"] == "RD"
+    assert info["cached"] is True
+
+
+def test_parse_stream_torrentio_uncached_bracket_download():
+    stream = {"name": "[RD download] Deadpool 2160p", "title": "", "description": "", "behaviorHints": {}}
+    info = parse_stream(stream)
+    assert info["service"] == "RD"
+    assert info["cached"] is False
+
+
+def test_parse_stream_comet_kodi_cached_bracket_c():
+    stream = {
+        "name": "[RD C] 1080p | 3.65 GB | S:20 | FraMeSToR", "title": "", "description": "", "behaviorHints": {},
+    }
+    info = parse_stream(stream)
+    assert info["service"] == "RD"
+    assert info["cached"] is True
+
+
+def test_parse_stream_comet_kodi_uncached_bracket_u():
+    stream = {
+        "name": "[RD U] 1080p | 3.65 GB | S:20 | FraMeSToR", "title": "", "description": "", "behaviorHints": {},
+    }
+    info = parse_stream(stream)
+    assert info["service"] == "RD"
+    assert info["cached"] is False
+
+
+def test_parse_stream_stremthru_cached_lightning_bolt():
+    stream = {"name": "x", "title": "", "description": "\u26a1\ufe0f [RD] Deadpool 2160p", "behaviorHints": {}}
+    info = parse_stream(stream)
+    assert info["service"] == "RD"
+    assert info["cached"] is True
+
+
+def test_parse_stream_stremthru_uncached_bare_bracket():
+    # StremThru's uncached form is a bare code in `name` (its cached form
+    # carries the bolt) - see the module's marker matrix.
+    stream = {"name": "[RD]\nStremThru\n1080p", "title": "", "description": "", "behaviorHints": {}}
+    info = parse_stream(stream)
+    assert info["service"] == "RD"
+    assert info["cached"] is False
+
+
+def test_parse_stream_bare_service_code_outside_name_is_not_a_verdict():
+    # '[EN]' is Easynews' code but also an ordinary language tag: read as
+    # a debrid verdict it would claim 'not cached' on a stream nobody said
+    # anything about. Only `name` carries the bare-code form.
+    stream = {
+        "name": "Deadpool 2160p", "title": "Deadpool.2016.2160p.WEB-DL [EN] [RD]",
+        "description": "", "behaviorHints": {},
+    }
+    info = parse_stream(stream)
+    assert info["service"] == ""
+    assert info["cached"] is None
+
+
+def test_parse_stream_aiostreams_prism_ready_is_cached():
+    stream = {"name": "\u26a1Ready (RD) Deadpool 2160p", "title": "", "description": "", "behaviorHints": {}}
+    info = parse_stream(stream)
+    assert info["service"] == "RD"
+    assert info["cached"] is True
+
+
+def test_parse_stream_aiostreams_prism_not_ready_is_uncached():
+    stream = {"name": "\u274c Not Ready (RD) Deadpool 2160p", "title": "", "description": "", "behaviorHints": {}}
+    info = parse_stream(stream)
+    assert info["service"] == "RD"
+    assert info["cached"] is False
+
+
+def test_parse_stream_aiostreams_torbox_instant_is_cached():
+    stream = {"name": "Deadpool 2160p (Instant RD)", "title": "", "description": "", "behaviorHints": {}}
+    info = parse_stream(stream)
+    assert info["service"] == "RD"
+    assert info["cached"] is True
+
+
+def test_parse_stream_aiostreams_torbox_bare_paren_is_uncached():
+    stream = {"name": "Deadpool 2160p (RD)", "title": "", "description": "", "behaviorHints": {}}
+    info = parse_stream(stream)
+    assert info["service"] == "RD"
+    assert info["cached"] is False
+
+
+@pytest.mark.parametrize("bracket", ["[SEV]", "[P2P]", "[AIOStreams Stable]"])
+def test_parse_stream_non_service_bracket_yields_no_service(bracket):
+    stream = {"name": "%s Deadpool 2160p" % bracket, "title": "", "description": "", "behaviorHints": {}}
+    info = parse_stream(stream)
+    assert info["service"] == ""
+    assert info["cached"] is None
+
+
+def test_parse_stream_comet_kodi_meta_overrides_text_guesses():
+    stream = {
+        "name": "[RD C] 1080p | TrueHD | 7.1 | English",
+        "title": "", "description": "",
+        "behaviorHints": {
+            "cometKodiMetaV1": {"audio": "DTS", "channels": "2.0", "languages": ["French"]},
+        },
+    }
+    info = parse_stream(stream)
+    assert info["audio"] == ["DTS"]
+    assert info["channels"] == "2.0"
+    assert info["languages"] == ["FR"]
+
+
+# --- parse_stream: languages ------------------------------------------
+
+
+def test_parse_stream_languages_flag_emoji_survive_clean_text():
+    stream = {
+        "name": "Deadpool 2160p", "title": "",
+        "description": "Dual Audio / \U0001F1EC\U0001F1E7 / \U0001F1EE\U0001F1F3",
+        "behaviorHints": {},
+    }
+    info = parse_stream(stream)
+    assert info["languages"] == ["DUAL", "EN", "HI"]
+    assert "\U0001F1EC" not in info["raw"]
+
+
+def test_parse_stream_languages_full_names_from_labelled_segment():
+    # AIOStreams' torbox format labels the segment: 'Languages: <names>'.
+    stream = {
+        "name": "x", "title": "", "behaviorHints": {},
+        "description": "Size: 22.42 GB\nLanguages: English, Russian",
+    }
+    info = parse_stream(stream)
+    assert info["languages"] == ["EN", "RU"]
+
+
+def test_parse_stream_language_name_in_a_title_is_not_a_language():
+    # No marker, so 'Italian' here is what it looks like: part of the
+    # film's name, not an audio track.
+    stream = {
+        "name": "x", "title": "The Italian Job 2160p Remux",
+        "description": "", "behaviorHints": {},
+    }
+    info = parse_stream(stream)
+    assert info["languages"] == []
+
+
+def test_parse_stream_languages_bare_abbreviations_are_not_full_names():
+    stream = {"name": "x", "title": "", "description": "en / fr", "behaviorHints": {}}
+    info = parse_stream(stream)
+    assert info["languages"] == []
+
+
+# --- parse_stream: tracker / release group ---------------------------------
+
+
+def test_parse_stream_tracker_from_gear_marker_torrentio():
+    title = (
+        "Deadpool [2016] 2160p BDRip x265 [SEV]\n"
+        "\U0001F464 16 \U0001F4BE 22.42 GB \u2699\uFE0F 1337x"
+    )
+    stream = {"name": "Torrentio", "title": title, "description": "", "behaviorHints": {}}
+    info = parse_stream(stream)
+    assert info["tracker"] == "1337x"
+
+
+def test_parse_stream_stremthru_tracker_and_group_precedence():
+    description = (
+        "\U0001F4BF BluRay | \U0001F39E\uFE0F HEVC\n"
+        "\U0001F3A7 TrueHD | 7.1\n"
+        "\U0001F4E6 22.42 GB | \u303D\uFE0F 25.5 Mbps\n"
+        "\u2699\uFE0F FraMeSToR\n"
+        "\U0001F50D 1337x\n"
+        "\U0001F4C4 Deadpool.2016.2160p.mkv"
+    )
+    stream = {
+        "name": "StremThru", "title": "", "description": description,
+        "behaviorHints": {"filename": "Deadpool.2016.2160p.mkv"},
+    }
+    info = parse_stream(stream)
+    assert info["tracker"] == "1337x"
+    assert info["group"] == "FraMeSToR"
+
+
+def test_parse_stream_tracker_skips_the_addon_name_aiostreams_prism():
+    # prism puts the ADDON behind the magnifier and its indexer behind the
+    # satellite marker, the opposite of gdrive/StremThru: the row must end
+    # up with the tracker, not a second copy of the addon name.
+    description = (
+        "\U0001F4E6 97.43 GB \U0001F4CA 130 Mbps \U0001F331 85\n"
+        "\U0001F3F7\uFE0F BTM \U0001F4E1 Rutor\n"
+        "\u274C Not Ready (RD) \U0001F50DAIOStreams"
+    )
+    stream = {"name": "4K UHD", "title": "", "description": description, "behaviorHints": {}}
+    info = parse_stream(stream, addon_name="AIOStreams")
+    assert info["tracker"] == "Rutor"
+    assert info["group"] == "BTM"
+
+
+def test_parse_stream_group_falls_back_to_filename_release_group():
+    info = parse_stream(AIOSTREAMS_STREAM, addon_name="AIOStreams")
+    assert info["group"] == "GROUP"
+
+
 # --- format_label ------------------------------------------------------
 
 
@@ -400,6 +680,67 @@ def test_format_label_full_fixture_contains_expected_pieces():
     assert "\u25b250" in label
 
 
+def test_format_label_cached_service_shows_lime_segment():
+    info = _info(service="RD", cached=True)
+    label = format_label(info)
+    assert "[COLOR lime]RD[/COLOR]" in label
+
+
+def test_format_label_uncached_service_shows_orange_dl_segment():
+    info = _info(service="RD", cached=False)
+    label = format_label(info)
+    assert "[COLOR orange]RD DL[/COLOR]" in label
+
+
+def test_format_label_unknown_cache_state_shows_bare_service_no_color():
+    info = _info(service="RD", cached=None)
+    label = format_label(info)
+    assert "RD" in label
+    assert "[COLOR lime]RD" not in label
+    assert "[COLOR orange]RD" not in label
+
+
+def test_format_label_no_service_omits_cache_segment_entirely():
+    info = _info(service="", cached=True)
+    label = format_label(info)
+    assert "RD" not in label
+    assert "[COLOR lime]" not in label
+    assert "[COLOR orange]" not in label
+
+
+# --- format_details ---------------------------------------------------------
+
+
+def test_format_details_empty_info_is_empty_string():
+    assert format_details(_info()) == ""
+
+
+def test_format_details_omits_empty_segments_without_dangling_separators():
+    info = _info(audio=["TrueHD"], tracker="1337x")
+    details = format_details(info)
+    assert details == "TrueHD \u00b7 1337x"
+    assert "\u00b7  \u00b7" not in details
+    assert "\u00b7\u00b7" not in details
+
+
+def test_format_details_composes_all_segments_in_order():
+    info = _info(
+        audio=["TrueHD", "Atmos"], channels="7.1", languages=["EN", "RU"],
+        bitrate="25.5 Mbps", release=["Hybrid", "P8"], group="FraMeSToR", tracker="1337x",
+    )
+    details = format_details(info)
+    assert details == "TrueHD Atmos 7.1 \u00b7 EN / RU \u00b7 25.5 Mbps \u00b7 Hybrid P8 \u00b7 FraMeSToR \u00b7 1337x"
+
+
+def test_format_details_never_contains_bbcode_or_newlines():
+    info = parse_stream(AIOSTREAMS_STREAM, addon_name="AIOStreams")
+    details = format_details(info)
+    assert "[COLOR" not in details
+    assert "[B]" not in details
+    assert "\n" not in details
+    assert "\r" not in details
+
+
 # --- format_plot ---------------------------------------------------------
 
 
@@ -427,6 +768,36 @@ def test_format_plot_contains_cleaned_addon_line():
     plot = format_plot(info)
     assert "AIOStreams" in plot
     assert "\U0001F3AC" not in plot
+
+
+def test_format_plot_contains_details_line_when_non_empty():
+    info = parse_stream(AIOSTREAMS_STREAM, addon_name="AIOStreams")
+    plot = format_plot(info)
+    details = format_details(info)
+    assert details
+    assert details in plot
+
+
+def test_format_plot_omits_details_line_when_empty():
+    info = _info()
+    plot = format_plot(info)
+    assert format_details(info) == ""
+    assert "\n\n" not in plot
+
+
+def test_format_plot_cached_line_variants():
+    assert "Cached (RD)" in format_plot(_info(service="RD", cached=True))
+    assert "Not cached (RD)" in format_plot(_info(service="RD", cached=False))
+    plot_unknown = format_plot(_info(service="RD", cached=None))
+    assert "Cached (RD)" not in plot_unknown
+    assert "Not cached (RD)" not in plot_unknown
+    assert "RD" in plot_unknown
+
+
+def test_format_plot_no_service_omits_cache_line():
+    plot = format_plot(_info(service="", cached=True))
+    assert "Cached" not in plot
+    assert "RD" not in plot
 
 
 # --- sort_streams ------------------------------------------------------
