@@ -17,11 +17,30 @@
             <control type="image"><width>1280</width><height>720</height><texture colordiffuse="E6111111">white.png</texture></control>
             <control type="image" id="30000"><width>1280</width><height>720</height><texture colordiffuse="FF777777"></texture><aspectratio>scale</aspectratio></control>
             <!-- Scrim stack over the fanart: a flat wash for overall contrast,
-                 then a bottom-anchored gradient (fade_edge rotated via flipy)
-                 so the poster strip sits on solid dark while the top of the
-                 frame keeps some of the backdrop visible. -->
+                 then a bottom-anchored gradient so the hero text and the
+                 poster strip sit on solid dark while the top of the frame
+                 keeps some of the backdrop visible.
+
+                 The gradient covers the hero text, not just the strip - that
+                 text is what needs it most. Against a worst-case white
+                 backdrop the flat wash alone leaves white body copy at about
+                 2.8:1, well under the 4.5:1 it needs to stay readable.
+                 Starting the ramp at y=40 lifts the metadata to 5.5:1 or
+                 better and the title to 4.4:1; the title only approaches that
+                 floor on artwork that is near-solid white behind it, and any
+                 real fanart clears it comfortably (6.4:1 at 200 luma).
+                 Darkening further would start hiding the backdrop, which is
+                 the thing this window exists to show.
+
+                 The gradient needs its own asset: fade_edge.png ramps along X
+                 only (its alpha is constant down every column), which is why
+                 the side fades use it at 64x720 with flipx. flipy mirrors
+                 rather than rotates, so it cannot turn an X ramp into a Y one.
+                 fade_bottom.png is 8x680, alpha 0 at top -> 255 at bottom on
+                 an ease-out curve, so it gains opacity quickly across the text
+                 and then flattens instead of crushing the lower frame. -->
             <control type="image"><width>1280</width><height>720</height><texture colordiffuse="66000000">white.png</texture></control>
-            <control type="image"><left>0</left><top>300</top><width>1280</width><height>420</height><texture colordiffuse="E6000000" flipy="true">fade_edge.png</texture></control>
+            <control type="image"><left>0</left><top>40</top><width>1280</width><height>680</height><texture colordiffuse="E6000000">fade_bottom.png</texture></control>
             <control type="image" id="30001"><top>355</top><left>490</left><width>300</width><height>10</height><texture>white.png</texture>
                 <animation effect="zoom" pulse="true" center="auto" start="0,100" end="100,100" time="1000" condition="Control.IsVisible(30001)">Conditional</animation>
             </control>
@@ -31,8 +50,25 @@
             <control type="label"><left>64</left><top>112</top><width>980</width><height>44</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
                 <label>[B]$INFO[ListItem.Label][/B]</label>
             </control>
+            <!-- Year/rating line, in two mutually exclusive controls: the
+                 separator must appear only when both values are present, and
+                 a $INFO prefix/postfix hangs off one value alone, so neither
+                 value can carry it. With a year, the rating brings the
+                 separator with it; without one, the rating stands bare rather
+                 than opening the line with a stray space.
+
+                 The separator is a plain ASCII pipe. A star (U+2605) tofu'd
+                 here, and so did U+25C6 from Geometric Shapes when it was
+                 tried as a replacement - the bundled font carries neither, and
+                 nothing else in this skin uses a non-ASCII glyph. Anything
+                 fancier has to ship as a texture, not a codepoint. -->
             <control type="label"><left>64</left><top>162</top><width>980</width><height>26</height><font>font12</font><textcolor>FF38BDF8</textcolor>
-                <label>$INFO[ListItem.Property(year)]$INFO[ListItem.Property(rating), ★ ]</label>
+                <label>$INFO[ListItem.Property(year)]$INFO[ListItem.Property(rating),  |  , ]</label>
+                <visible>!IsEmpty(ListItem.Property(year))</visible>
+            </control>
+            <control type="label"><left>64</left><top>162</top><width>980</width><height>26</height><font>font12</font><textcolor>FF38BDF8</textcolor>
+                <label>$INFO[ListItem.Property(rating)]</label>
+                <visible>IsEmpty(ListItem.Property(year))</visible>
             </control>
             <!-- Genre sits under the year/rating line when there is one, and
                  slides up into its place when there is not: catalog metas
@@ -53,7 +89,11 @@
             </control>
 
             <control type="fixedlist" id="30002">
-                <top>371</top><left>64</left><width>1152</width><height>310</height>
+                <!-- 1144 = one focused slot (224) + five unfocused (5x184).
+                     At 1152 a sixth slot got the leftover 8px and rendered as
+                     a clipped sliver at the right edge, uncovered by the side
+                     fade (which starts at x=1216). -->
+                <top>371</top><left>64</left><width>1144</width><height>310</height>
                 <viewtype>wrap</viewtype><orientation>horizontal</orientation>
                 <scrolltime tween="cubic" easing="out">300</scrolltime>
                 <!-- focusposition 0: the focused poster leads the strip. The
@@ -71,7 +111,7 @@
                 <itemlayout width="184" height="310">
                     <control type="image">
                         <top>65</top><left>12</left><width>160</width><height>240</height>
-                        <texture colordiffuse="99FFFFFF" border="2">$INFO[ListItem.Property(thumbnail)]</texture>
+                        <texture colordiffuse="99FFFFFF">$INFO[ListItem.Property(thumbnail)]</texture>
                         <aspectratio align="center" aligny="center">keep</aspectratio>
                     </control>
                 </itemlayout>
