@@ -10,14 +10,16 @@ lazily inside run() (never called here), so there is no stale
 cross-module binding risk.
 
 The data layer (lib.store.Store / lib.stremio.addons.AddonClient) is faked
-by assigning to the names lib.ui.views actually imports (`views.Store`,
-`views.AddonClient`) since both are constructed lazily behind a
-module-global cache that a fresh import resets to None. lib.stremio.streaminfo
+by assigning to the provider names lib.ui.views actually calls
+(`views.get_store`, `views.get_client`, imported from
+lib.ui.dependencies), since both are single process-wide singletons owned
+by that module. lib.stremio.streaminfo
 is exercised for real: it's the module responsible for turning hostile,
 emoji-laden Stream.title/name text into the addon's single-line labels.
 """
 import contextlib
 import sys
+import threading
 import time
 from urllib.parse import parse_qsl, urlparse
 
@@ -25,9 +27,15 @@ import pytest
 
 from lib.stremio.addons import AddonError
 from lib.stremio.api import ApiError
+from lib.ui import urlutil
 from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = ('lib.ui.compat', 'lib.ui.router', 'lib.ui.views', 'lib.ui.infowindow')
+
+#: Generous safety-valve timeout (seconds) for the Barrier/Event-gated
+#: fanout tests below: bounds a genuine deadlock/regression as a test
+#: failure instead of hanging the suite. Not used to assert performance.
+_GATE_TIMEOUT = 5.0
 
 
 # ---------------------------------------------------------------------------
@@ -142,16 +150,28 @@ class FakeAddonClient:
     in `manifest_results`.
 
     `delays` (transport_url -> seconds) makes catalog()/streams()/meta()
-    call time.sleep() before returning/raising, for tests proving the
-    addon fan-out in lib.ui.views runs concurrently rather than one
-    addon at a time - time.sleep() releases the GIL, so several fake
-    calls made from a real ThreadPoolExecutor genuinely overlap the same
-    way blocking socket I/O would.
+    call time.sleep() before returning/raising - used where a test needs
+    one addon to genuinely answer later than another (e.g. proving a
+    faster addon's result wins), not to prove concurrency itself.
+
+    `barrier` (a threading.Barrier sized to the addon count, built with a
+    generous timeout) makes every call block until *all* addons' calls
+    are simultaneously waiting on it: a sequential, one-addon-at-a-time
+    caller can only ever get one thread there, so the barrier's timeout
+    trips (BrokenBarrierError) instead of releasing - deterministic proof
+    of overlap with no wall-clock margin to tune.
+
+    `gates` (transport_url -> threading.Event) blocks that addon's call
+    until the test sets the event, for proving a caller returned without
+    ever waiting on a given addon: if the caller only proceeds after the
+    gate opens, it read that addon's result. `_GATE_TIMEOUT` bounds the
+    wait so a regression that truly blocks fails on a timeout rather than
+    hanging the suite, instead of asserting on elapsed time.
     """
 
     def __init__(self, catalog_result=None, stream_results=None, catalog_results=None,
                  meta_results=None, manifest_result=None, manifest_error=None,
-                 manifest_results=None, delays=None):
+                 manifest_results=None, delays=None, barrier=None, gates=None):
         self._catalog_result = catalog_result if catalog_result is not None else []
         self._catalog_results = catalog_results or {}
         self._stream_results = stream_results or {}
@@ -160,9 +180,18 @@ class FakeAddonClient:
         self._manifest_error = manifest_error
         self._manifest_results = manifest_results or {}
         self._delays = delays or {}
+        self._barrier = barrier
+        self._gates = gates or {}
         self.manifest_calls = []
 
     def _delay(self, transport_url):
+        if self._barrier is not None:
+            self._barrier.wait()
+            return
+        gate = self._gates.get(transport_url)
+        if gate is not None:
+            gate.wait(timeout=_GATE_TIMEOUT)
+            return
         seconds = self._delays.get(transport_url)
         if seconds:
             time.sleep(seconds)
@@ -246,8 +275,8 @@ class FakeStremioAPI:
 
 
 def _wire_data_layer(views, store, client):
-    views.Store = lambda *a, **k: store
-    views.AddonClient = lambda *a, **k: client
+    views.get_store = lambda: store
+    views.get_client = lambda: client
 
 
 def _wire_api(views, api):
@@ -604,13 +633,13 @@ def test_discover_lists_catalogs_across_addons_with_art_and_url_fallbacks(load_v
     assert li0.getLabel() == 'Addon X: Top Movies (movie)'
     assert li0.art['fanart'] == 'https://x.example/bg.jpg'
     assert 'icon' not in li0.art
-    assert url0 == router.url_for('catalog', transport=descriptor_x['transportUrl'], type='movie', id='top')
+    assert url0 == urlutil.url_for(router.BASE_URL, 'catalog', transport=descriptor_x['transportUrl'], type='movie', id='top')
 
     url1, li1, _ = items[1]
     assert li1.getLabel() == 'Addon Y: popular (series)'
     assert li1.art['icon'] == 'https://y.example/logo.png'
     assert li1.art['fanart'] == compat.addon_fanart()
-    assert url1 == router.url_for('catalog', transport=descriptor_y['transportUrl'], type='series', id='popular')
+    assert url1 == urlutil.url_for(router.BASE_URL, 'catalog', transport=descriptor_y['transportUrl'], type='series', id='popular')
 
     assert ctx.env.content[-1] == (call['handle'], 'files')
     assert ctx.env.end_of_directory[-1]['succeeded'] is True
@@ -632,7 +661,7 @@ def test_discover_rows_carry_showcase_context_menu_item(load_views):
     views.discover()
 
     _, li, _ = ctx.env.directory_items[-1]['items'][0]
-    expected_url = router.url_for('showcase', transport=transport, type='movie', id='top')
+    expected_url = urlutil.url_for(router.BASE_URL, 'showcase', transport=transport, type='movie', id='top')
     assert li.context_menu_items == [('STR30026', 'RunPlugin(%s)' % expected_url)]
 
 
@@ -788,7 +817,7 @@ def test_showcase_opens_overlay_with_catalog_metas_and_updates_container_on_sele
 
     assert captured['metas'] == metas
     assert ctx.env.executed_builtins == [
-        'Container.Update(%s)' % router.url_for('meta', type='series', id='tt2')
+        'Container.Update(%s)' % urlutil.url_for(router.BASE_URL, 'meta', type='series', id='tt2')
     ]
 
 
@@ -804,7 +833,7 @@ def test_showcase_selected_meta_without_type_falls_back_to_catalog_type(load_vie
     views.showcase(transport, 'movie', 'top')
 
     assert ctx.env.executed_builtins == [
-        'Container.Update(%s)' % router.url_for('meta', type='movie', id='tt9')
+        'Container.Update(%s)' % urlutil.url_for(router.BASE_URL, 'meta', type='movie', id='tt9')
     ]
 
 
@@ -999,20 +1028,19 @@ def test_search_records_query_in_history_regardless_of_result_count(load_views, 
 
 
 def test_search_addon_fanout_runs_concurrently_not_sequentially(load_views, monkeypatch):
-    """5 addons that each take ~0.2s to answer (simulating slow network
-    I/O) would serialize to ~1s under the old one-addon-at-a-time loop;
-    fanned out over the thread pool this should land close to a single
-    addon's 0.2s. The 0.6s threshold leaves generous slack on both sides
-    (well below the ~1s sequential sum, well above the ~0.2s expected
-    fanned-out time) to avoid CI flakiness.
+    """5 addons' catalog() calls must all be in flight at once, not one
+    at a time: each call blocks on a threading.Barrier sized to the
+    addon count, which only releases once all 5 are simultaneously
+    waiting on it. A one-addon-at-a-time (sequential) implementation can
+    never get more than one thread to the barrier, so it deadlocks and
+    trips `_GATE_TIMEOUT` instead of releasing - deterministic proof of
+    overlap, no wall-clock margin to tune.
     """
     ctx = load_views(dialog_inputs=['batman'])
     views = ctx.views
-    delay = 0.2
     num_addons = 5
     descriptors = []
     catalog_results = {}
-    delays = {}
     for i in range(num_addons):
         transport = 'https://addon%d.example/manifest.json' % i
         descriptors.append({
@@ -1024,8 +1052,8 @@ def test_search_addon_fanout_runs_concurrently_not_sequentially(load_views, monk
             'flags': {},
         })
         catalog_results[transport] = [{'id': 'tt%d' % i, 'name': 'Batman %d' % i, 'type': 'movie'}]
-        delays[transport] = delay
-    client = FakeAddonClient(catalog_results=catalog_results, delays=delays)
+    barrier = threading.Barrier(num_addons, timeout=_GATE_TIMEOUT)
+    client = FakeAddonClient(catalog_results=catalog_results, barrier=barrier)
     _wire_data_layer(views, FakeStore(addons=descriptors), client)
 
     captured = {}
@@ -1036,15 +1064,11 @@ def test_search_addon_fanout_runs_concurrently_not_sequentially(load_views, monk
 
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', fake_open_showcase)
 
-    start = time.monotonic()
     views.search()
-    elapsed = time.monotonic() - start
 
-    assert elapsed < 0.6, (
-        'search() took %.2fs for %d addons at %.2fs each - looks sequential, not fanned out'
-        % (elapsed, num_addons, delay)
-    )
+    assert 'metas' in captured, 'search() did not reach open_showcase (fanout deadlocked or failed)'
     assert len(captured['metas']) == num_addons
+
 
 # ---------------------------------------------------------------------------
 # meta() / _fetch_meta() / _ordered_seasons()
@@ -1101,7 +1125,7 @@ def test_fetch_meta_skips_unsupported_and_erroring_addons_first_hit_wins(load_vi
         'manifest': {'id': 'org.skip', 'resources': ['catalog'], 'types': ['series'], 'idPrefixes': ['tt']},
     }
     descriptor_error = {
-        'transportUrl': 't2',
+        'transportUrl': 'https://err.example/manifest.json',
         'manifest': {'id': 'org.err', 'resources': ['meta'], 'types': ['series'], 'idPrefixes': ['tt']},
     }
     descriptor_hit = {
@@ -1109,7 +1133,7 @@ def test_fetch_meta_skips_unsupported_and_erroring_addons_first_hit_wins(load_vi
         'manifest': {'id': 'org.hit', 'resources': ['meta'], 'types': ['series'], 'idPrefixes': ['tt']},
     }
     client = FakeAddonClient(meta_results={
-        't2': AddonError('meta fetch boom'),
+        'https://err.example/manifest.json': AddonError('meta fetch boom'),
         't3': {
             'id': 'tt1', 'name': 'A Show', 'type': 'series',
             'videos': [{'season': 1, 'episode': 1, 'id': 'ep1'}],
@@ -1122,7 +1146,9 @@ def test_fetch_meta_skips_unsupported_and_erroring_addons_first_hit_wins(load_vi
     assert ctx.env.content[-1][1] == 'seasons'
     items = ctx.env.directory_items[-1]['items']
     assert len(items) == 1
-    assert any('meta fetch boom' in msg for msg, _level in ctx.env.log_calls)
+    all_messages = ' '.join(msg for msg, _level in ctx.env.log_calls)
+    assert 'err.example' in all_messages
+    assert 'meta fetch boom' not in all_messages
 
 
 def test_fetch_meta_skips_addon_returning_no_usable_result(load_views):
@@ -1153,10 +1179,13 @@ def test_fetch_meta_skips_addon_returning_no_usable_result(load_views):
 
 def test_fetch_meta_returns_without_waiting_for_a_slower_addon(load_views):
     """The first-listed (preferred) addon is the slow one; a second addon
-    answers almost immediately with an equally usable result. The old
-    sequential loop would have blocked on the first addon before ever
-    trying the second; the concurrent version must return as soon as the
-    fast addon answers instead of waiting out the slow one's delay.
+    answers almost immediately with an equally usable result. The slow
+    addon's call is gated on a threading.Event the test never sets, so
+    if meta() still returns a result, that result cannot have come from
+    the slow addon - deterministic proof that the concurrent version
+    returned as soon as the fast addon answered instead of waiting for
+    the slow one. `_GATE_TIMEOUT` bounds how long a regression that
+    truly waits can block the test, without asserting on elapsed time.
     """
     ctx = load_views()
     views = ctx.views
@@ -1168,7 +1197,7 @@ def test_fetch_meta_returns_without_waiting_for_a_slower_addon(load_views):
         'transportUrl': 't-fast',
         'manifest': {'id': 'org.fast', 'resources': ['meta'], 'types': ['series'], 'idPrefixes': ['tt']},
     }
-    slow_delay = 2.0  # would dominate the test's wall-clock time if ever awaited
+    slow_gate = threading.Event()  # deliberately never set: t-slow must not be allowed to answer
     client = FakeAddonClient(
         meta_results={
             't-slow': {
@@ -1180,21 +1209,20 @@ def test_fetch_meta_returns_without_waiting_for_a_slower_addon(load_views):
                 'videos': [{'season': 1, 'episode': 1, 'id': 'ep1'}],
             },
         },
-        delays={'t-slow': slow_delay},
+        gates={'t-slow': slow_gate},
     )
     # descriptor_slow is listed FIRST (the preferred addon), but it is the
     # slow one - _fetch_meta must not serialize behind it.
     _wire_data_layer(views, FakeStore(addons=[descriptor_slow, descriptor_fast]), client)
 
-    start = time.monotonic()
     views.meta('series', 'tt1')
-    elapsed = time.monotonic() - start
 
-    assert elapsed < slow_delay * 0.5, (
-        'meta() took %.2fs - looks like it waited on the slow addon instead of the fast one' % elapsed
-    )
     assert ctx.env.content[-1][1] == 'seasons'
-    assert len(ctx.env.directory_items[-1]['items']) == 1
+    items = ctx.env.directory_items[-1]['items']
+    assert len(items) == 1
+    li = items[0][1]
+    assert li.info_tag.calls.get('setTvShowTitle') == 'Fast Show'
+    slow_gate.set()  # release the still-blocked background worker thread
 
 
 def test_fetch_meta_prefers_earlier_addon_when_it_answers_at_least_as_fast(load_views):
@@ -1265,7 +1293,7 @@ def test_meta_series_orders_seasons_specials_last_with_poster_fallback_fanart(lo
         assert li.info_tag.calls.get('setTvShowTitle') == 'A Show'
         assert li.info_tag.calls.get('setSeason') == season
         assert li.info_tag.calls.get('setMediaType') == 'season'
-        assert url == router.url_for('videos', type='series', id='tt1', season=str(season))
+        assert url == urlutil.url_for(router.BASE_URL, 'videos', type='series', id='tt1', season=str(season))
     assert ctx.env.content[-1][1] == 'seasons'
 
 
@@ -1427,8 +1455,8 @@ def test_streams_addon_error_is_skipped_other_addons_still_listed(load_views, mo
     monkeypatch.setattr(sys, 'argv', ['default.py'])
     ctx = load_views()
     views = ctx.views
-    failing_transport = 't-failing'
-    ok_transport = 't-ok'
+    failing_transport = 'https://user:hunter2@failing.example/manifest.json?token=abc123'
+    ok_transport = 'https://ok.example/manifest.json'
     descriptor_failing = {
         'transportUrl': failing_transport,
         'manifest': {
@@ -1446,7 +1474,7 @@ def test_streams_addon_error_is_skipped_other_addons_still_listed(load_views, mo
         'flags': {},
     }
     client = FakeAddonClient(stream_results={
-        failing_transport: AddonError('addon offline'),
+        failing_transport: AddonError('GET %s failed: addon offline' % failing_transport),
         ok_transport: [STREAM_1080P],
     })
     _wire_data_layer(views, FakeStore(addons=[descriptor_failing, descriptor_ok]), client)
@@ -1455,7 +1483,14 @@ def test_streams_addon_error_is_skipped_other_addons_still_listed(load_views, mo
 
     items = ctx.env.directory_items[-1]['items']
     assert len(items) == 1
-    assert any('addon offline' in msg for msg, _level in ctx.env.log_calls)
+    all_messages = ' '.join(msg for msg, _level in ctx.env.log_calls)
+    # The safe scheme+host is logged, never the failing addon's raw URL
+    # (credentials/query) nor the upstream exception text, which may
+    # itself repeat the raw URL.
+    assert 'failing.example' in all_messages
+    assert 'hunter2' not in all_messages
+    assert 'token=abc123' not in all_messages
+    assert 'addon offline' not in all_messages
 
 
 def test_streams_no_results_notifies_but_still_ends_successfully(load_views, monkeypatch):
@@ -1507,21 +1542,20 @@ def test_stream_item_size_property_falls_back_to_parsed_text_size(load_views, mo
 
 
 def test_streams_addon_fanout_runs_concurrently_not_sequentially(load_views, monkeypatch):
-    """5 addons that each take ~0.2s to answer (simulating slow network
-    I/O) would serialize to ~1s under the old one-addon-at-a-time loop;
-    fanned out over the thread pool this should land close to a single
-    addon's 0.2s. The 0.6s threshold leaves generous slack on both sides
-    (well below the ~1s sequential sum, well above the ~0.2s expected
-    fanned-out time) to avoid CI flakiness.
+    """5 addons' streams() calls must all be in flight at once, not one
+    at a time: each call blocks on a threading.Barrier sized to the
+    addon count, which only releases once all 5 are simultaneously
+    waiting on it. A one-addon-at-a-time (sequential) implementation can
+    never get more than one thread to the barrier, so it deadlocks and
+    trips `_GATE_TIMEOUT` instead of releasing - deterministic proof of
+    overlap, no wall-clock margin to tune.
     """
     monkeypatch.setattr(sys, 'argv', ['default.py'])
     ctx = load_views()
     views = ctx.views
-    delay = 0.2
     num_addons = 5
     descriptors = []
     stream_results = {}
-    delays = {}
     for i in range(num_addons):
         transport = 't%d' % i
         descriptors.append({
@@ -1533,19 +1567,15 @@ def test_streams_addon_fanout_runs_concurrently_not_sequentially(load_views, mon
             'flags': {},
         })
         stream_results[transport] = [_stream(name='Release %d' % i, info_hash='hash%d' % i)]
-        delays[transport] = delay
-    client = FakeAddonClient(stream_results=stream_results, delays=delays)
+    barrier = threading.Barrier(num_addons, timeout=_GATE_TIMEOUT)
+    client = FakeAddonClient(stream_results=stream_results, barrier=barrier)
     _wire_data_layer(views, FakeStore(addons=descriptors), client)
 
-    start = time.monotonic()
     views.streams('movie', 'tt1234567', poster='p.jpg', title='T')
-    elapsed = time.monotonic() - start
 
-    assert elapsed < 0.6, (
-        'streams() took %.2fs for %d addons at %.2fs each - looks sequential, not fanned out'
-        % (elapsed, num_addons, delay)
-    )
+    assert ctx.env.directory_items, 'streams() did not reach endOfDirectory (fanout deadlocked or failed)'
     assert len(ctx.env.directory_items[-1]['items']) == num_addons
+
 
 # ---------------------------------------------------------------------------
 # addons()
@@ -1582,7 +1612,7 @@ def test_addons_lists_protected_and_removable_entries_with_login_action(load_vie
 
     url0, li0, is_folder0 = items[0]
     assert is_folder0 is True
-    assert url0 == router.url_for('discover')
+    assert url0 == urlutil.url_for(router.BASE_URL, 'discover')
     assert 'icon' not in li0.art
     assert li0.art['fanart'] == compat.addon_fanart()
 
@@ -1592,16 +1622,16 @@ def test_addons_lists_protected_and_removable_entries_with_login_action(load_vie
     assert li1.art['icon'] == 'https://community.example/logo.png'
     assert li1.art['fanart'] == 'https://community.example/bg.png'
     assert li1.info_tag.calls.get('setPlot') == 'A community addon'
-    assert url1 == router.url_for('addon_remove', transport=community_transport)
+    assert url1 == urlutil.url_for(router.BASE_URL, 'addon_remove', transport=community_transport)
     assert li1.context_menu_items == [('STR30011', 'RunPlugin(%s)' % url1)]
 
     url2, li2, _ = items[2]
-    assert url2 == router.url_for('addon_install')
+    assert url2 == urlutil.url_for(router.BASE_URL, 'addon_install')
     assert li2.art['icon'] == 'DefaultAddonNone.png'
 
     url3, li3, _ = items[3]
     assert li3.getLabel() == 'STR30020'
-    assert url3 == router.url_for('login')
+    assert url3 == urlutil.url_for(router.BASE_URL, 'login')
 
     assert ctx.env.content[-1] == (ctx.env.directory_items[-1]['handle'], 'files')
 
@@ -1619,7 +1649,7 @@ def test_addons_shows_logout_action_with_user_label_when_authenticated(load_view
 
     url, li, _ = ctx.env.directory_items[-1]['items'][-1]
     assert li.getLabel() == 'Logout (me@example.com)'
-    assert url == router.url_for('logout')
+    assert url == urlutil.url_for(router.BASE_URL, 'logout')
 
 
 # ---------------------------------------------------------------------------
@@ -1756,6 +1786,50 @@ def test_addon_install_success_sync_push_failure_does_not_block_install(load_vie
     assert ctx.env.notifications[-1][1] == 'STR30012'
     assert 'Container.Refresh' in ctx.env.executed_builtins
     assert ctx.env.end_of_directory[-1]['succeeded'] is True
+
+
+def test_addon_install_rejects_unsafe_transport_url_without_fetching_manifest_or_leaking_secrets(load_views):
+    """A credentialed/plaintext-public transport must never reach the
+    network (no manifest fetch, no install) - and the rejection is
+    logged/notified without ever repeating the credentials."""
+    url = 'https://attacker:hunter2@evil.example/manifest.json'
+    ctx = load_views(dialog_inputs=[url])
+    views = ctx.views
+    store = FakeStore(auth={'authKey': 'abc123'})
+    client = FakeAddonClient(manifest_result={'id': 'org.new'})
+    api = FakeStremioAPI()
+    _wire_data_layer(views, store, client)
+    _wire_api(views, api)
+
+    views.addon_install()
+
+    assert store.installed == []
+    assert client.manifest_calls == []
+    assert api.addon_collection_set_calls == []
+    assert ctx.env.notifications[-1][1] == 'STR30014'
+    all_messages = ' '.join(msg for msg, _level in ctx.env.log_calls)
+    assert 'hunter2' not in all_messages
+    assert 'evil.example' in all_messages
+
+
+def test_addon_install_persists_the_normalized_validated_url_not_the_raw_input(load_views):
+    """install_addon()/manifest() must both use validate_transport_url()'s
+    normalized (lowercased scheme/host) form, not whatever casing/shape
+    the user typed into the dialog."""
+    typed_url = 'HTTPS://New.Example:443/Manifest.json'
+    normalized_url = 'https://new.example:443/Manifest.json'
+    ctx = load_views(dialog_inputs=[typed_url])
+    views = ctx.views
+    store = FakeStore()
+    manifest = {'id': 'org.new', 'name': 'New Addon'}
+    client = FakeAddonClient(manifest_results={normalized_url: manifest})
+    _wire_data_layer(views, store, client)
+
+    views.addon_install()
+
+    assert store.installed == [(normalized_url, manifest)]
+    assert client.manifest_calls == [normalized_url]
+    assert ctx.env.notifications[-1][1] == 'STR30012'
 
 
 # ---------------------------------------------------------------------------
@@ -1953,6 +2027,74 @@ def test_login_success_merges_all_local_addons_with_remote_collection_and_pushes
     assert api.addon_collection_set_calls == [(login_result['authKey'], [protected, community, remote_new])]
     assert ctx.env.notifications[-1][1] == 'Logged in as me@example.com'
     assert 'Container.Refresh' in ctx.env.executed_builtins
+
+
+def test_login_merge_discards_unsafe_synced_descriptors_but_keeps_safe_ones(load_views):
+    """Remote account addon sync must discard descriptors whose
+    transportUrl fails validate_transport_url() (credentials, plaintext
+    HTTP to a public host, non-HTTP(S) scheme, ...) - a hijacked/tampered
+    remote account must never be able to smuggle an unsafe transport into
+    the local store via login. Safe remote descriptors, and the existing
+    local union/protected-preserving behavior, survive unaffected. A safe
+    descriptor whose URL needs normalization (scheme/host casing) is
+    persisted/pushed with ONLY the normalized transportUrl, and the
+    original input descriptor is left untouched (no shared-mutation with
+    the API response)."""
+    ctx = load_views(dialog_inputs=['me@example.com', 'hunter2'], localized={30022: 'Logged in as %s'})
+    views = ctx.views
+    protected = {'transportUrl': 'https://official.example/manifest.json', 'flags': {'protected': True}}
+    store = FakeStore(addons=[protected])
+    remote_credentialed = {
+        'transportUrl': 'https://attacker:hunter2@evil.example/manifest.json',
+        'manifest': {'id': 'org.evil-creds'},
+    }
+    remote_plaintext_public = {
+        'transportUrl': 'http://public.example/manifest.json',
+        'manifest': {'id': 'org.evil-http'},
+    }
+    remote_bad_scheme = {
+        'transportUrl': 'javascript:alert(1)',
+        'manifest': {'id': 'org.evil-scheme'},
+    }
+    remote_missing_url = {'transportUrl': None, 'manifest': {'id': 'org.evil-missing'}}
+    remote_safe = {'transportUrl': 'https://remote.example/manifest.json', 'manifest': {'id': 'org.remote'}}
+    remote_needs_normalization = {
+        'transportUrl': 'HTTPS://Remote-Two.Example/manifest.json',
+        'manifest': {'id': 'org.remote-two'},
+    }
+    remote_needs_normalization_snapshot = dict(remote_needs_normalization)
+    normalized_remote_two = {
+        'transportUrl': 'https://remote-two.example/manifest.json',
+        'manifest': {'id': 'org.remote-two'},
+    }
+    login_result = {'authKey': 'abc123', 'user': {'email': 'me@example.com'}}
+    api = FakeStremioAPI(login_result=login_result, addon_collection_result=[
+        remote_credentialed, remote_plaintext_public, remote_bad_scheme, remote_missing_url, remote_safe,
+        remote_needs_normalization,
+    ])
+    _wire_data_layer(views, store, FakeAddonClient())
+    _wire_api(views, api)
+
+    views.login()
+
+    # Only the protected local addon and the safe remote descriptors
+    # survive the merge - every unsafe remote descriptor is dropped, and
+    # the normalization-requiring one is persisted/pushed with only its
+    # normalized transportUrl.
+    assert store.addons_set_calls == [[protected, remote_safe, normalized_remote_two]]
+    assert api.addon_collection_set_calls == [
+        (login_result['authKey'], [protected, remote_safe, normalized_remote_two]),
+    ]
+    # The API response object itself was never mutated in place.
+    assert remote_needs_normalization == remote_needs_normalization_snapshot
+    all_messages = ' '.join(msg for msg, _level in ctx.env.log_calls)
+    # Only safe identity/origin is logged for discarded descriptors -
+    # never the raw credentialed URL.
+    assert 'hunter2' not in all_messages
+    assert 'evil.example' in all_messages
+    assert 'org.evil-creds' in all_messages
+    assert 'public.example' in all_messages
+    assert 'org.evil-http' in all_messages
 
 
 def test_login_success_keeps_existing_addons_when_remote_sync_fails(load_views):
@@ -2179,7 +2321,7 @@ def test_library_lists_entries_filtering_removed_and_mapping_mediatype(load_view
     assert li0.getLabel() == 'Movie One'
     assert li0.art['poster'] == 'p1.jpg'
     assert li0.info_tag.calls.get('setMediaType') == 'movie'
-    assert url0 == router.url_for('meta', type='movie', id='tt1')
+    assert url0 == urlutil.url_for(router.BASE_URL, 'meta', type='movie', id='tt1')
 
     _, li1, _ = items[1]
     assert li1.art['fanart'] == 'bg2.jpg'
@@ -2288,3 +2430,39 @@ def test_safe_listing_decorator_catches_exception_notifies_and_fails(load_views)
         'handle': -1, 'succeeded': False, 'updateListing': False, 'cacheToDisc': True,
     }
     assert ctx.env.log_calls[-1][1] == 3  # xbmc.LOGERROR
+
+
+# ---------------------------------------------------------------------------
+# Shared process-wide Store/AddonClient (lib.ui.dependencies)
+# ---------------------------------------------------------------------------
+
+
+def test_player_and_views_share_the_same_store_and_client():
+    """`lib.ui.player` and `lib.ui.views` both call
+    `lib.ui.dependencies.get_store()`/`get_client()` - this proves each
+    returns the exact same object to both consumers, and constructs it
+    exactly once, so there is only one on-disk Store and one AddonClient
+    per process rather than a duplicate pair per module."""
+    reload_names = ('lib.ui.compat', 'lib.ui.dependencies', 'lib.ui.player', 'lib.ui.views')
+    with install_kodi_stubs(reload=reload_names) as ctx:
+        class _CountingStore:
+            instances = 0
+
+            def __init__(self, *args, **kwargs):
+                type(self).instances += 1
+
+        class _CountingClient:
+            instances = 0
+
+            def __init__(self, *args, **kwargs):
+                type(self).instances += 1
+
+        ctx.dependencies.Store = _CountingStore
+        ctx.dependencies.AddonClient = _CountingClient
+
+        assert ctx.player.get_store() is ctx.views.get_store()
+        assert ctx.player.get_client() is ctx.views.get_client()
+        assert isinstance(ctx.player.get_store(), _CountingStore)
+        assert isinstance(ctx.player.get_client(), _CountingClient)
+        assert _CountingStore.instances == 1
+        assert _CountingClient.instances == 1

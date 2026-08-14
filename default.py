@@ -14,7 +14,7 @@ from urllib.parse import parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from lib.ui import router
+from lib.ui import router, urlutil
 
 router.BASE_URL = sys.argv[0] if len(sys.argv) > 0 else 'plugin://plugin.video.rivulet/'
 try:
@@ -57,6 +57,7 @@ if _action == 'home':
         # `dispatch.get(action, dispatch['home'])`. This handle was already
         # closed above, so recovery must go through a new invocation rather
         # than a second endOfDirectory() call on the same (spent) handle.
-        xbmc.executebuiltin('Container.Update(%s)' % router.url_for('home_classical'))
+        fallback_url = urlutil.url_for(router.BASE_URL, 'home_classical')
+        xbmc.executebuiltin('Container.Update(%s)' % fallback_url)
 else:
     router.run()

@@ -15,11 +15,17 @@ local stremio-server-go instance, mirroring stremio-core's Stream::convert
   streaming_server/request.rs:86-98, upstream 87b65391/bc5aa9d8) - see
   `normalize_info_hash`/`normalize_trackers` below.
 - YouTube (ytId) -> GET {server}/yt/{ytId} (swagger `/yt/{id}`).
-- Plain url (http/https) is returned unchanged; a `magnet:` url is parsed
-  for `xt=urn:btih:` + `tr=` params and converted the same way as a
-  Torrent source, since a bare magnet link needs the server to fetch it;
-  a bare `ftp://`/`ftps://` url is proxied through `/ftp/{filename}` (see
-  `_ftp_create_url` below).
+- Plain url: validated against `_DIRECT_URL_SCHEMES` and returned
+  unchanged when allowed (see that constant for the exact scheme
+  list); a `magnet:` url is parsed for `xt=urn:btih:` + `tr=` params
+  and converted the same way as a Torrent source, since a bare magnet
+  link needs the server to fetch it; a bare `ftp://`/`ftps://` url is
+  proxied through `/ftp/{filename}` (see `_ftp_create_url` below).
+  Anything else (a Kodi control/local scheme like `plugin:`/`script:`/
+  `special:`/`file:`, an empty/relative/malformed url, or any scheme
+  outside the allowlist) raises `UnsupportedStreamError` - a Stream
+  dict is untrusted addon data, so its `url` field must be validated
+  before it ever reaches Kodi's player.
 - Archive sources (rar/zip/7zip/tgz/tar) and Nzb -> GET
   {server}/{kind}/create?lz=<payload>, and a nested ftp(s) member url ->
   GET {server}/ftp/{filename}?lz=<payload>, where <payload> is
@@ -95,6 +101,24 @@ _ARCHIVE_KIND_BY_KEY = {
     'tarUrls': 'tar',
 }
 
+#: Schemes `resolve_stream()` accepts for a Stream's own `url` field once
+#: `magnet:`/`ftp(s):` have been special-cased into a different URL
+#: (see the module docstring) - the current, intended network-media
+#: families Kodi's player can open directly. `_validate_direct_url()`
+#: rejects everything else, including Kodi control/local schemes
+#: (`plugin`, `script`, `special`, `file`, ...) a rogue addon could
+#: otherwise smuggle into an untrusted Stream dict.
+_DIRECT_URL_SCHEMES = frozenset({
+    'http', 'https',
+    'ftp', 'ftps',
+    'smb',
+    'nfs',
+    'rtmp', 'rtmps',
+    'rtsp',
+    'rtp',
+    'udp',
+})
+
 
 def normalize_info_hash(value):
     """Normalize a torrent info hash to the 40-char lowercase hex string
@@ -169,6 +193,39 @@ def _ftp_filename(url):
     return segments[-1] if segments else None
 
 
+def _validate_direct_url(url):
+    """Return `url` unchanged if it is an absolute network-media URL
+    whose scheme is in `_DIRECT_URL_SCHEMES`, else raise
+    `UnsupportedStreamError`.
+
+    Never rewrites `url` - only `_ftp_create_url()`/`_magnet_to_torrent_url()`
+    (checked before this is ever called, see `resolve_stream()`) turn a
+    Stream's own `url` field into a different URL. Rejects: non-strings,
+    empty strings, relative urls (no scheme and/or no host - `urlparse`
+    reports `netloc` empty for both), and any scheme outside the
+    allowlist - in particular Kodi's own control/local schemes
+    (`plugin:`, `script:`, `special:`, `file:`) that resolve to addon
+    invocations or local-filesystem paths, not media, if handed to
+    `xbmc.Player()`/`ListItem` unchecked.
+
+    The raised message never embeds `url` itself (or any userinfo/path/
+    query/fragment out of it) - a Stream dict is untrusted addon data,
+    and this error's text reaches kodi.log (`lib.ui.player` logs `%r`
+    of the exception) and a user-visible notification, neither of
+    which should ever leak a credential/token/path a malicious or
+    misconfigured addon embedded in a rejected url. Only the bare
+    scheme (never sensitive on its own) is included when that's what
+    failed; anything else (missing/malformed) gets a generic message.
+    """
+    parsed = urlparse(url) if isinstance(url, str) and url else None
+    if parsed is None or not parsed.netloc:
+        raise UnsupportedStreamError('Stream url is empty, relative, or malformed')
+    scheme = parsed.scheme.lower()
+    if scheme not in _DIRECT_URL_SCHEMES:
+        raise UnsupportedStreamError('Stream url scheme %r is not an allowed direct-playback scheme' % (scheme,))
+    return url
+
+
 class ServerError(Exception):
     """Raised when a stremio-server-go engine/stats request fails.
 
@@ -186,7 +243,12 @@ class UnsupportedStreamError(ServerError):
     to be opened by a native app or deep link, e.g. a torrent client or
     a platform store listing) and `playerFrameUrl`
     (`StreamSource::PlayerFrame`, stream.rs:818-821 - an embeddable
-    IFRAME player, not a media URL at all). Distinct from
+    IFRAME player, not a media URL at all); and, since a Stream dict is
+    untrusted addon data, an empty/relative/malformed `url` field or one
+    outside `_DIRECT_URL_SCHEMES` (a Kodi control/local scheme such as
+    `plugin:`/`script:`/`special:`/`file:` would let a rogue addon run
+    addon code or read local files via `xbmc.Player()`/`ListItem`
+    instead of merely failing to play a video). Distinct from
     `resolve_stream()` returning None (which means "unrecognized
     source" or "missing data needed to build a URL") so a caller can
     show a precise, honest message instead of the generic "no playable
@@ -500,11 +562,13 @@ class ServerClient:
         """Resolve a Stream protocol dict to a playable URL, None, or
         raise `UnsupportedStreamError`.
 
-        - `url`: http(s)/other schemes are returned as-is; a `magnet:`
-          url is converted via _magnet_to_torrent_url() when it carries
-          a parseable info hash, else None (playing a bare magnet needs
-          a torrent client, which the addon doesn't embed); a bare
-          `ftp://`/`ftps://` url is proxied via `_ftp_create_url()`.
+        - `url`: validated by `_validate_direct_url()` (`_DIRECT_URL_SCHEMES`)
+          and returned as-is when allowed, else raises
+          `UnsupportedStreamError`; a `magnet:` url is converted via
+          _magnet_to_torrent_url() when it carries a parseable info hash,
+          else None (playing a bare magnet needs a torrent client, which
+          the addon doesn't embed); a bare `ftp://`/`ftps://` url is
+          proxied via `_ftp_create_url()`.
         - `infoHash` (+ `fileIdx`, `announce`/`sources`): -> torrent_url(),
           which normalizes `infoHash` (see `normalize_info_hash`) and
           returns None for one that can't be. Missing `fileIdx` defaults
@@ -524,17 +588,17 @@ class ServerClient:
         - `externalUrl`/`playerFrameUrl`: raises `UnsupportedStreamError`
           - stremio-core recognizes these StreamSource kinds, but
           neither is a URL Kodi's player can ever open.
-        - anything else: None, unrecognized.
+        - anything else (no recognized key at all): None, unrecognized.
         """
         stream = stream or {}
 
         url = stream.get('url')
         if url:
-            if url.startswith('magnet:'):
+            if isinstance(url, str) and url.startswith('magnet:'):
                 return self._magnet_to_torrent_url(url)
             if _is_ftp_url(url):
                 return self._ftp_create_url(url)
-            return url
+            return _validate_direct_url(url)
 
         info_hash = stream.get('infoHash')
         if info_hash:

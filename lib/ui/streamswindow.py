@@ -56,10 +56,10 @@ still only ever returns False.
 """
 import xbmcgui
 
-from lib.store import Store
 from lib.stremio import streaminfo
-from lib.stremio.addons import AddonClient, AddonError, addon_supports
+from lib.stremio.addons import AddonError, addon_supports, safe_url_for_log
 from lib.ui.binge import next_video, pick_binge_stream
+from lib.ui.dependencies import get_client, get_store
 from lib.ui.uicommon import BaseWindow, busy_dialog, close_windows_for_playback, open_window
 
 BACKGROUND = 30000
@@ -189,14 +189,16 @@ class StreamsWindow(BaseWindow):
         # already has in hand (see the module docstring's heading/art/
         # meta kwargs) into the player's OSD - only the keys actually
         # known are included, so a bare "no context" open still behaves
-        # exactly like item_meta=None to play_direct(). on_ready tears
-        # down every OTHER live screen (close_windows_for_playback())
-        # right before Kodi starts playing, so the fullscreen player -
-        # not a leftover dialog underneath it - is what actually owns
-        # play/pause and the OSD; THIS window is excluded and keeps
-        # closing itself the normal way below so open_streams()'s own
-        # reopen loop (not the ModalStackWindow mixin) is what brings
-        # the picker back afterwards.
+        # exactly like item_meta=None to play_direct(). on_ready fires
+        # right before Kodi actually starts playing (play_direct()'s own
+        # docstring), and _close_for_player_handoff() below is what
+        # tears down every OTHER live screen AND this picker itself at
+        # that exact instant, so no Rivulet modal - not even this one -
+        # is still live when xbmc.Player().play() runs. This window is
+        # closed WITHOUT _closed_for_playback, unlike its ancestors, so
+        # ModalStackWindow.doModal() does not immediately reopen it;
+        # open_streams()'s own reopen loop is what brings the picker
+        # back once playback actually ends.
         item_meta = {}
         label = self.heading or (self.meta or {}).get('name') or ''
         if label:
@@ -210,11 +212,36 @@ class StreamsWindow(BaseWindow):
         from lib.ui.player import play_direct
         if play_direct(
             stream, self.stype, self.sid, item_meta=item_meta,
-            on_ready=lambda: close_windows_for_playback(exclude=self),
+            on_ready=lambda: _close_for_player_handoff(self),
+            video_id=self.video_id,
         ):
             self.played = True
             self.played_pair = (info, stream)
-            self.close()
+            self.close()  # no-op: on_ready above already closed this window
+
+
+def _close_for_player_handoff(picker):
+    """`play_direct()`'s `on_ready` hook for `StreamsWindow.onClick()`:
+    fires immediately before `xbmc.Player().play()` (see that
+    function's docstring), so this is the ONE moment every live Rivulet
+    modal - including `picker` itself - must already be gone, or Kodi
+    keeps routing play/pause and the OSD to whichever WindowXMLDialog
+    is still topmost rather than to the player (see uicommon's module
+    docstring).
+
+    `close_windows_for_playback(exclude=picker)` tears down every OTHER
+    live screen, marking each ancestor `_closed_for_playback` so
+    `ModalStackWindow.doModal()` restores it once `open_streams()`'s own
+    post-playback reopen loop brings a fresh picker back. `picker`
+    itself is then closed the same plain way `onAction()`'s Back
+    handling does - deliberately WITHOUT `_closed_for_playback`, since
+    that flag would also trip `ModalStackWindow.doModal()`'s own reopen
+    loop and pop a second, premature picker up immediately behind the
+    player; bringing the picker back afterwards is `open_streams()`'s
+    reopen loop's job alone.
+    """
+    close_windows_for_playback(exclude=picker)
+    picker.close()
 
 
 def _wait_for_playback_end(player=None, monitor=None, start_timeout=20.0, tick=0.5):
@@ -288,10 +315,10 @@ def _fetch_stream_pairs(stype, sid):
     the picker instead (see `_try_binge_watch()`)."""
     import xbmc
 
-    from lib.ui.compat import L, addon_profile_dir, log
+    from lib.ui.compat import L, log
 
-    store = Store(addon_profile_dir())
-    client = AddonClient()
+    store = get_store()
+    client = get_client()
     pairs = []
     addons = []
     for descriptor in store.get_addons():
@@ -314,13 +341,14 @@ def _fetch_stream_pairs(stype, sid):
                 # One addon failing (offline, misconfigured, slow) is
                 # routine, not exceptional - logging each at ERROR with a
                 # full exception repr drowned real problems in noise on
-                # every single fetch. DEBUG + a single-line message here
-                # (never trust an upstream error string not to embed a
-                # stray CR/LF); one aggregate WARNING below covers
-                # "something's wrong" without spamming per-addon detail
-                # into the normal log.
-                message = 'streamswindow: %s failed: %s' % (transport_url, exc)
-                log(message.replace('\r', ' ').replace('\n', ' '), xbmc.LOGDEBUG)
+                # every single fetch. DEBUG + only the safe scheme/host
+                # (never the raw transport_url, which may carry
+                # path/query/credentials, nor the exception text, which
+                # may embed the raw URL too) here; one aggregate WARNING
+                # below covers "something's wrong" without spamming
+                # per-addon detail into the normal log.
+                log('streamswindow: %s failed: %s' % (
+                    safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGDEBUG)
                 failed_addons += 1
                 continue
             for stream in results or []:
@@ -460,6 +488,7 @@ def _try_binge_watch(stype, meta, poster, art, video_id, played_info):
             if not play_direct(
                 picked_stream, stype, candidate.get('id'), item_meta=item_meta,
                 on_ready=close_windows_for_playback,
+                video_id=candidate.get('id'),
             ):
                 return None
             log('streamswindow: binge-watching auto-played %r' % candidate.get('id'), xbmc.LOGINFO)

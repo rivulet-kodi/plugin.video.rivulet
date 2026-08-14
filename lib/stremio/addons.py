@@ -10,10 +10,12 @@ Implements the addon resource protocol exactly as stremio-core does it:
 
 `requests` is imported at module scope but guarded so this module - and all
 its pure helper functions (encode_extra, build_resource_url, addon_supports,
-iter_catalogs) - stay importable even where `requests` is missing; only
-constructing/using an AddonClient actually needs it.
+iter_catalogs, validate_transport_url, safe_url_for_log) - stay importable
+even where `requests` is missing; only constructing/using an AddonClient
+actually needs it.
 """
-from urllib.parse import quote
+import ipaddress
+from urllib.parse import quote, urlsplit, urlunsplit
 
 try:
     import requests
@@ -101,6 +103,92 @@ class AddonError(Exception):
     """Raised when an addon HTTP request fails or returns malformed JSON."""
 
 
+def validate_transport_url(url):
+    """Validate an addon transport/resource URL before any HTTP request.
+
+    HTTPS is accepted for any host. Plaintext HTTP is accepted only for
+    "localhost" or a loopback/private/link-local IP literal (local addon
+    development); every other HTTP host is rejected. Also rejects
+    credentials, a missing host, a fragment, malformed ports, and any
+    scheme other than http(s).
+
+    Returns a normalized `scheme://host[:port]path[?query]` (lowercased
+    scheme/host, no fragment) on success. Raises AddonError otherwise,
+    with a message that never repeats the URL (safe to log verbatim).
+    """
+    try:
+        parts = urlsplit(url)
+        hostname = parts.hostname
+        port = parts.port
+    except ValueError:
+        raise AddonError('invalid addon URL')
+
+    scheme = (parts.scheme or '').lower()
+    if scheme not in ('http', 'https'):
+        raise AddonError('unsupported addon URL scheme')
+    if parts.username or parts.password:
+        raise AddonError('addon URL must not contain credentials')
+    if parts.fragment:
+        raise AddonError('addon URL must not contain a fragment')
+    if not hostname:
+        raise AddonError('addon URL is missing a host')
+
+    hostname = hostname.lower()
+    if scheme == 'http' and not _is_local_host(hostname):
+        raise AddonError('plaintext HTTP is only allowed for local addon hosts')
+
+    return urlunsplit((scheme, _format_netloc(hostname, port), parts.path, parts.query, ''))
+
+
+def _is_local_host(hostname):
+    """Whether (lowercased) `hostname` is safe for plaintext HTTP: the
+    literal name "localhost", or an IP literal that's loopback, private
+    (RFC 1918/4193), or link-local (RFC 3927/4291) - local addon
+    development, never a plaintext request to a public host."""
+    if hostname == 'localhost':
+        return True
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    return addr.is_loopback or addr.is_private or addr.is_link_local
+
+
+def _format_netloc(hostname, port):
+    """Rebuild a `netloc` from a bare (lowercased) hostname/port, re-adding
+    the brackets `urlsplit().hostname` strips from IPv6 literals."""
+    host = '[%s]' % hostname if ':' in hostname else hostname
+    return host if port is None else '%s:%d' % (host, port)
+
+
+def safe_url_for_log(url):
+    """Return `scheme://hostname[:port]` for safely logging/displaying
+    `url` - never userinfo, path, query, or fragment - or the sentinel
+    `<invalid-url>` if it can't be parsed that far. Never raises."""
+    try:
+        parts = urlsplit(url)
+        hostname = parts.hostname
+        port = parts.port
+    except ValueError:
+        return '<invalid-url>'
+    scheme = (parts.scheme or '').lower()
+    if not scheme or not hostname:
+        return '<invalid-url>'
+    return '%s://%s' % (scheme, _format_netloc(hostname.lower(), port))
+
+
+def _request_error_category(exc):
+    """A short, safe-to-log category for a failed `requests` call - the
+    HTTP status if the server responded, else the exception's class name
+    (never `str(exc)`, which for `requests` often repeats the full URL,
+    query string included)."""
+    response = getattr(exc, 'response', None)
+    status_code = getattr(response, 'status_code', None)
+    if status_code is not None:
+        return 'HTTP %s' % status_code
+    return type(exc).__name__
+
+
 class AddonClient:
     """Thin HTTP client for the addon manifest/catalog/meta/stream/subtitles
     resources. One `requests.Session()` per client instance (stored as
@@ -114,15 +202,17 @@ class AddonClient:
         self.session = requests.Session()
 
     def _get_json(self, url):
+        url = validate_transport_url(url)
+        safe = safe_url_for_log(url)
         try:
             resp = self.session.get(url, timeout=self.timeout)
             resp.raise_for_status()
         except requests.RequestException as exc:
-            raise AddonError('GET %s failed: %s' % (url, exc))
+            raise AddonError('GET %s failed: %s' % (safe, _request_error_category(exc)))
         try:
             return resp.json()
-        except ValueError as exc:
-            raise AddonError('GET %s returned invalid JSON: %s' % (url, exc))
+        except ValueError:
+            raise AddonError('GET %s returned invalid JSON' % safe)
 
     def manifest(self, transport_url):
         """GET the addon manifest (transport_url normally ends in /manifest.json)."""

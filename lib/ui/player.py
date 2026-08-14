@@ -5,8 +5,6 @@ base64url-decoded stream dict for action=play. This module owns the only
 xbmc* calls involved in actually starting playback.
 """
 import contextlib
-import os
-import re
 from urllib.parse import urlencode
 
 import xbmc
@@ -14,8 +12,6 @@ import xbmcgui
 import xbmcplugin
 
 from lib.library import iso8601_utc
-from lib.store import Store
-from lib.stremio.addons import AddonClient
 from lib.stremio.server import (
     UNKNOWN_FILE_IDX,
     ServerClient,
@@ -26,79 +22,25 @@ from lib.stremio.subtitles import collect_subtitles, sort_subtitles
 from lib.ui.compat import (
     ADDON,
     L,
-    addon_profile_dir,
     log,
     notify,
     set_video_info,
     setting_bool,
     setting_int,
 )
-
-#: Extension -> MIME type for the video containers Stremio streams commonly
-#: use. Keyed by `os.path.splitext()` output (lowercased, leading dot kept).
-_MIME_TYPES = {
-    '.mkv': 'video/x-matroska',
-    '.mp4': 'video/mp4',
-    '.m4v': 'video/mp4',
-    '.avi': 'video/x-msvideo',
-    '.mov': 'video/quicktime',
-    '.ts': 'video/mp2t',
-    '.m2ts': 'video/mp2t',
-    '.webm': 'video/webm',
-    '.flv': 'video/x-flv',
-    '.wmv': 'video/x-ms-wmv',
-    '.mpg': 'video/mpeg',
-    '.mpeg': 'video/mpeg',
-}
-
-
-def _mime_for(filename):
-    """Best-effort MIME type for `filename`'s extension, or None.
-
-    Unknown/absent extensions return None so the caller skips
-    `setMimeType` entirely rather than hinting a wrong/generic type.
-    """
-    if not filename:
-        return None
-    ext = os.path.splitext(filename)[1].lower()
-    return _MIME_TYPES.get(ext)
-
-
-def _filename_from_url(url):
-    """Last path segment of a resolved playback `url`, with any baked
-    `|urlencoded-headers` suffix (see the header-baking below in `play()`)
-    and query string stripped first.
-    """
-    base = url.split('|', 1)[0].split('?', 1)[0]
-    return base.rsplit('/', 1)[-1]
-
-
-def _extract_file_name(stats, file_idx):
-    """Best-effort filename for `file_idx` out of a `/create` stats
-    dict's `files` array (`[{'name', 'path', 'length', 'offset'}, ...]` -
-    see `guess_file_idx()`'s docstring in lib/stremio/server.py for the
-    full response shape), or None when `stats`/`files`/the entry at
-    `file_idx` is missing or an unexpected shape.
-
-    A torrent's resolved playback URL (`http://host/<infoHash>/<fileIdx>`)
-    carries no filename or extension of its own, so this is the only way
-    a torrent stream ever gets a real filename for `_apply_item_metadata`
-    (title/originaltitle fallback) or a correct MIME type from
-    `_mime_for`. Callers thread back a `/create` stats dict they already
-    fetched for another reason (engine warm, or the metadata-wait loop) -
-    this never issues a request of its own. Never raises: a malformed
-    `/create` response must never break playback.
-    """
-    try:
-        files = stats.get('files')
-    except AttributeError:
-        return None
-    if not isinstance(files, list) or not (0 <= file_idx < len(files)):
-        return None
-    entry = files[file_idx]
-    name = entry.get('name') if isinstance(entry, dict) else None
-    return name if isinstance(name, str) and name else None
-
+from lib.ui.dependencies import get_client, get_store
+from lib.ui.playbackmeta import (
+    extract_file_name,
+    filename_from_url,
+    format_hms,
+    human_size,
+    mime_for,
+    parse_duration_seconds,
+    parse_rating,
+    parse_year,
+    resolve_art,
+    sanitize_title,
+)
 
 #: Bounded (connect, read) timeouts for the pre-buffer network calls. The
 #: SHORT read timeout is what makes the "Preparing stream" dialog
@@ -167,38 +109,12 @@ def _server_client():
     return ServerClient(base_url)
 
 
-_STORE = None
-_CLIENT = None
-
-
-def _get_store():
-    global _STORE
-    if _STORE is None:
-        _STORE = Store(addon_profile_dir())
-    return _STORE
-
-
-def _get_client():
-    global _CLIENT
-    if _CLIENT is None:
-        _CLIENT = AddonClient()
-    return _CLIENT
-
-
 #: Resume-prompt progress band (percent of duration already watched):
 #: below RESUME_MIN_PERCENT is "barely started, not worth asking"; at/
 #: above RESUME_MAX_PERCENT is "basically finished, nothing meaningful
 #: left to resume".
 RESUME_MIN_PERCENT = 1.0
 RESUME_MAX_PERCENT = 95.0
-
-
-def _format_hms(seconds):
-    """'H:MM:SS' for the resume-prompt message (e.g. 5410 -> '1:30:10')."""
-    seconds = max(0, int(seconds))
-    hours, remainder = divmod(seconds, 3600)
-    minutes, secs = divmod(remainder, 60)
-    return '%d:%02d:%02d' % (hours, minutes, secs)
 
 
 def _maybe_resume_offset_ms(store, stype, sid, video_id):
@@ -227,7 +143,7 @@ def _maybe_resume_offset_ms(store, stype, sid, video_id):
     if percent < RESUME_MIN_PERCENT or percent > RESUME_MAX_PERCENT:
         return None
     if not xbmcgui.Dialog().yesno(
-        L(30172), _lfmt(30173, _format_hms(position_ms / 1000.0)),
+        L(30172), _lfmt(30173, format_hms(position_ms / 1000.0)),
         yeslabel=L(30174), nolabel=L(30175),
     ):
         return None
@@ -238,24 +154,32 @@ def _record_now_playing_and_maybe_resume(stype, sid, video_id, item_meta):
     """Best-effort: persist the "now playing" context
     (`lib.store.Store.set_now_playing`, consumed by
     `lib.service_runner`'s background progress tracker) and, when local
-    progress exists for `(stype, sid, video_id)` in a resumable band,
-    prompt the user and queue a one-shot resume-seek offset the
+    progress exists for `(stype, content_id, video_id)` in a resumable
+    band, prompt the user and queue a one-shot resume-seek offset the
     service's `onAVStarted` performs - `ListItem.setProperty(
     'StartOffset')` is unreliable for the direct `xbmc.Player().play()`
     path this addon's custom windows use, hence an explicit post-start
     seek rather than a resume property (see `lib.service_runner`).
 
+    `content_id` is `item_meta['meta']['id']` when present, else `sid` -
+    for a series this is the show's own library id (`sid` passed in is
+    the season/stream-picker id), so local resume/progress and the
+    stored now-playing context stay rooted at the show, keyed together
+    with the exact episode `video_id`. A movie has no series meta id, so
+    `content_id` falls back to `sid` exactly as before.
+
     Never raises: a broken store write must never block playback that
     has already been resolved.
     """
     try:
-        store = _get_store()
-        resume_offset_ms = _maybe_resume_offset_ms(store, stype, sid, video_id)
+        store = get_store()
         meta = (item_meta or {}).get('meta') or {}
+        content_id = meta.get('id') or sid
+        resume_offset_ms = _maybe_resume_offset_ms(store, stype, content_id, video_id)
         art = (item_meta or {}).get('art') or {}
         store.set_now_playing({
             'type': stype,
-            'id': sid,
+            'id': content_id,
             'video_id': video_id,
             'name': (item_meta or {}).get('label') or meta.get('name') or '',
             'poster': art.get('poster') or meta.get('poster'),
@@ -279,7 +203,7 @@ def _attach_subtitles(list_item, behavior_hints, stype, sid):
         if 'filename' in behavior_hints:
             extra.append(('filename', behavior_hints['filename']))
         subs = collect_subtitles(
-            _get_client(), _get_store().get_addons(), stype, sid, extra=extra or None
+            get_client(), get_store().get_addons(), stype, sid, extra=extra or None
         )
         subs = sort_subtitles(subs, ADDON.getSetting('subs_language') or 'en')
         urls = [sub['url'] for sub in subs[:20]]
@@ -287,16 +211,6 @@ def _attach_subtitles(list_item, behavior_hints, stype, sid):
             list_item.setSubtitles(urls)
     except Exception as exc:  # noqa: BLE001 - subtitles are a bonus, never fatal
         log('player: subtitle fetch failed for %s/%s: %r' % (stype, sid, exc), xbmc.LOGWARNING)
-
-
-def _human_size(num_bytes):
-    """Format a byte count as e.g. '12.3 MB' (B/KB/MB/GB, 1 decimal)."""
-    value = float(num_bytes or 0)
-    for unit in ('B', 'KB', 'MB'):
-        if value < 1024.0:
-            return '%.1f %s' % (value, unit)
-        value /= 1024.0
-    return '%.1f GB' % value
 
 
 def _lfmt(string_id, *args):
@@ -322,7 +236,7 @@ def _stats_line(stats):
     peers = (stats or {}).get('peers')
     if peers is None:
         return ''
-    speed = _human_size((stats or {}).get('downloadSpeed') or 0)
+    speed = human_size((stats or {}).get('downloadSpeed') or 0)
     return _lfmt(30082, speed, peers)
 
 
@@ -369,7 +283,7 @@ def _await_file_idx(server, stream, info_hash, url, dialog, monitor):
     None - the caller then falls back to "proceed without polling".
     Otherwise `stats` is the exact `/create` response `file_idx` was
     guessed from, threaded back out so the caller can recover a real
-    filename (`_extract_file_name`) without an extra `/create` round-trip.
+    filename (`extract_file_name`) without an extra `/create` round-trip.
     """
     for attempt in range(_MAX_METADATA_ATTEMPTS):
         if dialog.iscanceled():
@@ -415,7 +329,7 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
     the original url, or the rebuilt one when the server had to guess
     the file index; `filename` is the resolved torrent file's own name
     (from a `/create` stats dict this function already fetched for
-    another reason - see `_extract_file_name`) when one could be
+    another reason - see `extract_file_name`) when one could be
     recovered, else None. ANY unexpected error degrades to `(True, url,
     None)` - a broken pre-buffer must never block playback.
     """
@@ -445,17 +359,17 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
                 # the front of, so just start playback.
                 notify(L(30083))
                 return True, url, None
-            filename = _extract_file_name(stats, file_idx)
+            filename = extract_file_name(stats, file_idx)
         else:
             # Warm the engine, but bounded: a cold /create would otherwise
             # block for its full timeout with no cancel check. The front
             # reads below drive the engine anyway, so a failed/slow warm is
             # non-fatal. Its response also doubles as the source of a real
-            # filename (see _extract_file_name) - no extra request needed.
+            # filename (see `extract_file_name`) - no extra request needed.
             dialog.update(_ENGINE_WARM_PERCENT, L(30089))
             try:
                 warm_stats = server.create_engine(info_hash, timeout=_METADATA_TIMEOUT)
-                filename = _extract_file_name(warm_stats, file_idx)
+                filename = extract_file_name(warm_stats, file_idx)
             except Exception as exc:  # noqa: BLE001 - front reads drive the engine regardless
                 log('player: engine warm failed for %s: %r (continuing)' % (info_hash, exc), xbmc.LOGWARNING)
 
@@ -492,7 +406,7 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
                 for chunk_len in server.iter_front(info_hash, file_idx, target, timeout=_FRONT_TIMEOUT):
                     got += chunk_len
                     percent = min(100, _BUFFER_PERCENT_BASE + got * _BUFFER_PERCENT_SPAN // target) if target else 100
-                    message = _lfmt(30081, _human_size(got), _human_size(target))
+                    message = _lfmt(30081, human_size(got), human_size(target))
                     if stats_line:
                         message += '\n' + stats_line
                     dialog.update(percent, message)
@@ -514,7 +428,7 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
             # retrying hint so that silent pause isn't a dead-looking dialog.
             percent = min(100, _BUFFER_PERCENT_BASE + got * _BUFFER_PERCENT_SPAN // target) if target else 100
             retry_message = '%s\n%s' % (
-                _lfmt(30081, _human_size(got), _human_size(target)),
+                _lfmt(30081, human_size(got), human_size(target)),
                 _lfmt(30090, attempt + 1, _MAX_FRONT_ATTEMPTS),
             )
             if stats_line:
@@ -559,105 +473,6 @@ def _wait_for_server(server, dialog, monitor):
     return False
 
 
-#: Regex for the first 4-digit year group in a Stremio `releaseInfo`
-#: value - that field's shape is an open-ended range ('2019-',
-#: '2019-2023'), not a bare year, so the year itself must be pulled out
-#: rather than the whole field parsed as one.
-_YEAR_RE = re.compile(r'\d{4}')
-
-#: Regex for the first run of digits in a Stremio `runtime` string
-#: (e.g. '132 min') - every Stremio addon's `runtime` field is minutes,
-#: never seconds, hence `_SECONDS_PER_MINUTE` below.
-_RUNTIME_MINUTES_RE = re.compile(r'\d+')
-_SECONDS_PER_MINUTE = 60
-
-
-def _sanitize_title(text):
-    """Strip CR/LF from `text` and trim surrounding whitespace.
-
-    Addon-supplied `title`/`name`/`label` fields routinely bake in
-    newlines (the same hazard `lib.ui.streamswindow.onInit` already
-    sanitizes stream-picker rows against) - left in, they visibly break
-    Kodi's single-line fullscreen OSD title.
-    """
-    if not text:
-        return ''
-    return text.replace('\r', ' ').replace('\n', ' ').strip()
-
-
-def _parse_year(value):
-    """Best-effort 4-digit release year out of a Stremio `releaseInfo`
-    (or plain `year`) value, tolerating the open-ended-range shapes
-    Stremio metadata actually uses ('2019', '2019-', '2019-2023') by
-    taking the FIRST 4-digit group rather than requiring the whole value
-    to be a bare year. Returns None for anything else - never raises, so
-    a malformed field only skips this one piece of metadata.
-    """
-    if value is None:
-        return None
-    match = _YEAR_RE.search(str(value))
-    return int(match.group()) if match else None
-
-
-def _parse_rating(value):
-    """Best-effort float rating out of a Stremio `imdbRating` value
-    (e.g. '7.8'), or None for an unparseable value like 'n/a' - never
-    raises.
-    """
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _parse_duration_seconds(value):
-    """Best-effort duration in SECONDS out of a Stremio `runtime` string
-    such as '132 min' - the first run of digits found is taken as
-    MINUTES (the unit every Stremio addon's `runtime` field actually
-    uses) and converted to the seconds
-    `InfoTagVideo.setDuration()`/legacy `setInfo('video', {'duration':
-    ...})` both expect. Returns None for an unparseable value like '?' -
-    never raises.
-    """
-    if value is None:
-        return None
-    match = _RUNTIME_MINUTES_RE.search(str(value))
-    if not match:
-        return None
-    return int(match.group()) * _SECONDS_PER_MINUTE
-
-
-def _resolve_art(art, meta):
-    """Best-effort `ListItem.setArt()` payload from `item_meta['art']`
-    (any subset of poster/fanart/thumb), falling back field-by-field to
-    the raw Stremio `meta` dict's own poster/background/logo when `art`
-    doesn't supply one. A poster with no explicit thumb also becomes the
-    thumb and icon - the same poster->thumb/icon convention every other
-    Rivulet ListItem builder already uses (see e.g. lib/ui/views.py).
-    Missing/falsy values are skipped entirely: `ListItem.setArt()`
-    treats an empty string or None as "clear this art type", never
-    "leave it alone".
-    """
-    art = art or {}
-    meta = meta or {}
-    poster = art.get('poster') or meta.get('poster')
-    thumb = art.get('thumb')
-    fanart = art.get('fanart') or meta.get('background') or meta.get('logo')
-
-    result = {}
-    if poster:
-        result['poster'] = poster
-        result['icon'] = poster
-        result['thumb'] = thumb or poster
-    elif thumb:
-        result['thumb'] = thumb
-    if fanart:
-        result['fanart'] = fanart
-    return result
-
-
 def _stream_plot(stream):
     """Last-resort plot text for the OSD: the stream's own parsed
     description (release name, size, seeders, provider), or '' when the
@@ -695,7 +510,7 @@ def _apply_item_metadata(list_item, stream, stype, item_meta, filename):
 
     `filename` is the release/torrent filename `_resolve_playable_item`
     already derived (`behaviorHints.filename`, or the resolved torrent
-    file's own name - see `_extract_file_name`): the title fallback when
+    file's own name - see `extract_file_name`): the title fallback when
     `item_meta` has no `label`, and preserved as `originaltitle` when a
     more specific `item_meta['label']` title is chosen instead, so the
     user can still see which exact release is playing.
@@ -703,13 +518,13 @@ def _apply_item_metadata(list_item, stream, stype, item_meta, filename):
     item_meta = item_meta or {}
     meta = item_meta.get('meta') or {}
 
-    title = _sanitize_title(
+    title = sanitize_title(
         item_meta.get('label') or filename or stream.get('title') or stream.get('name') or ''
     )
     if title:
         list_item.setLabel(title)
 
-    art = _resolve_art(item_meta.get('art'), meta)
+    art = resolve_art(item_meta.get('art'), meta)
     if art:
         list_item.setArt(art)
 
@@ -717,7 +532,7 @@ def _apply_item_metadata(list_item, stream, stype, item_meta, filename):
     if title:
         info['title'] = title
 
-    originaltitle = _sanitize_title(filename or '')
+    originaltitle = sanitize_title(filename or '')
     if originaltitle and originaltitle != title:
         info['originaltitle'] = originaltitle
 
@@ -738,11 +553,11 @@ def _apply_item_metadata(list_item, stream, stype, item_meta, filename):
     if meta.get('tagline'):
         info['plotoutline'] = meta['tagline']
 
-    year = _parse_year(meta.get('releaseInfo') or meta.get('year'))
+    year = parse_year(meta.get('releaseInfo') or meta.get('year'))
     if year is not None:
         info['year'] = year
 
-    rating = _parse_rating(meta.get('imdbRating'))
+    rating = parse_rating(meta.get('imdbRating'))
     if rating is not None:
         info['rating'] = rating
 
@@ -750,7 +565,7 @@ def _apply_item_metadata(list_item, stream, stype, item_meta, filename):
     if genres:
         info['genre'] = genres
 
-    duration = _parse_duration_seconds(meta.get('runtime'))
+    duration = parse_duration_seconds(meta.get('runtime'))
     if duration is not None:
         info['duration'] = duration
 
@@ -820,9 +635,13 @@ def _resolve_playable_item(stream, stype, sid, item_meta=None, video_id=None):
             url = server.resolve_stream(stream)
         except UnsupportedStreamError as exc:
             # A known limitation (externalUrl/playerFrameUrl streams can
-            # only be opened by the Stremio app itself), not a fault -
-            # LOGINFO, and a message telling the user WHY instead of the
-            # generic "no playable stream" one below.
+            # only be opened by the Stremio app itself) OR a rejected
+            # direct-url scheme (lib.stremio.server._DIRECT_URL_SCHEMES -
+            # e.g. a malicious addon smuggling a plugin:/script:/special:/
+            # file: url) - either way not a fault. LOGINFO, and a message
+            # telling the user WHY instead of the generic "no playable
+            # stream" one below - raised, and this early return happens,
+            # strictly before any metadata/ListItem construction below.
             log('player: unsupported stream for %s/%s: %r' % (stype, sid, exc), xbmc.LOGINFO)
             notify(L(30160))
             return None, None
@@ -863,7 +682,7 @@ def _resolve_playable_item(stream, stype, sid, item_meta=None, video_id=None):
     # extension is known) gives Kodi the same information up front so the
     # probe was never needed.
     list_item.setContentLookup(False)
-    mime = _mime_for(filename or _filename_from_url(url))
+    mime = mime_for(filename or filename_from_url(url))
     if mime:
         list_item.setMimeType(mime)
 

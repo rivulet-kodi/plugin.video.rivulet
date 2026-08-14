@@ -222,7 +222,7 @@ class BaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
 def fallback_to_classical(action, **params):
     """Temporary bridge for screens with no custom-window replacement yet:
     open the classical plugin directory for `action` (see
-    `lib.ui.router.url_for`) in Kodi's Videos window. Callers should
+    `lib.ui.urlutil.url_for`) in Kodi's Videos window. Callers should
     close every custom window in their call chain afterwards
     (conventionally: return True from an `open_*()` function and have
     its caller close too).
@@ -238,5 +238,6 @@ def fallback_to_classical(action, **params):
     window at `url`, the standard way to jump into a plugin directory
     from a non-container context (a dialog, a script, anywhere).
     """
-    from lib.ui import router
-    xbmc.executebuiltin('ActivateWindow(Videos,%s)' % router.url_for(action, **params))
+    from lib.ui import router, urlutil
+    url = urlutil.url_for(router.BASE_URL, action, **params)
+    xbmc.executebuiltin('ActivateWindow(Videos,%s)' % url)

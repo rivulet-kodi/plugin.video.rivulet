@@ -13,6 +13,8 @@ from lib.stremio.addons import (
     build_resource_url,
     encode_extra,
     iter_catalogs,
+    safe_url_for_log,
+    validate_transport_url,
 )
 from tests.conftest import FakeSession
 
@@ -412,3 +414,131 @@ def _invalid_json_response():
             raise ValueError("invalid json")
 
     return _Resp()
+
+
+# --- validate_transport_url -------------------------------------------------
+
+
+@pytest.mark.parametrize('url,expected', [
+    ('https://v3-cinemeta.strem.io/manifest.json', 'https://v3-cinemeta.strem.io/manifest.json'),
+    ('https://192.0.2.1/manifest.json', 'https://192.0.2.1/manifest.json'),  # HTTPS is fine for any host, public IP included
+    ('http://localhost/manifest.json', 'http://localhost/manifest.json'),
+    ('http://LOCALHOST/manifest.json', 'http://localhost/manifest.json'),  # host normalized to lowercase
+    ('http://127.0.0.1:11470/manifest.json', 'http://127.0.0.1:11470/manifest.json'),
+    ('http://[::1]:11470/manifest.json', 'http://[::1]:11470/manifest.json'),
+    ('http://192.168.1.5/manifest.json', 'http://192.168.1.5/manifest.json'),   # private (RFC 1918)
+    ('http://169.254.1.1/manifest.json', 'http://169.254.1.1/manifest.json'),   # link-local (RFC 3927)
+    ('http://[fe80::1]/manifest.json', 'http://[fe80::1]/manifest.json'),       # link-local (RFC 4291)
+], ids=[
+    'public-https', 'https-public-ip', 'localhost', 'localhost-mixed-case',
+    'loopback-v4', 'loopback-v6', 'private-v4', 'link-local-v4', 'link-local-v6',
+])
+def test_validate_transport_url_accepts(url, expected):
+    assert validate_transport_url(url) == expected
+
+
+@pytest.mark.parametrize('url', [
+    'http://example.com/manifest.json',
+    'http://8.8.8.8/manifest.json',
+    'https://user:pass@example.com/manifest.json',
+    'https://token@example.com/manifest.json',
+    'file:///etc/passwd',
+    'plugin://plugin.video.rivulet/play',
+    'https:///manifest.json',
+    'https://example.com:notaport/manifest.json',
+    'https://example.com/manifest.json#frag',
+    'ftp://example.com/manifest.json',
+], ids=[
+    'plaintext-public-host', 'plaintext-public-ip', 'userinfo-user-pass',
+    'userinfo-token-only', 'file-scheme', 'plugin-scheme', 'missing-host',
+    'malformed-port', 'fragment', 'unsupported-scheme',
+])
+def test_validate_transport_url_rejects(url):
+    with pytest.raises(AddonError) as exc_info:
+        validate_transport_url(url)
+    assert url not in str(exc_info.value)
+
+
+def test_validate_transport_url_normalizes_scheme_and_host_case():
+    url = validate_transport_url('HTTPS://Addon.Example/manifest.json')
+    assert url == 'https://addon.example/manifest.json'
+
+
+def test_validate_transport_url_preserves_path_and_query():
+    url = validate_transport_url('https://addon.example/catalog/movie/top.json?skip=100')
+    assert url == 'https://addon.example/catalog/movie/top.json?skip=100'
+
+
+# --- safe_url_for_log --------------------------------------------------------
+
+
+def test_safe_url_for_log_strips_userinfo_path_query_fragment():
+    url = 'https://user:token@addon.example:8443/manifest.json?api_key=SECRET#frag'
+    assert safe_url_for_log(url) == 'https://addon.example:8443'
+
+
+def test_safe_url_for_log_normalizes_scheme_and_host_case():
+    assert safe_url_for_log('HTTP://Addon.Example/x') == 'http://addon.example'
+
+
+def test_safe_url_for_log_keeps_ipv6_brackets():
+    assert safe_url_for_log('http://[::1]:11470/manifest.json') == 'http://[::1]:11470'
+
+
+@pytest.mark.parametrize('url', [
+    'not a url at all \t\n',
+    'https:///manifest.json',
+    'https://example.com:notaport/manifest.json',
+    '',
+])
+def test_safe_url_for_log_returns_sentinel_for_unparseable_urls(url):
+    assert safe_url_for_log(url) == '<invalid-url>'
+
+
+# --- AddonClient enforces validate_transport_url ----------------------------
+
+
+def test_addon_client_rejects_plaintext_public_host_before_any_request():
+    client = AddonClient()
+    client.session = FakeSession()  # no queued responses: a real GET would fail the test
+    with pytest.raises(AddonError):
+        client.manifest('http://example.com/manifest.json')
+    assert client.session.calls == []
+
+
+def test_addon_client_error_message_never_repeats_full_url_or_query_token():
+    import requests
+
+    secret_url = 'https://addon.example/manifest.json?api_key=SECRET-TOKEN'
+    client = AddonClient()
+    client.session = FakeSession(
+        exc=requests.exceptions.ConnectionError(
+            'Failed to establish a new connection: ' + secret_url
+        )
+    )
+    with pytest.raises(AddonError) as exc_info:
+        client.manifest(secret_url)
+    message = str(exc_info.value)
+    assert 'SECRET-TOKEN' not in message
+    assert 'api_key' not in message
+    assert message == 'GET https://addon.example failed: ConnectionError'
+
+
+def test_addon_client_error_message_uses_http_status_category():
+    from tests.conftest import FakeResponse
+
+    client = AddonClient()
+    client.session = FakeSession(responses=[FakeResponse(status_code=500)])
+    with pytest.raises(AddonError) as exc_info:
+        client.catalog('https://addon.example', 'movie', 'top')
+    assert str(exc_info.value) == 'GET https://addon.example failed: HTTP 500'
+
+
+def test_addon_client_invalid_json_error_message_is_safe():
+    client = AddonClient()
+    client.session = FakeSession(responses=[_invalid_json_response()])
+    with pytest.raises(AddonError) as exc_info:
+        client.manifest('https://addon.example/manifest.json?api_key=SECRET')
+    message = str(exc_info.value)
+    assert 'SECRET' not in message
+    assert message == 'GET https://addon.example returned invalid JSON'

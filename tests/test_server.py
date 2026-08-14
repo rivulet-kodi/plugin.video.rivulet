@@ -166,6 +166,108 @@ def test_resolve_stream_unknown_source_returns_none():
     assert client.resolve_stream({}) is None
 
 
+# --- resolve_stream: direct url scheme allowlist (_DIRECT_URL_SCHEMES) -----
+
+
+@pytest.mark.parametrize("scheme,host_path", [
+    ("http", "example.com/video.mp4"),
+    ("https", "example.com/video.mp4"),
+    ("smb", "nas.local/share/movie.mkv"),
+    ("nfs", "nas.local/share/movie.mkv"),
+    ("rtmp", "live.example.com/app/stream"),
+    ("rtmps", "live.example.com/app/stream"),
+    ("rtsp", "cam.example.com/stream1"),
+    ("rtp", "239.0.0.1:1234"),
+    ("udp", "239.0.0.1:1234"),
+])
+def test_resolve_stream_allows_every_direct_network_media_scheme(scheme, host_path):
+    client = make_client()
+    url = "%s://%s" % (scheme, host_path)
+    stream = {"url": url}
+    assert client.resolve_stream(stream) == url
+
+
+@pytest.mark.parametrize("url", [
+    "plugin://plugin.video.rivulet/?action=play",
+    "script://special/path",
+    "special://home/addons/evil",
+    "file:///etc/passwd",
+    "javascript:alert(1)",
+])
+def test_resolve_stream_rejects_kodi_control_and_local_schemes(url):
+    client = make_client()
+    with pytest.raises(UnsupportedStreamError):
+        client.resolve_stream({"url": url})
+
+
+@pytest.mark.parametrize("url", [
+    "example.com/video.mp4",  # relative: no scheme
+    "https://",  # malformed: no host
+    "https:///video.mp4",  # malformed: empty host
+    "not a url at all",
+])
+def test_resolve_stream_rejects_empty_relative_and_malformed_direct_urls(url):
+    client = make_client()
+    with pytest.raises(UnsupportedStreamError):
+        client.resolve_stream({"url": url})
+
+
+def test_resolve_stream_empty_url_falls_back_to_info_hash():
+    """An empty `url` string is treated as absent, not validated - old
+    compatibility restored: a Stream carrying both an empty url
+    placeholder and an infoHash must still resolve via the torrent
+    fallback, not raise UnsupportedStreamError."""
+    client = make_client()
+    stream = {"url": "", "infoHash": "aa" * 20}
+    resolved = client.resolve_stream(stream)
+    assert resolved == client.torrent_url("aa" * 20, -1, [])
+
+
+def test_resolve_stream_empty_url_falls_back_to_yt_id():
+    client = make_client()
+    stream = {"url": "", "ytId": "dQw4w9WgXcQ"}
+    assert client.resolve_stream(stream) == BASE + "/yt/dQw4w9WgXcQ"
+
+
+def test_resolve_stream_empty_url_with_no_fallback_returns_none():
+    client = make_client()
+    assert client.resolve_stream({"url": ""}) is None
+
+
+def test_resolve_stream_rejects_non_string_direct_url():
+    client = make_client()
+    with pytest.raises(UnsupportedStreamError):
+        client.resolve_stream({"url": 12345})
+
+
+def test_resolve_stream_rejected_scheme_error_omits_userinfo_path_query_fragment():
+    """A rejected disallowed-scheme url may embed a credential/token a
+    malicious or misconfigured addon put there - the raised message
+    must carry only the bare scheme, never the userinfo/host/path/
+    query/fragment (this message reaches kodi.log and a user-visible
+    notification via lib.ui.player)."""
+    client = make_client()
+    secret_url = "plugin://user:SUPERSECRETPASS@evil.example.com/steal?token=SECRETTOKEN#frag"
+    with pytest.raises(UnsupportedStreamError) as excinfo:
+        client.resolve_stream({"url": secret_url})
+    message = str(excinfo.value)
+    assert "plugin" in message
+    for secret in ("SUPERSECRETPASS", "SECRETTOKEN", "steal", "frag", "evil.example.com"):
+        assert secret not in message
+
+
+def test_resolve_stream_malformed_url_error_omits_embedded_secrets():
+    """A malformed (no scheme/host) url that still embeds secret-shaped
+    text (e.g. a query string) must raise a generic message with no
+    part of the input echoed back."""
+    client = make_client()
+    secret_url = "not-a-url?token=SECRETTOKEN"
+    with pytest.raises(UnsupportedStreamError) as excinfo:
+        client.resolve_stream({"url": secret_url})
+    assert "SECRETTOKEN" not in str(excinfo.value)
+    assert secret_url not in str(excinfo.value)
+
+
 # --- is_available ----------------------------------------------------------
 
 

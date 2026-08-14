@@ -55,6 +55,7 @@ this never corrupts the file itself.
 """
 
 import copy
+import datetime
 import json
 import os
 import tempfile
@@ -68,6 +69,17 @@ PROGRESS_FILENAME = "progress.json"
 
 #: Most-recent-first cap for the persisted search history list.
 MAX_SEARCH_HISTORY = 15
+
+#: Hard cap on the number of entries kept in ``progress.json``. Once a
+#: :meth:`Store.set_progress` write would exceed this, the oldest
+#: entries (by ``updated_at``) are evicted first -- see
+#: :func:`_prune_progress`.
+MAX_PROGRESS_ENTRIES = 500
+
+#: Entries in ``progress.json`` older than this (by ``updated_at``) are
+#: dropped on the next :meth:`Store.set_progress` write, regardless of
+#: :data:`MAX_PROGRESS_ENTRIES`.
+MAX_PROGRESS_AGE_DAYS = 180
 
 # Official addon descriptors seeded on first run. Manifests are copied
 # verbatim from the live addons (https://v3-cinemeta.strem.io/manifest.json
@@ -743,6 +755,65 @@ def _read_json(path, default):
     return _parse_json(_read_raw(path), default)
 
 
+def _parse_progress_timestamp(value):
+    """Parse a ``progress.json`` ``updated_at`` value -- the seconds-
+    precision ISO 8601 UTC string ``library.iso8601_utc()`` produces --
+    tolerating anything else (missing, wrong type, malformed string) by
+    returning ``None``. Callers then treat that entry as unparseable,
+    the same as an expired one."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except (TypeError, ValueError):
+        return None
+
+
+def _prune_progress(progress, now, keep_key):
+    """Bound ``progress.json`` after a write: drop malformed entries
+    (not a dict, or an unparseable ``updated_at``) and entries older
+    than :data:`MAX_PROGRESS_AGE_DAYS`, then -- if still over
+    :data:`MAX_PROGRESS_ENTRIES` -- evict the oldest remaining entries
+    by ``updated_at`` until the cap holds.
+
+    ``keep_key`` (the entry :meth:`Store.set_progress` just wrote) is
+    always retained, regardless of its own age or how it sorts --
+    otherwise two sessions racing the same offline/stale clock could
+    prune the very sample that was just persisted.
+
+    ``now`` is the ISO 8601 UTC string of the entry just written, reused
+    as the "current time" reference so this stays a pure function of
+    its arguments; if it fails to parse, age-based pruning is skipped
+    for this call (malformed-entry and count pruning still apply).
+    """
+    now_parsed = _parse_progress_timestamp(now)
+    max_age_seconds = MAX_PROGRESS_AGE_DAYS * 86400
+    kept = {}
+    for key, entry in progress.items():
+        if key == keep_key:
+            kept[key] = entry
+            continue
+        if not isinstance(entry, dict):
+            continue
+        updated = _parse_progress_timestamp(entry.get("updated_at"))
+        if updated is None:
+            continue
+        if now_parsed is not None and (now_parsed - updated).total_seconds() > max_age_seconds:
+            continue
+        kept[key] = entry
+    if len(kept) <= MAX_PROGRESS_ENTRIES:
+        return kept
+
+    def _sort_key(item):
+        key, entry = item
+        if key == keep_key:
+            return datetime.datetime.max
+        return _parse_progress_timestamp(entry.get("updated_at")) or datetime.datetime.min
+
+    ordered = sorted(kept.items(), key=_sort_key, reverse=True)
+    return dict(ordered[:MAX_PROGRESS_ENTRIES])
+
+
 class ConcurrentUpdateError(RuntimeError):
     """Raised when a JSON store file keeps changing underneath a retried
     read-modify-write update.
@@ -830,7 +901,7 @@ class Store:
             baseline_raw = _read_raw(self._addons_path)
             current = _parse_json(baseline_raw, None)
             if not isinstance(current, list):
-                current = [dict(addon) for addon in DEFAULT_ADDONS]
+                current = copy.deepcopy(DEFAULT_ADDONS)
             new_value = transform(current)
             if new_value == current and baseline_raw is not None:
                 return current
@@ -1027,13 +1098,18 @@ class Store:
         sampling at the same moment) at worst drops one sample, which the
         next periodic sample corrects within seconds -- never file
         corruption (writes are still atomic).
+
+        Also bounds ``progress.json`` -- see :func:`_prune_progress` --
+        so a long-lived install's cache cannot grow without bound.
         """
         progress = _read_json(self._progress_path, None)
         if not isinstance(progress, dict):
             progress = {}
-        progress[self._progress_key(content_type, content_id, video_id)] = {
+        key = self._progress_key(content_type, content_id, video_id)
+        progress[key] = {
             "position_ms": int(position_ms),
             "duration_ms": int(duration_ms),
             "updated_at": now,
         }
+        progress = _prune_progress(progress, now, keep_key=key)
         _atomic_write(self._progress_path, progress)

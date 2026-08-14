@@ -3,6 +3,7 @@ directly in the coverflow overlay (`lib.ui.infowindow`) - Rivulet's custom
 replacement for the classical `library()` directory action. Picking a
 title opens `lib.ui.detailwindow` for it.
 """
+from lib.ui.dependencies import get_store
 
 
 def open_library():
@@ -11,12 +12,11 @@ def open_library():
     (playback started somewhere down the open_detail() chain)."""
     import xbmc
 
-    from lib.store import Store
     from lib.stremio.api import ApiError, StremioAPI
-    from lib.ui.compat import L, addon_profile_dir, log, notify
+    from lib.ui.compat import L, log, notify
     from lib.ui.uicommon import busy_dialog
 
-    auth = Store(addon_profile_dir()).get_auth()
+    auth = get_store().get_auth()
     if not auth:
         notify(L(30020))
         return False

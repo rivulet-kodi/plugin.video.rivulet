@@ -13,6 +13,7 @@ which is not worth replacing.
 """
 import xbmcgui
 
+from lib.ui.dependencies import get_store
 from lib.ui.uicommon import BaseWindow, open_window
 
 BACKGROUND = 30000
@@ -75,10 +76,9 @@ class HomeWindow(BaseWindow):
     """See module docstring. Built/run via `open_home()`."""
 
     def onInit(self):
-        from lib.store import Store
-        from lib.ui.compat import addon_fanart, addon_profile_dir
+        from lib.ui.compat import addon_fanart
 
-        auth = Store(addon_profile_dir()).get_auth()
+        auth = get_store().get_auth()
         self.getControl(BACKGROUND).setImage(addon_fanart())
         control = self.getControl(LIST)
         # reset() before addItems(): onInit() runs again when

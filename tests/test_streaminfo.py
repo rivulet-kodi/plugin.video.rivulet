@@ -16,6 +16,7 @@ from lib.stremio.streaminfo import (
     parse_stream,
     sort_streams,
 )
+from lib.ui import playbackmeta
 
 # --- fixtures ----------------------------------------------------------
 
@@ -505,3 +506,79 @@ def test_sort_streams_seeders_key_descending_none_last():
 
 def test_sort_streams_empty_list():
     assert sort_streams([], key="quality") == []
+
+
+# --- lib.ui.playbackmeta: pure OSD metadata formatting/parsing helpers -----
+# (Kodi-independent, so tested directly here alongside this module's own
+# pure text/label formatting helpers, with no xbmc stub required.)
+
+
+def test_format_hms_formats_hours_minutes_seconds():
+    assert playbackmeta.format_hms(5410) == "1:30:10"
+
+
+def test_format_hms_clamps_negative_to_zero():
+    assert playbackmeta.format_hms(-5) == "0:00:00"
+
+
+def test_human_size_formats_bytes_kb_mb_gb():
+    assert playbackmeta.human_size(500) == "500.0 B"
+    assert playbackmeta.human_size(1536) == "1.5 KB"
+    assert playbackmeta.human_size(5 * 1024 * 1024) == "5.0 MB"
+    assert playbackmeta.human_size(2 * 1024 * 1024 * 1024) == "2.0 GB"
+
+
+def test_human_size_none_or_falsy_is_zero_bytes():
+    assert playbackmeta.human_size(None) == "0.0 B"
+
+
+def test_sanitize_title_strips_crlf_and_trims():
+    assert playbackmeta.sanitize_title("Some\r\nTitle\n") == "Some  Title"
+
+
+def test_sanitize_title_empty_or_none_is_empty_string():
+    assert playbackmeta.sanitize_title("") == ""
+    assert playbackmeta.sanitize_title(None) == ""
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("2019", 2019),
+    ("2019-", 2019),
+    ("2019-2023", 2019),
+    (None, None),
+    ("n/a", None),
+])
+def test_parse_year_handles_open_ended_ranges_and_unparseable(value, expected):
+    assert playbackmeta.parse_year(value) == expected
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("7.8", 7.8),
+    (None, None),
+    ("n/a", None),
+])
+def test_parse_rating_handles_unparseable_values(value, expected):
+    assert playbackmeta.parse_rating(value) == expected
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("132 min", 132 * 60),
+    (None, None),
+    ("?", None),
+])
+def test_parse_duration_seconds_converts_minutes_to_seconds(value, expected):
+    assert playbackmeta.parse_duration_seconds(value) == expected
+
+
+def test_resolve_art_poster_becomes_thumb_and_icon_when_no_explicit_thumb():
+    result = playbackmeta.resolve_art({"poster": "p.jpg"}, {})
+    assert result == {"poster": "p.jpg", "icon": "p.jpg", "thumb": "p.jpg"}
+
+
+def test_resolve_art_falls_back_to_meta_fields_when_art_empty():
+    result = playbackmeta.resolve_art(None, {"poster": "mp.jpg", "background": "bg.jpg"})
+    assert result == {"poster": "mp.jpg", "icon": "mp.jpg", "thumb": "mp.jpg", "fanart": "bg.jpg"}
+
+
+def test_resolve_art_missing_fields_are_omitted_entirely():
+    assert playbackmeta.resolve_art(None, None) == {}

@@ -12,6 +12,8 @@ import xbmcaddon
 import xbmcgui
 import xbmcvfs
 
+from lib import settings as _settings
+
 ADDON = xbmcaddon.Addon()
 ADDON_ID = ADDON.getAddonInfo('id')
 ADDON_NAME = ADDON.getAddonInfo('name')
@@ -66,42 +68,22 @@ def setting_bool(key, default):
     spuriously return False for a setting settings.xml genuinely has as
     "true" - specifically when read at torrent pre-buffer time, inside a
     setResolvedUrl-bound call, often right after an addon upgrade (see
-    lib/ui/player.py's `_prebuffer_torrent()`). Parsing the raw setting
-    string ourselves sidesteps whatever internal typing/caching quirk
-    causes that. Any empty/missing/unreadable/unrecognized value falls
-    back to `default` - this never raises and never silently goes False.
+    lib/ui/player.py's `_prebuffer_torrent()`). Delegates to
+    `lib.settings.setting_bool()`, shared with `lib.service_runner`, so
+    the UI and the background service can never disagree about the same
+    setting's value.
     """
-    try:
-        raw = ADDON.getSetting(key)
-    except Exception:  # noqa: BLE001 - a broken setting read must never raise
-        return default
-    raw = (raw or '').strip().lower()
-    if raw in ('true', '1', 'yes', 'on'):
-        return True
-    if raw in ('false', '0', 'no', 'off'):
-        return False
-    return default
+    return _settings.setting_bool(ADDON, key, default)
 
 
 def setting_int(key, default, minimum=None):
     """Read an int addon setting via the raw `getSetting()` string.
 
-    Same rationale as `setting_bool()`: sidesteps `getSettingInt()`
-    misbehaving the same way, and never raises. An empty/missing/
-    unparseable value falls back to `default`; when `minimum` is given,
-    the result is clamped up to it.
+    Same rationale as `setting_bool()`: delegates to
+    `lib.settings.setting_int()` to sidestep `getSettingInt()`
+    misbehaving the same way, shared with `lib.service_runner`.
     """
-    try:
-        raw = ADDON.getSetting(key)
-    except Exception:  # noqa: BLE001 - a broken setting read must never raise
-        return default
-    try:
-        value = int(str(raw).strip())
-    except (TypeError, ValueError):
-        return default
-    if minimum is not None and value < minimum:
-        return minimum
-    return value
+    return _settings.setting_int(ADDON, key, default, minimum=minimum)
 
 
 _KODI_MAJOR = None

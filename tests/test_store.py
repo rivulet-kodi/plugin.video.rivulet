@@ -219,6 +219,25 @@ def test_update_addons_accepts_arbitrary_transform_and_persists_result(tmp_path)
     assert store.get_addons() == result
 
 
+def test_update_addons_missing_file_fallback_transform_cannot_corrupt_defaults(tmp_path):
+    """The missing/corrupt fallback in update_addons must hand the transform
+    a deep copy: mutating a fallback entry's nested manifest/flags in place
+    (rather than replacing it) must never leak into DEFAULT_ADDONS itself.
+    """
+    store = make_store(tmp_path)
+    # No addons.json on disk yet -- update_addons must fall back internally.
+
+    def mutate_nested_in_place(addons):
+        addons[0]["manifest"]["id"] = "corrupted"
+        addons[0]["flags"]["protected"] = False
+        return addons
+
+    store.update_addons(mutate_nested_in_place)
+
+    assert DEFAULT_ADDONS[0]["manifest"]["id"] != "corrupted"
+    assert DEFAULT_ADDONS[0]["flags"]["protected"] is True
+
+
 def test_update_addons_noop_transform_skips_write(tmp_path, monkeypatch):
     store = make_store(tmp_path)
     store.get_addons()  # seed defaults to disk
@@ -580,25 +599,25 @@ def test_progress_keys_distinguish_by_video_id(tmp_path):
     """Two different episodes of the SAME series id must never collide
     -- (type, id) alone is not a unique key for a series."""
     store = make_store(tmp_path)
-    store.set_progress("series", "tt9", "tt9:1:1", 1000, 2000, "t1")
-    store.set_progress("series", "tt9", "tt9:1:2", 3000, 4000, "t2")
+    store.set_progress("series", "tt9", "tt9:1:1", 1000, 2000, "2020-01-01T00:00:00Z")
+    store.set_progress("series", "tt9", "tt9:1:2", 3000, 4000, "2020-01-01T00:00:01Z")
     assert store.get_progress("series", "tt9", "tt9:1:1") == {
-        "position_ms": 1000, "duration_ms": 2000, "updated_at": "t1",
+        "position_ms": 1000, "duration_ms": 2000, "updated_at": "2020-01-01T00:00:00Z",
     }
     assert store.get_progress("series", "tt9", "tt9:1:2") == {
-        "position_ms": 3000, "duration_ms": 4000, "updated_at": "t2",
+        "position_ms": 3000, "duration_ms": 4000, "updated_at": "2020-01-01T00:00:01Z",
     }
 
 
 def test_progress_key_with_no_video_id_distinct_from_with_video_id(tmp_path):
     store = make_store(tmp_path)
-    store.set_progress("movie", "tt1", None, 100, 200, "t1")
-    store.set_progress("series", "tt1", "tt1:1:1", 300, 400, "t2")
+    store.set_progress("movie", "tt1", None, 100, 200, "2020-01-01T00:00:00Z")
+    store.set_progress("series", "tt1", "tt1:1:1", 300, 400, "2020-01-01T00:00:01Z")
     assert store.get_progress("movie", "tt1", None) == {
-        "position_ms": 100, "duration_ms": 200, "updated_at": "t1",
+        "position_ms": 100, "duration_ms": 200, "updated_at": "2020-01-01T00:00:00Z",
     }
     assert store.get_progress("series", "tt1", "tt1:1:1") == {
-        "position_ms": 300, "duration_ms": 400, "updated_at": "t2",
+        "position_ms": 300, "duration_ms": 400, "updated_at": "2020-01-01T00:00:01Z",
     }
 
 
@@ -625,3 +644,80 @@ def test_corrupt_progress_json_returns_none_without_raising(tmp_path):
     (data_dir / "progress.json").write_text("{not valid json")
     store = Store(str(data_dir))
     assert store.get_progress("movie", "tt1") is None  # must not raise
+
+
+# --- progress.json bounds (age/count/malformed pruning) --------------------
+
+
+def test_set_progress_prunes_non_dict_entry(tmp_path):
+    data_dir = tmp_path / "addon_data"
+    data_dir.mkdir()
+    (data_dir / "progress.json").write_text(json.dumps({"movie\x1ftt-old\x1f": "not-a-dict"}))
+    store = Store(str(data_dir))
+    store.set_progress("movie", "tt1", None, 100, 200, "2020-01-01T00:00:00Z")
+    raw = json.loads((data_dir / "progress.json").read_text())
+    assert list(raw.keys()) == [store._progress_key("movie", "tt1")]
+
+
+def test_set_progress_prunes_entry_with_malformed_updated_at(tmp_path):
+    data_dir = tmp_path / "addon_data"
+    data_dir.mkdir()
+    (data_dir / "progress.json").write_text(json.dumps({
+        "movie\x1ftt-old\x1f": {"position_ms": 1, "duration_ms": 2, "updated_at": "not-a-timestamp"},
+    }))
+    store = Store(str(data_dir))
+    store.set_progress("movie", "tt1", None, 100, 200, "2020-01-01T00:00:00Z")
+    raw = json.loads((data_dir / "progress.json").read_text())
+    assert list(raw.keys()) == [store._progress_key("movie", "tt1")]
+
+
+def test_set_progress_prunes_entry_older_than_max_age(tmp_path):
+    store = make_store(tmp_path)
+    store.set_progress("movie", "tt-old", None, 1, 2, "2020-01-01T00:00:00Z")
+    store.set_progress("movie", "tt-new", None, 3, 4, "2021-06-01T00:00:00Z")  # >180d later
+    assert store.get_progress("movie", "tt-old") is None
+    assert store.get_progress("movie", "tt-new") == {
+        "position_ms": 3, "duration_ms": 4, "updated_at": "2021-06-01T00:00:00Z",
+    }
+
+
+def test_set_progress_keeps_entry_within_max_age(tmp_path):
+    store = make_store(tmp_path)
+    store.set_progress("movie", "tt-recent", None, 1, 2, "2020-01-01T00:00:00Z")
+    store.set_progress("movie", "tt-new", None, 3, 4, "2020-06-01T00:00:00Z")  # <180d later
+    assert store.get_progress("movie", "tt-recent") == {
+        "position_ms": 1, "duration_ms": 2, "updated_at": "2020-01-01T00:00:00Z",
+    }
+
+
+def test_set_progress_evicts_oldest_entries_over_max_count(tmp_path, monkeypatch):
+    monkeypatch.setattr(store_module, "MAX_PROGRESS_ENTRIES", 3)
+    store = make_store(tmp_path)
+    store.set_progress("movie", "tt1", None, 1, 2, "2020-01-01T00:00:01Z")
+    store.set_progress("movie", "tt2", None, 1, 2, "2020-01-01T00:00:02Z")
+    store.set_progress("movie", "tt3", None, 1, 2, "2020-01-01T00:00:03Z")
+    store.set_progress("movie", "tt4", None, 1, 2, "2020-01-01T00:00:04Z")
+    assert store.get_progress("movie", "tt1") is None  # oldest evicted
+    for content_id in ("tt2", "tt3", "tt4"):
+        assert store.get_progress("movie", content_id) is not None
+    raw = json.loads((tmp_path / "addon_data" / "progress.json").read_text())
+    assert len(raw) == 3
+
+
+def test_set_progress_retains_just_written_entry_even_when_it_sorts_oldest(tmp_path, monkeypatch):
+    """The entry `set_progress` just wrote must never be the one evicted
+    by the count cap, even if its own timestamp is older than every
+    other entry -- otherwise the sample a caller just persisted could
+    vanish immediately."""
+    monkeypatch.setattr(store_module, "MAX_PROGRESS_ENTRIES", 3)
+    store = make_store(tmp_path)
+    store.set_progress("movie", "tt1", None, 1, 2, "2024-01-01T00:00:01Z")
+    store.set_progress("movie", "tt2", None, 1, 2, "2024-01-01T00:00:02Z")
+    store.set_progress("movie", "tt3", None, 1, 2, "2024-01-01T00:00:03Z")
+    store.set_progress("movie", "tt-ancient", None, 9, 9, "2000-01-01T00:00:00Z")
+    assert store.get_progress("movie", "tt-ancient") == {
+        "position_ms": 9, "duration_ms": 9, "updated_at": "2000-01-01T00:00:00Z",
+    }
+    assert store.get_progress("movie", "tt1") is None  # oldest of the REST evicted instead
+    raw = json.loads((tmp_path / "addon_data" / "progress.json").read_text())
+    assert len(raw) == 3

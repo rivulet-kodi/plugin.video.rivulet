@@ -64,6 +64,56 @@ def load_uicommon():
 
 
 # ---------------------------------------------------------------------------
+# setting_bool() / setting_int() -- thin ADDON-bound wrappers delegating to
+# the pure lib.settings helpers also used by ServiceMonitor._refresh() in
+# lib.service_runner (see tests/test_service_runner.py for the shared
+# parsing behavior's own edge-case coverage); these prove the delegation
+# itself reproduces the same missing/malformed/mixed-case/zero/negative/
+# minimum-clamped results through compat's real ADDON instance.
+# ---------------------------------------------------------------------------
+
+
+def test_setting_bool_missing_key_returns_default(load_uicommon):
+    ctx = load_uicommon()
+    assert ctx.compat.setting_bool('missing', True) is True
+    assert ctx.compat.setting_bool('missing', False) is False
+
+
+def test_setting_bool_malformed_value_returns_default(load_uicommon):
+    ctx = load_uicommon()
+    ctx.compat.ADDON.settings['flag'] = 'not-a-bool'
+    assert ctx.compat.setting_bool('flag', True) is True
+
+
+@pytest.mark.parametrize('raw,expected', [
+    ('TRUE', True), ('YES', True), ('On', True),
+    ('FALSE', False), ('No', False), ('OFF', False),
+])
+def test_setting_bool_parses_mixed_case(load_uicommon, raw, expected):
+    ctx = load_uicommon()
+    ctx.compat.ADDON.settings['flag'] = raw
+    assert ctx.compat.setting_bool('flag', not expected) is expected
+
+
+def test_setting_int_malformed_value_returns_default(load_uicommon):
+    ctx = load_uicommon()
+    ctx.compat.ADDON.settings['n'] = 'nope'
+    assert ctx.compat.setting_int('n', 7) == 7
+
+
+def test_setting_int_zero_is_not_treated_as_missing(load_uicommon):
+    ctx = load_uicommon()
+    ctx.compat.ADDON.settings['n'] = '0'
+    assert ctx.compat.setting_int('n', 99) == 0
+
+
+def test_setting_int_negative_value_clamped_up_to_minimum(load_uicommon):
+    ctx = load_uicommon()
+    ctx.compat.ADDON.settings['n'] = '-5'
+    assert ctx.compat.setting_int('n', 0, minimum=1) == 1
+
+
+# ---------------------------------------------------------------------------
 # dismiss_busy_dialog()
 # ---------------------------------------------------------------------------
 

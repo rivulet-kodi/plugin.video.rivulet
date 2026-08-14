@@ -30,7 +30,6 @@ import contextlib
 
 import pytest
 
-import lib.store as store_module
 from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
@@ -158,7 +157,7 @@ def test_status_text_reports_not_logged_in_when_auth_is_none(load_homewindow):
 
 def test_oninit_shows_library_row_when_authenticated(load_homewindow, monkeypatch):
     ctx = load_homewindow(localized={30022: 'Logged in as %s'})
-    monkeypatch.setattr(store_module, 'Store', lambda *a, **k: _FakeStore(auth={'authKey': 'x'}))
+    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(auth={'authKey': 'x'}))
     win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '720p')
 
     win.onInit()
@@ -172,7 +171,7 @@ def test_oninit_shows_library_row_when_authenticated(load_homewindow, monkeypatc
 
 def test_oninit_hides_library_row_when_not_authenticated(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    monkeypatch.setattr(store_module, 'Store', lambda *a, **k: _FakeStore(auth=None))
+    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(auth=None))
     win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '720p')
 
     win.onInit()
@@ -185,7 +184,7 @@ def test_oninit_hides_library_row_when_not_authenticated(load_homewindow, monkey
 def test_oninit_sets_status_label_to_email_when_authenticated_with_email(load_homewindow, monkeypatch):
     ctx = load_homewindow(localized={30022: 'Logged in as %s'})
     auth = {'authKey': 'x', 'user': {'email': 'me@example.com', 'name': 'Me'}}
-    monkeypatch.setattr(store_module, 'Store', lambda *a, **k: _FakeStore(auth=auth))
+    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(auth=auth))
     win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '720p')
 
     win.onInit()
@@ -196,7 +195,7 @@ def test_oninit_sets_status_label_to_email_when_authenticated_with_email(load_ho
 def test_oninit_sets_status_label_to_name_when_email_is_absent(load_homewindow, monkeypatch):
     ctx = load_homewindow(localized={30022: 'Logged in as %s'})
     auth = {'authKey': 'x', 'user': {'name': 'Me'}}
-    monkeypatch.setattr(store_module, 'Store', lambda *a, **k: _FakeStore(auth=auth))
+    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(auth=auth))
     win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '720p')
 
     win.onInit()

@@ -4,15 +4,15 @@ logged-in user's Stremio library datastore, then shows it directly in the
 coverflow overlay - exercised against the shared fake xbmc/xbmcgui stubs in
 tests/kodistubs (no real Kodi runtime, no network).
 
-lib.ui.librarywindow imports its ENTIRE data layer (lib.store.Store,
-lib.stremio.api.StremioAPI) lazily, from inside open_library() itself, so -
-mirroring tests/test_catalogpicker.py's `store_module.Store` monkeypatch for
-catalogpicker.open_catalog_picker()'s own lazy `from lib.store import
-Store` - the data layer is faked by monkeypatching the attribute on the
-real `lib.store`/`lib.stremio.api` modules (`from lib.X import Y` resolves
-`Y` off `sys.modules['lib.X']` at call time, so patching that attribute is
-enough; lib.ui.librarywindow is never reloaded with a rebound name of its
-own to patch).
+lib.ui.librarywindow imports `get_store` (from lib.ui.dependencies) at
+module scope, and lazily `from lib.stremio.api import ApiError,
+StremioAPI` from inside open_library() itself - so this file fakes the
+shared Store provider by assigning directly to `librarywindow.get_store`
+(the same way tests/test_views.py wires `views.get_store`), and fakes
+StremioAPI the old way, by monkeypatching the attribute on the real
+`lib.stremio.api` module (`from lib.X import Y` resolves `Y` off
+`sys.modules['lib.X']` at call time, so patching that attribute is
+enough).
 
 open_library() also lazily `from lib.ui.infowindow import open_showcase`/
 `from lib.ui.detailwindow import open_detail`, so load_librarywindow
@@ -25,13 +25,12 @@ import contextlib
 
 import pytest
 
-import lib.store as store_module
 import lib.stremio.api as api_module
 from lib.stremio.api import ApiError
 from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
-    'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.router',
+    'lib.ui.compat', 'lib.ui.dependencies', 'lib.ui.uicommon', 'lib.ui.router',
     'lib.ui.infowindow', 'lib.ui.detailwindow', 'lib.ui.librarywindow',
 )
 
@@ -84,8 +83,8 @@ def load_librarywindow():
         yield _load
 
 
-def _wire_data_layer(monkeypatch, store, api):
-    monkeypatch.setattr(store_module, 'Store', lambda *a, **k: store)
+def _wire_data_layer(librarywindow_mod, monkeypatch, store, api):
+    librarywindow_mod.get_store = lambda: store
     monkeypatch.setattr(api_module, 'StremioAPI', lambda *a, **k: api)
 
 
@@ -98,7 +97,7 @@ def test_open_library_without_auth_notifies_and_returns_false(load_librarywindow
     ctx = load_librarywindow()
     librarywindow = ctx.librarywindow
     api = _FakeStremioAPI()
-    _wire_data_layer(monkeypatch, _FakeStore(auth=None), api)
+    _wire_data_layer(librarywindow, monkeypatch, _FakeStore(auth=None), api)
 
     result = librarywindow.open_library()
 
@@ -122,7 +121,7 @@ def test_open_library_fetch_filters_removed_and_missing_id(load_librarywindow, m
         {'name': 'No Id Here', 'type': 'movie'},  # dropped: no `_id`
     ]
     api = _FakeStremioAPI(datastore_result=entries)
-    _wire_data_layer(monkeypatch, _FakeStore(auth=auth), api)
+    _wire_data_layer(librarywindow, monkeypatch, _FakeStore(auth=auth), api)
     captured = {}
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: captured.setdefault('metas', metas) and None)
 
@@ -140,7 +139,7 @@ def test_open_library_empty_fetch_notifies_and_returns_false(load_librarywindow,
     librarywindow = ctx.librarywindow
     auth = {'authKey': 'abc123'}
     api = _FakeStremioAPI(datastore_result=[])
-    _wire_data_layer(monkeypatch, _FakeStore(auth=auth), api)
+    _wire_data_layer(librarywindow, monkeypatch, _FakeStore(auth=auth), api)
     opened = []
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas))
 
@@ -162,7 +161,7 @@ def test_open_library_selection_opens_detail_and_returns_its_result(load_library
     auth = {'authKey': 'abc123'}
     entry = {'_id': 'tt9', 'name': 'Batman', 'type': 'movie', 'poster': None, 'background': None}
     api = _FakeStremioAPI(datastore_result=[entry])
-    _wire_data_layer(monkeypatch, _FakeStore(auth=auth), api)
+    _wire_data_layer(librarywindow, monkeypatch, _FakeStore(auth=auth), api)
     chosen = {'id': 'tt9', 'name': 'Batman', 'type': 'movie'}
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: chosen)
     captured = {}
@@ -185,7 +184,7 @@ def test_open_library_no_selection_returns_false_without_opening_detail(load_lib
     auth = {'authKey': 'abc123'}
     entry = {'_id': 'tt1', 'name': 'One', 'type': 'movie'}
     api = _FakeStremioAPI(datastore_result=[entry])
-    _wire_data_layer(monkeypatch, _FakeStore(auth=auth), api)
+    _wire_data_layer(librarywindow, monkeypatch, _FakeStore(auth=auth), api)
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: None)
 
     def _unexpected(*a, **k):
@@ -208,7 +207,7 @@ def test_open_library_datastore_error_notifies_and_returns_false(load_librarywin
     librarywindow = ctx.librarywindow
     auth = {'authKey': 'abc123'}
     api = _FakeStremioAPI(datastore_error=ApiError('down'))
-    _wire_data_layer(monkeypatch, _FakeStore(auth=auth), api)
+    _wire_data_layer(librarywindow, monkeypatch, _FakeStore(auth=auth), api)
 
     def _unexpected(*a, **k):
         raise AssertionError('open_showcase must not be reached when the fetch failed')

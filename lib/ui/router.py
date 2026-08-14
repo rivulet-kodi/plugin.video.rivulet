@@ -2,13 +2,16 @@
 
 Kodi invokes default.py with argv = [base_url, handle, "?querystring"].
 Everything here is UI glue only; the actual list-building/playback logic
-lives in views.py / player.py.
+lives in views.py / player.py. Pure URL-building/stream-token logic
+(url_for/encode_stream/decode_stream) needs no dispatch state and lives in
+lib.ui.urlutil instead; this module keeps only the mutable
+ADDON_HANDLE/BASE_URL dispatch state and the querystring parser.
 """
-import base64
-import json
 import os
 import sys
-from urllib.parse import parse_qs, urlencode
+from urllib.parse import parse_qs
+
+from lib.ui import urlutil
 
 ADDON_HANDLE = -1
 BASE_URL = ''
@@ -20,34 +23,6 @@ def _parse_params(raw_qs):
     if not raw_qs:
         return {}
     return {key: values[0] for key, values in parse_qs(raw_qs).items()}
-
-
-def url_for(action, **params):
-    """Build a plugin:// URL for `action` with the given string params."""
-    query = {'action': action}
-    for key, value in params.items():
-        if value is None or value == '':
-            continue
-        query[key] = value
-    return '%s?%s' % (BASE_URL, urlencode(query))
-
-
-def encode_stream(stream):
-    """Base64url-encode a stream dict for safe passage inside a plugin URL."""
-    payload = json.dumps(stream or {}, separators=(',', ':')).encode('utf-8')
-    return base64.urlsafe_b64encode(payload).decode('ascii')
-
-
-def decode_stream(token):
-    """Inverse of encode_stream(); returns {} for empty/invalid input."""
-    if not token:
-        return {}
-    padded = token + '=' * (-len(token) % 4)
-    try:
-        payload = base64.urlsafe_b64decode(padded.encode('ascii'))
-        return json.loads(payload.decode('utf-8'))
-    except (ValueError, TypeError):
-        return {}
 
 
 def run():
@@ -71,7 +46,7 @@ def run():
     action = params.get('action', 'home')
 
     def do_play(p):
-        stream = decode_stream(p.get('stream'))
+        stream = urlutil.decode_stream(p.get('stream'))
         player.play(ADDON_HANDLE, stream, p.get('type'), p.get('id'))
 
     dispatch = {

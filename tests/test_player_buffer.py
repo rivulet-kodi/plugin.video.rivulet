@@ -50,6 +50,7 @@ import contextlib
 
 import pytest
 
+from lib.ui import playbackmeta
 from tests.kodistubs import install_kodi_stubs
 
 INFO_HASH = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
@@ -644,6 +645,60 @@ def test_unsupported_stream_error_notifies_30160_and_logs_loginfo_not_error(kodi
     assert list_item.path == ''
 
 
+
+def test_unsupported_stream_error_play_direct_no_player_play_sink(kodi_stubs, monkeypatch):
+    """The same UnsupportedStreamError rejection (e.g. a direct `url`
+    field rejected by lib.stremio.server._DIRECT_URL_SCHEMES - see
+    lib.stremio.server.resolve_stream) must short-circuit play_direct()
+    (the custom-window path) BEFORE any ListItem/metadata construction
+    and before xbmc.Player().play() is ever called - only a failure
+    notification, no player sink."""
+    from lib.stremio.server import UnsupportedStreamError
+
+    env = kodi_stubs.env
+    _ServerScript(
+        resolve_error=UnsupportedStreamError("Stream url scheme 'plugin' is not an allowed direct-playback scheme"),
+    ).install(monkeypatch, kodi_stubs.player)
+
+    result = kodi_stubs.player.play_direct({'url': 'plugin://evil'}, 'movie', 'tt51')
+
+    assert result is False
+    assert env.player_play_calls == []
+    assert env.resolved == []  # play_direct never touches xbmcplugin.setResolvedUrl()
+    assert [msg for _, msg, _, _ in env.notifications] == ['STR30160']
+
+
+
+def test_unsupported_stream_error_log_and_notification_omit_embedded_secrets(kodi_stubs, monkeypatch):
+    """A rejected direct url may embed a credential/token a malicious
+    addon put there - lib.ui.player logs `%r` of the raised
+    UnsupportedStreamError (see the `except UnsupportedStreamError`
+    block in _resolve_playable_item) and shows a fixed notification
+    string; neither may ever contain the secret. Uses the REAL
+    lib.stremio.server._validate_direct_url() to produce the actual
+    exception message a live rejection would carry."""
+    from lib.stremio.server import UnsupportedStreamError, _validate_direct_url
+
+    secret_url = 'plugin://user:SUPERSECRETPASS@evil.example.com/steal?token=SECRETTOKEN#frag'
+    try:
+        _validate_direct_url(secret_url)
+        raise AssertionError('expected UnsupportedStreamError')
+    except UnsupportedStreamError as exc:
+        real_error = exc
+
+    env = kodi_stubs.env
+    _ServerScript(resolve_error=real_error).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(61, {'url': secret_url}, 'movie', 'tt61')
+
+    logged_text = ' '.join(msg for msg, _level in env.log_calls)
+    notified_text = ' '.join(msg for _, msg, _, _ in env.notifications)
+    for secret in ('SUPERSECRETPASS', 'SECRETTOKEN', 'steal', 'frag', 'evil.example.com'):
+        assert secret not in logged_text
+        assert secret not in notified_text
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (61, False)
+
 # --- ListItem hardening: setContentLookup/setMimeType/video-info (seek-exit fix) -
 
 
@@ -1198,8 +1253,9 @@ def test_explicit_item_meta_plot_wins_over_description_and_stream_fallback(kodi_
 def test_torrent_resolved_filename_from_create_stats_sets_correct_mimetype(kodi_stubs, monkeypatch):
     """Defect A/mime fix: a torrent's resolved playback URL
     (`http://host/<infoHash>/<fileIdx>`) carries no file extension of
-    its own, so `_mime_for` could never derive a MIME type from it
-    before. `_extract_file_name` recovers the real filename from the
+    its own, so `playbackmeta.mime_for` could never derive a MIME type
+    from it before. `playbackmeta.extract_file_name` recovers the real
+    filename from the
     `/create` stats dict the metadata-wait loop already fetched (no
     extra HTTP round-trip), letting a torrent stream get a correct
     `setMimeType` (and a real title) exactly like a
@@ -1329,7 +1385,7 @@ class _FakeProgressStore:
     """Fake `lib.store.Store` surface `lib.ui.player`'s resume/now-
     playing code needs (`get_progress`/`set_now_playing`/
     `set_resume_offset_ms`) -- injected via `monkeypatch.setattr(
-    kodi_stubs.player, 'Store', ...)` so these tests never touch a real
+    kodi_stubs.player, 'get_store', ...)` so these tests never touch a real
     filesystem or `lib.store.Store` directly."""
 
     def __init__(self, progress=None):
@@ -1350,7 +1406,7 @@ class _FakeProgressStore:
 
 
 def _install_progress_store(monkeypatch, player_module, store):
-    monkeypatch.setattr(player_module, 'Store', lambda *a, **k: store)
+    monkeypatch.setattr(player_module, 'get_store', lambda: store)
 
 
 # --- "now playing" context recording (LibrarySync) --------------------------
@@ -1439,6 +1495,63 @@ def test_video_id_threaded_to_progress_lookup_and_now_playing_context(kodi_stubs
 
     assert store.get_progress_calls == [('series', 'tt6', 'tt6:1:3')]
     assert store.now_playing['video_id'] == 'tt6:1:3'
+
+
+def test_series_now_playing_and_progress_are_rooted_at_the_shows_meta_id_not_the_episode_sid(
+    kodi_stubs, monkeypatch,
+):
+    """For a series, `sid` passed to `play_direct()` is the episode/stream
+    id, but local resume/progress and the stored now-playing context must
+    stay rooted at the SHOW's own library id (`item_meta['meta']['id']`),
+    keyed together with the exact episode `video_id`."""
+    store = _FakeProgressStore()
+    _install_progress_store(monkeypatch, kodi_stubs.player, store)
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    item_meta = {'meta': {'id': 'tt-show', 'name': 'Show'}}
+    kodi_stubs.player.play_direct(
+        {'url': 'https://example.com/a.mp4'}, 'series', 's1e2', item_meta=item_meta, video_id='s1e2',
+    )
+
+    assert store.get_progress_calls == [('series', 'tt-show', 's1e2')]
+    assert store.now_playing['id'] == 'tt-show'
+    assert store.now_playing['video_id'] == 's1e2'
+
+
+def test_series_content_id_falls_back_to_sid_when_meta_has_no_id(kodi_stubs, monkeypatch):
+    """A series `item_meta` with no (or falsy) `meta.id` must fall back to
+    `sid` exactly like a movie does - never crash, never key on `None`."""
+    store = _FakeProgressStore()
+    _install_progress_store(monkeypatch, kodi_stubs.player, store)
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    item_meta = {'meta': {'name': 'Show'}}
+    kodi_stubs.player.play_direct(
+        {'url': 'https://example.com/a.mp4'}, 'series', 's1e2', item_meta=item_meta, video_id='s1e2',
+    )
+
+    assert store.get_progress_calls == [('series', 's1e2', 's1e2')]
+    assert store.now_playing['id'] == 's1e2'
+
+
+def test_movie_content_id_matches_sid_when_meta_id_mirrors_it(kodi_stubs, monkeypatch):
+    """A movie's own `item_meta['meta']['id']` (when a caller supplies
+    one, e.g. `lib.ui.infowindow`) is the SAME id as `sid` - the movie's
+    library id never has a separate show-vs-episode split, so the shared
+    `(meta.id or sid)` derivation is a no-op for movies: `id` stays
+    `sid`, `video_id` stays `None`, exactly as before this change."""
+    store = _FakeProgressStore()
+    _install_progress_store(monkeypatch, kodi_stubs.player, store)
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+
+    item_meta = {'meta': {'id': 'tt-movie', 'name': 'Movie'}}
+    kodi_stubs.player.play_direct(
+        {'url': 'https://example.com/a.mp4'}, 'movie', 'tt-movie', item_meta=item_meta,
+    )
+
+    assert store.get_progress_calls == [('movie', 'tt-movie', None)]
+    assert store.now_playing['id'] == 'tt-movie'
+    assert store.now_playing['video_id'] is None
 
 
 # --- resume prompt: 1%-95% band, resume_ask setting, yes/no -----------------
@@ -1539,7 +1652,7 @@ def test_store_construction_failure_is_logged_and_never_blocks_playback(kodi_stu
     def _raise(*_a, **_k):
         raise OSError('disk full')
 
-    monkeypatch.setattr(kodi_stubs.player, 'Store', _raise)
+    monkeypatch.setattr(kodi_stubs.player, 'get_store', _raise)
     _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
 
     result = kodi_stubs.player.play_direct({'url': 'https://example.com/a.mp4'}, 'movie', 'tt14')
@@ -1566,3 +1679,34 @@ def test_get_progress_exception_is_logged_and_resume_skipped_without_blocking_pl
     assert result is True
     assert kodi_stubs.env.dialog_yesno_prompts == []
     assert store.now_playing['id'] == 'tt15'  # now-playing recording still succeeds
+
+
+# --- lib.ui.playbackmeta: pure filename/MIME helpers, tested directly ------
+# (no kodi_stubs needed - playbackmeta.py has no xbmc dependency)
+
+
+def test_mime_for_known_extension_returns_mimetype():
+    assert playbackmeta.mime_for('Movie.2020.mkv') == 'video/x-matroska'
+
+
+def test_mime_for_unknown_or_absent_extension_returns_none():
+    assert playbackmeta.mime_for('Movie.2020.xyz') is None
+    assert playbackmeta.mime_for('') is None
+    assert playbackmeta.mime_for(None) is None
+
+
+def test_filename_from_url_strips_headers_and_query_string():
+    url = 'http://server/x/0/Movie.mkv?token=1|User-Agent=test'
+    assert playbackmeta.filename_from_url(url) == 'Movie.mkv'
+
+
+def test_extract_file_name_returns_name_at_index():
+    stats = {'files': [{'name': 'a.mkv'}, {'name': 'b.mkv'}]}
+    assert playbackmeta.extract_file_name(stats, 1) == 'b.mkv'
+
+
+def test_extract_file_name_out_of_range_or_malformed_returns_none():
+    assert playbackmeta.extract_file_name({'files': [{'name': 'a.mkv'}]}, 5) is None
+    assert playbackmeta.extract_file_name({'files': 'not-a-list'}, 0) is None
+    assert playbackmeta.extract_file_name({}, 0) is None
+    assert playbackmeta.extract_file_name(None, 0) is None

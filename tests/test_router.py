@@ -5,11 +5,10 @@ tests/kodistubs (no real Kodi runtime, no network, no subprocess).
 router.py only imports xbmc/xbmcgui/xbmcplugin (and lib.ui.player/views)
 lazily inside run()/_download_server_binary()/_fail_gracefully() - never at
 module scope - so a bare `import lib.ui.router` needs no stubs at all for
-the pure helpers (_parse_params/url_for/encode_stream/decode_stream).
-`load_router` still reloads it fresh per call (via
-tests.kodistubs.install_kodi_stubs, reloading lib.ui.compat/lib.ui.router)
-so every test starts from router's declared ADDON_HANDLE=-1/BASE_URL=''
-module globals with no cross-test leakage.
+its own pure helper (_parse_params). The actual URL-building/stream-token
+logic (url_for/encode_stream/decode_stream) lives in lib.ui.urlutil, which
+has no Kodi dependency at all and is exercised directly below, without
+load_router().
 
 For run() dispatch, router.run() resolves `from lib.ui import player,
 views` via a plain getattr() on the already-imported `lib.ui` package
@@ -32,6 +31,7 @@ import pytest
 
 import lib.advancedsettings as advancedsettings
 import lib.serverbin as serverbin
+from lib.ui import urlutil
 from tests.kodistubs import FakeListItem, install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = ('lib.ui.compat', 'lib.ui.router')
@@ -142,34 +142,29 @@ def test_parse_params(load_router, raw_qs, expected):
 
 
 # ---------------------------------------------------------------------------
-# url_for
+# url_for / encode_stream / decode_stream (lib.ui.urlutil - pure, no Kodi
+# dependency, no router/dispatch state)
 # ---------------------------------------------------------------------------
 
 
-def test_url_for_builds_plugin_url_with_action_and_params(load_router):
-    ctx = load_router()
-    ctx.router.BASE_URL = 'plugin://plugin.video.rivulet/'
-
-    url = ctx.router.url_for('meta', type='movie', id='tt123')
+def test_url_for_builds_plugin_url_with_action_and_params():
+    url = urlutil.url_for('plugin://plugin.video.rivulet/', 'meta', type='movie', id='tt123')
 
     assert url.startswith('plugin://plugin.video.rivulet/?')
     assert parse_qsl(urlparse(url).query) == [('action', 'meta'), ('type', 'movie'), ('id', 'tt123')]
 
 
-def test_url_for_drops_none_and_empty_string_params(load_router):
-    ctx = load_router()
-    ctx.router.BASE_URL = 'plugin://plugin.video.rivulet/'
-
-    url = ctx.router.url_for('search', q=None, extra='')
+def test_url_for_drops_none_and_empty_string_params():
+    url = urlutil.url_for('plugin://plugin.video.rivulet/', 'search', q=None, extra='')
 
     assert parse_qsl(urlparse(url).query) == [('action', 'search')]
 
 
-def test_url_for_preserves_kwarg_call_order_after_action(load_router):
-    ctx = load_router()
-    ctx.router.BASE_URL = 'plugin://plugin.video.rivulet/'
-
-    url = ctx.router.url_for('catalog', extra='skip=2', id='tt1', type='movie', transport='http://x/m.json')
+def test_url_for_preserves_kwarg_call_order_after_action():
+    url = urlutil.url_for(
+        'plugin://plugin.video.rivulet/', 'catalog',
+        extra='skip=2', id='tt1', type='movie', transport='http://x/m.json',
+    )
 
     assert parse_qsl(urlparse(url).query) == [
         ('action', 'catalog'),
@@ -182,18 +177,13 @@ def test_url_for_preserves_kwarg_call_order_after_action(load_router):
 
 def test_url_for_round_trips_special_characters_through_parse_params(load_router):
     ctx = load_router()
-    ctx.router.BASE_URL = 'plugin://plugin.video.rivulet/'
     tricky_id = 'Bad & Ugly: 2024 \u00dcn\u00efcode?/#'
 
-    url = ctx.router.url_for('meta', type='movie', id=tricky_id)
+    url = urlutil.url_for('plugin://plugin.video.rivulet/', 'meta', type='movie', id=tricky_id)
     query_string = urlparse(url).query
 
     assert ctx.router._parse_params(query_string) == {'action': 'meta', 'type': 'movie', 'id': tricky_id}
 
-
-# ---------------------------------------------------------------------------
-# encode_stream / decode_stream
-# ---------------------------------------------------------------------------
 
 STREAM_SAMPLE = {
     'name': 'Stream4Me \U0001f3ac',
@@ -211,51 +201,43 @@ STREAM_SAMPLE = {
 STREAM_WITH_PLUS_AND_SLASH_BYTES = {'infoHash': 'o/b>K1JtP($ 7?A#> t)Zmj(UMX51h', 'n': 3}
 
 
-def test_encode_decode_stream_round_trips_unicode_and_nested_dict(load_router):
-    ctx = load_router()
-    token = ctx.router.encode_stream(STREAM_SAMPLE)
-    assert ctx.router.decode_stream(token) == STREAM_SAMPLE
+def test_encode_decode_stream_round_trips_unicode_and_nested_dict():
+    token = urlutil.encode_stream(STREAM_SAMPLE)
+    assert urlutil.decode_stream(token) == STREAM_SAMPLE
 
 
-def test_encode_stream_none_and_empty_dict_are_equivalent(load_router):
-    ctx = load_router()
-    assert ctx.router.decode_stream(ctx.router.encode_stream(None)) == {}
-    assert ctx.router.decode_stream(ctx.router.encode_stream({})) == {}
+def test_encode_stream_none_and_empty_dict_are_equivalent():
+    assert urlutil.decode_stream(urlutil.encode_stream(None)) == {}
+    assert urlutil.decode_stream(urlutil.encode_stream({})) == {}
 
 
-def test_decode_stream_empty_or_missing_token_returns_empty_dict(load_router):
-    ctx = load_router()
-    assert ctx.router.decode_stream('') == {}
-    assert ctx.router.decode_stream(None) == {}
+def test_decode_stream_empty_or_missing_token_returns_empty_dict():
+    assert urlutil.decode_stream('') == {}
+    assert urlutil.decode_stream(None) == {}
 
 
-def test_decode_stream_garbage_base64_returns_empty_dict(load_router):
-    ctx = load_router()
-    assert ctx.router.decode_stream('!!!not-valid-base64!!!') == {}
+def test_decode_stream_garbage_base64_returns_empty_dict():
+    assert urlutil.decode_stream('!!!not-valid-base64!!!') == {}
 
 
-def test_decode_stream_valid_base64_invalid_utf8_returns_empty_dict(load_router):
-    ctx = load_router()
+def test_decode_stream_valid_base64_invalid_utf8_returns_empty_dict():
     token = base64.urlsafe_b64encode(b'\xff\xfe\xfd').decode('ascii')
-    assert ctx.router.decode_stream(token) == {}
+    assert urlutil.decode_stream(token) == {}
 
 
-def test_decode_stream_valid_base64_non_json_returns_empty_dict(load_router):
-    ctx = load_router()
+def test_decode_stream_valid_base64_non_json_returns_empty_dict():
     token = base64.urlsafe_b64encode(b'not json at all').decode('ascii')
-    assert ctx.router.decode_stream(token) == {}
+    assert urlutil.decode_stream(token) == {}
 
 
-def test_encode_stream_uses_urlsafe_alphabet_for_plus_slash_producing_payload(load_router):
-    ctx = load_router()
-
-    token = ctx.router.encode_stream(STREAM_WITH_PLUS_AND_SLASH_BYTES)
+def test_encode_stream_uses_urlsafe_alphabet_for_plus_slash_producing_payload():
+    token = urlutil.encode_stream(STREAM_WITH_PLUS_AND_SLASH_BYTES)
 
     assert '+' not in token
     assert '/' not in token
     assert '-' in token
     assert '_' in token
-    assert ctx.router.decode_stream(token) == STREAM_WITH_PLUS_AND_SLASH_BYTES
+    assert urlutil.decode_stream(token) == STREAM_WITH_PLUS_AND_SLASH_BYTES
 
 
 # ---------------------------------------------------------------------------
@@ -382,7 +364,7 @@ def test_run_play_decodes_stream_and_calls_player(load_router, monkeypatch):
         'infoHash': 'deadbeef' * 5,
         'behaviorHints': {'bingeGroup': 'x'},
     }
-    token = ctx.router.encode_stream(stream)
+    token = urlutil.encode_stream(stream)
     query = urlencode({'action': 'play', 'stream': token, 'type': 'movie', 'id': 'tt1'})
     monkeypatch.setattr(sys, 'argv', ['plugin://plugin.video.rivulet/', '9', '?' + query])
 
@@ -437,7 +419,7 @@ def test_run_handler_exception_on_play_resolves_url_as_failed(load_router, monke
         raise RuntimeError('boom')
 
     ctx.player.play = _raise
-    token = ctx.router.encode_stream({})
+    token = urlutil.encode_stream({})
     query = urlencode({'action': 'play', 'stream': token, 'type': 'movie', 'id': 'tt1'})
     monkeypatch.setattr(sys, 'argv', ['plugin://x/', '5', '?' + query])
 

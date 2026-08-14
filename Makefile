@@ -1,32 +1,42 @@
 .PHONY: venv test cov random parallel lint format typecheck check
 
-# Assumes .venv may already be active; targets call plain pytest/ruff/mypy so
-# they work the same whether invoked inside or outside the venv shell.
-PYTHON ?= python3
+# PYTHON auto-selects .venv/bin/python when a venv exists (created by the
+# `venv` target below or manually), else falls back to plain `python3` -
+# so `make check`/`make test`/... work whether or not the venv is active.
+# SYSTEM_PYTHON is the interpreter used to CREATE the venv, kept separate
+# so it never gets shadowed by an already-selected venv PYTHON. VENV is
+# the venv directory, overridable (e.g. `make venv VENV=.venv-3.8`).
+SYSTEM_PYTHON ?= python3
+VENV ?= .venv
+ifeq ($(wildcard $(VENV)/bin/python),)
+PYTHON := $(SYSTEM_PYTHON)
+else
+PYTHON := $(VENV)/bin/python
+endif
 
 venv:
-	$(PYTHON) -m venv .venv
-	.venv/bin/python -m pip install -r requirements-dev.txt
+	$(SYSTEM_PYTHON) -m venv $(VENV)
+	$(VENV)/bin/python -m pip install -r requirements-dev.txt
 
 test:
-	pytest tests/
+	$(PYTHON) -m pytest tests/
 
 cov:
-	pytest tests/ --cov=lib --cov-report=term-missing
+	$(PYTHON) -m pytest tests/ --cov --cov-report=term-missing
 
 random:
-	pytest tests/ -p randomly
+	$(PYTHON) -m pytest tests/ -p randomly
 
 parallel:
-	pytest tests/ -n auto
+	$(PYTHON) -m pytest tests/ -n auto
 
 lint:
-	ruff check lib tests
+	$(PYTHON) -m ruff check lib tests
 
 format:
-	ruff format lib tests
+	$(PYTHON) -m ruff format lib tests
 
 typecheck:
-	mypy
+	$(PYTHON) -m mypy
 
 check: lint typecheck test
