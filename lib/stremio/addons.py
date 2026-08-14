@@ -15,7 +15,6 @@ validate_transport_url, safe_url_for_log) - stay importable, and cheap to
 import, even where `requests` is missing; only constructing/using an
 AddonClient actually needs it.
 """
-import ipaddress
 from urllib.parse import quote, urlsplit, urlunsplit
 
 #: `requests` costs ~35ms and ~200 transitive modules to import - resolved
@@ -166,7 +165,14 @@ def _is_local_host(hostname):
     """Whether (lowercased) `hostname` is safe for plaintext HTTP: the
     literal name "localhost", or an IP literal that's loopback, private
     (RFC 1918/4193), or link-local (RFC 3927/4291) - local addon
-    development, never a plaintext request to a public host."""
+    development, never a plaintext request to a public host.
+
+    `ipaddress` is imported here rather than at module scope: it costs
+    ~0.8ms to import and this module is pulled in by every navigation
+    for its pure helpers (`addon_supports`, `iter_catalogs`), while this
+    function is only reached when validating a plaintext-`http` URL."""
+    import ipaddress
+
     if hostname == 'localhost':
         return True
     try:
