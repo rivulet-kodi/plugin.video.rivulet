@@ -45,18 +45,20 @@ class _FakeStore:
 
 @pytest.fixture
 def load_catalogpicker():
-    """Factory fixture: `load_catalogpicker(addon_info=None)` installs fresh
-    stubs (via tests.kodistubs.install_kodi_stubs) reloading lib.ui.compat/
-    lib.ui.uicommon/lib.ui.router/lib.ui.views/lib.ui.infowindow/
-    lib.ui.catalogpicker, and returns a namespace with `.catalogpicker`,
-    `.compat`, `.router`, `.views`, `.infowindow`, and `.env`. Every call is
-    torn down automatically, in reverse order, at test end.
+    """Factory fixture: `load_catalogpicker(addon_info=None, dialog_inputs=None)`
+    installs fresh stubs (via tests.kodistubs.install_kodi_stubs) reloading
+    lib.ui.compat/lib.ui.uicommon/lib.ui.router/lib.ui.views/
+    lib.ui.infowindow/lib.ui.catalogpicker, and returns a namespace with
+    `.catalogpicker`, `.compat`, `.router`, `.views`, `.infowindow`, and
+    `.env`. Every call is torn down automatically, in reverse order, at
+    test end.
     """
     with contextlib.ExitStack() as stack:
-        def _load(addon_info=None):
+        def _load(addon_info=None, dialog_inputs=None):
             return stack.enter_context(install_kodi_stubs(
                 reload=_RELOAD_MODULE_NAMES,
                 addon_info=addon_info,
+                dialog_inputs=dialog_inputs,
             ))
 
         yield _load
@@ -172,7 +174,7 @@ def test_open_catalog_addon_error_is_logged_and_does_not_close(load_catalogpicke
     ctx = load_catalogpicker()
     win = _make_window(ctx.catalogpicker)
 
-    def _raise(transport, ctype, cid):
+    def _raise(transport, ctype, cid, extra=None):
         raise AddonError('upstream down')
 
     monkeypatch.setattr(ctx.views, '_fetch_catalog', _raise)
@@ -182,6 +184,7 @@ def test_open_catalog_addon_error_is_logged_and_does_not_close(load_catalogpicke
     assert win.should_close_caller is False
     assert win.closed is False
     assert ctx.env.executed_builtins == []
+    assert ctx.env.notifications == [('Rivulet', 'STR30032', 'info', 4000)]
 
 
 def test_open_catalog_addon_error_log_never_leaks_credentials_path_or_query(load_catalogpicker, monkeypatch):
@@ -190,7 +193,7 @@ def test_open_catalog_addon_error_log_never_leaks_credentials_path_or_query(load
     win = _make_window(ctx.catalogpicker)
     secret_transport = 'https://user:hunter2@evil.example:8443/private/path/manifest.json?token=abc123'
 
-    def _raise(transport, ctype, cid):
+    def _raise(transport, ctype, cid, extra=None):
         raise AddonError('GET %s failed: bad request' % transport)
 
     monkeypatch.setattr(ctx.views, '_fetch_catalog', _raise)
@@ -209,20 +212,21 @@ def test_open_catalog_addon_error_log_never_leaks_credentials_path_or_query(load
 def test_open_catalog_empty_results_does_not_close_or_fallback(load_catalogpicker, monkeypatch):
     ctx = load_catalogpicker()
     win = _make_window(ctx.catalogpicker)
-    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid: [])
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: [])
 
     win._open_catalog('https://a.example/manifest.json', {'type': 'movie', 'id': 'top'})
 
     assert win.should_close_caller is False
     assert win.closed is False
     assert ctx.env.executed_builtins == []
+    assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
 
 
 def test_open_catalog_no_selection_does_not_fallback_or_close(load_catalogpicker, monkeypatch):
     ctx = load_catalogpicker()
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'movie'}]
-    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid: metas)
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: None)
 
     win._open_catalog('https://a.example/manifest.json', {'type': 'movie', 'id': 'top'})
@@ -238,7 +242,7 @@ def test_open_catalog_with_selection_opens_detail_and_closes_when_playback_start
     ctx = load_catalogpicker()
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'series'}]
-    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid: metas)
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
     captured = {}
 
@@ -261,7 +265,7 @@ def test_open_catalog_with_selection_does_not_close_when_detail_returns_false(
     ctx = load_catalogpicker()
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'series'}]
-    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid: metas)
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
     monkeypatch.setattr(ctx.detailwindow, 'open_detail', lambda stype, sid: False)
 
@@ -277,7 +281,7 @@ def test_open_catalog_selected_meta_without_type_falls_back_to_the_catalogs_own_
     ctx = load_catalogpicker()
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt2', 'name': 'Two'}]  # no 'type' key on the selected meta
-    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid: metas)
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
     captured = {}
 
@@ -296,7 +300,7 @@ def test_open_catalog_fetch_shows_and_closes_the_busy_dialog(load_catalogpicker,
     ctx = load_catalogpicker()
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'series'}]
-    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid: metas)
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: None)
 
     win._open_catalog('https://a.example/manifest.json', {'type': 'movie', 'id': 'top'})
@@ -309,7 +313,7 @@ def test_open_catalog_closes_busy_dialog_before_opening_coverflow(load_catalogpi
     ctx = load_catalogpicker()
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'series'}]
-    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid: metas)
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
     captured = {}
 
     def fake_open_showcase(m):
@@ -327,7 +331,7 @@ def test_open_catalog_addon_error_still_closes_the_busy_dialog(load_catalogpicke
     ctx = load_catalogpicker()
     win = _make_window(ctx.catalogpicker)
 
-    def _raise(transport, ctype, cid):
+    def _raise(transport, ctype, cid, extra=None):
         raise AddonError('upstream down')
 
     monkeypatch.setattr(ctx.views, '_fetch_catalog', _raise)
@@ -370,7 +374,7 @@ def test_start_with_catalogs_calls_domodal_and_returns_should_close_caller(load_
     win = _make_window(picker)
     catalogs = [('https://a.example/manifest.json', {'name': 'A'}, {'id': 'top', 'type': 'movie'})]
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'movie'}]
-    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid: metas)
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
     monkeypatch.setattr(ctx.detailwindow, 'open_detail', lambda stype, sid: True)
 
@@ -473,3 +477,292 @@ def test_open_catalog_picker_window_is_closed_exactly_once_when_start_raises(
     assert win.close_calls == 1
     assert win.closed is True
     assert ctx.env.notifications == [('Rivulet', 'STR30032', 'info', 4000)]
+
+
+# ---------------------------------------------------------------------------
+# Required-extra classification: search-only / genre-required / unreachable
+# ---------------------------------------------------------------------------
+
+
+_SEARCH_CATALOG = {
+    'id': 'tmdb.search', 'type': 'movie', 'name': 'Search',
+    'extra': [{'name': 'search', 'isRequired': True}],
+}
+_GENRE_REQUIRED_CATALOG = {
+    'id': 'year', 'type': 'movie', 'name': 'New',
+    'extra': [{'name': 'genre', 'isRequired': True, 'options': ['2026', '2025']}],
+}
+_GENRE_OPTIONAL_CATALOG = {
+    'id': 'top', 'type': 'movie', 'name': 'Popular',
+    'extra': [{'name': 'genre', 'options': ['Action', 'Comedy']}],
+}
+_UNSUPPORTED_CATALOG = {
+    'id': 'last-videos', 'type': 'series', 'name': 'Continue Watching',
+    'extraRequired': ['lastVideosIds'],
+}
+
+
+def test_oninit_marks_search_only_catalog_rows_in_label2(load_catalogpicker):
+    ctx = load_catalogpicker()
+    picker = ctx.catalogpicker
+    win = _make_window(picker)
+    win.catalogs = [
+        ('https://a.example/manifest.json', {'name': 'Addon A'}, _SEARCH_CATALOG),
+        ('https://b.example/manifest.json', {'name': 'Addon B'}, _GENRE_OPTIONAL_CATALOG),
+    ]
+
+    win.onInit()
+
+    items = win.getControl(picker.LIST).items
+    assert items[0].label2 == 'Addon A \u00b7 movie \u00b7 STR30199'
+    assert items[1].label2 == 'Addon B \u00b7 movie'
+
+
+def test_open_catalog_search_only_prompts_and_fetches_with_search_extra(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker(dialog_inputs=['batman'])
+    win = _make_window(ctx.catalogpicker)
+    captured = {}
+
+    def fake_fetch(transport, ctype, cid, extra=None):
+        captured['extra'] = extra
+        return []
+
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', fake_fetch)
+
+    win._open_catalog('https://a.example/manifest.json', _SEARCH_CATALOG)
+
+    assert ctx.env.dialog_input_prompts == ['STR30001']
+    assert captured['extra'] == [('search', 'batman')]
+
+
+def test_open_catalog_search_only_cancelled_prompt_fetches_nothing(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker(dialog_inputs=[''])
+    win = _make_window(ctx.catalogpicker)
+    calls = []
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda *a, **k: calls.append((a, k)))
+
+    win._open_catalog('https://a.example/manifest.json', _SEARCH_CATALOG)
+
+    assert calls == []
+    assert ctx.env.notifications == []
+
+
+def test_open_catalog_normal_catalog_click_does_not_prompt(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker()
+    win = _make_window(ctx.catalogpicker)
+    captured = {}
+
+    def fake_fetch(transport, ctype, cid, extra=None):
+        captured['extra'] = extra
+        return []
+
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', fake_fetch)
+
+    win._open_catalog('https://a.example/manifest.json', _GENRE_OPTIONAL_CATALOG)
+
+    assert ctx.env.dialog_input_prompts == []
+    assert captured['extra'] is None
+
+
+def test_open_catalog_genre_required_opens_select_with_no_all_entry(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker()
+    import xbmcgui
+    win = _make_window(ctx.catalogpicker)
+    captured = {}
+
+    def fake_select(self, heading, options):
+        captured['select'] = (heading, options)
+        return 1
+
+    monkeypatch.setattr(xbmcgui.Dialog, 'select', fake_select, raising=False)
+
+    def fake_fetch(transport, ctype, cid, extra=None):
+        captured['extra'] = extra
+        return []
+
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', fake_fetch)
+
+    win._open_catalog('https://a.example/manifest.json', _GENRE_REQUIRED_CATALOG)
+
+    assert captured['select'] == ('STR30194', ['2026', '2025'])
+    assert captured['extra'] == [('genre', '2025')]
+
+
+def test_open_catalog_genre_required_cancelled_select_fetches_nothing(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker()
+    import xbmcgui
+    win = _make_window(ctx.catalogpicker)
+    monkeypatch.setattr(xbmcgui.Dialog, 'select', lambda self, heading, options: -1, raising=False)
+    calls = []
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda *a, **k: calls.append((a, k)))
+
+    win._open_catalog('https://a.example/manifest.json', _GENRE_REQUIRED_CATALOG)
+
+    assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# ACTION_CONTEXT_MENU (117) - the year/genre filter row
+# ---------------------------------------------------------------------------
+
+
+def test_onaction_context_menu_opens_select_with_all_first_then_declared_options(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker()
+    import xbmcgui
+    picker = ctx.catalogpicker
+    win = _make_window(picker)
+    win.catalogs = [('https://a.example/manifest.json', {'name': 'A'}, _GENRE_OPTIONAL_CATALOG)]
+    win.onInit()
+    win.getControl(picker.LIST).selected_index = 0
+    win.setFocusId(picker.LIST)
+    captured = {}
+
+    def fake_select(self, heading, options):
+        captured['select'] = (heading, options)
+        return -1
+
+    monkeypatch.setattr(xbmcgui.Dialog, 'select', fake_select, raising=False)
+
+    win.onAction(xbmcgui.Action(picker._CONTEXT_MENU_ACTION))
+
+    assert captured['select'] == ('STR30194', ['STR30198', 'Action', 'Comedy'])
+
+
+def test_onaction_context_menu_all_fetches_with_no_extra(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker()
+    import xbmcgui
+    picker = ctx.catalogpicker
+    win = _make_window(picker)
+    win.catalogs = [('https://a.example/manifest.json', {'name': 'A'}, _GENRE_OPTIONAL_CATALOG)]
+    win.onInit()
+    win.getControl(picker.LIST).selected_index = 0
+    win.setFocusId(picker.LIST)
+    monkeypatch.setattr(xbmcgui.Dialog, 'select', lambda self, heading, options: 0, raising=False)
+    captured = {}
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda t, c, i, extra=None: captured.setdefault('extra', extra) or [])
+
+    win.onAction(xbmcgui.Action(picker._CONTEXT_MENU_ACTION))
+
+    assert captured['extra'] is None
+
+
+def test_onaction_context_menu_option_fetches_with_genre_extra(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker()
+    import xbmcgui
+    picker = ctx.catalogpicker
+    win = _make_window(picker)
+    win.catalogs = [('https://a.example/manifest.json', {'name': 'A'}, _GENRE_OPTIONAL_CATALOG)]
+    win.onInit()
+    win.getControl(picker.LIST).selected_index = 0
+    win.setFocusId(picker.LIST)
+    monkeypatch.setattr(xbmcgui.Dialog, 'select', lambda self, heading, options: 2, raising=False)  # index 2 -> options[1] 'Comedy'
+    captured = {}
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda t, c, i, extra=None: captured.setdefault('extra', extra) or [])
+
+    win.onAction(xbmcgui.Action(picker._CONTEXT_MENU_ACTION))
+
+    assert captured['extra'] == [('genre', 'Comedy')]
+
+
+def test_onaction_context_menu_cancelled_select_fetches_nothing(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker()
+    import xbmcgui
+    picker = ctx.catalogpicker
+    win = _make_window(picker)
+    win.catalogs = [('https://a.example/manifest.json', {'name': 'A'}, _GENRE_OPTIONAL_CATALOG)]
+    win.onInit()
+    win.getControl(picker.LIST).selected_index = 0
+    win.setFocusId(picker.LIST)
+    monkeypatch.setattr(xbmcgui.Dialog, 'select', lambda self, heading, options: -1, raising=False)
+    calls = []
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda *a, **k: calls.append((a, k)))
+
+    win.onAction(xbmcgui.Action(picker._CONTEXT_MENU_ACTION))
+
+    assert calls == []
+
+
+def test_onaction_context_menu_notifies_when_catalog_has_no_genre_options(load_catalogpicker):
+    ctx = load_catalogpicker()
+    import xbmcgui
+    picker = ctx.catalogpicker
+    win = _make_window(picker)
+    win.catalogs = [('https://a.example/manifest.json', {'name': 'A'}, {'id': 'top', 'type': 'movie'})]
+    win.onInit()
+    win.getControl(picker.LIST).selected_index = 0
+    win.setFocusId(picker.LIST)
+
+    win.onAction(xbmcgui.Action(picker._CONTEXT_MENU_ACTION))
+
+    assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
+
+
+@pytest.mark.parametrize('action_id', [9, 10, 92], ids=['nav-back', 'previous-menu', 'backspace'])
+def test_onaction_back_actions_still_close_through_the_new_onaction(load_catalogpicker, action_id):
+    ctx = load_catalogpicker()
+    import xbmcgui
+    picker = ctx.catalogpicker
+    win = _make_window(picker)
+    win.catalogs = [('https://a.example/manifest.json', {'name': 'A'}, _GENRE_OPTIONAL_CATALOG)]
+    win.onInit()
+
+    win.onAction(xbmcgui.Action(action_id))
+
+    assert win.closed is True
+
+
+# ---------------------------------------------------------------------------
+# open_catalog_picker() - dropping permanently-unreachable catalogs
+# ---------------------------------------------------------------------------
+
+
+def test_open_catalog_picker_omits_and_logs_catalogs_requiring_unsupportable_extras(
+    load_catalogpicker, monkeypatch,
+):
+    ctx = load_catalogpicker(addon_info={'path': '/addon/path'})
+    import xbmc
+    descriptor = {
+        'transportUrl': 'https://a.example/manifest.json',
+        'manifest': {'name': 'Addon A', 'catalogs': [_UNSUPPORTED_CATALOG, {'id': 'top', 'type': 'movie'}]},
+    }
+    monkeypatch.setattr(ctx.catalogpicker, 'get_store', lambda: _FakeStore(addons=[descriptor]))
+    captured = {}
+
+    class RecordingWindow(ctx.catalogpicker.CatalogPickerWindow):
+        def start(self, catalogs):
+            captured['catalogs'] = catalogs
+            return True
+
+    monkeypatch.setattr(ctx.catalogpicker, 'CatalogPickerWindow', RecordingWindow)
+
+    result = ctx.catalogpicker.open_catalog_picker()
+
+    assert result is True
+    assert [cat.get('id') for _t, _m, cat in captured['catalogs']] == ['top']
+    info_msgs = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGINFO]
+    assert any('last-videos' in msg or 'Continue Watching' in msg for msg in info_msgs)
+
+
+def test_open_catalog_picker_omits_genre_required_catalog_with_no_declared_options(
+    load_catalogpicker, monkeypatch,
+):
+    ctx = load_catalogpicker(addon_info={'path': '/addon/path'})
+    no_options_genre_catalog = {'id': 'year', 'type': 'movie', 'name': 'New', 'extra': [{'name': 'genre', 'isRequired': True}]}
+    descriptor = {
+        'transportUrl': 'https://a.example/manifest.json',
+        'manifest': {'name': 'Addon A', 'catalogs': [no_options_genre_catalog, {'id': 'top', 'type': 'movie'}]},
+    }
+    monkeypatch.setattr(ctx.catalogpicker, 'get_store', lambda: _FakeStore(addons=[descriptor]))
+    captured = {}
+
+    class RecordingWindow(ctx.catalogpicker.CatalogPickerWindow):
+        def start(self, catalogs):
+            captured['catalogs'] = catalogs
+            return True
+
+    monkeypatch.setattr(ctx.catalogpicker, 'CatalogPickerWindow', RecordingWindow)
+
+    result = ctx.catalogpicker.open_catalog_picker()
+
+    assert result is True
+    assert [cat.get('id') for _t, _m, cat in captured['catalogs']] == ['top']

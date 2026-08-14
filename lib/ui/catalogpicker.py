@@ -6,11 +6,76 @@ that catalog's items; picking a TITLE from the coverflow opens
 """
 import xbmcgui
 
-from lib.stremio.addons import AddonError, safe_url_for_log
+from lib.stremio.addons import (
+    AddonError,
+    catalog_extra_options,
+    catalog_required_extra_names,
+    safe_url_for_log,
+)
 from lib.ui.dependencies import get_store
-from lib.ui.uicommon import BaseWindow, busy_dialog, open_window
+from lib.ui.uicommon import BACK_ACTIONS, BaseWindow, busy_dialog, open_window
 
 LIST = 30002
+
+#: ACTION_CONTEXT_MENU ("C"/menu button) - the secondary affordance for
+#: browsing a catalog's declared genre/year options, mirroring
+#: detailwindow's `_SEASON_NAV_ACTIONS`/infowindow's `_INFO_ACTION`.
+_CONTEXT_MENU_ACTION = 117
+
+
+def _classify_catalog(catalog):
+    """How `catalog` must be opened, from its REQUIRED extras
+    (`catalog_required_extra_names()`) minus `skip` (always satisfiable -
+    it is paging, never a precondition to open):
+
+    - 'search': requires `search` - prompt for a query on click.
+    - 'genre': requires `genre` - the option select must open FIRST,
+      with no unfiltered choice (a compliant client always supplies one -
+      see Cinemeta's `movie/year`/`series/year`, display name "New").
+    - 'open': no required extra the UI cannot supply - browses normally.
+    - None: requires something else the UI cannot synthesise (e.g.
+      Cinemeta's `lastVideosIds`/`calendarVideosIds`, or any unknown
+      required name) - permanently unreachable, caller drops the row.
+
+    `search` takes precedence over `genre` if a catalog somehow requires
+    both."""
+    required = catalog_required_extra_names(catalog) - {'skip'}
+    if 'search' in required:
+        return 'search'
+    if 'genre' in required:
+        return 'genre'
+    if required:
+        return None
+    return 'open'
+
+
+def _reachable_catalogs(catalogs):
+    """Drop every catalog `_classify_catalog()` marks permanently
+    unreachable (a required extra this UI cannot supply, e.g. Cinemeta's
+    `lastVideosIds`/`calendarVideosIds`) or genre-required with no
+    declared option values to choose from - logging each drop once at
+    INFO so a missing row is diagnosable, not mistaken for a missing
+    add-on."""
+    import xbmc
+
+    from lib.ui.compat import log
+
+    kept = []
+    for transport_url, manifest, catalog in catalogs:
+        kind = _classify_catalog(catalog)
+        if kind == 'genre' and not catalog_extra_options(catalog, 'genre'):
+            kind = None
+        if kind is None:
+            name = catalog.get('name') or catalog.get('id')
+            log(
+                'catalogpicker: skipping %s/%s (%s) - requires extras this UI cannot supply' % (
+                    safe_url_for_log(transport_url), catalog.get('type'), name,
+                ),
+                xbmc.LOGINFO,
+            )
+            continue
+        kept.append((transport_url, manifest, catalog))
+    return kept
 
 
 class CatalogPickerWindow(BaseWindow):
@@ -34,10 +99,15 @@ class CatalogPickerWindow(BaseWindow):
         return self.should_close_caller
 
     def _make_item(self, index, manifest, catalog):
+        from lib.ui.compat import L
+
         addon_name = manifest.get('name', '?')
         catalog_name = catalog.get('name') or catalog.get('id')
         catalog_type = catalog.get('type')
-        item = xbmcgui.ListItem(label=catalog_name, label2='%s \u00b7 %s' % (addon_name, catalog_type))
+        label2 = '%s \u00b7 %s' % (addon_name, catalog_type)
+        if _classify_catalog(catalog) == 'search':
+            label2 = '%s \u00b7 %s' % (label2, L(30199))
+        item = xbmcgui.ListItem(label=catalog_name, label2=label2)
         item.setProperty('position', str(index))
         return item
 
@@ -55,32 +125,96 @@ class CatalogPickerWindow(BaseWindow):
         control.addItems(items)
         self.setFocusId(LIST)
 
+    def _focused_catalog(self):
+        """The `(transport_url, manifest, catalog)` tuple under the LIST's
+        current selection, or None if nothing is focused - the
+        bounds-safe lookup `onClick()`/the context-menu handling share."""
+        focused = self.getControl(LIST).getSelectedItem()
+        if focused is None:
+            return None
+        return self.catalogs[int(focused.getProperty('position'))]
+
+    def onAction(self, action):
+        action_id = action.getId()
+        if action_id == _CONTEXT_MENU_ACTION and self.getFocusId() == LIST:
+            self._open_genre_filter()
+            return
+        if action_id in BACK_ACTIONS:
+            self.close()
+
     def onClick(self, control_id):
         if control_id != LIST:
             return
-        focused = self.getControl(LIST).getSelectedItem()
+        focused = self._focused_catalog()
         if focused is None:
             return
-        transport_url, _manifest, catalog = self.catalogs[int(focused.getProperty('position'))]
+        transport_url, _manifest, catalog = focused
         self._open_catalog(transport_url, catalog)
 
+    def _open_genre_filter(self):
+        """Context-menu (117) affordance: browse an optional-genre
+        catalog (e.g. Popular) filtered, or unfiltered via the "All"
+        entry. A catalog with no declared genre options has nothing to
+        filter by."""
+        from lib.ui.compat import L, notify
+
+        focused = self._focused_catalog()
+        if focused is None:
+            return
+        transport_url, _manifest, catalog = focused
+        options = catalog_extra_options(catalog, 'genre')
+        if not options:
+            notify(L(30030))
+            return
+        choice = xbmcgui.Dialog().select(L(30194), [L(30198)] + options)
+        if choice < 0:
+            return
+        if choice == 0:
+            self._fetch_and_show(transport_url, catalog)
+            return
+        self._fetch_and_show(transport_url, catalog, extra=[('genre', options[choice - 1])])
+
     def _open_catalog(self, transport_url, catalog):
+        kind = _classify_catalog(catalog)
+        if kind == 'search':
+            from lib.ui.compat import L
+            query = xbmcgui.Dialog().input(L(30001))
+            if not query:
+                return
+            self._fetch_and_show(transport_url, catalog, extra=[('search', query)])
+            return
+        if kind == 'genre':
+            # Required genre (e.g. Cinemeta's "New"/year catalog): no
+            # unfiltered choice - the select opens immediately, with no
+            # "All" entry, and a cancel just does nothing.
+            from lib.ui.compat import L
+            options = catalog_extra_options(catalog, 'genre')
+            choice = xbmcgui.Dialog().select(L(30194), options)
+            if choice < 0:
+                return
+            self._fetch_and_show(transport_url, catalog, extra=[('genre', options[choice])])
+            return
+        self._fetch_and_show(transport_url, catalog)
+
+    def _fetch_and_show(self, transport_url, catalog, extra=None):
         import xbmc
 
-        from lib.ui.compat import L, log
+        from lib.ui.compat import L, log, notify
         from lib.ui.views import _fetch_catalog
 
         ctype = catalog.get('type')
+        catalog_name = catalog.get('name') or catalog.get('id')
         try:
             with busy_dialog(L(30033)):
-                metas = _fetch_catalog(transport_url, ctype, catalog.get('id'))
+                metas = _fetch_catalog(transport_url, ctype, catalog.get('id'), extra=extra)
         except AddonError as exc:
             log('catalogpicker: %s failed: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGERROR)
+            notify(L(30032))
             return
         if not metas:
+            log('catalogpicker: %s (%s) returned no results' % (catalog_name, ctype), xbmc.LOGINFO)
+            notify(L(30030))
             return
-
-        from lib.ui.compat import notify
 
         log('catalogpicker: opening coverflow (%d results)' % len(metas), xbmc.LOGINFO)
         try:
@@ -108,7 +242,7 @@ def open_catalog_picker():
     from lib.stremio.addons import iter_catalogs
     from lib.ui.compat import L, log, notify
 
-    catalogs = list(iter_catalogs(get_store().get_addons()))
+    catalogs = _reachable_catalogs(list(iter_catalogs(get_store().get_addons())))
     if not catalogs:
         notify(L(30030))
         return False
