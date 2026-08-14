@@ -131,25 +131,30 @@ def _make_window(streamswindow_mod):
 # ---------------------------------------------------------------------------
 
 
-def test_oninit_builds_two_line_row_stripping_addon_from_line_one_into_label2(load_streamswindow):
+def test_oninit_multi_provider_row_shows_gray_addon_on_line1_and_details_on_line2(load_streamswindow):
     ctx = load_streamswindow()
     win = _make_window(ctx.streamswindow)
     info = {
         'resolution': '1080p', 'source': 'WEB-DL', 'codec': 'x265', 'hdr': ['HDR10'],
         'size_text': '2.1 GB', 'seeders': 42, 'addon': 'AddonA',
+        'audio': ['TrueHD', 'Atmos'], 'channels': '7.1', 'languages': ['EN', 'FR'],
+        'bitrate': '25.5 Mbps', 'release': ['Hybrid', 'P8'], 'group': 'FraMeSToR', 'tracker': '1337x',
     }
     # A second pair from a different addon keeps this a multi-provider
-    # case, so the single-provider label2 dedupe (see below) doesn't
-    # mask what this test is actually about: per-row label1/label2 text.
+    # case, so format_label() renders the gray addon segment on line 1
+    # instead of the single-provider 'via <addon>' info-panel dedupe
+    # (see below) masking what this test is actually about.
     win.pairs = [(info, {'url': 'https://a.example/a.mp4'}), ({'addon': 'AddonB'}, {})]
 
     win.onInit()
 
     item = win.getControl(ctx.streamswindow.LIST).items[0]
     assert item.getLabel() == (
-        '[COLOR lime]1080p[/COLOR] [B]WEB-DL[/B] x265 HDR10 \u00b7 2.1 GB \u00b7 \u25b242'
+        '[COLOR lime]1080p[/COLOR] [B]WEB-DL[/B] x265 HDR10 \u00b7 2.1 GB \u00b7 \u25b242 \u00b7 [COLOR gray]AddonA[/COLOR]'
     )
-    assert item.label2 == 'AddonA'
+    assert item.label2 == (
+        'TrueHD Atmos 7.1 \u00b7 EN / FR \u00b7 25.5 Mbps \u00b7 Hybrid P8 \u00b7 FraMeSToR \u00b7 1337x'
+    )
 
 
 def test_oninit_falls_back_to_raw_text_stripping_cr_and_lf_when_format_label_is_empty(load_streamswindow):
@@ -181,23 +186,37 @@ def test_oninit_falls_back_to_question_mark_when_no_label_material_is_available(
     assert item.label2 == ''
 
 
-def test_oninit_addon_only_info_falls_back_to_question_mark_on_line1_but_keeps_addon_on_line2(load_streamswindow):
+def test_oninit_addon_only_info_renders_the_gray_addon_segment_on_line1_with_empty_details_on_line2(
+    load_streamswindow,
+):
     ctx = load_streamswindow()
     win = _make_window(ctx.streamswindow)
-    # No resolution/source/codec/hdr/size_text/seeders -> format_label(...,
-    # include_addon=False) returns '' regardless of 'addon' being set, so
-    # line 1 falls back to '?' -- but the addon name still surfaces, on
-    # line 2, where the two-line row now dedicates it.
-    # A second pair from a different addon keeps this a multi-provider
-    # case, so the single-provider label2 dedupe (see below) doesn't
-    # mask what this test is actually about: per-row label1/label2 text.
+    # No resolution/source/codec/hdr/size_text/seeders -> format_label()'s
+    # head is empty, so with two distinct addons (include_addon=True) its
+    # only tail segment - the gray addon name - IS the whole line 1; line
+    # 2 has nothing to derive from an addon-only info dict.
     win.pairs = [({'addon': 'AddonA'}, {'url': 'https://a.example/a.mp4'}), ({'addon': 'AddonB'}, {})]
 
     win.onInit()
 
     item = win.getControl(ctx.streamswindow.LIST).items[0]
-    assert item.getLabel() == '?'
-    assert item.label2 == 'AddonA'
+    assert item.getLabel() == '[COLOR gray]AddonA[/COLOR]'
+    assert item.label2 == ''
+
+
+def test_oninit_scrubs_cr_lf_from_the_details_line(load_streamswindow, monkeypatch):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    # format_details() itself never emits CR/LF (see its own docstring/
+    # tests), but onInit() must scrub it defensively just like it already
+    # does for line 1 - stub it out to prove that independently.
+    monkeypatch.setattr(ctx.streamswindow.streaminfo, 'format_details', lambda info: 'TrueHD\r\nAtmos')
+    win.pairs = [({'raw': 'A'}, {})]
+
+    win.onInit()
+
+    item = win.getControl(ctx.streamswindow.LIST).items[0]
+    assert item.label2 == 'TrueHD  Atmos'
 
 
 def test_oninit_sets_position_property_in_pair_order_and_focuses_the_list(load_streamswindow):
@@ -291,8 +310,10 @@ def test_oninit_poster_panel_is_cleared_when_neither_art_nor_legacy_poster_is_su
 # ---------------------------------------------------------------------------
 # StreamsWindow.onInit() - info panel (INFO_PANEL/30008): year/runtime/
 # rating/genres built from `self.meta`, plus the single-provider dedupe
-# that blanks every row's label2 and appends a trailing 'via <addon>' line
-# once every pair came from the same addon.
+# that drops the addon segment from every row's line 1 (format_label's
+# include_addon=False) and appends a trailing 'via <addon>' line once
+# every pair came from the same addon. label2 is always
+# streaminfo.format_details(info), independent of that dedupe.
 # ---------------------------------------------------------------------------
 
 
@@ -314,7 +335,7 @@ def test_oninit_meta_renders_year_runtime_rating_and_genres_into_the_info_panel(
     )
 
 
-def test_oninit_single_provider_blanks_every_label2_and_appends_via_line(load_streamswindow):
+def test_oninit_single_provider_drops_addon_from_line1_and_appends_via_line(load_streamswindow):
     ctx = load_streamswindow()
     win = _make_window(ctx.streamswindow)
     win.meta = None
@@ -326,23 +347,42 @@ def test_oninit_single_provider_blanks_every_label2_and_appends_via_line(load_st
     win.onInit()
 
     items = win.getControl(ctx.streamswindow.LIST).items
+    # format_label(..., include_addon=False) has nothing else to render
+    # here, so line 1 falls back to 'raw' with no addon segment at all -
+    # the single-provider dedupe now lives in include_addon, not label2.
+    assert [item.getLabel() for item in items] == ['A', 'B']
     assert [item.label2 for item in items] == ['', '']
     assert win.getControl(ctx.streamswindow.INFO_PANEL).text == 'via AddonA'
 
 
-def test_oninit_multiple_providers_keep_label2_and_skip_the_via_line(load_streamswindow):
+def test_oninit_single_provider_still_shows_line2_details_when_known(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.meta = None
+    win.pairs = [({'addon': 'AddonA', 'raw': 'A', 'audio': ['DTS'], 'channels': '5.1'}, {})]
+
+    win.onInit()
+
+    item = win.getControl(ctx.streamswindow.LIST).items[0]
+    # The single-provider dedupe only ever touches the addon segment - it
+    # never blanks label2, which is always the re-derived details line.
+    assert item.label2 == 'DTS 5.1'
+    assert win.getControl(ctx.streamswindow.INFO_PANEL).text == 'via AddonA'
+
+
+def test_oninit_multiple_providers_show_details_on_line2_and_skip_the_via_line(load_streamswindow):
     ctx = load_streamswindow()
     win = _make_window(ctx.streamswindow)
     win.meta = {'runtime': '90 min'}
     win.pairs = [
-        ({'addon': 'AddonA', 'raw': 'A'}, {}),
-        ({'addon': 'AddonB', 'raw': 'B'}, {}),
+        ({'addon': 'AddonA', 'raw': 'A', 'audio': ['DTS'], 'channels': '5.1'}, {}),
+        ({'addon': 'AddonB', 'raw': 'B', 'languages': ['EN']}, {}),
     ]
 
     win.onInit()
 
     items = win.getControl(ctx.streamswindow.LIST).items
-    assert [item.label2 for item in items] == ['AddonA', 'AddonB']
+    assert [item.label2 for item in items] == ['DTS 5.1', 'EN']
     assert win.getControl(ctx.streamswindow.INFO_PANEL).text == '90 min'
 
 
@@ -359,7 +399,7 @@ def test_oninit_no_meta_and_multiple_providers_leaves_the_info_panel_empty(load_
 
     assert win.getControl(ctx.streamswindow.INFO_PANEL).text == ''
     items = win.getControl(ctx.streamswindow.LIST).items
-    assert [item.label2 for item in items] == ['AddonA', 'AddonB']
+    assert [item.label2 for item in items] == ['', '']
 
 # ---------------------------------------------------------------------------
 # StreamsWindow.onAction()
