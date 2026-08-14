@@ -5,8 +5,7 @@ plugin:// invocation as sys.argv. Bootstrap sys.path so the addon's own
 ``lib`` package is importable, then either open the custom HomeWindow
 (a bare invocation - clicking the addon - is Rivulet's own app UI now)
 or hand off to the router for every other action (context-menu
-RunPlugin callbacks, Settings buttons, ``play``, the still-classical
-``meta``/``videos``/``streams``/``library``/``addons`` directories, ...).
+RunPlugin callbacks, Settings buttons, ``play``, ...).
 """
 import os
 import sys
@@ -52,8 +51,9 @@ if _action == 'home':
         )
         # 'home_classical' is intentionally NOT a registered router action:
         # this is a FRESH plugin:// invocation (its own handle), and
-        # router.run()'s dispatch falls back to views.home() (the classical
-        # directory) for any unrecognized action - see router.run()'s
+        # router.run()'s dispatch falls back to views.home() - now a
+        # minimal recovery directory (notice + Settings row), not the
+        # classical home - for any unrecognized action; see router.run()'s
         # `dispatch.get(action, dispatch['home'])`. This handle was already
         # closed above, so recovery must go through a new invocation rather
         # than a second endOfDirectory() call on the same (spent) handle.

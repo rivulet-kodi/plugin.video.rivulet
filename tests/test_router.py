@@ -286,53 +286,8 @@ def test_decode_stream_valid_base64_deflate_garbage_returns_empty_dict():
 
 DISPATCH_CASES = [
     pytest.param({'action': 'home'}, ('home', (), {}), id='home'),
-    pytest.param({'action': 'discover'}, ('discover', (), {}), id='discover'),
-    pytest.param(
-        {'action': 'catalog', 'transport': 'http://x/manifest.json', 'type': 'movie', 'id': 'tt1', 'extra': 'skip=2'},
-        ('catalog', ('http://x/manifest.json', 'movie', 'tt1', 'skip=2'), {}),
-        id='catalog',
-    ),
-    pytest.param(
-        {'action': 'showcase', 'transport': 'http://x/manifest.json', 'type': 'movie', 'id': 'tt1', 'extra': 'skip=2'},
-        ('showcase', ('http://x/manifest.json', 'movie', 'tt1', 'skip=2'), {}),
-        id='showcase',
-    ),
-    pytest.param({'action': 'search'}, ('search', (None,), {}), id='search-no-query'),
-    pytest.param(
-        {'action': 'filters', 'transport': 'http://x/manifest.json', 'type': 'movie', 'id': 'year', 'extra': 'genre=1972'},
-        ('filters', ('http://x/manifest.json', 'movie', 'year', 'genre=1972'), {}),
-        id='filters',
-    ),
-    pytest.param(
-        {'action': 'people', 'type': 'movie', 'id': 'tt1'},
-        ('people', ('movie', 'tt1'), {}),
-        id='people',
-    ),
-    pytest.param(
-        {'action': 'meta', 'type': 'series', 'id': 'tt2'},
-        ('meta', ('series', 'tt2'), {}),
-        id='meta',
-    ),
-    pytest.param(
-        {'action': 'videos', 'type': 'series', 'id': 'tt2', 'season': '1'},
-        ('videos', ('series', 'tt2', '1'), {}),
-        id='videos',
-    ),
-    pytest.param(
-        {'action': 'streams', 'type': 'movie', 'id': 'tt1'},
-        ('streams', ('movie', 'tt1'), {}),
-        id='streams',
-    ),
-    pytest.param({'action': 'addons'}, ('addons', (), {}), id='addons'),
-    pytest.param({'action': 'addon_install'}, ('addon_install', (), {}), id='addon_install'),
-    pytest.param(
-        {'action': 'addon_remove', 'transport': 'http://x/manifest.json'},
-        ('addon_remove', ('http://x/manifest.json',), {}),
-        id='addon_remove',
-    ),
     pytest.param({'action': 'login'}, ('login', (), {}), id='login'),
     pytest.param({'action': 'logout'}, ('logout', (), {}), id='logout'),
-    pytest.param({'action': 'library'}, ('library', (), {}), id='library'),
     # Note: the URL action string is literally 'settings' (not
     # 'open_settings') - only the view function it dispatches to is named
     # open_settings(). See final report re: the assignment's naming.
@@ -352,21 +307,6 @@ def test_run_dispatches_to_matching_view(load_router, monkeypatch, query_params,
     assert ctx.player.calls == []
 
 
-def test_run_search_forwards_decoded_query_param(load_router, monkeypatch):
-    """?action=search&query=Al+Pacino must reach views.search() as the
-    decoded string 'Al Pacino' - proving _parse_params' percent/plus
-    decoding survives the round trip through the dispatch lambda intact."""
-    ctx = load_router()
-    monkeypatch.setattr(
-        sys, 'argv',
-        ['plugin://plugin.video.rivulet/', '7', '?' + urlencode({'action': 'search', 'query': 'Al Pacino'})],
-    )
-
-    ctx.router.run()
-
-    assert ctx.views.calls == [('search', ('Al Pacino',), {})]
-
-
 def test_run_missing_action_defaults_to_home(load_router, monkeypatch):
     ctx = load_router()
     monkeypatch.setattr(sys, 'argv', ['plugin://plugin.video.rivulet/', '7', ''])
@@ -379,6 +319,22 @@ def test_run_missing_action_defaults_to_home(load_router, monkeypatch):
 def test_run_unknown_action_falls_back_to_home(load_router, monkeypatch):
     ctx = load_router()
     monkeypatch.setattr(sys, 'argv', ['plugin://plugin.video.rivulet/', '7', '?action=some_future_action_v2'])
+
+    ctx.router.run()
+
+    assert ctx.views.calls == [('home', (), {})]
+
+
+def test_run_removed_action_falls_back_to_home_rather_than_raising(load_router, monkeypatch):
+    """'catalog' was a real dispatched action through v0.7.1. Now that the
+    classical listing views are gone, a favourite or .strm file still
+    pointing at it must land on the recovery home directory, not raise
+    AttributeError."""
+    ctx = load_router()
+    monkeypatch.setattr(
+        sys, 'argv',
+        ['plugin://plugin.video.rivulet/', '7', '?' + urlencode({'action': 'catalog', 'type': 'movie', 'id': 'tt1'})],
+    )
 
     ctx.router.run()
 
@@ -473,34 +429,6 @@ def test_run_handler_exception_ends_directory_as_failed_and_logs_error(load_rout
     assert ctx.env.resolved == []
     assert any(
         level == xbmc_mod.LOGERROR and 'action "home" failed' in msg
-        for msg, level in ctx.env.log_calls
-    )
-
-
-def test_run_handler_exception_on_filters_ends_directory_as_failed(load_router, monkeypatch):
-    """Mirrors the 'home' case above but for the new 'filters' action - the
-    guard in run() is generic over the dispatched action, not special-cased
-    per view, so any new view raising must be caught the same way."""
-    ctx = load_router()
-
-    def _raise(transport, ctype, cid, extra):
-        raise RuntimeError('boom')
-
-    ctx.views.filters = _raise
-    monkeypatch.setattr(
-        sys, 'argv',
-        ['plugin://x/', '5', '?' + urlencode({'action': 'filters', 'transport': 'http://x/manifest.json', 'type': 'movie', 'id': 'year'})],
-    )
-
-    ctx.router.run()  # must never propagate - that is the whole point of the guard
-
-    xbmc_mod = sys.modules['xbmc']
-    assert ctx.env.end_of_directory == [
-        {'handle': 5, 'succeeded': False, 'updateListing': False, 'cacheToDisc': True}
-    ]
-    assert ctx.env.resolved == []
-    assert any(
-        level == xbmc_mod.LOGERROR and 'action "filters" failed' in msg
         for msg, level in ctx.env.log_calls
     )
 

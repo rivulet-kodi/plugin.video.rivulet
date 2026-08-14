@@ -51,34 +51,21 @@ def run():
 
     dispatch = {
         'home': lambda p: views.home(),
-        'discover': lambda p: views.discover(),
-        'catalog': lambda p: views.catalog(
-            p.get('transport'), p.get('type'), p.get('id'), p.get('extra')
-        ),
-        'showcase': lambda p: views.showcase(
-            p.get('transport'), p.get('type'), p.get('id'), p.get('extra')
-        ),
-        'filters': lambda p: views.filters(
-            p.get('transport'), p.get('type'), p.get('id'), p.get('extra')
-        ),
-        'search': lambda p: views.search(p.get('query')),
-        'meta': lambda p: views.meta(p.get('type'), p.get('id')),
-        'videos': lambda p: views.videos(p.get('type'), p.get('id'), p.get('season')),
-        'streams': lambda p: views.streams(p.get('type'), p.get('id')),
-        'people': lambda p: views.people(p.get('type'), p.get('id')),
         'play': do_play,
-        'addons': lambda p: views.addons(),
-        'addon_install': lambda p: views.addon_install(),
-        'addon_remove': lambda p: views.addon_remove(p.get('transport')),
         'login': lambda p: views.login(),
         'logout': lambda p: views.logout(),
-        'library': lambda p: views.library(),
         'settings': lambda p: views.open_settings(),
         'server_download': lambda p: _download_server_binary(),
         'advancedsettings_install': lambda p: _install_advancedsettings(),
         'sync_addons_now': lambda p: views.sync_addons_now(),
     }
 
+    # Any action not in this dict - unrecognized, or a favourite/.strm URL
+    # saved against an action a later release deleted - falls back to
+    # 'home'. views.home() is now a minimal recovery directory (not a
+    # classical listing replacement), so this fallback lands the user on a
+    # screen that explains something went wrong and offers Settings,
+    # rather than raising or dead-ending.
     handler = dispatch.get(action, dispatch['home'])
     try:
         handler(params)

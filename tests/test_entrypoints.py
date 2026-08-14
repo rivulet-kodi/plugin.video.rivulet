@@ -147,7 +147,7 @@ def test_home_action_opens_homewindow_on_success(load_default):
 
 
 # ---------------------------------------------------------------------------
-# action == 'home': HomeWindow failure falls back to the classical directory
+# action == 'home': HomeWindow failure falls back to the recovery directory
 # ---------------------------------------------------------------------------
 
 
