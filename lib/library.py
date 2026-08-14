@@ -38,7 +38,6 @@ byte-for-byte, or left ``None`` for a brand-new item. Synthesising or
 guessing this field would silently corrupt the user's REAL Stremio
 library the next moment any official Stremio client reads it back.
 """
-import copy
 import datetime
 
 #: Default `posterShape` for a freshly-built item. stremio-core's own
@@ -198,11 +197,20 @@ def merge_playback(item, position_ms, duration_ms, video_id=None, now=None):
     -- e.g. a bogus `getTime()` reading -- must never corrupt stored
     progress); an item with no prior `state` at all gets a fresh default
     one first.
+
+    Only shallow-copies what it actually mutates -- the top-level dict
+    and `state` -- rather than `copy.deepcopy`-ing the whole item (which
+    can run 8-12 KB, sampled on every playback-progress tick). Every
+    field this function never writes (`poster`, `behaviorHints`, and
+    `state.watched` itself) is carried into the result BY REFERENCE,
+    shared with `item`'s own copy of it -- safe precisely because
+    nothing below ever mutates one of those shared objects in place.
     """
-    item = copy.deepcopy(item)
     now_iso = iso8601_utc(now)
-    state = item.get('state')
-    if not isinstance(state, dict):
+    original_state = item.get('state')
+    if isinstance(original_state, dict):
+        state = dict(original_state)
+    else:
         state = _default_state(now_iso)
 
     position_ms = max(0, int(position_ms))
@@ -246,6 +254,7 @@ def merge_playback(item, position_ms, duration_ms, video_id=None, now=None):
         state['flaggedWatched'] = 1
         state['timesWatched'] = int(state.get('timesWatched') or 0) + 1
 
+    item = dict(item)
     item['state'] = state
     item['_mtime'] = now_iso
     return item

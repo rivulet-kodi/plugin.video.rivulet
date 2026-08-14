@@ -56,6 +56,7 @@ this never corrupts the file itself.
 
 import copy
 import datetime
+import heapq
 import json
 import os
 import tempfile
@@ -707,13 +708,24 @@ DEFAULT_ADDONS = [{'transportUrl': 'https://v3-cinemeta.strem.io/manifest.json',
   'flags': {'official': True, 'protected': True}}]
 
 
-def _atomic_write(path, data):
-    """Write ``data`` as JSON to ``path`` via a tmp-file + rename."""
+def _atomic_write(path, data, compact=False):
+    """Write ``data`` as JSON to ``path`` via a tmp-file + rename.
+
+    ``compact`` writes without indentation (``separators=(',', ':')``)
+    for frequently-rewritten, machine-only files (progress/now_playing/
+    resume_offset) -- smaller writes and reads, less flash wear on every
+    15-second playback-progress sample. ``addons.json``/``auth.json``
+    stay pretty-printed (the default): they are user-inspectable and
+    rarely written, so paying the indent cost once is the safer trade.
+    """
     directory = os.path.dirname(path) or "."
     fd, tmp_path = tempfile.mkstemp(prefix=".tmp-", dir=directory)
     try:
         with os.fdopen(fd, "w") as fh:
-            json.dump(data, fh, indent=2, sort_keys=False)
+            if compact:
+                json.dump(data, fh, separators=(',', ':'))
+            else:
+                json.dump(data, fh, indent=2, sort_keys=False)
         os.replace(tmp_path, path)
     except Exception:
         try:
@@ -810,8 +822,14 @@ def _prune_progress(progress, now, keep_key):
             return datetime.datetime.max
         return _parse_progress_timestamp(entry.get("updated_at")) or datetime.datetime.min
 
-    ordered = sorted(kept.items(), key=_sort_key, reverse=True)
-    return dict(ordered[:MAX_PROGRESS_ENTRIES])
+    # Bounded top-N selection (keep the newest MAX_PROGRESS_ENTRIES) --
+    # `heapq.nlargest` is O(n log k) versus a full `sorted()`'s
+    # O(n log n), and is documented as equivalent to
+    # `sorted(iterable, key=key, reverse=True)[:n]`, so order/contents
+    # are unchanged. The common case (map already under the cap) never
+    # reaches here at all -- see the early return above.
+    ordered = heapq.nlargest(MAX_PROGRESS_ENTRIES, kept.items(), key=_sort_key)
+    return dict(ordered)
 
 
 class ConcurrentUpdateError(RuntimeError):
@@ -840,6 +858,50 @@ class Store:
         self._now_playing_path = os.path.join(self.data_dir, NOW_PLAYING_FILENAME)
         self._resume_offset_path = os.path.join(self.data_dir, RESUME_OFFSET_FILENAME)
         self._progress_path = os.path.join(self.data_dir, PROGRESS_FILENAME)
+        #: Per-instance memoisation for `_cached_read`: `path -> ((mtime_ns,
+        #: size), parsed_value)`. A single process/screen-render often
+        #: calls e.g. `get_addons()` many times; a fresh eMMC/SD `open()`
+        #: + `json.loads()` per call is far pricier than one `os.stat()`.
+        #: NEVER consulted by `update_addons`'s compare-and-swap, which
+        #: must always observe the current on-disk bytes -- see
+        #: `_cached_read`'s docstring.
+        self._read_cache = {}
+
+    def _cached_read(self, path, default):
+        """Memoised ``_read_json(path, default)`` for read-only accessors.
+
+        Revalidates against a single ``os.stat()`` (comparing
+        ``st_mtime_ns`` and ``st_size``, not just mtime -- coarse mtime
+        granularity on some filesystems could otherwise miss a same-tick
+        rewrite) instead of paying a fresh ``open()``/``read()``/
+        ``json.loads()`` on every call.
+
+        MUST NOT be used anywhere that needs to observe the CURRENT
+        on-disk bytes on every attempt -- :meth:`update_addons`'s
+        compare-and-swap (and anything else detecting a concurrent
+        writer) calls ``_read_raw``/``_read_json`` directly instead.
+        Every mutating method calls :meth:`_invalidate_cache` right
+        after it writes/removes its file, so a ``get_*`` right after a
+        ``set_*`` on the SAME instance never sees a stale value.
+        """
+        try:
+            stat = os.stat(path)
+        except OSError:
+            self._read_cache.pop(path, None)
+            return _read_json(path, default)
+        fingerprint = (stat.st_mtime_ns, stat.st_size)
+        cached = self._read_cache.get(path)
+        if cached is not None and cached[0] == fingerprint:
+            return cached[1]
+        value = _read_json(path, default)
+        self._read_cache[path] = (fingerprint, value)
+        return value
+
+    def _invalidate_cache(self, path):
+        """Drop any memoised value for ``path``. Called by every
+        mutating method immediately after it writes or removes the file
+        it owns, so the cache never outlives the bytes it describes."""
+        self._read_cache.pop(path, None)
 
     # -- addons ----------------------------------------------------------
 
@@ -848,15 +910,18 @@ class Store:
 
         Seeds and persists :data:`DEFAULT_ADDONS` the first time this is
         called (including recovery from a missing/corrupt addons.json).
+        Served from the per-instance read cache -- see `_cached_read`.
         """
-        addons = _read_json(self._addons_path, None)
+        addons = self._cached_read(self._addons_path, None)
         if not isinstance(addons, list):
             addons = copy.deepcopy(DEFAULT_ADDONS)
             self.set_addons(addons)
         return addons
 
     def set_addons(self, addons):
-        _atomic_write(self._addons_path, list(addons))
+        addons = list(addons)
+        _atomic_write(self._addons_path, addons)
+        self._invalidate_cache(self._addons_path)
 
     def update_addons(self, transform, max_attempts=3):
         """Safely read-modify-write the addon list against concurrent writers.
@@ -963,8 +1028,9 @@ class Store:
     # -- auth --------------------------------------------------------------
 
     def get_auth(self):
-        """Return ``{"authKey": ..., "user": {...}}`` or ``None``."""
-        auth = _read_json(self._auth_path, None)
+        """Return ``{"authKey": ..., "user": {...}}`` or ``None``.
+        Served from the per-instance read cache -- see `_cached_read`."""
+        auth = self._cached_read(self._auth_path, None)
         return auth if isinstance(auth, dict) else None
 
     def set_auth(self, auth):
@@ -981,14 +1047,17 @@ class Store:
                 os.remove(self._auth_path)
             except OSError:
                 pass
+            self._invalidate_cache(self._auth_path)
             return
         _atomic_write(self._auth_path, auth)
+        self._invalidate_cache(self._auth_path)
 
     # -- search history ------------------------------------------------------
 
     def get_search_history(self):
-        """Return past search queries, most recent first."""
-        history = _read_json(self._search_history_path, None)
+        """Return past search queries, most recent first. Served from
+        the per-instance read cache -- see `_cached_read`."""
+        history = self._cached_read(self._search_history_path, None)
         return history if isinstance(history, list) else []
 
     def add_search_query(self, query):
@@ -1009,6 +1078,7 @@ class Store:
         history = [q for q in self.get_search_history() if q.lower() != query.lower()]
         history.insert(0, query)
         _atomic_write(self._search_history_path, history[:MAX_SEARCH_HISTORY])
+        self._invalidate_cache(self._search_history_path)
 
     def clear_search_history(self):
         """Delete all persisted search history."""
@@ -1016,6 +1086,7 @@ class Store:
             os.remove(self._search_history_path)
         except OSError:
             pass
+        self._invalidate_cache(self._search_history_path)
 
     # -- now playing / resume / progress (LibrarySync) ----------------------
 
@@ -1023,27 +1094,33 @@ class Store:
         """Return the current Rivulet "now playing" context dict (the
         cross-slice Contract shape: ``{'type', 'id', 'video_id', 'name',
         'poster', 'started_at'}``), or ``None`` while nothing Rivulet-
-        originated is playing."""
-        context = _read_json(self._now_playing_path, None)
+        originated is playing. Served from the per-instance read cache --
+        see `_cached_read`."""
+        context = self._cached_read(self._now_playing_path, None)
         return context if isinstance(context, dict) else None
 
     def set_now_playing(self, context):
         """Persist/replace the "now playing" context, or clear it when
         ``context`` is ``None`` (playback ended). Wholesale replace-or-
-        clear like :meth:`set_auth` -- see the module docstring."""
+        clear like :meth:`set_auth` -- see the module docstring. Written
+        compactly (see `_atomic_write`): this file is rewritten on every
+        playback start/stop and never hand-inspected."""
         if context is None:
             try:
                 os.remove(self._now_playing_path)
             except OSError:
                 pass
+            self._invalidate_cache(self._now_playing_path)
             return
-        _atomic_write(self._now_playing_path, dict(context))
+        _atomic_write(self._now_playing_path, dict(context), compact=True)
+        self._invalidate_cache(self._now_playing_path)
 
     def get_resume_offset_ms(self):
         """Return the pending resume-seek offset (milliseconds) queued by
         ``lib.ui.player`` for the NEXT playback session's ``onAVStarted``,
-        or ``None`` if there is nothing queued."""
-        payload = _read_json(self._resume_offset_path, None)
+        or ``None`` if there is nothing queued. Served from the
+        per-instance read cache -- see `_cached_read`."""
+        payload = self._cached_read(self._resume_offset_path, None)
         return payload.get("offset_ms") if isinstance(payload, dict) else None
 
     def set_resume_offset_ms(self, offset_ms):
@@ -1051,14 +1128,17 @@ class Store:
         ``offset_ms`` is ``None``. ``lib.service_runner``'s playback-
         progress tracker consumes and clears this exactly once, on the
         next ``onAVStarted``, so a later session (e.g. auto-playing the
-        next episode) never re-seeks using a stale value."""
+        next episode) never re-seeks using a stale value. Written
+        compactly (see `_atomic_write`): machine-only, one small int."""
         if offset_ms is None:
             try:
                 os.remove(self._resume_offset_path)
             except OSError:
                 pass
+            self._invalidate_cache(self._resume_offset_path)
             return
-        _atomic_write(self._resume_offset_path, {"offset_ms": int(offset_ms)})
+        _atomic_write(self._resume_offset_path, {"offset_ms": int(offset_ms)}, compact=True)
+        self._invalidate_cache(self._resume_offset_path)
 
     @staticmethod
     def _progress_key(content_type, content_id, video_id=None):
@@ -1078,8 +1158,9 @@ class Store:
         nothing has been recorded yet. Never talks to the Stremio API
         (that is ``lib.stremio.api.StremioAPI``'s job): this is the sole
         source of truth for ``lib.ui.player``'s resume prompt, so it
-        works fully offline and while logged out."""
-        progress = _read_json(self._progress_path, None)
+        works fully offline and while logged out. Served from the
+        per-instance read cache -- see `_cached_read`."""
+        progress = self._cached_read(self._progress_path, None)
         if not isinstance(progress, dict):
             return None
         entry = progress.get(self._progress_key(content_type, content_id, video_id))
@@ -1112,4 +1193,7 @@ class Store:
             "updated_at": now,
         }
         progress = _prune_progress(progress, now, keep_key=key)
-        _atomic_write(self._progress_path, progress)
+        # Compact (see `_atomic_write`): rewritten every ~15s during
+        # playback, machine-only, never hand-inspected.
+        _atomic_write(self._progress_path, progress, compact=True)
+        self._invalidate_cache(self._progress_path)
