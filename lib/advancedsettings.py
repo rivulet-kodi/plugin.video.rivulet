@@ -12,6 +12,7 @@ overwriting.
 """
 import os
 import shutil
+import tempfile
 
 #: install() copied source_path -> dest_path.
 STATUS_INSTALLED = 'installed'
@@ -30,9 +31,26 @@ def install(source_path, dest_path):
     Returns STATUS_EXISTS without touching `dest_path` if it's already
     there (non-destructive: an existing advancedsettings.xml might be the
     user's own tuning, or another addon's), otherwise copies the file and
-    returns STATUS_INSTALLED. Raises AdvancedSettingsError wrapping the
-    original OSError for any other I/O failure (missing/unreadable source,
-    unwritable dest directory, ...).
+    returns STATUS_INSTALLED. The copy itself is atomic: it lands in a
+    temporary file in dest's own directory first, then a single
+    os.replace() swaps it into place. advancedsettings.xml is parsed by
+    Kodi core itself at startup, not by this addon, and this addon's
+    target hardware (Raspberry Pi / Android TV boxes running off SD card
+    or eMMC) treats sudden power loss as routine rather than exceptional
+    - a plain, non-atomic copy left half-written by one of those would
+    make Kodi silently discard the whole file's tuning. Worse, because
+    install() refuses to touch an existing `dest_path`, that truncated
+    file would satisfy os.path.exists() forever after, so no later re-run
+    could ever repair it. The temporary file is chmod'ed to 0644 before
+    the swap: tempfile.mkstemp() creates 0600, but Rivulet's own release
+    notes tell users to hand-edit this file, which on LibreELEC/OSMC
+    typically means over Samba or SFTP as a different account than the
+    one Kodi runs as - 0600 would silently break exactly the workflow
+    the notes prescribe. Raises AdvancedSettingsError wrapping the
+    original OSError for any other I/O failure (missing/unreadable
+    source, unwritable dest directory, ...); the temporary file is
+    removed before the error propagates, so a failed install never
+    litters the destination directory.
     """
     if os.path.exists(dest_path):
         return STATUS_EXISTS
@@ -41,7 +59,20 @@ def install(source_path, dest_path):
         dest_dir = os.path.dirname(dest_path)
         if dest_dir:
             os.makedirs(dest_dir, exist_ok=True)
-        shutil.copyfile(source_path, dest_path)
+        fd, tmp_path = tempfile.mkstemp(prefix='.tmp-', dir=dest_dir or '.')
+        try:
+            os.close(fd)
+            shutil.copyfile(source_path, tmp_path)
+            # mkstemp() is 0600 by design; the plain copyfile() this
+            # replaced produced 0666 & ~umask (0644 for the default 022).
+            os.chmod(tmp_path, 0o644)
+            os.replace(tmp_path, dest_path)
+        except Exception:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
     except OSError as exc:
         raise AdvancedSettingsError('failed to install advancedsettings.xml: %s' % exc) from exc
 

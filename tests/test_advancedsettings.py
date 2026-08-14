@@ -8,6 +8,7 @@ network.
 """
 import os
 import shutil
+import stat
 
 import pytest
 
@@ -160,6 +161,105 @@ def test_install_wraps_copy_failure_raised_after_parent_dirs_exist(tmp_path, mon
         install(str(source), str(dest))
 
     assert not dest.exists()
+
+
+def test_install_produces_byte_identical_content_to_source(tmp_path):
+    """The copy is now a copy-to-tmp-then-rename, not a straight
+    shutil.copyfile onto dest_path - confirm that indirection still
+    produces exactly the source's bytes, not e.g. a truncated or
+    re-encoded tmp file."""
+    source = tmp_path / 'source.xml'
+    source.write_bytes(_TEMPLATE_TEXT.encode('utf-8'))
+    dest = tmp_path / 'dest.xml'
+
+    status = install(str(source), str(dest))
+
+    assert status == STATUS_INSTALLED
+    assert dest.read_bytes() == source.read_bytes()
+
+
+def test_install_leaves_dest_world_readable(tmp_path):
+    """tempfile.mkstemp() creates 0600, but the shutil.copyfile() the
+    atomic rewrite replaced produced 0666 & ~umask. Rivulet's release
+    notes tell users to hand-edit this file - typically over Samba/SFTP
+    as a different account than Kodi runs as - so the installed file
+    must stay group/other-readable, not collapse to owner-only."""
+    source = tmp_path / 'source.xml'
+    source.write_text(_TEMPLATE_TEXT, encoding='utf-8')
+    dest = tmp_path / 'sub' / 'advancedsettings.xml'
+
+    assert install(str(source), str(dest)) == STATUS_INSTALLED
+
+    mode = stat.S_IMODE(os.stat(str(dest)).st_mode)
+    assert mode == 0o644, 'installed advancedsettings.xml is %s, not 0644' % oct(mode)
+
+
+# ---------------------------------------------------------------------------
+# install(): atomicity - the actual regression this file guards against
+# ---------------------------------------------------------------------------
+
+
+def test_install_dest_absent_and_error_chained_when_replace_fails(tmp_path, monkeypatch):
+    """os.replace() failing stands in for a power cut landing between the
+    copy and the atomic rename - the one moment install() is not yet
+    committed. dest_path must come back absent (never a partial/
+    truncated file - the exact stuck-forever failure mode this atomic
+    rewrite closes), and the failure must still surface as
+    AdvancedSettingsError chaining the original OSError, same as any
+    other I/O failure."""
+    source = tmp_path / 'source.xml'
+    source.write_text(_TEMPLATE_TEXT, encoding='utf-8')
+    dest = tmp_path / 'dest.xml'
+
+    def _boom(_src, _dst):
+        raise OSError('simulated power cut between copy and rename')
+
+    monkeypatch.setattr(os, 'replace', _boom)
+
+    with pytest.raises(AdvancedSettingsError) as excinfo:
+        install(str(source), str(dest))
+
+    assert not dest.exists()
+    assert isinstance(excinfo.value.__cause__, OSError)
+
+
+def test_install_leaves_no_temp_file_in_dest_directory_when_replace_fails(tmp_path, monkeypatch):
+    """The litter regression this atomic rewrite must not introduce: a
+    failed install must not leave its tempfile.mkstemp() scratch file
+    behind in dest's own directory."""
+    source = tmp_path / 'source.xml'
+    source.write_text(_TEMPLATE_TEXT, encoding='utf-8')
+    dest_dir = tmp_path / 'userdata'
+    dest = dest_dir / 'advancedsettings.xml'
+
+    def _boom(_src, _dst):
+        raise OSError('simulated power cut between copy and rename')
+
+    monkeypatch.setattr(os, 'replace', _boom)
+
+    with pytest.raises(AdvancedSettingsError):
+        install(str(source), str(dest))
+
+    assert os.listdir(str(dest_dir)) == []
+
+
+@pytest.mark.parametrize('existing_content', ['', 'not xml, just garbage left by a power cut'],
+                          ids=['empty', 'malformed'])
+def test_install_refuses_when_existing_dest_is_empty_or_malformed(tmp_path, existing_content):
+    """The stuck-file case this atomic rewrite must not regress: an
+    existing dest_path that is empty or malformed (exactly what the old
+    non-atomic copy could leave behind after a power cut) still satisfies
+    os.path.exists(), so install() must still refuse to touch it - never
+    'repair' it - and report STATUS_EXISTS."""
+    source = tmp_path / 'source.xml'
+    source.write_text(_TEMPLATE_TEXT, encoding='utf-8')
+    dest = tmp_path / 'dest.xml'
+    dest.write_text(existing_content, encoding='utf-8')
+
+    status = install(str(source), str(dest))
+
+    assert status == STATUS_EXISTS
+    assert dest.read_text(encoding='utf-8') == existing_content
 
 
 # ---------------------------------------------------------------------------
