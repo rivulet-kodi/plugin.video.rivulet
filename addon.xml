@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.rivulet" name="Rivulet" version="0.5.0" provider-name="M0Rf30">
+<addon id="plugin.video.rivulet" name="Rivulet" version="0.5.1" provider-name="M0Rf30">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" version="2.22.0"/>
@@ -12,7 +12,12 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse Discover and Search catalogs, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote stremio-server-go streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.5.0:
+    <news>v0.5.1:
+- New: the stream list's second line now describes the file itself - audio format and channel layout, languages, bitrate, release group and tracker - instead of repeating the add-on name.
+- New: debrid sources say whether they are ready to play: the service code shows green when the file is cached and orange with "DL" when it still has to be downloaded first. Torrentio, Comet, StremThru and every built-in AIOStreams format are recognised.
+- New: Dolby Vision profile markers (P5/P7/P8, FEL, MEL, BL+RPU, Hybrid) and editions like IMAX, Extended or REPACK now show on the row, so a native DV remux can be told apart from a re-mapped conversion without starting playback first.
+- Improved: the add-on name moved to the end of the first line, and is dropped entirely when every source came from the same add-on.
+v0.5.0:
 - New: the next episode now plays automatically when one finishes, with a cancellable countdown, preferring a release from the same group as the episode you just watched. Turn it off, or change the countdown, under Playback.
 - New: what you watch is now written back to your Stremio account - progress, resume position and watched state - and Rivulet offers to resume where you left off. Progress is kept locally too, so resume works logged out.
 - New: RAR/ZIP/7z/TAR/TGZ, NZB and FTP streams now play through the streaming server instead of silently failing.
