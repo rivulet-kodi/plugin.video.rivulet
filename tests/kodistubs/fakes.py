@@ -192,6 +192,12 @@ class FakeListItem:
     def setProperty(self, key, value):
         self.properties[key] = value
 
+    def setProperties(self, values):
+        # Real xbmcgui.ListItem.setProperties(dict) - Kodi 19+ - sets many
+        # Properties in one call; mirrors looping setProperty() per key
+        # without clearing any property not passed in.
+        self.properties.update(values)
+
     def getProperty(self, key):
         return self.properties.get(key, '')
 

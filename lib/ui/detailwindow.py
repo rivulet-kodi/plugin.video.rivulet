@@ -189,9 +189,12 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         items = []
         for video in videos:
             item = xbmcgui.ListItem(_episode_label(video))
-            item.setProperty('row_id', video.get('id'))
-            for key, value in _episode_properties(video).items():
-                item.setProperty(key, value)
+            properties = _episode_properties(video)
+            properties['row_id'] = video.get('id')
+            # One setProperties() call instead of 3 setProperty() calls
+            # (row_id, thumb, line2) - each is a Python->C++ boundary
+            # crossing.
+            item.setProperties(properties)
             items.append(item)
         return items
 

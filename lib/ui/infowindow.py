@@ -87,6 +87,11 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         super().__init__(*args, **kwargs)
         self.metas = []
         self.selected = None
+        #: fanart last pushed to BACKGROUND - lets onAction() skip
+        #: setImage() when a keypress doesn't actually change focus (e.g.
+        #: the enrich worker's Action(noop) wake-up), the per-keypress
+        #: cost the coverflow's scroll feel is most sensitive to.
+        self._last_background = None
         self._reset_enrich_state()
 
     def _reset_enrich_state(self):
@@ -115,17 +120,27 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         self.doModal()
         return self.selected
 
-    def _make_item(self, index, meta):
+    def _make_item(self, index, meta, props=None):
         item = xbmcgui.ListItem(meta.get('name') or meta.get('id') or '?')
-        for key, value in _item_properties(meta).items():
-            item.setProperty(key, value)
-        item.setProperty('position', str(index))
+        properties = dict(props) if props is not None else _item_properties(meta)
+        properties['position'] = str(index)
+        # One setProperties() call instead of one setProperty() per key -
+        # each crosses the Python->C++ boundary, so this collapses what
+        # was 7 crossings per item into 1.
+        item.setProperties(properties)
         return item
 
     def onInit(self):
         if not self.metas:
             return
-        items = [self._make_item(index, meta) for index, meta in enumerate(self.metas)]
+        # Computed once per meta and reused for the background fallback
+        # below - _make_item() used to call _item_properties() again just
+        # for metas[0], recomputing what this loop already has in hand.
+        props_by_index = [_item_properties(meta) for meta in self.metas]
+        items = [
+            self._make_item(index, meta, props_by_index[index])
+            for index, meta in enumerate(self.metas)
+        ]
         control = self.getControl(SELECT)
         # reset() before addItems(): onInit() runs again when
         # uicommon.ModalStackWindow reopens a screen force-closed for
@@ -133,7 +148,9 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         # item.
         control.reset()
         control.addItems(items)
-        self.getControl(BACKGROUND).setImage(_item_properties(self.metas[0]).get('fanart', ''))
+        background = props_by_index[0].get('fanart', '')
+        self.getControl(BACKGROUND).setImage(background)
+        self._last_background = background
         self.getControl(LOADING).setVisible(False)
         self.setFocusId(SELECT)
         # A rebuild discards the ListItems a pending merge was queued
@@ -150,7 +167,17 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         if self.getFocusId() == SELECT:
             focused = self.getControl(SELECT).getSelectedItem()
             if focused is not None:
-                self.getControl(BACKGROUND).setImage(focused.getProperty('fanart'))
+                fanart = focused.getProperty('fanart')
+                # Skip the setImage() boundary crossing when focus fired
+                # onAction() but the fanart didn't actually change - e.g.
+                # the enrich worker's Action(noop) wake-up below, or any
+                # other non-navigation key while the same item stays
+                # focused. This is the call scrolling feel is most
+                # sensitive to: it used to run unconditionally on every
+                # keypress.
+                if fanart != self._last_background:
+                    self.getControl(BACKGROUND).setImage(fanart)
+                    self._last_background = fanart
                 # Both on the UI thread: drain anything a worker finished
                 # since the last action, then arm a fetch for this item.
                 self._apply_enriched()
@@ -194,8 +221,9 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
             if not 0 <= index < size:
                 continue
             item = control.getListItem(index)
-            for key, value in props.items():
-                item.setProperty(key, value)
+            # One setProperties() call instead of one setProperty() per
+            # key (genre/rating/plot/year).
+            item.setProperties(props)
 
     def _enrich_focused(self, item, settle=True):
         """Fill in the description/genres a catalog meta preview lacks.

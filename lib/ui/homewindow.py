@@ -50,9 +50,11 @@ def _menu_items(show_library):
         if action == 'library' and not show_library:
             continue
         item = xbmcgui.ListItem(L(string_id))
-        item.setProperty('action', action)
+        # One setProperties() call instead of two setProperty() calls
+        # (action, subtitle) - setArt() stays separate, a distinct Kodi
+        # API that setProperties() cannot batch into.
+        item.setProperties({'action': action, 'subtitle': L(_SUBTITLES[action])})
         item.setArt({'icon': addon_media_path('%s.png' % action)})
-        item.setProperty('subtitle', L(_SUBTITLES[action]))
         items.append(item)
     return items
 
