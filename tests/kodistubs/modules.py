@@ -177,6 +177,17 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
         def getSelectedPosition(self):
             return self.selected_index if self.items else -1
 
+        def size(self):
+            return len(self.items)
+
+        def getListItem(self, position):
+            # Real ControlList raises rather than returning None for an
+            # out-of-range index; ShowcaseWindow._apply_enriched() bounds
+            # its own lookups against size() on the strength of that.
+            if not 0 <= position < len(self.items):
+                raise ValueError('Index out of range')
+            return self.items[position]
+
     class FakeAction:
         """Stand-in for `xbmcgui.Action`: only `getId()` is used by
         `lib.ui.infowindow.ShowcaseWindow.onAction()`; a test builds one

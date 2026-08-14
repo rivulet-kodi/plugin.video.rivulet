@@ -35,7 +35,13 @@ import pytest
 
 from tests.kodistubs import install_kodi_stubs
 
-_RELOAD_MODULE_NAMES = ('lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.streamswindow', 'lib.ui.infowindow')
+_RELOAD_MODULE_NAMES = (
+    # lib.ui.views is reloaded alongside the rest because ShowcaseWindow's
+    # meta enrichment lazily `from lib.ui.views import _fetch_meta` inside
+    # its worker - the enrichment tests monkeypatch `ctx.views._fetch_meta`
+    # so no test ever reaches the network.
+    'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.streamswindow', 'lib.ui.views', 'lib.ui.infowindow',
+)
 
 
 @pytest.fixture
@@ -540,3 +546,407 @@ def test_open_showcase_closes_the_window_exactly_once_and_reraises_when_start_ra
 def test_open_showcase_with_empty_metas_returns_none(load_infowindow):
     ctx = load_infowindow(addon_info={'path': '/addon/path'})
     assert ctx.infowindow.open_showcase([]) is None
+
+
+# ---------------------------------------------------------------------------
+# _enrich_focused()/_enrich_worker()/_apply_enriched() - lazy meta enrichment
+#
+# Stremio's `catalog` resource returns meta *previews* (no description/genres),
+# so the focused poster's full meta is fetched lazily. The worker never touches
+# a ListItem: it merges into self.metas[index] and queues props for the UI
+# thread to apply, which is what keeps a fetch landing across a reopen from
+# writing to a detached item. These drive the worker synchronously (by calling
+# _enrich_worker directly, or via a Thread that is joined) with _fetch_meta
+# monkeypatched - no real threading races, no network.
+# ---------------------------------------------------------------------------
+
+
+def _sparse(mid='tt1', name='Sparse', **extra):
+    """A catalog preview: id/name/type only, no description or genres."""
+    return _make_meta(mid, name, **extra)
+
+
+def _spawned(monkeypatch, ctx, win):
+    """Record (index, meta) each _spawn_enrich call would hand to a thread,
+    instead of actually spawning one."""
+    calls = []
+    monkeypatch.setattr(
+        type(win), '_spawn_enrich',
+        lambda self, index, meta: calls.append((index, meta)),
+    )
+    return calls
+
+
+def test_enrich_fires_for_item_zero_from_oninit(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    calls = _spawned(monkeypatch, ctx, win)
+
+    win.onInit()
+
+    # onAction() never fires for the item the window opens focused, so
+    # onInit() must enrich item 0 itself - and without the settle delay,
+    # since that item is already settled.
+    assert [index for index, _ in calls] == [0]
+
+
+def test_enrich_fires_on_focus_change_from_onaction(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse('tt1', 'One'), _sparse('tt2', 'Two')]
+    win._reset_enrich_state()
+    win.onInit()
+    calls = _spawned(monkeypatch, ctx, win)
+    control = win.getControl(ctx.infowindow.SELECT)
+    control.selected_index = 1
+    win.setFocusId(ctx.infowindow.SELECT)
+
+    win.onAction(ctx.infowindow.xbmcgui.Action(0))
+
+    # A focus change arms the settle timer rather than fetching inline, so
+    # scrolling past an item does not fetch it. Run the timer's callback to
+    # stand in for the 200ms elapsing.
+    assert win._enriched == {0, 1}
+    timer = win._enrich_timer
+    assert timer is not None
+    timer.cancel()
+    timer.function(*timer.args)
+
+    assert [index for index, _ in calls] == [1]
+
+
+def test_enrich_settle_timer_is_superseded_by_the_next_focus_change(load_infowindow, monkeypatch):
+    """Scrolling past items must not leave a fetch armed for each one."""
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse('tt1', 'One'), _sparse('tt2', 'Two'), _sparse('tt3', 'Three')]
+    win._reset_enrich_state()
+    win.onInit()
+    calls = _spawned(monkeypatch, ctx, win)
+    control = win.getControl(ctx.infowindow.SELECT)
+    win.setFocusId(ctx.infowindow.SELECT)
+
+    control.selected_index = 1
+    win.onAction(ctx.infowindow.xbmcgui.Action(0))
+    first_timer = win._enrich_timer
+    control.selected_index = 2
+    win.onAction(ctx.infowindow.xbmcgui.Action(0))
+
+    # The timer armed for item 1 was cancelled when focus moved on. (cancel()
+    # only stops the callback firing - the thread itself lingers until its
+    # wait unblocks - so assert on the effect, not on is_alive().)
+    assert first_timer is not win._enrich_timer
+    first_timer.join(timeout=1)
+    assert calls == []
+    # ...so only the item focus settled on actually fetches.
+    timer = win._enrich_timer
+    timer.cancel()
+    timer.function(*timer.args)
+    assert [index for index, _ in calls] == [2]
+
+
+def test_enrich_skips_a_meta_that_already_has_a_description(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse(description='Already complete.')]
+    win._reset_enrich_state()
+    calls = _spawned(monkeypatch, ctx, win)
+
+    win.onInit()
+
+    # Discover's catalogs usually carry a description already: no fetch, but
+    # still marked so a later focus does not reconsider it.
+    assert calls == []
+    assert win._enriched == {0}
+
+
+def test_enrich_skips_an_index_it_has_already_handled(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    win._enriched = {0}
+    calls = _spawned(monkeypatch, ctx, win)
+
+    win.onInit()
+
+    assert calls == []
+
+
+def test_enrich_ignores_an_item_whose_position_is_unparseable(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    calls = _spawned(monkeypatch, ctx, win)
+    item = ctx.infowindow.xbmcgui.ListItem('No position')
+    item.setProperty('position', 'not-a-number')
+
+    win._enrich_focused(item)
+
+    assert calls == []
+    assert win._enriched == set()
+
+
+def test_enrich_ignores_a_position_outside_the_meta_list(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    calls = _spawned(monkeypatch, ctx, win)
+    item = ctx.infowindow.xbmcgui.ListItem('Out of range')
+    item.setProperty('position', '7')
+
+    win._enrich_focused(item)
+
+    assert calls == []
+
+
+def test_enrich_ignores_a_meta_without_an_id(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [{'name': 'No id', 'type': 'movie'}]
+    win._reset_enrich_state()
+    calls = _spawned(monkeypatch, ctx, win)
+
+    win.onInit()
+
+    assert calls == []
+
+
+def test_enrich_worker_merges_into_metas_and_queues_props(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    monkeypatch.setattr(
+        ctx.views, '_fetch_meta',
+        lambda stype, sid: {
+            'id': 'tt1',
+            'description': 'A full plot.',
+            'genres': ['Drama', 'Thriller'],
+            'imdbRating': '7.9',
+            'releaseInfo': '2026',
+        },
+    )
+
+    win._enrich_worker(0, win.metas[0])
+
+    # Merged onto the meta, so a rebuild re-derives it...
+    assert win.metas[0]['description'] == 'A full plot.'
+    assert win.metas[0]['genres'] == ['Drama', 'Thriller']
+    # ...and queued for the UI thread rather than written to a ListItem.
+    assert win._enrich_pending == {
+        0: {'genre': 'Drama, Thriller', 'rating': '7.9', 'plot': 'A full plot.', 'year': '2026'},
+    }
+
+
+def test_enrich_worker_leaves_fields_the_preview_already_had(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse(releaseInfo='1999', genres=['Comedy'])]
+    win._reset_enrich_state()
+    monkeypatch.setattr(
+        ctx.views, '_fetch_meta',
+        lambda stype, sid: {'description': 'Plot.', 'genres': ['Drama'], 'releaseInfo': '2026'},
+    )
+
+    win._enrich_worker(0, win.metas[0])
+
+    assert win.metas[0]['releaseInfo'] == '1999'
+    assert win.metas[0]['genres'] == ['Comedy']
+
+
+def test_enrich_worker_coerces_a_string_genres_field(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    # Unvalidated third-party JSON: a str is iterable, so joining it
+    # directly would render "D, r, a, m, a".
+    monkeypatch.setattr(
+        ctx.views, '_fetch_meta',
+        lambda stype, sid: {'description': 'Plot.', 'genres': 'Drama'},
+    )
+
+    win._enrich_worker(0, win.metas[0])
+
+    assert 'genres' not in win.metas[0]
+    assert win._enrich_pending[0]['genre'] == ''
+
+
+def test_enrich_worker_stringifies_a_numeric_rating(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    monkeypatch.setattr(
+        ctx.views, '_fetch_meta',
+        lambda stype, sid: {'description': 'Plot.', 'imdbRating': 8.0, 'releaseInfo': 2026},
+    )
+
+    win._enrich_worker(0, win.metas[0])
+
+    assert win._enrich_pending[0]['rating'] == '8.0'
+    assert win._enrich_pending[0]['year'] == '2026'
+
+
+def test_enrich_worker_survives_a_fetch_that_raises(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+
+    def _boom(stype, sid):
+        raise RuntimeError('addon exploded')
+
+    monkeypatch.setattr(ctx.views, '_fetch_meta', _boom)
+
+    win._enrich_worker(0, win.metas[0])  # must not raise
+
+    assert win._enrich_pending == {}
+
+
+def test_enrich_worker_ignores_an_empty_fetch_result(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: None)
+
+    win._enrich_worker(0, win.metas[0])
+
+    assert win._enrich_pending == {}
+
+
+def test_apply_enriched_writes_queued_props_onto_the_live_listitem(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    _spawned(monkeypatch, ctx, win)  # onInit() must not spawn a real worker
+    win.onInit()
+    win._enrich_pending = {0: {'genre': 'Drama', 'rating': '7.9', 'plot': 'Plot.', 'year': '2026'}}
+
+    win._apply_enriched()
+
+    item = win.getControl(ctx.infowindow.SELECT).getListItem(0)
+    assert item.getProperty('plot') == 'Plot.'
+    assert item.getProperty('genre') == 'Drama'
+    assert win._enrich_pending == {}
+
+
+def test_apply_enriched_drops_an_index_no_longer_in_the_list(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    _spawned(monkeypatch, ctx, win)  # onInit() must not spawn a real worker
+    win.onInit()
+    win._enrich_pending = {5: {'plot': 'Stale.'}}
+
+    win._apply_enriched()  # must not raise
+
+    assert win._enrich_pending == {}
+
+
+def test_enrichment_survives_a_reopen_for_playback(load_infowindow, monkeypatch):
+    """A fetch landing across a reopen must reach the item on screen.
+
+    onInit() rebuilds every ListItem (reset() + addItems), so a worker that
+    closed over the handle it was spawned with would write to a detached
+    object while the live one stayed blank - and never retry, because the
+    index is already in _enriched.
+    """
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    monkeypatch.setattr(
+        ctx.views, '_fetch_meta',
+        lambda stype, sid: {'description': 'Landed late.', 'genres': ['Drama']},
+    )
+
+    win.onInit()
+    win._enrich_worker(0, win.metas[0])   # fetch completes...
+    win.onInit()                          # ...and THEN the window reopens
+
+    item = win.getControl(ctx.infowindow.SELECT).getListItem(0)
+    # Rebuilt from self.metas, which the worker merged into.
+    assert item.getProperty('plot') == 'Landed late.'
+
+
+def test_enrich_worker_gives_up_its_index_when_no_slot_is_free(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    win._enriched = {0}
+    fetched = []
+    monkeypatch.setattr(
+        ctx.views, '_fetch_meta',
+        lambda stype, sid: fetched.append(sid),
+    )
+    # Exhaust the in-flight ceiling.
+    for _ in range(ctx.infowindow._ENRICH_MAX_INFLIGHT):
+        win._enrich_slots.acquire()
+
+    win._enrich_worker(0, win.metas[0])
+
+    assert fetched == []
+    # Dropped from the cache so a later focus can retry it.
+    assert win._enriched == set()
+
+
+def test_start_clears_enrich_state_between_runs(load_infowindow):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    win._enriched = {0, 1}
+    win._enrich_pending = {0: {'plot': 'Stale.'}}
+
+    win.start([_sparse('tt9', 'Fresh')])
+
+    assert win._enriched == set()
+    assert win._enrich_pending == {}
+
+
+def test_enrich_worker_swallows_an_exception_from_its_own_imports(load_infowindow, monkeypatch):
+    """The worker runs on a daemon thread nobody joins, so nothing can
+    surface an exception it lets escape - pytest reports one as an
+    unhandled thread exception against whichever test happens to be running
+    when it fires. A worker still in flight while the interpreter (or, under
+    test, the injected xbmc stubs) is torn down fails on `import xbmc`
+    before it reaches any of its own error handling.
+    """
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+
+    def _torn_down(index, meta):
+        raise ModuleNotFoundError("No module named 'xbmc'")
+
+    monkeypatch.setattr(type(win), '_enrich_fetch', _torn_down)
+
+    win._enrich_worker(0, win.metas[0])  # must not raise
+
+    # ...and the slot it took is handed back, so enrichment still works after.
+    assert win._enrich_slots.acquire(blocking=False) is True
+    win._enrich_slots.release()
+
+
+def test_enrich_worker_releases_its_slot_after_a_successful_fetch(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse()]
+    win._reset_enrich_state()
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: {'description': 'Plot.'})
+
+    for _ in range(ctx.infowindow._ENRICH_MAX_INFLIGHT + 1):
+        win._enrich_worker(0, win.metas[0])
+
+    assert win._enrich_pending[0]['plot'] == 'Plot.'
