@@ -5,6 +5,7 @@ base64url-decoded stream dict for action=play. This module owns the only
 xbmc* calls involved in actually starting playback.
 """
 import contextlib
+import time
 from urllib.parse import urlencode
 
 import xbmc
@@ -79,6 +80,24 @@ _SERVER_POLL_INTERVAL_SECONDS = 1.0
 #: it is deliberately much smaller than the user's configured buffer_mb
 #: target (a minimum of 5 MiB).
 _HEADER_MIN_BYTES = 512 * 1024
+
+#: Clearing `_HEADER_MIN_BYTES` means the container header is readable, not
+#: that the swarm can KEEP UP. Starting there on a starved torrent is what
+#: produced the live failure this gate exists for: a one-peer swarm at
+#: ~174 KB/s feeding 720p HEVC started at 1.2 MB of a 20 MB target, starved
+#: within seconds, and left Kodi's reader thread stuck in a curl reconnect.
+#: So an early start now also requires the swarm to be fast enough to top
+#: the REST of the buffer up almost immediately - if it can do that, it is
+#: comfortably faster than playback drains it, which is the property that
+#: actually matters. A slow swarm keeps filling toward the real target
+#: instead, with the dialog showing live speed/peers so the user can cancel
+#: and pick a healthier source.
+_EARLY_START_ETA_SECONDS = 10
+
+#: Upper bound on that extra filling, so a slow-but-alive swarm still starts
+#: rather than sitting in the dialog forever. Once this much time has gone
+#: into the buffering loop, whatever cleared the header floor is played.
+_TARGET_WAIT_SECONDS = 45
 
 #: DialogProgress percent bands for the staged "Preparing stream" dialog
 #: `_resolve_playable_item` owns (created once, threaded through every
@@ -266,6 +285,39 @@ def _poll_stats_best_effort(server, info_hash):
         return None
 
 
+def _may_start_early(stats, got, target, waited):
+    """Whether a front read that cleared the header floor but not `target`
+    may start playback anyway.
+
+    Withholds the early start ONLY on positive evidence that the swarm is
+    too slow to sustain playback - a measured speed that could not deliver
+    the REMAINING buffer inside `_EARLY_START_ETA_SECONDS`. A swarm that
+    can top the buffer up that fast is comfortably outrunning playback,
+    which is the property that matters and needs no guess at the file's
+    bitrate.
+
+    Absent stats mean "unknown", NOT "slow": the stats poll is best-effort
+    and fails on exactly the struggling servers this runs against, so an
+    unknown speed keeps the previous fast-start behaviour rather than
+    inventing a 45s wait from missing evidence. Only a speed the server
+    actually reported can hold playback back.
+
+    Also yes once `_TARGET_WAIT_SECONDS` of filling has gone by, so a
+    slow-but-alive swarm eventually plays instead of buffering forever.
+    """
+    if waited >= _TARGET_WAIT_SECONDS:
+        return True
+    if not isinstance(stats, dict) or 'downloadSpeed' not in stats:
+        return True
+    try:
+        speed = float(stats.get('downloadSpeed') or 0)
+    except (TypeError, ValueError):
+        return True
+    if speed <= 0:
+        return False
+    return (target - got) / speed <= _EARLY_START_ETA_SECONDS
+
+
 def _await_file_idx(server, stream, info_hash, url, dialog, monitor):
     """Poll `GET /create` until stremio-server-go resolves a file index for
     streams with no fileIdx of their own, sharing the caller's `dialog`/
@@ -396,6 +448,18 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
         # format" bug). Short per-read timeout keeps the dialog cancellable;
         # a genuinely dead swarm fails honestly (30084) after the budget
         # rather than hanging or handing Kodi a doomed URL.
+        # Wall clock for the whole buffering loop, used by the early-start
+        # gate below to bound how long a slow swarm is allowed to keep
+        # filling before playback starts on what it has.
+        loop_started = time.monotonic()
+
+        def waited():
+            return time.monotonic() - loop_started
+
+        #: Best front length seen across attempts - each attempt re-reads the
+        #: front from offset 0, so this is what the loop actually achieved.
+        best_got = 0
+
         for attempt in range(_MAX_FRONT_ATTEMPTS):
             if dialog.iscanceled():
                 return False, url, None
@@ -405,7 +469,8 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
             # `_poll_stats_best_effort`'s docstring). Re-checked right
             # after so a slow poll never delays the next cancel check
             # past the front-read call that follows it.
-            stats_line = _stats_line(_poll_stats_best_effort(server, info_hash))
+            stats = _poll_stats_best_effort(server, info_hash)
+            stats_line = _stats_line(stats)
             if dialog.iscanceled():
                 return False, url, None
 
@@ -425,20 +490,22 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
             except Exception as exc:  # noqa: BLE001 - a front-read hiccup must not brick playback
                 log('player: front read failed for %s: %r' % (info_hash, exc), xbmc.LOGWARNING)
 
-            if got >= _HEADER_MIN_BYTES:
-                # Not "complete" unless it actually reached the target: this
-                # is the header floor letting playback start early on the
-                # server's readahead. Say which of the two happened, so a
-                # log showing a stall right after playback starts is not
-                # also showing a line that claims the buffer was full.
+            if got >= target:
                 log(
-                    'player: pre-buffer %s for %s: buffered=%d target=%d' % (
-                        'complete' if got >= target else 'header floor reached, starting early',
-                        info_hash, got, target,
-                    ),
+                    'player: pre-buffer complete for %s: buffered=%d target=%d'
+                    % (info_hash, got, target),
                     xbmc.LOGINFO,
                 )
                 return True, url, filename
+
+            if got >= _HEADER_MIN_BYTES and _may_start_early(stats, got, target, waited()):
+                log(
+                    'player: pre-buffer header floor reached, starting early for %s: '
+                    'buffered=%d target=%d waited=%.1fs' % (info_hash, got, target, waited()),
+                    xbmc.LOGINFO,
+                )
+                return True, url, filename
+            best_got = max(best_got, got)
 
             # About to sleep _ATTEMPT_PAUSE_SECONDS before retrying - show a
             # retrying hint so that silent pause isn't a dead-looking dialog.
@@ -453,6 +520,18 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
 
             if monitor.waitForAbort(_ATTEMPT_PAUSE_SECONDS):
                 return False, url, None
+
+        if best_got >= _HEADER_MIN_BYTES:
+            # The retry budget ran out while still under target, but the
+            # header is readable. Failing here would be a regression: before
+            # the early-start gate this case started playback immediately, so
+            # play it rather than refusing a stream that is merely slow.
+            log(
+                'player: pre-buffer budget spent for %s, starting on %d of %d bytes'
+                % (info_hash, best_got, target),
+                xbmc.LOGINFO,
+            )
+            return True, url, filename
 
         log(
             'player: pre-buffer timed out for %s after %d attempts with no usable front data'

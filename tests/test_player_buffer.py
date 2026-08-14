@@ -884,6 +884,76 @@ def test_prebuffer_logs_complete_only_when_the_target_is_reached(kodi_stubs, mon
     assert not any('starting early' in msg for msg in entries), entries
 
 
+def test_may_start_early_blocks_a_measurably_starved_swarm(kodi_stubs):
+    """The live failure: a one-peer swarm at ~174 KB/s cleared the header
+    floor at 1.2MB of a 20MB target and started, then starved within
+    seconds. Topping up the remaining ~19MB at that speed takes ~113s, far
+    past the early-start budget, so it must NOT start early."""
+    player = kodi_stubs.player
+    target = 20 * 1024 * 1024
+
+    assert player._may_start_early({'downloadSpeed': 174687.6}, 1245184, target, 0.0) is False
+
+
+def test_may_start_early_allows_a_swarm_that_outruns_playback(kodi_stubs):
+    """A swarm that can top the rest of the buffer up within the budget is
+    comfortably faster than playback drains it - keep the fast start."""
+    player = kodi_stubs.player
+    target = 20 * 1024 * 1024
+
+    assert player._may_start_early({'downloadSpeed': 8 * 1024 * 1024}, 1245184, target, 0.0) is True
+
+
+def test_may_start_early_treats_absent_stats_as_unknown_not_slow(kodi_stubs):
+    """The stats poll is best-effort and fails on exactly the struggling
+    servers this runs against. Missing evidence must not be read as slow,
+    or a flaky stats endpoint would invent a long wait on a healthy swarm."""
+    player = kodi_stubs.player
+    target = 20 * 1024 * 1024
+
+    assert player._may_start_early(None, 1245184, target, 0.0) is True
+    assert player._may_start_early({}, 1245184, target, 0.0) is True
+    assert player._may_start_early({'downloadSpeed': 'nonsense'}, 1245184, target, 0.0) is True
+
+
+def test_may_start_early_blocks_a_reported_dead_stall(kodi_stubs):
+    """A speed the server actually reported as zero is evidence, not
+    absence of it."""
+    player = kodi_stubs.player
+
+    assert player._may_start_early({'downloadSpeed': 0}, 1245184, 20 * 1024 * 1024, 0.0) is False
+
+
+def test_may_start_early_gives_up_waiting_after_the_budget(kodi_stubs):
+    """A slow-but-alive swarm must eventually play rather than buffer
+    forever behind the gate."""
+    player = kodi_stubs.player
+    target = 20 * 1024 * 1024
+    slow = {'downloadSpeed': 174687.6}
+
+    assert player._may_start_early(slow, 1245184, target, player._TARGET_WAIT_SECONDS) is True
+
+
+def test_prebuffer_starts_late_rather_than_failing_when_budget_is_spent(kodi_stubs, monkeypatch):
+    """With the gate holding a starved swarm back, the retry budget can now
+    run out while the header floor HAS been cleared. Before the gate that
+    case played immediately, so it must still play - refusing a merely-slow
+    stream would be a regression."""
+    env = kodi_stubs.env
+    _ServerScript(
+        resolve_url='http://server/x/0',
+        # Always clears the floor, never reaches target, always measurably slow.
+        iter_front_attempts=[[600_000]],
+        create_engine_result={'downloadSpeed': 1000, 'peers': 1},
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(19, _torrent_stream(fileIdx=0), 'movie', 'tt19')
+
+    entries = [msg for msg, level in env.log_calls]
+    assert any('budget spent' in msg for msg in entries), entries
+    assert not any('pre-buffer timed out' in msg for msg in entries), entries
+
+
 def test_prebuffer_timeout_logged_at_loginfo(kodi_stubs, monkeypatch):
     env = kodi_stubs.env
     _ServerScript(
