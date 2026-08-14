@@ -548,17 +548,9 @@ msgctxt "#30192"
 msgid "Add a Stremio addon by manifest URL"
 msgstr "매니페스트 URL로 Stremio 애드온 추가"
 
-msgctxt "#30193"
-msgid "Filter: %s"
-msgstr "필터: %s"
-
 msgctxt "#30194"
 msgid "Filter"
 msgstr "필터"
-
-msgctxt "#30195"
-msgid "Clear filter"
-msgstr "필터 지우기"
 
 msgctxt "#30196"
 msgid "Cast & crew"

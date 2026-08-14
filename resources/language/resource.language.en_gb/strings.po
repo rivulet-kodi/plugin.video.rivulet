@@ -548,16 +548,8 @@ msgctxt "#30192"
 msgid "Add a Stremio addon by manifest URL"
 msgstr ""
 
-msgctxt "#30193"
-msgid "Filter: %s"
-msgstr ""
-
 msgctxt "#30194"
 msgid "Filter"
-msgstr ""
-
-msgctxt "#30195"
-msgid "Clear filter"
 msgstr ""
 
 msgctxt "#30196"

@@ -35,11 +35,9 @@ _DEFAULT_SETTINGS = {
 # "Checking %s...", "Season %d" strings); every other id not explicitly
 # configured falls back to a deterministic 'STR<id>' marker (see
 # `FakeAddon.getLocalizedString`) so assertions never need real strings.po
-# text. 30189-30192 and 30194-30197 are plain (non-`%`) strings, so they
-# deliberately stay out of this dict and fall through to their 'STR<id>'
-# marker. 30193 ("Filter: %s") MUST stay in: views.catalog() renders it as
-# `L(30193) % <active genre>`, so a bare marker raises TypeError and takes
-# out the whole filtered-catalog listing.
+# text. 30189-30192, 30194, 30196, and 30197 are plain (non-`%`) strings, so
+# they deliberately stay out of this dict and fall through to their
+# 'STR<id>' marker.
 _DEFAULT_LOCALIZED = {
     30081: 'buffered %s of %s',
     30082: 'speed %s, %s peers',
@@ -47,7 +45,6 @@ _DEFAULT_LOCALIZED = {
     30186: 'Searching %s...',
     30187: 'Checking %s...',
     30188: 'Season %d',
-    30193: 'Filter: %s',
 }
 
 

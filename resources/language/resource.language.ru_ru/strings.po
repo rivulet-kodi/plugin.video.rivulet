@@ -548,17 +548,9 @@ msgctxt "#30192"
 msgid "Add a Stremio addon by manifest URL"
 msgstr "Добавить дополнение Stremio по URL манифеста"
 
-msgctxt "#30193"
-msgid "Filter: %s"
-msgstr "Фильтр: %s"
-
 msgctxt "#30194"
 msgid "Filter"
 msgstr "Фильтр"
-
-msgctxt "#30195"
-msgid "Clear filter"
-msgstr "Очистить фильтр"
 
 msgctxt "#30196"
 msgid "Cast & crew"
