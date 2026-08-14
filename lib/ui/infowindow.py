@@ -24,6 +24,9 @@ focusedlayout, the background crossfade) is Kodi-skin-engine-only and
 cannot be exercised by this test suite - see tests/test_infowindow.py's
 module docstring for what a real device must confirm.
 """
+import threading
+
+import xbmc
 import xbmcgui
 
 from lib.ui.uicommon import ModalStackWindow
@@ -73,6 +76,8 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         super().__init__(*args, **kwargs)
         self.metas = []
         self.selected = None
+        #: indices whose full meta has been fetched (or found already complete)
+        self._enriched = set()
 
     def start(self, metas):
         """doModal() with `metas` (a list of Stremio meta dicts) loaded as
@@ -81,6 +86,7 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         the modal at all and returns None immediately."""
         self.metas = list(metas or [])
         self.selected = None
+        self._enriched = set()
         if not self.metas:
             return None
         self.doModal()
@@ -107,17 +113,78 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         self.getControl(BACKGROUND).setImage(_item_properties(self.metas[0]).get('fanart', ''))
         self.getControl(LOADING).setVisible(False)
         self.setFocusId(SELECT)
+        # onAction() enriches on every focus change, but never fires for the
+        # item that opens focused - enrich item 0 here so the window doesn't
+        # open on a blank plot until the user scrolls off it and back.
+        if items:
+            self._enrich_focused(items[0])
 
     def onAction(self, action):
         if self.getFocusId() == SELECT:
             focused = self.getControl(SELECT).getSelectedItem()
             if focused is not None:
                 self.getControl(BACKGROUND).setImage(focused.getProperty('fanart'))
+                self._enrich_focused(focused)
         action_id = action.getId()
         if action_id == _INFO_ACTION:
             return
         if action_id in _BACK_ACTIONS:
             self.close()
+
+    def _enrich_focused(self, item):
+        """Fill in the description/genres a catalog meta preview lacks.
+
+        Stremio's `catalog` resource returns meta *previews*, which carry
+        name/poster/year but commonly omit `description` and `genres` -
+        those only exist on the full `meta` resource. Discover's catalogs
+        happen to include them often enough that the coverflow looked
+        complete; search results routinely do not, leaving the window's
+        plot/genre labels blank.
+
+        Fetch the full meta lazily for whichever poster is focused, on a
+        daemon thread (`_fetch_meta` is a blocking HTTP call - doing it
+        inline would stall the scroll), write the result back onto both
+        the ListItem and `self.metas[index]`, and cache per index so
+        scrolling back and forth re-fetches nothing. Every failure is
+        non-fatal: the labels simply stay as they were.
+        """
+        try:
+            index = int(item.getProperty('position'))
+        except (TypeError, ValueError):
+            return
+        if index in self._enriched:
+            return
+        meta = self.metas[index] if 0 <= index < len(self.metas) else None
+        if not meta or not meta.get('id'):
+            return
+        # Already complete (Discover's catalogs usually are) - nothing to do.
+        if meta.get('description'):
+            self._enriched.add(index)
+            return
+        self._enriched.add(index)
+        threading.Thread(target=self._enrich_worker, args=(index, item, meta), daemon=True).start()
+
+    def _enrich_worker(self, index, item, meta):
+        from lib.ui.compat import log
+
+        try:
+            from lib.ui.views import _fetch_meta
+
+            full = _fetch_meta(meta.get('type') or 'movie', meta.get('id'))
+        except Exception as exc:  # never let a lookup failure break the UI
+            log('infowindow: meta enrich failed for %s: %r' % (meta.get('id'), exc), xbmc.LOGDEBUG)
+            return
+        if not full:
+            return
+        # Merge rather than replace: the preview's own poster/background are
+        # what the strip is already showing, and re-setting them would make
+        # the focused art flicker as the fetch lands.
+        for key in ('description', 'genres', 'imdbRating', 'releaseInfo'):
+            if full.get(key) and not meta.get(key):
+                meta[key] = full[key]
+        props = _item_properties(meta)
+        for key in ('genre', 'rating', 'plot', 'year'):
+            item.setProperty(key, props.get(key, ''))
 
     def onClick(self, control_id):
         if control_id == SELECT:
