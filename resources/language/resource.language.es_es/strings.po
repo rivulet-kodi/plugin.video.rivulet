@@ -567,3 +567,11 @@ msgstr "Reparto y equipo"
 msgctxt "#30197"
 msgid "No cast or crew information"
 msgstr "No se encontró información de reparto ni equipo"
+
+msgctxt "#30198"
+msgid "All"
+msgstr "Todas"
+
+msgctxt "#30199"
+msgid "search only"
+msgstr "solo búsqueda"

@@ -567,3 +567,11 @@ msgstr ""
 msgctxt "#30197"
 msgid "No cast or crew information"
 msgstr ""
+
+msgctxt "#30198"
+msgid "All"
+msgstr ""
+
+msgctxt "#30199"
+msgid "search only"
+msgstr ""

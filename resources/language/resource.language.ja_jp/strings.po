@@ -567,3 +567,11 @@ msgstr "キャスト・スタッフ"
 msgctxt "#30197"
 msgid "No cast or crew information"
 msgstr "キャストまたはスタッフの情報がありません"
+
+msgctxt "#30198"
+msgid "All"
+msgstr "すべて"
+
+msgctxt "#30199"
+msgid "search only"
+msgstr "検索専用"

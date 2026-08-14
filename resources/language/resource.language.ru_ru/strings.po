@@ -567,3 +567,11 @@ msgstr "Актёры и съёмочная группа"
 msgctxt "#30197"
 msgid "No cast or crew information"
 msgstr "Нет информации об актёрах и съёмочной группе"
+
+msgctxt "#30198"
+msgid "All"
+msgstr "Все"
+
+msgctxt "#30199"
+msgid "search only"
+msgstr "только поиск"

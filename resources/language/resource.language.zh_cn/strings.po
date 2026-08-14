@@ -567,3 +567,11 @@ msgstr "演职员"
 msgctxt "#30197"
 msgid "No cast or crew information"
 msgstr "未找到演职员信息"
+
+msgctxt "#30198"
+msgid "All"
+msgstr "全部"
+
+msgctxt "#30199"
+msgid "search only"
+msgstr "仅搜索"

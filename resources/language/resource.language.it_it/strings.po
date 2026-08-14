@@ -567,3 +567,11 @@ msgstr "Cast e troupe"
 msgctxt "#30197"
 msgid "No cast or crew information"
 msgstr "Nessuna informazione su cast o troupe"
+
+msgctxt "#30198"
+msgid "All"
+msgstr "Tutti"
+
+msgctxt "#30199"
+msgid "search only"
+msgstr "sola ricerca"

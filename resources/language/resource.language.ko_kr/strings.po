@@ -567,3 +567,11 @@ msgstr "출연진 및 제작진"
 msgctxt "#30197"
 msgid "No cast or crew information"
 msgstr "출연진 또는 제작진 정보 없음"
+
+msgctxt "#30198"
+msgid "All"
+msgstr "전체"
+
+msgctxt "#30199"
+msgid "search only"
+msgstr "검색 전용"

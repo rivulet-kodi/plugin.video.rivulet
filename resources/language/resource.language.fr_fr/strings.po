@@ -567,3 +567,11 @@ msgstr "Distribution et équipe technique"
 msgctxt "#30197"
 msgid "No cast or crew information"
 msgstr "Aucune information sur la distribution ou l'équipe technique"
+
+msgctxt "#30198"
+msgid "All"
+msgstr "Tous"
+
+msgctxt "#30199"
+msgid "search only"
+msgstr "recherche seule"

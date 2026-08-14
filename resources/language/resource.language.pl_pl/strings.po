@@ -567,3 +567,11 @@ msgstr "Obsada i ekipa"
 msgctxt "#30197"
 msgid "No cast or crew information"
 msgstr "Brak informacji o obsadzie i ekipie"
+
+msgctxt "#30198"
+msgid "All"
+msgstr "Wszystkie"
+
+msgctxt "#30199"
+msgid "search only"
+msgstr "tylko wyszukiwanie"

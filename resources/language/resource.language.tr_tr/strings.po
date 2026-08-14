@@ -567,3 +567,11 @@ msgstr "Oyuncular ve Ekip"
 msgctxt "#30197"
 msgid "No cast or crew information"
 msgstr "Oyuncu veya ekip bilgisi bulunamadı"
+
+msgctxt "#30198"
+msgid "All"
+msgstr "Tümü"
+
+msgctxt "#30199"
+msgid "search only"
+msgstr "yalnızca arama"
