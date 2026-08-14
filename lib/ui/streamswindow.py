@@ -147,9 +147,17 @@ class StreamsWindow(BaseWindow):
 
         items = []
         for index, (info, _stream) in enumerate(self.pairs):
-            line1 = streaminfo.format_label(info, include_addon=False) or info.get('raw') or '?'
+            # Multi-provider rows show the addon as a gray tail segment on
+            # line 1 (format_label's own include_addon=True rendering);
+            # once every pair is the SAME addon it's redundant there and
+            # surfaces once instead as the info panel's 'via <addon>' line
+            # below, so line 1 drops it (include_addon=False).
+            line1 = streaminfo.format_label(info, include_addon=not single_provider) or info.get('raw') or '?'
             line1 = line1.replace('\r', ' ').replace('\n', ' ')
-            line2 = '' if single_provider else (info.get('addon') or '').replace('\r', ' ').replace('\n', ' ')
+            # Line 2 is the re-derived detail line (audio/channels,
+            # languages, bitrate, release tags, group, tracker) - see
+            # streaminfo.format_details() - never the provider name.
+            line2 = streaminfo.format_details(info).replace('\r', ' ').replace('\n', ' ')
             item = xbmcgui.ListItem(line1, label2=line2)
             item.setProperty('position', str(index))
             items.append(item)
