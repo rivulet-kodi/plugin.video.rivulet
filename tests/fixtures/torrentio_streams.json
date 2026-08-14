@@ -1,0 +1,231 @@
+{
+  "_source": "live capture from https://torrentio.strem.fun (the most widely used Stremio stream addon)",
+  "_captured": "2026-08-14",
+  "_note": "Verbatim Stream objects EXCEPT infoHash, which is replaced with a deterministic dummy digest: parse_stream() only reads it as a boolean (is_torrent), and a real info hash locates copyrighted content, which has no place in a test fixture. Every other field - name, title, behaviorHints - is exactly what the addon sent, because those free-form strings are precisely what the parser has to cope with.",
+  "queries": {
+    "movie": "tt0111161",
+    "series": "tt0903747:1:1"
+  },
+  "streams": [
+    {
+      "name": "Torrentio\nBRRip",
+      "title": "The Shawshank Redemption 1994 BRRip Sub Eng-Arabic-French-Swedis\nThe Shawshank Redemption,1994,BRRip,Sub Arabic-ToZoon/The Shawshank Redemption,1994,BRRip,Sub Arabic-ToZoon.AVI\n👤 7 💾 1.78 GB ⚙️ ThePirateBay\n🇬🇧 / 🇫🇷 / 🇸🇦",
+      "infoHash": "fcf882bac3e6021df0438629e0235cc91c4da333",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|BRRip",
+        "filename": "The Shawshank Redemption,1994,BRRip,Sub Arabic-ToZoon.AVI"
+      },
+      "_query_type": "movie"
+    },
+    {
+      "name": "Torrentio\n1080p HDR",
+      "title": "The Shawshank Redemption (1994) (1080p DS4K BluRay x265 10-bit HDR AAC 5.1) [WeSLeY]\n👤 11 💾 6.81 GB ⚙️ 1337x",
+      "infoHash": "8f3ff708276caae360cb7df44cc619376750edc9",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|1080p|BluRay|x265|10bit|HDR",
+        "filename": "The Shawshank Redemption (1994) (1080p DS4K BluRay x265 10-bit HDR AAC 5.1) [WeSLeY].mkv"
+      },
+      "_query_type": "movie"
+    },
+    {
+      "name": "Torrentio\n4k DV",
+      "title": "The.Shawshank.Redemption.1994.UHD.BluRay.2160p.DTS-HD.MA.5.1.DV.HEVC.HYBRID.REMUX-FraMeSToR\n👤 109 💾 54.33 GB ⚙️ TorrentGalaxy",
+      "infoHash": "0d92e6c203ef2d29280d143aa4839fe6309ebb87",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|4k|BluRay REMUX|hevc|DV",
+        "filename": "The.Shawshank.Redemption.1994.UHD.BluRay.2160p.DTS-HD.MA.5.1.DV.HEVC.HYBRID.REMUX-FraMeSToR.mkv"
+      },
+      "_query_type": "movie"
+    },
+    {
+      "name": "Torrentio\n720p",
+      "title": "The Shawshank Redemption (1994) 720p BrRip x264 - YIFY\n👤 88 💾 848.96 MB ⚙️ ThePirateBay",
+      "infoHash": "711fd577ba0e736436b654fb670d96255e9ff1f3",
+      "fileIdx": 3,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|720p|BRRip|x264",
+        "filename": "The Shawshank Redemption 1994.720p.BRRip.x264.YIFY.mp4"
+      },
+      "_query_type": "movie"
+    },
+    {
+      "name": "Torrentio\nDVDRip",
+      "title": "Breaking Bad Saison 1 FRENCH HDTV\nBreaking.Bad.S01E01.FRENCH.DVDRip.XviD-JMT.avi\n👤 45 💾 548.16 MB ⚙️ Torrent9\n🇫🇷",
+      "infoHash": "a365110bd5bb181bf84dc59e2c2d65dbfbee176d",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|0a03aba4f6395f865b40e5c83b27ae4f630897c1",
+        "filename": "Breaking.Bad.S01E01.FRENCH.DVDRip.XviD-JMT.avi"
+      },
+      "_query_type": "series"
+    },
+    {
+      "name": "Torrentio\n1080p",
+      "title": "Breaking Bad (2008) Season 1-5 S01-S05 (1080p BluRay x265 HEVC 10bit AAC 5 1 Silence) [QxR]\nSeason 1/Breaking Bad (2008) - S01E01 - Pilot (1080p BluRay x265 Silence).mkv\n👤 391 💾 2.56 GB ⚙️ ThePirateBay",
+      "infoHash": "8279e52615f804bb9e0bb591c0642872974d5c74",
+      "fileIdx": 245,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|b43df67a93863ea91f2f773f00361072da771dd3",
+        "filename": "Breaking Bad (2008) - S01E01 - Pilot (1080p BluRay x265 Silence).mkv"
+      },
+      "_query_type": "series"
+    },
+    {
+      "name": "Torrentio\n4k",
+      "title": "Breaking Bad (2008) S01 (2160p AMZN WEB-DL H265 SDR DDP 5.1 English - HONE)\nBreaking Bad (2008) S01E01 (2160p AMZN WEB-DL H265 SDR DDP 5.1 English - HONE).mkv\n👤 84 💾 6.27 GB ⚙️ ThePirateBay",
+      "infoHash": "d03a3a9a892d7f9238fb528bb532d579a238fe16",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|f0fd1cad0e24b69ff6aaadb9df40c50286327188",
+        "filename": "Breaking Bad (2008) S01E01 (2160p AMZN WEB-DL H265 SDR DDP 5.1 English - HONE).mkv"
+      },
+      "_query_type": "series"
+    },
+    {
+      "name": "Torrentio\n480p",
+      "title": "Breaking Bad Season 1-5 Complete 480p x264 MKVTV\nBreaking Bad Season 1 480p (mkvtv.net)/Breaking.Bad.S01E01.480p.MKVTV.mkv\n👤 4 💾 374.89 MB ⚙️ 1337x",
+      "infoHash": "00821432d0d3d4d66e95e472d7585a08f5ff47ed",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|4a36cddbe3f716be6f335abd9df1b6d3257e824e",
+        "filename": "Breaking.Bad.S01E01.480p.MKVTV.mkv"
+      },
+      "_query_type": "series"
+    },
+    {
+      "name": "Torrentio\n720p",
+      "title": "Breaking Bad Season 1 Complete 720p.BRrip.Sujaidr (pimprg)\nBreaking Bad s01e01 720p.BRrip.Sujaidr.mkv\n👤 170 💾 464.62 MB ⚙️ ThePirateBay",
+      "infoHash": "e1fd290149f626abd7b356a8dd1b8f03f0600c62",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|72a391645b5ea76dd6f5ade169ffda943aa81649",
+        "filename": "Breaking Bad s01e01 720p.BRrip.Sujaidr.mkv"
+      },
+      "_query_type": "series"
+    },
+    {
+      "name": "Torrentio\nBRRip",
+      "title": "The Shawshank Redemption 1994 BRRip Sub Eng-Arabic-French-Swedis\nThe Shawshank Redemption,1994,BRRip-ToZoon/The Shawshank Redemption,1994,BRRip-ToZoon.AVI\n👤 7 💾 1.73 GB ⚙️ ThePirateBay\n🇬🇧 / 🇫🇷 / 🇸🇦",
+      "infoHash": "dcde384e6c03cc8ff54d72920252d73782d2467e",
+      "fileIdx": 6,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|BRRip",
+        "filename": "The Shawshank Redemption,1994,BRRip-ToZoon.AVI"
+      },
+      "_query_type": "movie"
+    },
+    {
+      "name": "Torrentio\n1080p",
+      "title": "Imdb top 263 movies hindi english gdrive\nThe.Shawshank.Redemption.1994.1080p.x264.YIFY.mp4\n👤 2081 💾 1.6 GB ⚙️ 1337x\n🇬🇧 / 🇮🇳",
+      "infoHash": "506241fdc3d8565620d093eb66ebfb58ce76e273",
+      "fileIdx": 227,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|1080p|x264",
+        "filename": "The.Shawshank.Redemption.1994.1080p.x264.YIFY.mp4"
+      },
+      "_query_type": "movie"
+    },
+    {
+      "name": "Torrentio\n4k HDR",
+      "title": "The Shawshank Redemption (1994) (2160p BluRay x265 HEVC 10bit HDR AAC 5.1 Tigole) [QxR]\n👤 31 💾 17.1 GB ⚙️ 1337x",
+      "infoHash": "1abd69d6570db262bebe534d815d4527a0e19e70",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|4k|BluRay|hevc|10bit|HDR",
+        "filename": "The Shawshank Redemption (1994) (2160p BluRay x265 10bit HDR Tigole).mkv"
+      },
+      "_query_type": "movie"
+    },
+    {
+      "name": "Torrentio\n720p",
+      "title": "The Shawshank Redemption 1994 720p NF WEB-DL DDP5 1 H 264-ViSTA\n👤 10 💾 3.75 GB ⚙️ ThePirateBay\n🇬🇧 / 🇮🇳",
+      "infoHash": "0a45b8e3f28a004da31c30e6cbb7920844cdf621",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|720p|WEB-DL|h264",
+        "filename": "The Shawshank Redemption 1994 720p NF WEB-DL DDP5 1 H 264-ViSTA.mkv"
+      },
+      "_query_type": "movie"
+    },
+    {
+      "name": "Torrentio\nBRRip",
+      "title": "Breaking Bad (Integrale) FRENCH HDTV\nBreaking.Bad.S01.REPACK.FRENCH.BRRip.x264-DUFF/Breaking.Bad.S01E01.FRENCH.BRRip.x264-DUFF.mp4\n👤 5 💾 620.03 MB ⚙️ Torrent9\n🇫🇷",
+      "infoHash": "cffe0520553298979abc5cf01165b0cac7e4da5e",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|be661458d6586804ae73adf22679b171b4ead019",
+        "filename": "Breaking.Bad.S01E01.FRENCH.BRRip.x264-DUFF.mp4"
+      },
+      "_query_type": "series"
+    },
+    {
+      "name": "Torrentio\n1080p",
+      "title": "Breaking.Bad.SEASON.01.S01.COMPLETE.1080p.10bit.BluRay.6CH.x265.HEVC-PSA\nBreaking.Bad.S01E01.Pilot.1080p.10bit.BluRay.6CH.x265.HEVC-PSA.mkv\n👤 375 💾 928.25 MB ⚙️ 1337x",
+      "infoHash": "4e5b2c6a3656e12bb901985d59530ef1c8a7afb6",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|6bbad06245a0d631b0a5e47c8cd6e5abc9a70211",
+        "filename": "Breaking.Bad.S01E01.Pilot.1080p.10bit.BluRay.6CH.x265.HEVC-PSA.mkv"
+      },
+      "_query_type": "series"
+    },
+    {
+      "name": "Torrentio\n4k",
+      "title": "Breaking Bad COMPLETE S01-S05 2160p WEB-DL Rus Ukr Eng DTS-HD MA5.1 x264-TrollUHD [RiCK]\nBreaking.Bad.S01.2160p.WEBRip.DTS-HD.MA5.1.x264-TrollUHD/Breaking.Bad.S01E01.2160p.WEBRip.DTS-HD.MA5.1.x264-TrollUHD.mkv\n👤 30 💾 50.81 GB ⚙️ 1337x\n🇬🇧 / 🇷🇺 / 🇺🇦",
+      "infoHash": "501bbf2b1fac4ca3d1877eccd8a43562ba7e6de1",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|1b42b99b9fbc0e0416a379787f250eb73b7434e3",
+        "filename": "Breaking.Bad.S01E01.2160p.WEBRip.DTS-HD.MA5.1.x264-TrollUHD.mkv"
+      },
+      "_query_type": "series"
+    },
+    {
+      "name": "Torrentio\n720p",
+      "title": "Breaking Bad S01-S05 720p 10bit BluRay 2CH x265 HEVC 30nama\ns01/Breaking_Bad_S01E01_x265_720p_BluRay_30nama_30NAMA.mkv\n👤 28 💾 383.27 MB ⚙️ 1337x",
+      "infoHash": "2c63f78fc135c22f9e915f7a6bbdd5b2dbeb3176",
+      "fileIdx": 45,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|dfa188ecbc2edd7983b60e4532aed4402a9c74a7",
+        "filename": "Breaking_Bad_S01E01_x265_720p_BluRay_30nama_30NAMA.mkv"
+      },
+      "_query_type": "series"
+    },
+    {
+      "name": "Torrentio\nHDRip",
+      "title": "Cadena Perpetua[Drama][1994][HDRip-XviD AC3 5.1 Spanish][newpct].avi\n👤 3 💾 1.94 GB ⚙️ MejorTorrent\n🇪🇸",
+      "infoHash": "398b06ee1ae3d6af4b1e1db7301e24fc17f72804",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|HDRip|xvid",
+        "filename": "Cadena Perpetua[Drama][1994][HDRip-XviD AC3 5.1 Spanish][newpct].avi"
+      },
+      "_query_type": "movie"
+    },
+    {
+      "name": "Torrentio\n1080p",
+      "title": "IMDB Top 250 - 2024 Edition - 1080p BluRay eSubs jZQ\n001 The Shawshank Redemption (1994)/The.Shawshank.Redemption.1994.REMASTERED.1080p.BluRay.x265-RARBG.mp4\n👤 637 💾 2.22 GB ⚙️ TorrentGalaxy",
+      "infoHash": "924bab89ca88520f63cb0373dc4c79ea4943fd31",
+      "fileIdx": 316,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|1080p|BluRay|x265",
+        "filename": "The.Shawshank.Redemption.1994.REMASTERED.1080p.BluRay.x265-RARBG.mp4"
+      },
+      "_query_type": "movie"
+    },
+    {
+      "name": "Torrentio\n4k DV | HDR",
+      "title": "The.Shawshank.Redemption.1994.2160p.UHD.Blu-Ray.DV.HEVC.HDR.DTS-HD.MA.5.1.DTS.XLL.5.1x265-E\n👤 27 💾 30.28 GB ⚙️ 1337x",
+      "infoHash": "4d5c737e1dc6c05f39883bc58c25b385a73e3255",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|4k|BluRay|hevc|DV|HDR",
+        "filename": "The.Shawshank.Redemption.1994.2160p.UHD.Blu-Ray.DV.HEVC.HDR.DTS-HD.MA.5.1.DTS.XLL.5.1x265-E.mkv"
+      },
+      "_query_type": "movie"
+    }
+  ]
+}
