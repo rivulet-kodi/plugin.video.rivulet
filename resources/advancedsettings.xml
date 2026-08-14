@@ -1,9 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <advancedsettings>
     <network>
-        <curlclienttimeout>60</curlclienttimeout>
+        <!-- Kodi maps curlclienttimeout to BOTH CURLOPT_CONNECTTIMEOUT and
+             CURLOPT_TIMEOUT (xbmc/filesystem/CurlFile.cpp), so it is a hard
+             cap on a whole request, not just on connecting - and Kodi's
+             CloseFile() has to wait for the reader thread sitting in it.
+             This template used to raise it to 60, which bought nothing (the
+             streaming server is normally on 127.0.0.1, where connecting is
+             instant) and made stopping a stalled torrent block for up to
+             curlretries+1 x 60s. Kodi's own default is 30.
+             Tolerance for a slow-but-moving torrent comes from
+             curllowspeedtime below, which is the right knob for it: it only
+             trips when the transfer sits under 1 byte/s for that long. -->
+        <curlclienttimeout>30</curlclienttimeout>
         <curllowspeedtime>60</curllowspeedtime>
-        <curlretries>2</curlretries>
+        <!-- One retry still absorbs a transient blip, while halving the
+             worst-case teardown wait versus Kodi's default of 2. -->
+        <curlretries>1</curlretries>
     </network>
     <cache>
         <buffermode>1</buffermode>
