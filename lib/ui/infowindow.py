@@ -56,6 +56,13 @@ _BACK_ACTIONS = frozenset({9, 10, 92})
 # - swallow it rather than let it fall through to back-action handling.
 _INFO_ACTION = 11
 
+# ACTION_CONTEXT_MENU ("C" key, a remote's menu button, long-press on
+# Android TV) opens the cast & crew picker for whichever poster is
+# focused - the coverflow is the only place a movie's cast/crew can be
+# reached in the custom-window path (a series gets the same affordance
+# on its own onAction - see detailwindow.py's identical constant).
+_CONTEXT_MENU_ACTION = 117
+
 
 def _item_properties(meta):
     """Map one Stremio catalog meta to the string Properties
@@ -185,8 +192,38 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         action_id = action.getId()
         if action_id == _INFO_ACTION:
             return
+        if action_id == _CONTEXT_MENU_ACTION:
+            self._open_credits()
+            return
         if action_id in _BACK_ACTIONS:
             self.close()
+
+    def _open_credits(self):
+        """ACTION_CONTEXT_MENU on the coverflow: resolve the focused
+        poster the exact same way onAction()'s own background swap does
+        above (getFocusId()/getSelectedItem()/position -> self.metas) -
+        no second "what's focused" mechanism - then fetch its full meta
+        (a catalog preview has no `links`, see `_item_properties()`) and
+        hand it to `open_credits_picker()`."""
+        if self.getFocusId() != SELECT:
+            return
+        focused = self.getControl(SELECT).getSelectedItem()
+        if focused is None:
+            return
+        meta = self.metas[int(focused.getProperty('position'))]
+        stype = meta.get('type') or 'movie'
+        sid = meta.get('id')
+        if not sid:
+            return
+
+        from lib.ui.compat import L
+        from lib.ui.dependencies import get_client, get_store
+        from lib.ui.uicommon import busy_dialog
+        from lib.ui.views import _fetch_meta
+
+        with busy_dialog(L(30033)):
+            full_meta = _fetch_meta(stype, sid)
+        open_credits_picker(get_store(), get_client(), full_meta)
 
     def close(self):
         # Any exit path - a back action, a selection, or a force-close for
@@ -427,3 +464,109 @@ def open_showcase(metas):
             win.close()
         except Exception:
             pass
+
+
+def open_credits_picker(store, client, meta):
+    """Cast & crew affordance shared by `ShowcaseWindow` (called above
+    with a freshly fetched full meta - a catalog preview has no
+    `links`) and `lib.ui.detailwindow.DetailWindow` (which already holds
+    its own full meta and passes it straight through, no re-fetch).
+
+    Lives here rather than in detailwindow.py because every dispatch
+    branch below needs `open_showcase` - already this module's own
+    function - while only the rare detail-kind branch needs
+    `detailwindow.open_detail`, the exact same lazy import every other
+    `open_showcase()` caller (searchwindow, catalogpicker, librarywindow,
+    views) already makes once a coverflow returns a selection. The
+    reverse edge this creates - DetailWindow lazily importing this
+    function - is just as function-scoped, so neither module needs the
+    other at import time; no real cycle.
+
+    Groups `meta['links']` via `lib.stremio.metalinks.iter_link_groups()`
+    and shows an `xbmcgui.Dialog().select()` picker, one row per link
+    ('Category: name', in group order). A cancelled picker, or a meta
+    with no usable links (the latter after `notify(L(30197))`), does
+    nothing. Otherwise dispatches the pick:
+      - search (a person): reruns `lib.ui.searchwindow.run_query()` and
+        opens the results the same way a coverflow selection normally
+        would (`_open_results()` below).
+      - discover (a genre): fetches that catalog and does the same -
+        but only once its transport_url is confirmed to name one of the
+        user's own installed addons (mirrors `lib.ui.views.people()`'s
+        identical check for the classical directory's own version of
+        this picker) - an addon-supplied URL must never send Rivulet to
+        an arbitrary host.
+      - detail: opens `lib.ui.detailwindow.open_detail()` directly.
+    """
+    import xbmc
+
+    from lib.stremio import metalinks
+    from lib.ui.compat import L, log, notify
+
+    groups = metalinks.iter_link_groups(meta)
+    if not groups:
+        notify(L(30197))
+        return
+
+    labels = []
+    links = []
+    for category, members in groups:
+        for name, parsed in members:
+            labels.append('%s: %s' % (category, name))
+            links.append(parsed)
+
+    choice = xbmcgui.Dialog().select(L(30196), labels)
+    if choice < 0:
+        return
+    parsed = links[choice]
+    kind = parsed['kind']
+
+    if kind == 'search':
+        from lib.ui.searchwindow import run_query
+        _open_results(run_query(store, client, parsed['query']))
+        return
+
+    if kind == 'discover':
+        from lib.stremio.addons import AddonError, safe_url_for_log
+
+        installed = {descriptor.get('transportUrl') for descriptor in store.get_addons()}
+        # SECURITY: an addon-supplied discover link's transport_url must
+        # never cause a fetch to an arbitrary host - only dispatch it
+        # once it's confirmed to name one of the user's own installed
+        # addons (resolved against store.get_addons(), never fetched
+        # from the link itself).
+        if parsed['transport_url'] not in installed:
+            log('infowindow: discover link transport not installed: %s' % safe_url_for_log(parsed['transport_url']), xbmc.LOGWARNING)
+            return
+        from lib.ui.views import _fetch_catalog
+        try:
+            metas = _fetch_catalog(parsed['transport_url'], parsed['type'], parsed['catalog_id'], extra=parsed['extra'])
+        except AddonError as exc:
+            log('infowindow: discover fetch %s failed: %s' % (safe_url_for_log(parsed['transport_url']), type(exc).__name__), xbmc.LOGERROR)
+            notify(L(30032))
+            return
+        _open_results(metas)
+        return
+
+    if kind == 'detail':
+        from lib.ui.detailwindow import open_detail
+        open_detail(parsed['type'], parsed['id'])
+
+
+def _open_results(metas):
+    """The tail every `open_showcase()` caller already runs on a fresh
+    result set (searchwindow._run_search, catalogpicker._open_catalog,
+    views.showcase/search): notify if empty, else open a coverflow and,
+    if the user picks a series there, follow through to
+    `detailwindow.open_detail()` - same as those callers, so a pick made
+    from this nested picker is never a dead end."""
+    from lib.ui.compat import L, notify
+
+    if not metas:
+        notify(L(30030))
+        return
+    selected = open_showcase(metas)
+    if not selected:
+        return
+    from lib.ui.detailwindow import open_detail
+    open_detail(selected.get('type') or 'movie', selected.get('id'))

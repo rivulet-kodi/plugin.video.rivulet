@@ -279,6 +279,56 @@ def test_new_search_with_a_query_runs_search_with_it(load_searchwindow, monkeypa
 
 
 # ---------------------------------------------------------------------------
+# run_query() - the fan-out extracted from _run_search() for reuse by
+# lib.ui.infowindow.open_credits_picker()'s "person" (search-kind link)
+# dispatch, the contract's second caller.
+# ---------------------------------------------------------------------------
+
+
+def test_run_query_returns_metas_with_type_defaulted_from_the_catalog(load_searchwindow):
+    ctx = load_searchwindow()
+    transport = 'https://a.example/manifest.json'
+    store = _FakeStore(addons=[_search_catalog_descriptor(transport)])
+    metas = [{'id': 'tt1', 'name': 'No Type'}, {'id': 'tt2', 'name': 'Has Type', 'type': 'series'}]
+    client = _FakeAddonClient(catalog_results={transport: metas})
+
+    result = ctx.searchwindow.run_query(store, client, 'batman')
+
+    assert [m.get('type') for m in result] == ['movie', 'series']
+
+
+def test_run_query_isolates_a_failing_addon_and_still_aggregates_the_rest(load_searchwindow):
+    ctx = load_searchwindow()
+    transport_a = 'https://a.example/manifest.json'
+    transport_b = 'https://b.example/manifest.json'
+    store = _FakeStore(addons=[
+        _search_catalog_descriptor(transport_a, 'A'),
+        _search_catalog_descriptor(transport_b, 'B'),
+    ])
+    metas_b = [{'id': 'tt1', 'name': 'Batman', 'type': 'movie'}]
+    client = _FakeAddonClient(catalog_results={
+        transport_a: AddonError('upstream down'),
+        transport_b: metas_b,
+    })
+
+    result = ctx.searchwindow.run_query(store, client, 'batman')
+
+    assert result == metas_b
+    assert any('a.example' in msg and 'AddonError' in msg for msg, _level in ctx.env.log_calls)
+    assert not any('upstream down' in msg or transport_a in msg for msg, _level in ctx.env.log_calls)
+
+
+def test_run_query_writes_no_search_history(load_searchwindow):
+    ctx = load_searchwindow()
+    store = _FakeStore(addons=[])
+    client = _FakeAddonClient(catalog_results={})
+
+    ctx.searchwindow.run_query(store, client, 'batman')
+
+    assert store.search_queries == []
+
+
+# ---------------------------------------------------------------------------
 # SearchWindow._run_search() - aggregation, error handling, history recording
 # ---------------------------------------------------------------------------
 

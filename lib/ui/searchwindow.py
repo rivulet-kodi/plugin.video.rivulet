@@ -99,29 +99,12 @@ class SearchWindow(BaseWindow):
         self._reload()
 
     def _run_search(self, query):
-        from lib.stremio.addons import AddonError, iter_catalogs, safe_url_for_log
         from lib.ui.compat import L, log, notify
 
         self.store.add_search_query(query)
 
         client = get_client()
-        metas = []
-        catalogs = list(iter_catalogs(self.store.get_addons(), extra_required='search'))
-        total_catalogs = len(catalogs)
-        with busy_dialog(L(30033), query) as dialog:
-            for index, (transport_url, manifest, cat) in enumerate(catalogs):
-                if dialog.iscanceled():
-                    break
-                percent = int(index * 100 / total_catalogs) if total_catalogs else 0
-                dialog.update(percent, L(30186) % (manifest.get('name') or '?'))
-                try:
-                    results = client.catalog(transport_url, cat.get('type'), cat.get('id'), extra=[('search', query)])
-                except AddonError as exc:
-                    log('searchwindow: %s failed: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGERROR)
-                    continue
-                for meta_obj in results or []:
-                    meta_obj['type'] = meta_obj.get('type') or cat.get('type')
-                    metas.append(meta_obj)
+        metas = run_query(self.store, client, query)
 
         self._reload()
 
@@ -144,6 +127,40 @@ class SearchWindow(BaseWindow):
         if open_detail(selected.get('type') or 'movie', selected.get('id')):
             self.should_close_caller = True
             self.close()
+
+
+def run_query(store, client, query):
+    """Fan `query` across every search-capable catalog
+    (`iter_catalogs(..., extra_required='search')`) and return the
+    collected metas, each with `type` defaulted from its catalog.
+    Extracted verbatim from `SearchWindow._run_search()`'s own fan-out
+    (progress dialog via `busy_dialog`/L(30186), per-addon `AddonError`
+    isolation and logging included) so other windows can run a search
+    without going through `SearchWindow` -
+    `lib.ui.infowindow.open_credits_picker()`'s "person" dispatch is the
+    second caller. Writes no history, opens no coverflow - callers own
+    both."""
+    from lib.stremio.addons import AddonError, iter_catalogs, safe_url_for_log
+    from lib.ui.compat import L, log
+
+    metas = []
+    catalogs = list(iter_catalogs(store.get_addons(), extra_required='search'))
+    total_catalogs = len(catalogs)
+    with busy_dialog(L(30033), query) as dialog:
+        for index, (transport_url, manifest, cat) in enumerate(catalogs):
+            if dialog.iscanceled():
+                break
+            percent = int(index * 100 / total_catalogs) if total_catalogs else 0
+            dialog.update(percent, L(30186) % (manifest.get('name') or '?'))
+            try:
+                results = client.catalog(transport_url, cat.get('type'), cat.get('id'), extra=[('search', query)])
+            except AddonError as exc:
+                log('searchwindow: %s failed: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGERROR)
+                continue
+            for meta_obj in results or []:
+                meta_obj['type'] = meta_obj.get('type') or cat.get('type')
+                metas.append(meta_obj)
+    return metas
 
 
 def open_search():

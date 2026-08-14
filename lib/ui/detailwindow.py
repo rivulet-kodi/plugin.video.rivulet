@@ -35,6 +35,12 @@ SEASON_BAR = 30007
 #: that is this module's cue to check whether the selected season moved.
 _SEASON_NAV_ACTIONS = frozenset({1, 2})
 
+#: ACTION_CONTEXT_MENU ("C" key, a remote's menu button, long-press on
+#: Android TV) opens the cast & crew picker for `self.meta` - the same
+#: affordance ShowcaseWindow's identical constant offers a movie, since
+#: this window only ever shows for a series (see the module docstring).
+_CONTEXT_MENU_ACTION = 117
+
 
 def _ordered_videos(videos):
     """Filter out any entry missing an `id` (nothing to open streams
@@ -258,8 +264,21 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         action_id = action.getId()
         if action_id in _SEASON_NAV_ACTIONS and self.getFocusId() == SEASON_BAR:
             self._sync_season_from_bar()
+        if action_id == _CONTEXT_MENU_ACTION:
+            self._open_credits()
+            return
         if action_id in BACK_ACTIONS:
             self.close()
+
+    def _open_credits(self):
+        """ACTION_CONTEXT_MENU: `self.meta` is already the full meta
+        `open_detail()` fetched to build this window, so - unlike
+        ShowcaseWindow's own version of this affordance, where a catalog
+        preview has no `links` - there is nothing left to fetch here."""
+        from lib.ui.dependencies import get_client, get_store
+        from lib.ui.infowindow import open_credits_picker
+
+        open_credits_picker(get_store(), get_client(), self.meta)
 
     def onClick(self, control_id):
         if control_id == SEASON_BAR:

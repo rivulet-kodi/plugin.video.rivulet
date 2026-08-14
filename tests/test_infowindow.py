@@ -39,8 +39,15 @@ _RELOAD_MODULE_NAMES = (
     # lib.ui.views is reloaded alongside the rest because ShowcaseWindow's
     # meta enrichment lazily `from lib.ui.views import _fetch_meta` inside
     # its worker - the enrichment tests monkeypatch `ctx.views._fetch_meta`
-    # so no test ever reaches the network.
-    'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.streamswindow', 'lib.ui.views', 'lib.ui.infowindow',
+    # so no test ever reaches the network. lib.ui.dependencies/
+    # lib.ui.searchwindow/lib.ui.detailwindow are reloaded for the same
+    # reason `_open_credits()`/`open_credits_picker()` lazily reach into
+    # them (get_store/get_client, run_query, open_detail) - the credits
+    # picker tests below monkeypatch `ctx.dependencies.get_store`/
+    # `get_client`, `ctx.searchwindow.run_query`, and
+    # `ctx.detailwindow.open_detail` directly.
+    'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.streamswindow', 'lib.ui.views',
+    'lib.ui.dependencies', 'lib.ui.searchwindow', 'lib.ui.detailwindow', 'lib.ui.infowindow',
 )
 
 
@@ -1120,3 +1127,246 @@ def test_enrich_worker_survives_a_guard_that_cannot_even_log(load_infowindow, mo
 
     assert win._enrich_slots.acquire(blocking=False) is True
     win._enrich_slots.release()
+
+
+# ---------------------------------------------------------------------------
+# ShowcaseWindow._open_credits() / open_credits_picker() - ACTION_CONTEXT_MENU
+# (117), the cast & crew affordance. ShowcaseWindow is the only place a
+# movie's cast/crew can be reached in the custom-window path - DetailWindow
+# only ever shows for a series and reuses this exact shared function from
+# self.meta with no fetch (see test_detailwindow.py's own, much smaller,
+# section for that wiring).
+# ---------------------------------------------------------------------------
+
+
+def _link(name, category, url):
+    return {'name': name, 'category': category, 'url': url}
+
+
+class _Store:
+    def __init__(self, addons):
+        self._addons = addons
+
+    def get_addons(self):
+        return self._addons
+
+
+def _stub_select(monkeypatch, answers=None, capture=None):
+    """kodistubs has no fake `xbmcgui.Dialog.select()` yet - this suite is
+    its first caller. Patches the class directly (fresh per test, since
+    `make_xbmcgui()` defines a brand-new `Dialog` class each
+    `install_kodi_stubs()` call) to pop successive `answers` (default: a
+    single -1, i.e. cancelled), recording each `(heading, options)` call
+    into `capture` if given."""
+    import xbmcgui
+
+    queue = list(answers) if answers is not None else [-1]
+
+    def _select(self, heading, options, **kwargs):
+        if capture is not None:
+            capture.append((heading, list(options)))
+        return queue.pop(0) if queue else -1
+
+    monkeypatch.setattr(xbmcgui.Dialog, 'select', _select, raising=False)
+
+
+def _showcase_window(ctx, metas, focus_index=0):
+    win = ctx.infowindow.ShowcaseWindow('ShowcaseWindow.xml', '/addon/path', 'Default', '720p')
+    win.metas = list(metas)
+    win.onInit()
+    win.getControl(ctx.infowindow.SELECT).selected_index = focus_index
+    return win
+
+
+def _fire_context_menu(win, ctx):
+    import xbmcgui
+    win.onAction(xbmcgui.Action(ctx.infowindow._CONTEXT_MENU_ACTION))
+
+
+def test_context_menu_fetches_full_meta_and_opens_select_with_category_name_labels(
+    load_infowindow, monkeypatch,
+):
+    ctx = load_infowindow()
+    full_meta = {
+        'id': 'tt1', 'name': 'The Godfather', 'type': 'movie',
+        'links': [
+            _link('Francis Ford Coppola', 'Directors', 'stremio:///search?search=Francis'),
+            _link('Marlon Brando', 'Cast', 'stremio:///search?search=Brando'),
+        ],
+    }
+    fetched = []
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: fetched.append((stype, sid)) or full_meta)
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: object())
+    monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
+    captured = []
+    _stub_select(monkeypatch, capture=captured)
+    win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
+
+    _fire_context_menu(win, ctx)
+
+    assert fetched == [('movie', 'tt1')]
+    assert captured == [('STR30196', ['Directors: Francis Ford Coppola', 'Cast: Marlon Brando'])]
+
+
+def test_context_menu_person_entry_runs_run_query_and_opens_results(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    full_meta = {'id': 'tt1', 'type': 'movie', 'links': [_link('Marlon Brando', 'Cast', 'stremio:///search?search=Brando')]}
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: full_meta)
+    store, client = object(), object()
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: store)
+    monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: client)
+    _stub_select(monkeypatch, answers=[0])
+    run_query_calls = []
+    person_metas = [{'id': 'tt2', 'name': 'One-Eyed Jacks', 'type': 'movie'}]
+
+    def _run_query(passed_store, passed_client, query):
+        run_query_calls.append((passed_store, passed_client, query))
+        return person_metas
+
+    monkeypatch.setattr(ctx.searchwindow, 'run_query', _run_query)
+    opened = []
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas) or None)
+    win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
+
+    _fire_context_menu(win, ctx)
+
+    assert run_query_calls == [(store, client, 'Brando')]
+    assert opened == [person_metas]
+
+
+def test_context_menu_person_entry_with_no_results_notifies(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    full_meta = {'id': 'tt1', 'type': 'movie', 'links': [_link('Marlon Brando', 'Cast', 'stremio:///search?search=Brando')]}
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: full_meta)
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: object())
+    monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
+    _stub_select(monkeypatch, answers=[0])
+    monkeypatch.setattr(ctx.searchwindow, 'run_query', lambda store, client, query: [])
+    opened = []
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas))
+    win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
+
+    _fire_context_menu(win, ctx)
+
+    assert opened == []
+    assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
+
+
+def test_context_menu_genre_entry_with_installed_transport_fetches_catalog_and_opens_results(
+    load_infowindow, monkeypatch,
+):
+    from urllib.parse import quote
+
+    ctx = load_infowindow()
+    transport = 'https://a.example/manifest.json'
+    url = 'stremio:///discover/%s/movie/top?genre=Drama' % quote(transport, safe='')
+    full_meta = {'id': 'tt1', 'type': 'movie', 'links': [_link('Drama', 'Genres', url)]}
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: full_meta)
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: _Store([{'transportUrl': transport}]))
+    monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
+    _stub_select(monkeypatch, answers=[0])
+    fetch_calls = []
+    genre_metas = [{'id': 'tt9', 'name': 'Some Drama', 'type': 'movie'}]
+
+    def _fetch_catalog(transport_url, ctype, cid, extra=None):
+        fetch_calls.append((transport_url, ctype, cid, extra))
+        return genre_metas
+
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', _fetch_catalog)
+    opened = []
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas) or None)
+    win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
+
+    _fire_context_menu(win, ctx)
+
+    assert fetch_calls == [(transport, 'movie', 'top', [('genre', 'Drama')])]
+    assert opened == [genre_metas]
+
+
+def test_context_menu_genre_entry_with_uninstalled_transport_is_skipped_and_logged(
+    load_infowindow, monkeypatch,
+):
+    from urllib.parse import quote
+
+    ctx = load_infowindow()
+    transport = 'https://a.example/manifest.json'
+    url = 'stremio:///discover/%s/movie/top?genre=Drama' % quote(transport, safe='')
+    full_meta = {'id': 'tt1', 'type': 'movie', 'links': [_link('Drama', 'Genres', url)]}
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: full_meta)
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: _Store([]))  # nothing installed
+    monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
+    _stub_select(monkeypatch, answers=[0])
+    fetch_calls = []
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda *a, **k: fetch_calls.append((a, k)) or [])
+    win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
+
+    _fire_context_menu(win, ctx)
+
+    assert fetch_calls == []
+    assert any('not installed' in msg for msg, _level in ctx.env.log_calls)
+
+
+def test_context_menu_with_no_usable_links_notifies_and_shows_no_picker(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: {'id': 'tt1', 'type': 'movie'})  # no links
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: object())
+    monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
+    captured = []
+    _stub_select(monkeypatch, capture=captured)
+    win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
+
+    _fire_context_menu(win, ctx)
+
+    assert captured == []
+    assert ctx.env.notifications == [('Rivulet', 'STR30197', 'info', 4000)]
+
+
+def test_context_menu_cancelled_select_does_nothing(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    full_meta = {'id': 'tt1', 'type': 'movie', 'links': [_link('Marlon Brando', 'Cast', 'stremio:///search?search=Brando')]}
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: full_meta)
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: object())
+    monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
+    _stub_select(monkeypatch)  # default answers=[-1]
+    run_query_calls = []
+    monkeypatch.setattr(ctx.searchwindow, 'run_query', lambda *a: run_query_calls.append(a))
+    win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
+
+    _fire_context_menu(win, ctx)
+
+    assert run_query_calls == []
+    assert ctx.env.notifications == []
+
+
+def test_context_menu_detail_entry_opens_detailwindow_directly(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    full_meta = {
+        'id': 'tt1', 'type': 'movie',
+        'links': [_link('The Godfather Part II', 'Related', 'stremio:///detail/movie/tt0071562')],
+    }
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: full_meta)
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: object())
+    monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
+    _stub_select(monkeypatch, answers=[0])
+    captured = []
+    monkeypatch.setattr(ctx.detailwindow, 'open_detail', lambda stype, sid: captured.append((stype, sid)))
+    win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
+
+    _fire_context_menu(win, ctx)
+
+    assert captured == [('movie', 'tt0071562')]
+
+
+def test_context_menu_with_select_not_focused_does_nothing(load_infowindow, monkeypatch):
+    """`_open_credits()` reuses onAction()'s own SELECT-focus gate - the
+    same one guarding the background swap above it - rather than a second
+    "what's focused" mechanism."""
+    ctx = load_infowindow()
+    fetched = []
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: fetched.append((stype, sid)) or {})
+    win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
+    win.setFocusId(ctx.infowindow.CLOSE)
+
+    _fire_context_menu(win, ctx)
+
+    assert fetched == []

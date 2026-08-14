@@ -28,7 +28,8 @@ from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
     'lib.ui.compat', 'lib.ui.router', 'lib.ui.uicommon',
-    'lib.ui.views', 'lib.ui.streamswindow', 'lib.ui.detailwindow',
+    'lib.ui.views', 'lib.ui.streamswindow', 'lib.ui.dependencies', 'lib.ui.infowindow',
+    'lib.ui.detailwindow',
 )
 
 
@@ -37,9 +38,12 @@ def load_detailwindow():
     """Factory fixture: `load_detailwindow(addon_info=None)` installs fresh
     stubs (via tests.kodistubs.install_kodi_stubs) reloading lib.ui.compat/
     lib.ui.router/lib.ui.uicommon/lib.ui.views/lib.ui.streamswindow/
-    lib.ui.detailwindow, and returns a namespace with `.detailwindow`,
-    `.compat`, `.views`, `.streamswindow`, and `.env`. Every call is torn
-    down automatically, in reverse order, at test end.
+    lib.ui.dependencies/lib.ui.infowindow/lib.ui.detailwindow, and returns a
+    namespace with `.detailwindow`, `.compat`, `.views`, `.streamswindow`,
+    `.dependencies`, `.infowindow`, and `.env` - the last two for
+    `_open_credits()`'s lazy `get_store`/`get_client`/
+    `open_credits_picker` reach (see its own test section below). Every
+    call is torn down automatically, in reverse order, at test end.
     """
     with contextlib.ExitStack() as stack:
         def _load(addon_info=None):
@@ -329,6 +333,46 @@ def test_onaction_season_nav_without_focus_on_the_bar_does_not_repopulate(load_d
     win.onAction(xbmcgui.Action(2))  # ACTION_MOVE_RIGHT
 
     assert win.season_index == 0
+
+
+# ---------------------------------------------------------------------------
+# DetailWindow._open_credits() - ACTION_CONTEXT_MENU (117). Unlike
+# ShowcaseWindow's own version of this affordance (which fetches a full
+# meta on demand - a catalog preview has no `links`, see
+# test_infowindow.py's much larger section for that plus the full
+# person/genre/detail dispatch, exhaustively exercised there since the
+# shared logic lives in lib.ui.infowindow.open_credits_picker()),
+# DetailWindow already holds the full meta `open_detail()` fetched to
+# build it - these tests only cover that DetailWindow passes `self.meta`
+# straight through with no re-fetch.
+# ---------------------------------------------------------------------------
+
+
+def test_context_menu_uses_self_meta_directly_with_no_extra_fetch(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    import xbmcgui
+    win = _make_window(ctx.detailwindow)
+    win.meta = {
+        'id': 'tt1', 'name': 'Breaking Bad',
+        'links': [{'name': 'Bryan Cranston', 'category': 'Cast', 'url': 'stremio:///search?search=Bryan%20Cranston'}],
+    }
+    win.stype = 'series'
+    fetch_calls = []
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: fetch_calls.append((stype, sid)) or {})
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: object())
+    monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
+    captured = []
+
+    def _select(self, heading, options, **kwargs):
+        captured.append((heading, list(options)))
+        return -1
+
+    monkeypatch.setattr(xbmcgui.Dialog, 'select', _select, raising=False)
+
+    win.onAction(xbmcgui.Action(ctx.detailwindow._CONTEXT_MENU_ACTION))
+
+    assert fetch_calls == []  # self.meta was already full - no re-fetch
+    assert captured == [('STR30196', ['Cast: Bryan Cranston'])]
 
 
 # ---------------------------------------------------------------------------
