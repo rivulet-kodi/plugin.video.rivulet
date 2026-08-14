@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.5.4" provider-name="M0Rf30">
+<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.5.5" provider-name="M0Rf30">
   <requires>
     <import addon="xbmc.python" version="3.0.0" />
     <import addon="script.module.requests" version="2.22.0" />
@@ -12,7 +12,10 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse Discover and Search catalogs, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote stremio-server-go streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.5.4:
+    <news>v0.5.5:
+- Fix: Rivulet's icon, fanart and screenshot gallery were missing in Kodi's own Add-ons browser when installing from the Rivulet repository. The repository was publishing those images to different paths than the ones the add-on declares, so Kodi asked for them and got nothing back. The screenshots added in 0.4.20 should finally be visible.
+- Improved: the metadata cache now keeps itself under a fixed size budget rather than a fixed number of titles. A TV series entry is far bigger than a film's (it lists every episode), so the old limit could let the cache grow to a few megabytes and rewrite all of it each time a title was cached - the opposite of what it was there for on SD-card and eMMC installs.
+v0.5.4:
 - Fix: seeder counts were missing from nearly every Torrentio result, and the few that did appear were usually wrong. Torrentio states the count before the file size, which Rivulet was not reading, so it fell back to guessing at other numbers in the release name. It now reads Torrentio's own marker: the count is correct on every row, and sorting by seeders works properly. Checked against 100 live Torrentio results.
 v0.5.3:
 - Improved: a long stream list now uses about half the memory it did, and writes about half as much to storage. Each row carries a hidden copy of its stream details, which is now compressed - roughly 200KB less on a title that returns several hundred sources. Best felt on TV boxes and SD-card installs, where storage writes are the scarce resource.
