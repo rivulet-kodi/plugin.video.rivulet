@@ -197,13 +197,15 @@ def test_shipped_template_installs_and_is_valid_xml_with_expected_tunables(tmp_p
     assert status == STATUS_INSTALLED
     root = ET.parse(str(dest)).getroot()
     assert root.tag == 'advancedsettings'
-    # curlclienttimeout is Kodi's CURLOPT_TIMEOUT, i.e. a hard cap on a whole
-    # request that CloseFile() must wait out when stopping a stalled stream.
-    # It stays at Kodi's own default; raising it makes stopping a starved
-    # torrent hang for a multiple of it. Torrent tolerance is curllowspeedtime's
-    # job (it only trips under 1 byte/s), which is why that one IS raised.
+    # curllowspeedtime is what actually bounds how long stopping a stalled
+    # stream takes: Kodi's CFileCache reads are governed by
+    # CURLOPT_LOW_SPEED_TIME, not curlclienttimeout, so a stream at 0 bytes/s
+    # waits out this whole window before CloseFile() can finish. Measured on
+    # a live stall as a 57s stop with a 60.000s retry-to-timeout interval
+    # while curlclienttimeout was already 30 - so it is this value, and it
+    # stays at Kodi's default rather than raised.
     assert root.findtext('network/curlclienttimeout') == '30'
-    assert root.findtext('network/curllowspeedtime') == '60'
+    assert root.findtext('network/curllowspeedtime') == '20'
     assert root.findtext('network/curlretries') == '1'
     assert root.findtext('cache/buffermode') == '1'
     assert root.findtext('cache/memorysize') == '209715200'

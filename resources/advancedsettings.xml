@@ -1,21 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <advancedsettings>
     <network>
-        <!-- Kodi maps curlclienttimeout to BOTH CURLOPT_CONNECTTIMEOUT and
-             CURLOPT_TIMEOUT (xbmc/filesystem/CurlFile.cpp), so it is a hard
-             cap on a whole request, not just on connecting - and Kodi's
-             CloseFile() has to wait for the reader thread sitting in it.
-             This template used to raise it to 60, which bought nothing (the
-             streaming server is normally on 127.0.0.1, where connecting is
-             instant) and made stopping a stalled torrent block for up to
-             curlretries+1 x 60s. Kodi's own default is 30.
-             Tolerance for a slow-but-moving torrent comes from
-             curllowspeedtime below, which is the right knob for it: it only
-             trips when the transfer sits under 1 byte/s for that long. -->
+        <!-- curlclienttimeout is CURLOPT_CONNECTTIMEOUT plus, on some
+             handles, CURLOPT_TIMEOUT (xbmc/filesystem/CurlFile.cpp). Kept at
+             Kodi's own default: raising it bought nothing against a
+             streaming server on 127.0.0.1, where connecting is instant. -->
         <curlclienttimeout>30</curlclienttimeout>
-        <curllowspeedtime>60</curllowspeedtime>
-        <!-- One retry still absorbs a transient blip, while halving the
-             worst-case teardown wait versus Kodi's default of 2. -->
+        <!-- THIS is the one that decides how long stopping a stalled stream
+             takes. Kodi's playback reader is CFileCache, and its reads are
+             governed by CURLOPT_LOW_SPEED_TIME (with LOW_SPEED_LIMIT=1),
+             not by curlclienttimeout - so a stream sitting at 0 bytes/s
+             waits out this whole window, and CVideoPlayer::CloseFile()
+             cannot finish until that thread unblocks.
+
+             Measured on a live stall with curlclienttimeout already lowered
+             to 30: stop took 57s, and the curl retry-to-timeout interval was
+             exactly 60.000s - i.e. this setting, not the other one. Back to
+             Kodi's default of 20, which still rides out a recovering stream
+             (the same log shows one recovering across a 16s partial-file
+             gap, which a shorter window would have killed) while cutting the
+             teardown wait to roughly a third. An add-on cannot interrupt
+             Kodi's cache thread, so this timeout IS the only lever. -->
+        <curllowspeedtime>20</curllowspeedtime>
+        <!-- One retry still absorbs a transient blip - the same log shows
+             two partial-file reconnects that recovered mid-playback - while
+             halving the worst case versus Kodi's default of 2. -->
         <curlretries>1</curlretries>
     </network>
     <cache>
