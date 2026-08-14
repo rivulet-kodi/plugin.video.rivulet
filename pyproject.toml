@@ -2,7 +2,7 @@
 name = "plugin.video.rivulet"
 # addon.xml is the release source of truth for versioning (Kodi reads it);
 # this version is inert metadata for dev tooling and is kept in sync manually.
-version = "0.5.4"
+version = "0.5.5"
 description = "Kodi video addon (Rivulet) - not a pip-installable package; config-only pyproject.toml for dev tooling"
 requires-python = ">=3.8"
 
