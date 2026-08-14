@@ -390,12 +390,16 @@ def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn):
 
     Kodi invokes `onAVStarted`/`onPlayBackStopped`/`onPlayBackEnded` on
     every live `Player` instance for ANY playback in the whole Kodi
-    session, not just this addon's -- hence every method below first
+    session, not just this addon's -- hence every callback below first
     checks `store.get_now_playing()` and no-ops when no Rivulet context
     is active. `sample_if_playing()` is NOT a Kodi callback -- `main()`'s
     own poll loop calls it once per iteration, approximating
     "periodically while playing"; `xbmc.Player` has no native
-    periodic-tick hook to drive that instead.
+    periodic-tick hook to drive that instead. Unlike the callbacks,
+    `sample_if_playing()` checks `isPlayingVideo()` (a cheap native
+    binding call) BEFORE `store.get_now_playing()` (a disk read), so an
+    idle Kodi -- the common case for a background service -- never
+    touches disk on this per-tick path at all.
 
     `sync_enabled_fn`/`log_fn` are plain callables (`sync_enabled_fn() ->
     bool`, `log_fn(level, message)`) rather than an `xbmcaddon.Addon`/
@@ -455,7 +459,7 @@ def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn):
             context = store.get_now_playing()
             if context is not None and _context_key(context) == self._accepted_key:
                 try:
-                    self._flush(final=True)
+                    self._flush(context, final=True)
                 except Exception as exc:  # noqa: BLE001 - final flush is best-effort; cleanup below is unconditional
                     log_fn(xbmc_module.LOGWARNING, "final flush failed: %r" % (exc,))
             self._accepted_key = None
@@ -464,23 +468,27 @@ def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn):
             store.set_resume_offset_ms(None)
 
         def sample_if_playing(self):
-            """Call once per `main()` loop tick -- a no-op unless BOTH a
-            Rivulet now-playing context is active AND Kodi is actually
-            mid-playback. Only flushes a context this instance already
+            """Call once per `main()` loop tick -- a no-op unless BOTH
+            Kodi is actually mid-playback AND a Rivulet now-playing
+            context is active. `isPlayingVideo()` is checked FIRST since
+            it is a cheap native binding call, cheaper than the
+            `store.get_now_playing()` disk read below -- an idle Kodi
+            (the overwhelming common case) returns here without ever
+            touching disk. Only flushes a context this instance already
             accepted via onAVStarted (exact identity match) -- a
             different/not-yet-accepted context is left alone (waiting
             for onAVStarted) unless it is stale, in which case it is
             cleared instead of ever being sampled. One onAVStarted
             already accepted keeps sampling for as long as it keeps
             playing, however old `started_at` gets."""
-            context = store.get_now_playing()
-            if context is None:
-                return
             try:
                 playing = self.isPlayingVideo()
             except Exception:  # noqa: BLE001 - isPlayingVideo() must never crash the service loop
                 playing = False
             if not playing:
+                return
+            context = store.get_now_playing()
+            if context is None:
                 return
             if _context_key(context) != self._accepted_key:
                 now = datetime.datetime.now(datetime.timezone.utc)
@@ -488,12 +496,15 @@ def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn):
                     store.set_now_playing(None)
                     store.set_resume_offset_ms(None)
                 return
-            self._flush(final=False)
+            self._flush(context, final=False)
 
-        def _flush(self, final):
-            context = store.get_now_playing()
-            if context is None:
-                return
+        def _flush(self, context, final):
+            """Persist one playback sample for `context`. Both call
+            sites (`sample_if_playing`, `_terminate`) already read
+            `context` via `store.get_now_playing()` themselves -- to
+            check `_accepted_key` before ever calling here -- so this
+            takes it as a parameter instead of re-reading it from disk a
+            second time within the same tick/callback."""
             try:
                 position_ms = int(self.getTime() * library.MS_PER_SECOND)
                 duration_ms = int(self.getTotalTime() * library.MS_PER_SECOND)
