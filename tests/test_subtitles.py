@@ -6,7 +6,7 @@ suite needs no HTTP fakery from conftest - FakeSubtitleClient below plays
 that role and records every call for assertions.
 """
 from lib.stremio.addons import AddonError
-from lib.stremio.subtitles import collect_subtitles, sort_subtitles
+from lib.stremio.subtitles import collect_subtitles, filter_subtitles
 
 
 class FakeSubtitleClient:
@@ -269,25 +269,25 @@ def test_collect_subtitles_dedupes_by_url_keeps_first_label_too():
     assert result == [{"id": "from-a", "lang": "en", "url": dup_url, "label": "Forced"}]
 
 
-# --- sort_subtitles -------------------------------------------------------
+# --- filter_subtitles -----------------------------------------------------
 
 
 def _sub(sub_id, lang):
     return {"id": sub_id, "lang": lang, "url": "https://x.example/%s.srt" % sub_id}
 
 
-def test_sort_subtitles_preferred_first_stable_order():
+def test_filter_subtitles_keeps_only_preferred_lang_in_original_order():
     subs = [_sub("1", "fr"), _sub("2", "en"), _sub("3", "es"), _sub("4", "en")]
 
-    result = sort_subtitles(subs, "en")
+    result = filter_subtitles(subs, "en")
 
-    assert [s["id"] for s in result] == ["2", "4", "1", "3"]
+    assert [s["id"] for s in result] == ["2", "4"]
 
 
-def test_sort_subtitles_label_does_not_affect_ordering():
-    # Same fixture/order as test_sort_subtitles_preferred_first_stable_order,
-    # but every entry now carries a label -- the ranking must be byte-for-byte
-    # identical, and the labels must simply ride along untouched.
+def test_filter_subtitles_label_rides_along_untouched():
+    # Same fixture/order as test_filter_subtitles_keeps_only_preferred_lang_in_original_order,
+    # but every entry now carries a label -- the kept entries and their
+    # labels must simply ride along untouched.
     subs = [
         {"id": "1", "lang": "fr", "url": "https://x.example/1.srt", "label": "Francais"},
         {"id": "2", "lang": "en", "url": "https://x.example/2.srt", "label": "English"},
@@ -295,72 +295,64 @@ def test_sort_subtitles_label_does_not_affect_ordering():
         {"id": "4", "lang": "en", "url": "https://x.example/4.srt", "label": "English (SDH)"},
     ]
 
-    result = sort_subtitles(subs, "en")
+    result = filter_subtitles(subs, "en")
 
-    assert [s["id"] for s in result] == ["2", "4", "1", "3"]
-    assert [s["label"] for s in result] == ["English", "English (SDH)", "Francais", "Espanol"]
+    assert [s["label"] for s in result] == ["English", "English (SDH)"]
 
 
-def test_sort_subtitles_en_matches_two_and_three_letter_codes_case_insensitively():
+def test_filter_subtitles_en_matches_two_and_three_letter_codes_case_insensitively():
     subs = [_sub("1", "fr"), _sub("2", "ENG"), _sub("3", "En"), _sub("4", "eng")]
 
-    result = sort_subtitles(subs, "en")
+    result = filter_subtitles(subs, "en")
 
-    assert [s["id"] for s in result] == ["2", "3", "4", "1"]
+    assert [s["id"] for s in result] == ["2", "3", "4"]
 
 
-def test_sort_subtitles_three_letter_preferred_matches_two_letter_entries():
+def test_filter_subtitles_three_letter_preferred_matches_two_letter_entries():
     subs = [_sub("1", "fr"), _sub("2", "en")]
 
-    result = sort_subtitles(subs, "eng")
+    result = filter_subtitles(subs, "eng")
 
-    assert [s["id"] for s in result] == ["2", "1"]
+    assert [s["id"] for s in result] == ["2"]
 
 
-def test_sort_subtitles_preferred_lang_itself_case_insensitive():
+def test_filter_subtitles_preferred_lang_itself_case_insensitive():
     subs = [_sub("1", "fr"), _sub("2", "en")]
 
-    result = sort_subtitles(subs, "EN")
+    result = filter_subtitles(subs, "EN")
 
-    assert [s["id"] for s in result] == ["2", "1"]
+    assert [s["id"] for s in result] == ["2"]
 
 
-def test_sort_subtitles_non_matching_langs_keep_relative_order():
+def test_filter_subtitles_no_match_returns_empty_list():
     subs = [_sub("1", "fr"), _sub("2", "es"), _sub("3", "de")]
 
-    result = sort_subtitles(subs, "en")
-
-    assert [s["id"] for s in result] == ["1", "2", "3"]
+    assert filter_subtitles(subs, "en") == []
 
 
-def test_sort_subtitles_unknown_code_matches_itself_literally():
+def test_filter_subtitles_unknown_code_matches_itself_literally():
     subs = [_sub("1", "xx"), _sub("2", "en")]
 
-    result = sort_subtitles(subs, "xx")
+    result = filter_subtitles(subs, "xx")
 
-    assert [s["id"] for s in result] == ["1", "2"]
+    assert [s["id"] for s in result] == ["1"]
 
 
-def test_sort_subtitles_none_preferred_lang_returns_original_order():
+def test_filter_subtitles_none_preferred_lang_returns_every_entry_in_order():
     subs = [_sub("1", "fr"), _sub("2", "en")]
 
-    assert [s["id"] for s in sort_subtitles(subs, None)] == ["1", "2"]
+    assert [s["id"] for s in filter_subtitles(subs, None)] == ["1", "2"]
 
 
-def test_sort_subtitles_empty_string_preferred_lang_returns_original_order():
+def test_filter_subtitles_empty_string_preferred_lang_returns_every_entry_in_order():
     subs = [_sub("1", "fr"), _sub("2", "en")]
 
-    assert [s["id"] for s in sort_subtitles(subs, "")] == ["1", "2"]
+    assert [s["id"] for s in filter_subtitles(subs, "")] == ["1", "2"]
 
 
-def test_sort_subtitles_empty_list_returns_empty_list():
-    assert sort_subtitles([], "en") == []
+def test_filter_subtitles_empty_list_returns_empty_list():
+    assert filter_subtitles([], "en") == []
 
 
-def test_sort_subtitles_does_not_mutate_input_list():
-    subs = [_sub("1", "fr"), _sub("2", "en")]
-    original_order = list(subs)
-
-    sort_subtitles(subs, "en")
-
-    assert subs == original_order
+def test_filter_subtitles_none_list_returns_empty_list():
+    assert filter_subtitles(None, "en") == []

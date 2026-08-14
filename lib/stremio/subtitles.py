@@ -2,8 +2,8 @@
 
 Queries every installed Stremio addon that declares subtitle support for
 the content being played, merges the results, drops duplicates/unusable
-entries, and offers a stable preferred-language sort so the player can
-hand Kodi a ranked list of subtitle URLs.
+entries, and narrows what is left to the user's preferred language so the
+player can hand Kodi a list it can safely auto-select from.
 
 OpenSubtitles v3 (bundled in the Store's default addon list) accepts the
 usual stream ``extra`` props -- ``filename`` and ``videoSize`` -- to
@@ -20,7 +20,7 @@ from lib.stremio.addons import addon_supports
 
 # ISO 639-1 (2-letter) -> ISO 639-2/B (3-letter) codes for the languages
 # subtitle addons commonly report. Only used for the loose alias matching
-# in sort_subtitles(); an unrecognized code simply won't gain an alias.
+# in filter_subtitles(); an unrecognized code simply won't gain an alias.
 _ISO639_1_TO_3 = {
     'af': 'afr', 'am': 'amh', 'ar': 'ara', 'az': 'aze', 'be': 'bel',
     'bg': 'bul', 'bn': 'ben', 'bs': 'bos', 'ca': 'cat', 'cs': 'cze',
@@ -133,16 +133,26 @@ def collect_subtitles(client, addons, rtype, rid, extra=None):
     return subs
 
 
-def sort_subtitles(subs, preferred_lang):
-    """Stable-sort `subs` (as returned by :func:`collect_subtitles`) so
-    entries matching `preferred_lang` come first, everything else keeps
-    its original relative order. Matching is case-insensitive and treats
-    2-letter/3-letter ISO 639 codes for the same language as equal."""
+def filter_subtitles(subs, preferred_lang):
+    """Return only the `subs` entries whose language matches
+    `preferred_lang` (case-insensitive, treating 2-letter/3-letter ISO
+    639 codes for the same language as equal), preserving order; an
+    unusable/empty `preferred_lang` passes everything through unchanged.
+
+    Ordering alone is not enough for the player: `ListItem.setSubtitles()`
+    takes bare paths, and Kodi derives an external subtitle's language
+    from the filename of that path (`CUtil::GetExternalStreamDetails
+    FromFilename` -> `URIUtils::GetFileName`, query string stripped).
+    Addon subtitle URLs end in opaque numeric ids, so every attached
+    track reaches Kodi with an empty language and Kodi's auto-selection
+    picks an arbitrary one. Handing it a single-language list makes that
+    arbitrary pick harmless.
+
+    Returns [] when nothing matches - attaching a wrong-language track is
+    worse than attaching none, since the file's own embedded tracks do
+    carry proper language metadata for Kodi to choose from.
+    """
     preferred = _lang_aliases(preferred_lang)
     if not preferred:
         return list(subs or [])
-
-    def rank(sub):
-        return 0 if _lang_aliases(sub.get('lang')) & preferred else 1
-
-    return sorted(subs or [], key=rank)
+    return [sub for sub in subs or [] if _lang_aliases(sub.get('lang')) & preferred]
