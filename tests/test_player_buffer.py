@@ -1404,6 +1404,66 @@ def test_apply_item_metadata_skips_malformed_meta_fields_without_poisoning_other
     assert info.get('genre') == ['Sci-Fi']  # other fields unaffected
 
 
+def test_apply_item_metadata_applies_cast_from_meta_with_one_based_order(kodi_stubs, monkeypatch):
+    """`item_meta['meta']['cast']` (a Stremio meta's plain actor-name
+    array) must reach the playback ListItem via `compat.set_video_cast`,
+    alongside the existing title/art/plot metadata - the OSD/info cast
+    display Kodi's fullscreen player offers during playback, on both the
+    `play()` and `play_direct()` paths (both funnel through
+    `_apply_item_metadata`). The default stub build has no
+    `System.BuildVersion`, so `compat.kodi_major_version()` falls back to
+    19's legacy `ListItem.setCast()` path (`legacy_cast`).
+    """
+    env = kodi_stubs.env
+    env.addon.settings['buffer_enable'] = False
+    _ServerScript(resolve_url='http://server/x/0').install(monkeypatch, kodi_stubs.player)
+
+    item_meta = {
+        'label': 'Dune',
+        'meta': {'description': 'A desert planet', 'cast': ['Timothee Chalamet', 'Zendaya']},
+    }
+    kodi_stubs.player.play(77, _torrent_stream(fileIdx=0), 'movie', 'tt77', item_meta=item_meta)
+
+    _handle, _succeeded, list_item = _resolved_one(env)
+    # title/art/plot still populated alongside the new cast wiring
+    assert list_item.getLabel() == 'Dune'
+    assert list_item.legacy_info.get('plot') == 'A desert planet'
+    assert list_item.legacy_cast == [
+        {'name': 'Timothee Chalamet', 'role': '', 'order': 1, 'thumbnail': ''},
+        {'name': 'Zendaya', 'role': '', 'order': 2, 'thumbnail': ''},
+    ]
+
+
+def test_apply_item_metadata_no_cast_call_when_meta_has_no_cast(kodi_stubs, monkeypatch):
+    """A `meta` dict present but with no `cast` key must never call
+    `setCast()` at all - `compat.set_video_cast` is a no-op on absent
+    input, but this guards the caller side too."""
+    env = kodi_stubs.env
+    env.addon.settings['buffer_enable'] = False
+    _ServerScript(resolve_url='http://server/x/0').install(monkeypatch, kodi_stubs.player)
+
+    item_meta = {'label': 'Dune', 'meta': {'description': 'A desert planet'}}
+    kodi_stubs.player.play(78, _torrent_stream(fileIdx=0), 'movie', 'tt78', item_meta=item_meta)
+
+    _handle, _succeeded, list_item = _resolved_one(env)
+    assert list_item.legacy_cast is None
+    assert list_item.info_tag.calls == {}
+
+
+def test_apply_item_metadata_no_cast_call_when_item_meta_has_no_meta_key(kodi_stubs, monkeypatch):
+    """No `item_meta['meta']` at all (or no `item_meta`) must also never
+    call `setCast()`."""
+    env = kodi_stubs.env
+    env.addon.settings['buffer_enable'] = False
+    _ServerScript(resolve_url='http://server/x/0').install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(79, _torrent_stream(fileIdx=0), 'movie', 'tt79', item_meta={'label': 'Dune'})
+
+    _handle, _succeeded, list_item = _resolved_one(env)
+    assert list_item.legacy_cast is None
+    assert list_item.info_tag.calls == {}
+
+
 # --- _attach_subtitles: subs_language filtering (issue #6) ----------------
 # Kodi reads an external subtitle's language from its filename, and addon
 # subtitle URLs end in opaque numeric ids, so every attached track used to

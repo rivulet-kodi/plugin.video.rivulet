@@ -25,6 +25,7 @@ from lib.ui.compat import (
     L,
     log,
     notify,
+    set_video_cast,
     set_video_info,
     setting_bool,
     setting_int,
@@ -590,7 +591,7 @@ def _stream_plot(stream):
 
 def _apply_item_metadata(list_item, stream, stype, item_meta, filename):
     """Populate `list_item`'s label and video-info metadata (title, art,
-    plot, year, rating, genre, duration, mediatype/tvshowtitle) so
+    plot, year, rating, genre, duration, mediatype/tvshowtitle, cast) so
     Kodi's fullscreen OSD shows a real title and artwork instead of "Not
     available" plus the default camera placeholder - the live Defect A:
     a stream with no `behaviorHints.filename` (the common case for a
@@ -602,6 +603,10 @@ def _apply_item_metadata(list_item, stream, stype, item_meta, filename):
     caller now forwards them. Every field is best-effort: a missing or
     malformed value is silently skipped, never raised - a metadata
     hiccup must never prevent playback.
+
+    `cast` comes from `item_meta['meta']['cast']`, a Stremio meta's plain
+    list of actor names only (Stremio supplies no roles) - see
+    `compat.set_video_cast` for how it is applied across Kodi versions.
 
     `filename` is the release/torrent filename `_resolve_playable_item`
     already derived (`behaviorHints.filename`, or the resolved torrent
@@ -668,6 +673,7 @@ def _apply_item_metadata(list_item, stream, stype, item_meta, filename):
         info['tvshowtitle'] = meta['name']
 
     set_video_info(list_item, info)
+    set_video_cast(list_item, meta.get('cast'))
 
 
 def _resolve_playable_item(stream, stype, sid, item_meta=None, video_id=None):
