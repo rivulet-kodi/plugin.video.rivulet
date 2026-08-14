@@ -23,6 +23,7 @@ originally absent - at teardown, same as the stub modules themselves.
 """
 import base64
 import contextlib
+import json
 import os
 import sys
 from urllib.parse import parse_qsl, urlencode, urlparse
@@ -193,12 +194,14 @@ STREAM_SAMPLE = {
     'behaviorHints': {'bingeGroup': 'rivulet|2160p|HDR', 'filename': 'movie (2024).mkv'},
 }
 
-# Deliberately chosen so its STANDARD (non-urlsafe) base64 encoding contains
-# both '+' and '/' (verified out of band) - a regression guard for
-# encode_stream() using urlsafe_b64encode (required for the token to
-# round-trip unmangled through url_for()'s urlencode() inside a plugin://
-# querystring) rather than plain b64encode.
-STREAM_WITH_PLUS_AND_SLASH_BYTES = {'infoHash': 'o/b>K1JtP($ 7?A#> t)Zmj(UMX51h', 'n': 3}
+# Deliberately chosen so that the STANDARD (non-urlsafe) base64 encoding of
+# its COMPRESSED payload contains both '+' and '/' (verified out of band) -
+# a regression guard for encode_stream() using urlsafe_b64encode (required
+# for the token to round-trip unmangled through url_for()'s urlencode()
+# inside a plugin:// querystring) rather than plain b64encode. It is picked
+# against the compressed bytes, not the raw JSON, because encode_stream()
+# deflates before base64-encoding.
+STREAM_WITH_PLUS_AND_SLASH_BYTES = {'infoHash': '.ZhyiA4uoR{gna(t%mU<djA<Wt.GS}U8po/', 'n': 5}
 
 
 def test_encode_decode_stream_round_trips_unicode_and_nested_dict():
@@ -238,6 +241,43 @@ def test_encode_stream_uses_urlsafe_alphabet_for_plus_slash_producing_payload():
     assert '-' in token
     assert '_' in token
     assert urlutil.decode_stream(token) == STREAM_WITH_PLUS_AND_SLASH_BYTES
+
+
+def test_encode_stream_compresses_the_token():
+    """The token is the largest thing in a streams listing, so it is
+    deflated before base64-encoding - a Torrentio-shaped stream carries a
+    long release name plus a repetitive tracker list."""
+    stream = dict(
+        STREAM_SAMPLE,
+        sources=['udp://tracker.opentrackr.org:1337/announce'] * 8,
+    )
+    token = urlutil.encode_stream(stream)
+    uncompressed = base64.urlsafe_b64encode(
+        json.dumps(stream, separators=(',', ':')).encode('utf-8')
+    ).decode('ascii')
+
+    assert len(token) < len(uncompressed) / 2
+    assert urlutil.decode_stream(token) == stream
+
+
+def test_decode_stream_still_reads_a_legacy_uncompressed_token():
+    """Tokens built before compression was introduced can still be sitting
+    in Kodi's own directory cache after an upgrade; clicking one of those
+    rows must keep playing rather than resolve to an empty stream."""
+    legacy = base64.urlsafe_b64encode(
+        json.dumps(STREAM_SAMPLE, separators=(',', ':')).encode('utf-8')
+    ).decode('ascii')
+
+    assert urlutil.decode_stream(legacy) == STREAM_SAMPLE
+
+
+def test_decode_stream_valid_base64_deflate_garbage_returns_empty_dict():
+    """A payload that is neither legacy JSON nor a valid deflate stream
+    (zlib.error, which is not a ValueError) must not escape as an
+    exception into the play action."""
+    token = base64.urlsafe_b64encode(b'\x78\x9c not really deflate').decode('ascii')
+
+    assert urlutil.decode_stream(token) == {}
 
 
 # ---------------------------------------------------------------------------
