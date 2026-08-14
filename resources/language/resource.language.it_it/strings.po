@@ -450,7 +450,7 @@ msgstr "Chiave di autenticazione account Stremio (certificato HTTPS automatico)"
 
 msgctxt "#30148"
 msgid "Browse catalogs from your installed addons"
-msgstr "Sfoglia i catalogi dei tuoi add-on installati"
+msgstr "Sfoglia i cataloghi dei tuoi add-on installati"
 
 msgctxt "#30149"
 msgid "Search across every installed addon"
@@ -519,3 +519,51 @@ msgstr "Aggiornato alla versione %s"
 msgctxt "#30185"
 msgid "Loading more sources..."
 msgstr "Caricamento di altre fonti..."
+
+msgctxt "#30186"
+msgid "Searching %s..."
+msgstr "Ricerca in %s..."
+
+msgctxt "#30187"
+msgid "Checking %s..."
+msgstr "Verifica di %s..."
+
+msgctxt "#30188"
+msgid "Season %d"
+msgstr "Stagione %d"
+
+msgctxt "#30189"
+msgid "Specials"
+msgstr "Speciali"
+
+msgctxt "#30190"
+msgid "Not logged in"
+msgstr "Accesso non effettuato"
+
+msgctxt "#30191"
+msgid "This addon is protected and cannot be removed"
+msgstr "Questo add-on è protetto e non può essere rimosso"
+
+msgctxt "#30192"
+msgid "Add a Stremio addon by manifest URL"
+msgstr "Aggiungi un add-on Stremio tramite URL manifest"
+
+msgctxt "#30193"
+msgid "Filter: %s"
+msgstr "Filtro: %s"
+
+msgctxt "#30194"
+msgid "Filter"
+msgstr "Filtro"
+
+msgctxt "#30195"
+msgid "Clear filter"
+msgstr "Cancella filtro"
+
+msgctxt "#30196"
+msgid "Cast & crew"
+msgstr "Cast e troupe"
+
+msgctxt "#30197"
+msgid "No cast or crew information"
+msgstr "Nessuna informazione su cast o troupe"

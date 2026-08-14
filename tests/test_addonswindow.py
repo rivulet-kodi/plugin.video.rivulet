@@ -307,7 +307,7 @@ def test_remove_protected_addon_notifies_and_never_calls_remove(load_addonswindo
     assert store.removed == []
     assert ctx.env.dialog_yesno_prompts == []
     assert ctx.env.notifications == [
-        ('Rivulet', 'This addon is protected and cannot be removed', 'info', 4000),
+        ('Rivulet', 'STR30191', 'info', 4000),
     ]
 
 
@@ -331,7 +331,7 @@ def test_remove_store_raises_valueerror_notifies_protected(load_addonswindow, mo
     win.onClick(ctx.addonswindow.LIST)
 
     assert ctx.env.notifications == [
-        ('Rivulet', 'This addon is protected and cannot be removed', 'info', 4000),
+        ('Rivulet', 'STR30191', 'info', 4000),
     ]
 
 

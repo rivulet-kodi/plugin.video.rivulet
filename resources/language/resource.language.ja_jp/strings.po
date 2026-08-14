@@ -448,6 +448,26 @@ msgctxt "#30147"
 msgid "Stremio account auth key (HTTPS auto-cert)"
 msgstr "Stremioアカウント認証キー (HTTPS自動証明書)"
 
+msgctxt "#30148"
+msgid "Browse catalogs from your installed addons"
+msgstr "インストール済みアドオンのカタログを閲覧"
+
+msgctxt "#30149"
+msgid "Search across every installed addon"
+msgstr "インストール済みのすべてのアドオンを検索"
+
+msgctxt "#30150"
+msgid "Your saved titles"
+msgstr "保存したタイトル一覧"
+
+msgctxt "#30151"
+msgid "Manage installed Stremio addons"
+msgstr "インストール済みのStremioアドオンを管理"
+
+msgctxt "#30152"
+msgid "Configure Rivulet"
+msgstr "Rivuletを設定"
+
 msgctxt "#30170"
 msgid "Sync playback progress to your Stremio account"
 msgstr "再生の進行度をStremioアカウントに同期する"
@@ -499,3 +519,51 @@ msgstr "バージョン %s に更新されました"
 msgctxt "#30185"
 msgid "Loading more sources..."
 msgstr "他のソースを読み込み中..."
+
+msgctxt "#30186"
+msgid "Searching %s..."
+msgstr "%sを検索中..."
+
+msgctxt "#30187"
+msgid "Checking %s..."
+msgstr "%sを確認中..."
+
+msgctxt "#30188"
+msgid "Season %d"
+msgstr "シーズン %d"
+
+msgctxt "#30189"
+msgid "Specials"
+msgstr "特別編"
+
+msgctxt "#30190"
+msgid "Not logged in"
+msgstr "ログインしていません"
+
+msgctxt "#30191"
+msgid "This addon is protected and cannot be removed"
+msgstr "このアドオンは保護されているため削除できません"
+
+msgctxt "#30192"
+msgid "Add a Stremio addon by manifest URL"
+msgstr "マニフェストURLでStremioアドオンを追加"
+
+msgctxt "#30193"
+msgid "Filter: %s"
+msgstr "フィルター: %s"
+
+msgctxt "#30194"
+msgid "Filter"
+msgstr "フィルター"
+
+msgctxt "#30195"
+msgid "Clear filter"
+msgstr "フィルターを解除"
+
+msgctxt "#30196"
+msgid "Cast & crew"
+msgstr "キャスト・スタッフ"
+
+msgctxt "#30197"
+msgid "No cast or crew information"
+msgstr "キャストまたはスタッフの情報がありません"

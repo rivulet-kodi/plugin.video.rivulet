@@ -30,15 +30,24 @@ _DEFAULT_SETTINGS = {
 }
 
 # Default localized-string map (`xbmcaddon.Addon.getLocalizedString`). Only
-# ids lib.ui.player formats with `%` need real placeholders (see
-# `_prebuffer_torrent`'s dialog.update() text); every other id not
-# explicitly configured falls back to a deterministic 'STR<id>' marker (see
-# `FakeAddon.getLocalizedString`) so assertions never need real
-# strings.po text.
+# ids production code formats with `%` need real placeholders (see
+# `_prebuffer_torrent`'s dialog.update() text, and lib/ui's "Searching %s...",
+# "Checking %s...", "Season %d" strings); every other id not explicitly
+# configured falls back to a deterministic 'STR<id>' marker (see
+# `FakeAddon.getLocalizedString`) so assertions never need real strings.po
+# text. 30189-30192 and 30194-30197 are plain (non-`%`) strings, so they
+# deliberately stay out of this dict and fall through to their 'STR<id>'
+# marker. 30193 ("Filter: %s") MUST stay in: views.catalog() renders it as
+# `L(30193) % <active genre>`, so a bare marker raises TypeError and takes
+# out the whole filtered-catalog listing.
 _DEFAULT_LOCALIZED = {
     30081: 'buffered %s of %s',
     30082: 'speed %s, %s peers',
     30183: 'Playing %s in %d s',
+    30186: 'Searching %s...',
+    30187: 'Checking %s...',
+    30188: 'Season %d',
+    30193: 'Filter: %s',
 }
 
 
@@ -183,6 +192,8 @@ class FakeListItem:
         self.info_tag = FakeInfoTag()
         self.mimetype = None
         self.content_lookup = None
+        self.legacy_cast = None  # `xbmcgui.ListItem.setCast()` calls - Kodi 19 cast path
+        self._selected = False
 
     def getLabel(self):
         return self._label
@@ -226,3 +237,15 @@ class FakeListItem:
             self.context_menu_items = list(items)
         else:
             self.context_menu_items.extend(items)
+
+    def setCast(self, actors):
+        # Real `xbmcgui.ListItem.setCast(actors)` - Kodi 19's legacy cast
+        # API (Kodi >=20 uses `InfoTagVideo.setCast()` via `FakeInfoTag`
+        # instead - see `lib.ui.compat.set_video_cast()`).
+        self.legacy_cast = actors
+
+    def select(self, selected):
+        self._selected = bool(selected)
+
+    def isSelected(self):
+        return self._selected

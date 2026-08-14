@@ -448,6 +448,26 @@ msgctxt "#30147"
 msgid "Stremio account auth key (HTTPS auto-cert)"
 msgstr "Clave de autenticación de la cuenta Stremio (autocertificado HTTPS)"
 
+msgctxt "#30148"
+msgid "Browse catalogs from your installed addons"
+msgstr "Explorar los catálogos de tus complementos instalados"
+
+msgctxt "#30149"
+msgid "Search across every installed addon"
+msgstr "Buscar en todos los complementos instalados"
+
+msgctxt "#30150"
+msgid "Your saved titles"
+msgstr "Tus títulos guardados"
+
+msgctxt "#30151"
+msgid "Manage installed Stremio addons"
+msgstr "Gestionar los complementos de Stremio instalados"
+
+msgctxt "#30152"
+msgid "Configure Rivulet"
+msgstr "Configurar Rivulet"
+
 msgctxt "#30170"
 msgid "Sync playback progress to your Stremio account"
 msgstr "Sincronizar el progreso de reproducción con tu cuenta de Stremio"
@@ -499,3 +519,51 @@ msgstr "Actualizado a la versión %s"
 msgctxt "#30185"
 msgid "Loading more sources..."
 msgstr "Cargando más fuentes..."
+
+msgctxt "#30186"
+msgid "Searching %s..."
+msgstr "Buscando en %s..."
+
+msgctxt "#30187"
+msgid "Checking %s..."
+msgstr "Comprobando %s..."
+
+msgctxt "#30188"
+msgid "Season %d"
+msgstr "Temporada %d"
+
+msgctxt "#30189"
+msgid "Specials"
+msgstr "Especiales"
+
+msgctxt "#30190"
+msgid "Not logged in"
+msgstr "Sesión no iniciada"
+
+msgctxt "#30191"
+msgid "This addon is protected and cannot be removed"
+msgstr "Este complemento está protegido y no se puede eliminar"
+
+msgctxt "#30192"
+msgid "Add a Stremio addon by manifest URL"
+msgstr "Añadir un complemento de Stremio mediante URL de manifiesto"
+
+msgctxt "#30193"
+msgid "Filter: %s"
+msgstr "Filtro: %s"
+
+msgctxt "#30194"
+msgid "Filter"
+msgstr "Filtro"
+
+msgctxt "#30195"
+msgid "Clear filter"
+msgstr "Borrar filtro"
+
+msgctxt "#30196"
+msgid "Cast & crew"
+msgstr "Reparto y equipo"
+
+msgctxt "#30197"
+msgid "No cast or crew information"
+msgstr "No se encontró información de reparto ni equipo"

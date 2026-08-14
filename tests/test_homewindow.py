@@ -169,7 +169,7 @@ def test_status_text_reports_not_logged_in_when_auth_is_none(load_homewindow):
 
     text = ctx.homewindow._status_text(None)
 
-    assert text == 'Not logged in'
+    assert text == 'STR30190'
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +200,7 @@ def test_oninit_hides_library_row_when_not_authenticated(load_homewindow, monkey
 
     actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
     assert 'library' not in actions
-    assert win.getControl(ctx.homewindow.STATUS_LABEL).label == 'Not logged in'
+    assert win.getControl(ctx.homewindow.STATUS_LABEL).label == 'STR30190'
 
 
 def test_oninit_sets_status_label_to_email_when_authenticated_with_email(load_homewindow, monkeypatch):

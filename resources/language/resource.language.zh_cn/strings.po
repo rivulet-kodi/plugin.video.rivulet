@@ -448,6 +448,26 @@ msgctxt "#30147"
 msgid "Stremio account auth key (HTTPS auto-cert)"
 msgstr "Stremio 账户认证密钥（HTTPS 自动证书）"
 
+msgctxt "#30148"
+msgid "Browse catalogs from your installed addons"
+msgstr "浏览已安装插件的目录"
+
+msgctxt "#30149"
+msgid "Search across every installed addon"
+msgstr "在所有已安装插件中搜索"
+
+msgctxt "#30150"
+msgid "Your saved titles"
+msgstr "你保存的内容"
+
+msgctxt "#30151"
+msgid "Manage installed Stremio addons"
+msgstr "管理已安装的 Stremio 插件"
+
+msgctxt "#30152"
+msgid "Configure Rivulet"
+msgstr "配置 Rivulet"
+
 msgctxt "#30170"
 msgid "Sync playback progress to your Stremio account"
 msgstr "将播放进度同步到您的 Stremio 账户"
@@ -499,3 +519,51 @@ msgstr "已更新到版本 %s"
 msgctxt "#30185"
 msgid "Loading more sources..."
 msgstr "正在加载更多来源..."
+
+msgctxt "#30186"
+msgid "Searching %s..."
+msgstr "正在搜索 %s..."
+
+msgctxt "#30187"
+msgid "Checking %s..."
+msgstr "正在检查 %s..."
+
+msgctxt "#30188"
+msgid "Season %d"
+msgstr "第 %d 季"
+
+msgctxt "#30189"
+msgid "Specials"
+msgstr "特别篇"
+
+msgctxt "#30190"
+msgid "Not logged in"
+msgstr "未登录"
+
+msgctxt "#30191"
+msgid "This addon is protected and cannot be removed"
+msgstr "此插件受保护，无法移除"
+
+msgctxt "#30192"
+msgid "Add a Stremio addon by manifest URL"
+msgstr "通过清单 URL 添加 Stremio 插件"
+
+msgctxt "#30193"
+msgid "Filter: %s"
+msgstr "筛选：%s"
+
+msgctxt "#30194"
+msgid "Filter"
+msgstr "筛选"
+
+msgctxt "#30195"
+msgid "Clear filter"
+msgstr "清除筛选"
+
+msgctxt "#30196"
+msgid "Cast & crew"
+msgstr "演职员"
+
+msgctxt "#30197"
+msgid "No cast or crew information"
+msgstr "未找到演职员信息"

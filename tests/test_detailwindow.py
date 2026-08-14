@@ -135,7 +135,7 @@ def test_group_by_season_orders_seasons_specials_last_and_labels_them(load_detai
 
     groups = ctx.detailwindow._group_by_season(videos)
 
-    assert [label for _season, label, _videos in groups] == ['Season 1', 'Season 2', 'Specials']
+    assert [label for _season, label, _videos in groups] == ['Season 1', 'Season 2', 'STR30189']
     assert [video['id'] for video in groups[0][2]] == ['v-1x01', 'v-1x02']
     assert [video['id'] for video in groups[1][2]] == ['v-2x01']
     assert [video['id'] for video in groups[2][2]] == ['v-special']
@@ -217,7 +217,7 @@ def test_oninit_builds_season_bar_and_defaults_to_the_first_non_special_season(l
 
     bar = win.getControl(picker.SEASON_BAR)
     assert bar.visible is True
-    assert [item.getLabel() for item in bar.items] == ['Season 1', 'Season 2', 'Specials']
+    assert [item.getLabel() for item in bar.items] == ['Season 1', 'Season 2', 'STR30189']
     assert [item.getProperty('season') for item in bar.items] == ['1', '2', '0']
     assert win.season_index == 0
     list_row_ids = [item.getProperty('row_id') for item in win.getControl(picker.LIST).items]

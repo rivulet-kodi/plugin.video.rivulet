@@ -113,7 +113,7 @@ class SearchWindow(BaseWindow):
                 if dialog.iscanceled():
                     break
                 percent = int(index * 100 / total_catalogs) if total_catalogs else 0
-                dialog.update(percent, 'Searching %s...' % (manifest.get('name') or '?'))
+                dialog.update(percent, L(30186) % (manifest.get('name') or '?'))
                 try:
                     results = client.catalog(transport_url, cat.get('type'), cat.get('id'), extra=[('search', query)])
                 except AddonError as exc:

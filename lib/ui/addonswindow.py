@@ -12,9 +12,9 @@ from lib.ui.uicommon import BaseWindow, open_window
 
 LIST = 30002
 
-#: No existing string id fits this refusal; plain literal (mirrors
-#: homewindow._SUBTITLES's own literal-copy precedent).
-_PROTECTED_MESSAGE = 'This addon is protected and cannot be removed'
+#: strings.po id for the removal refusal shown for protected/official
+#: addons.
+_PROTECTED_MESSAGE_STRING_ID = 30191
 
 
 def _clean_description(text):
@@ -51,7 +51,7 @@ class AddonsWindow(BaseWindow):
         from lib.ui.compat import L
 
         install_item = xbmcgui.ListItem(
-            label=L(30010), label2='Add a Stremio addon by manifest URL',
+            label=L(30010), label2=L(30192),
         )
         install_item.setProperty('position', 'install')
         items = [install_item]
@@ -120,7 +120,7 @@ class AddonsWindow(BaseWindow):
         manifest = descriptor.get('manifest') or {}
         flags = descriptor.get('flags') or {}
         if flags.get('protected'):
-            notify(_PROTECTED_MESSAGE)
+            notify(L(_PROTECTED_MESSAGE_STRING_ID))
             return
 
         if not xbmcgui.Dialog().yesno(L(30011), manifest.get('name', '?')):
@@ -131,7 +131,7 @@ class AddonsWindow(BaseWindow):
         try:
             self.store.remove_addon(descriptor.get('transportUrl'))
         except ValueError:
-            notify(_PROTECTED_MESSAGE)
+            notify(L(_PROTECTED_MESSAGE_STRING_ID))
             return
 
         _sync_addons_if_logged_in(self.store)

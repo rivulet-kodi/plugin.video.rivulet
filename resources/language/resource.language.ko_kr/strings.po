@@ -448,6 +448,26 @@ msgctxt "#30147"
 msgid "Stremio account auth key (HTTPS auto-cert)"
 msgstr "Stremio 계정 인증 키 (HTTPS 자동 인증서)"
 
+msgctxt "#30148"
+msgid "Browse catalogs from your installed addons"
+msgstr "설치된 애드온의 카탈로그 찾아보기"
+
+msgctxt "#30149"
+msgid "Search across every installed addon"
+msgstr "설치된 모든 애드온에서 검색"
+
+msgctxt "#30150"
+msgid "Your saved titles"
+msgstr "저장한 콘텐츠"
+
+msgctxt "#30151"
+msgid "Manage installed Stremio addons"
+msgstr "설치된 Stremio 애드온 관리"
+
+msgctxt "#30152"
+msgid "Configure Rivulet"
+msgstr "Rivulet 설정"
+
 msgctxt "#30170"
 msgid "Sync playback progress to your Stremio account"
 msgstr "재생 진행 상황을 Stremio 계정에 동기화"
@@ -499,3 +519,51 @@ msgstr "버전 %s(으)로 업데이트됨"
 msgctxt "#30185"
 msgid "Loading more sources..."
 msgstr "추가 소스를 불러오는 중..."
+
+msgctxt "#30186"
+msgid "Searching %s..."
+msgstr "%s 검색 중..."
+
+msgctxt "#30187"
+msgid "Checking %s..."
+msgstr "%s 확인 중..."
+
+msgctxt "#30188"
+msgid "Season %d"
+msgstr "시즌 %d"
+
+msgctxt "#30189"
+msgid "Specials"
+msgstr "스페셜"
+
+msgctxt "#30190"
+msgid "Not logged in"
+msgstr "로그인되지 않음"
+
+msgctxt "#30191"
+msgid "This addon is protected and cannot be removed"
+msgstr "이 애드온은 보호되어 있어 제거할 수 없습니다"
+
+msgctxt "#30192"
+msgid "Add a Stremio addon by manifest URL"
+msgstr "매니페스트 URL로 Stremio 애드온 추가"
+
+msgctxt "#30193"
+msgid "Filter: %s"
+msgstr "필터: %s"
+
+msgctxt "#30194"
+msgid "Filter"
+msgstr "필터"
+
+msgctxt "#30195"
+msgid "Clear filter"
+msgstr "필터 지우기"
+
+msgctxt "#30196"
+msgid "Cast & crew"
+msgstr "출연진 및 제작진"
+
+msgctxt "#30197"
+msgid "No cast or crew information"
+msgstr "출연진 또는 제작진 정보 없음"

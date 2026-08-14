@@ -63,6 +63,18 @@ def parse_po(text):
     that isn't `#<digits>`, one not immediately followed by `msgid` then
     `msgstr`, or a duplicate id within the same catalog.
     """
+    return {string_id: msgid for string_id, (msgid, _msgstr) in _parse_po_full(text).items()}
+
+
+def _parse_po_full(text):
+    """Parse a Kodi `strings.po` catalog's numeric-id entries, keeping both
+    strings.
+
+    Returns `{int string_id: (str msgid, str msgstr)}` with the same
+    structural validation `parse_po` performs - `parse_po` is a thin
+    msgid-only view over this, so both share one parsing loop and one set
+    of `PoError`s instead of two hand-rolled parsers.
+    """
     entries = {}
     lines = text.splitlines()
     i, n = 0, len(lines)
@@ -93,7 +105,7 @@ def parse_po(text):
             raise PoError("line %d: msgctxt #%d not immediately followed by msgid then msgstr" % (i + 1, string_id))
         if string_id in entries:
             raise PoError("line %d: duplicate msgctxt id #%d" % (i + 1, string_id))
-        entries[string_id] = _unescape(msgid_match.group("value"))
+        entries[string_id] = (_unescape(msgid_match.group("value")), _unescape(msgstr_match.group("value")))
         i += 3
     return entries
 
@@ -128,6 +140,77 @@ def test_translated_catalog_ids_are_known_to_english():
         assert not unknown, "%s has ids unknown to English: %s" % (po_path, unknown)
 
 
+def test_translated_catalog_ids_cover_english():
+    """Complement of `test_translated_catalog_ids_are_known_to_english`:
+    every translated catalog must define every id English defines, not
+    merely a subset of them. Together the two tests pin each catalog's
+    id set as exactly equal to English's. This is the check that would
+    have caught #30148-#30152 silently missing from 12 of 14 catalogs - a
+    catalog that only omits ids ships English text on those ids at
+    runtime, defeating the point of translating it."""
+    english_ids = set(_english_ids())
+    assert english_ids, "English catalog defines no ids"
+    for po_path in _catalog_paths():
+        if po_path == ENGLISH_PO:
+            continue
+        catalog_ids = set(parse_po(po_path.read_text(encoding="utf-8")))
+        missing = sorted(english_ids - catalog_ids)
+        assert not missing, "%s is missing ids present in English: %s" % (po_path, missing)
+
+
+def test_translated_msgstr_populated_and_english_msgstr_empty():
+    """Kodi convention: `en_gb` carries English source text in msgid and
+    leaves msgstr empty, while every translated catalog must supply a
+    non-empty msgstr for every entry it defines. An empty msgstr in a
+    translated catalog ships as blank UI text - unlike a missing id,
+    which at least falls back to English, a present-but-blank entry
+    fails silently."""
+    for po_path in _catalog_paths():
+        entries = _parse_po_full(po_path.read_text(encoding="utf-8"))
+        if po_path == ENGLISH_PO:
+            non_empty = sorted(sid for sid, (_msgid, msgstr) in entries.items() if msgstr)
+            assert not non_empty, "%s has a non-empty msgstr for ids: %s" % (po_path, non_empty)
+        else:
+            empty = sorted(sid for sid, (_msgid, msgstr) in entries.items() if not msgstr)
+            assert not empty, "%s has an empty msgstr for ids: %s" % (po_path, empty)
+
+
+_FORMAT_SPEC_RE = re.compile(r"%%|%[sd]")
+
+
+def _format_specifiers(text):
+    """Multiset of `%s`/`%d` printf conversion specifiers in `text`, as a
+    sorted list so two multisets compare equal regardless of order. A
+    literal `%%` is matched (so it isn't misread as a stray `%` glued to
+    the character after it) but excluded from the result - it's an
+    escaped percent sign, not a conversion specifier consuming a format
+    argument."""
+    return sorted(spec for spec in _FORMAT_SPEC_RE.findall(text) if spec != "%%")
+
+
+def test_catalog_format_specifiers_match_english():
+    """Every translated msgstr must use exactly the same multiset of
+    %s/%d conversion specifiers as English's msgid for that id. Dropping
+    a %s (e.g. translating "Searching %s..." without it) raises
+    TypeError the moment production code does `L(30186) % title` to
+    build the search-progress dialog - a crash a translator could
+    introduce without ever running the addon."""
+    english = _parse_po_full(ENGLISH_PO.read_text(encoding="utf-8"))
+    for po_path in _catalog_paths():
+        if po_path == ENGLISH_PO:
+            continue
+        entries = _parse_po_full(po_path.read_text(encoding="utf-8"))
+        mismatched = []
+        for string_id, (_msgid, msgstr) in entries.items():
+            if string_id not in english:
+                continue
+            expected = _format_specifiers(english[string_id][0])
+            actual = _format_specifiers(msgstr)
+            if expected != actual:
+                mismatched.append("#%d: expected %s, got %s" % (string_id, expected, actual))
+        assert not mismatched, "%s has mismatched format specifiers: %s" % (po_path, mismatched)
+
+
 # --- regression fixtures: prove the .po validator actually catches bad data -
 
 
@@ -157,6 +240,39 @@ def test_unknown_translated_id_is_rejected_against_english_fixture():
     translated = parse_po('msgctxt "#99999"\nmsgid "Ghost"\nmsgstr "Fantasma"\n')
     unknown = set(translated) - set(english_ids)
     assert unknown == {99999}
+
+
+def test_catalog_missing_english_id_is_rejected_by_coverage_check_fixture():
+    """Regression: a translated catalog silently missing an id English
+    defines must fail the same set-difference check
+    `test_translated_catalog_ids_cover_english` runs against the real
+    catalogs - exactly how #30148-#30152 went missing from 12 of 14
+    catalogs undetected before this test existed."""
+    english_ids = {30000: "Discover", 30001: "Search"}
+    translated = parse_po('msgctxt "#30000"\nmsgid "Discover"\nmsgstr "Scopri"\n')
+    missing = set(english_ids) - set(translated)
+    assert missing == {30001}
+
+
+def test_empty_translated_msgstr_is_rejected_against_fixture():
+    """Regression: a translated entry left with an empty msgstr must fail
+    the same emptiness check
+    `test_translated_msgstr_populated_and_english_msgstr_empty` runs
+    against the real catalogs."""
+    entries = _parse_po_full('msgctxt "#30000"\nmsgid "Discover"\nmsgstr ""\n')
+    empty_ids = sorted(sid for sid, (_msgid, msgstr) in entries.items() if not msgstr)
+    assert empty_ids == [30000]
+
+
+def test_dropped_format_specifier_is_rejected_against_fixture():
+    """Regression: a translation that drops a %s conversion specifier
+    present in English must fail the same specifier-multiset check
+    `test_catalog_format_specifiers_match_english` runs against the real
+    catalogs - the exact bug class that raises TypeError formatting a
+    progress dialog at runtime."""
+    english = _parse_po_full('msgctxt "#30186"\nmsgid "Searching %s..."\nmsgstr ""\n')
+    translated = _parse_po_full('msgctxt "#30186"\nmsgid "Searching %s..."\nmsgstr "Ricerca in corso..."\n')
+    assert _format_specifiers(english[30186][0]) != _format_specifiers(translated[30186][1])
 
 
 # --- production L()/getLocalizedString() reference scan ---------------------

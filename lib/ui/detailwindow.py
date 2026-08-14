@@ -67,10 +67,12 @@ def _episode_rows(videos):
 
 
 def _season_label(season):
-    """'Season N' for season N >= 1, 'Specials' for season 0 - the two
-    label shapes DetailWindow.xml's season bar (`SEASON_BAR`/30007)
-    shows."""
-    return 'Season %d' % season if season else 'Specials'
+    """Localized 'Season N' for season N >= 1, 'Specials' for season 0 -
+    the two label shapes DetailWindow.xml's season bar (`SEASON_BAR`/
+    30007) shows."""
+    from lib.ui.compat import L
+
+    return L(30188) % season if season else L(30189)
 
 
 def _group_by_season(videos):

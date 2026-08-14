@@ -63,13 +63,12 @@ def _status_text(auth):
     """Render HomeWindow's top status line from the same `get_auth()`
     result onInit() already fetched for `show_library`: mirrors
     `lib.ui.views.addons()`'s exact "Logged in as <email/name/?>" wording
-    and string id (30022) so the two screens read identically; there is
-    no matching string id for the logged-out case, so it stays a plain
-    literal."""
+    and string id (30022) so the two screens read identically; the
+    logged-out case uses its own string id (30190)."""
     from lib.ui.compat import L
 
     if not auth:
-        return 'Not logged in'
+        return L(30190)
     user = auth.get('user') or {}
     return L(30022) % (user.get('email') or user.get('name') or '?')
 

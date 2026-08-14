@@ -448,6 +448,26 @@ msgctxt "#30147"
 msgid "Stremio account auth key (HTTPS auto-cert)"
 msgstr "Stremio-accountauthenticatiesleutel (HTTPS auto-certificaat)"
 
+msgctxt "#30148"
+msgid "Browse catalogs from your installed addons"
+msgstr "Catalogi van je geïnstalleerde add-ons doorbladeren"
+
+msgctxt "#30149"
+msgid "Search across every installed addon"
+msgstr "Zoeken in alle geïnstalleerde add-ons"
+
+msgctxt "#30150"
+msgid "Your saved titles"
+msgstr "Je opgeslagen titels"
+
+msgctxt "#30151"
+msgid "Manage installed Stremio addons"
+msgstr "Geïnstalleerde Stremio-add-ons beheren"
+
+msgctxt "#30152"
+msgid "Configure Rivulet"
+msgstr "Rivulet configureren"
+
 msgctxt "#30170"
 msgid "Sync playback progress to your Stremio account"
 msgstr "Kijkvoortgang synchroniseren met je Stremio-account"
@@ -499,3 +519,51 @@ msgstr "Bijgewerkt naar versie %s"
 msgctxt "#30185"
 msgid "Loading more sources..."
 msgstr "Meer bronnen laden..."
+
+msgctxt "#30186"
+msgid "Searching %s..."
+msgstr "%s doorzoeken..."
+
+msgctxt "#30187"
+msgid "Checking %s..."
+msgstr "%s controleren..."
+
+msgctxt "#30188"
+msgid "Season %d"
+msgstr "Seizoen %d"
+
+msgctxt "#30189"
+msgid "Specials"
+msgstr "Specials"
+
+msgctxt "#30190"
+msgid "Not logged in"
+msgstr "Niet ingelogd"
+
+msgctxt "#30191"
+msgid "This addon is protected and cannot be removed"
+msgstr "Deze add-on is beveiligd en kan niet worden verwijderd"
+
+msgctxt "#30192"
+msgid "Add a Stremio addon by manifest URL"
+msgstr "Een Stremio-add-on toevoegen via manifest-URL"
+
+msgctxt "#30193"
+msgid "Filter: %s"
+msgstr "Filter: %s"
+
+msgctxt "#30194"
+msgid "Filter"
+msgstr "Filter"
+
+msgctxt "#30195"
+msgid "Clear filter"
+msgstr "Filter wissen"
+
+msgctxt "#30196"
+msgid "Cast & crew"
+msgstr "Cast en crew"
+
+msgctxt "#30197"
+msgid "No cast or crew information"
+msgstr "Geen cast- of crewinformatie"

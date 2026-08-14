@@ -697,7 +697,7 @@ def _fetch_stream_pairs(stype, sid):
             if result is None:
                 break
             addon_name, _addon_pairs = result
-            dialog.update(int(completed * 100 / total), 'Checking %s...' % addon_name)
+            dialog.update(int(completed * 100 / total), L(30187) % addon_name)
 
     if failed_addons:
         log('streamswindow: %d addon(s) failed' % failed_addons, xbmc.LOGWARNING)
@@ -981,7 +981,7 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
             if result is None:
                 break
             addon_name, _addon_pairs = result
-            dialog.update(int(consumed * 100 / total), 'Checking %s...' % addon_name)
+            dialog.update(int(consumed * 100 / total), L(30187) % addon_name)
 
     if not pairs:
         if failed_addons:
