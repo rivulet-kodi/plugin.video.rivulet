@@ -329,6 +329,96 @@ def test_run_query_writes_no_search_history(load_searchwindow):
 
 
 # ---------------------------------------------------------------------------
+# _rank_by_credit() - moved from the deleted lib.ui.views.search(); applied
+# inside run_query() to every collected meta before it is returned.
+# ---------------------------------------------------------------------------
+
+
+def test_rank_by_credit_ranks_a_cast_credit_first_without_dropping_the_title_only_match(load_searchwindow):
+    ctx = load_searchwindow()
+    title_only = {'id': 'tt1', 'name': 'Listen to Me Marlon'}
+    cast_credit = {'id': 'tt2', 'name': 'One-Eyed Jacks', 'cast': ['Marlon Brando']}
+
+    result = ctx.searchwindow._rank_by_credit([title_only, cast_credit], 'Marlon Brando')
+
+    assert result[0] is cast_credit
+    assert title_only in result
+
+
+def test_rank_by_credit_ranks_a_director_credit_first(load_searchwindow):
+    ctx = load_searchwindow()
+    title_only = {'id': 'tt1', 'name': 'Listen to Me Marlon'}
+    director_credit = {'id': 'tt2', 'name': 'One-Eyed Jacks', 'director': ['Marlon Brando']}
+
+    result = ctx.searchwindow._rank_by_credit([title_only, director_credit], 'Marlon Brando')
+
+    assert result[0] is director_credit
+    assert title_only in result
+
+
+def test_rank_by_credit_ranks_a_writer_credit_first(load_searchwindow):
+    ctx = load_searchwindow()
+    title_only = {'id': 'tt1', 'name': 'Some Movie'}
+    writer_credit = {'id': 'tt2', 'name': 'Another Movie', 'writer': ['Charlie Kaufman']}
+
+    result = ctx.searchwindow._rank_by_credit([title_only, writer_credit], 'Charlie Kaufman')
+
+    assert result[0] is writer_credit
+    assert title_only in result
+
+
+def test_rank_by_credit_matching_is_case_insensitive(load_searchwindow):
+    ctx = load_searchwindow()
+    title_only = {'id': 'tt1', 'name': 'Unrelated'}
+    cast_credit = {'id': 'tt2', 'name': 'Credited', 'cast': ['marlon brando']}
+
+    result = ctx.searchwindow._rank_by_credit([title_only, cast_credit], 'MARLON BRANDO')
+
+    assert result[0] is cast_credit
+
+
+def test_rank_by_credit_is_stable_within_each_group(load_searchwindow):
+    ctx = load_searchwindow()
+    credited_a = {'id': 'tt1', 'name': 'Credited A', 'cast': ['Marlon Brando']}
+    credited_b = {'id': 'tt2', 'name': 'Credited B', 'director': ['Marlon Brando']}
+    uncredited_a = {'id': 'tt3', 'name': 'Uncredited A'}
+    uncredited_b = {'id': 'tt4', 'name': 'Uncredited B'}
+    metas = [uncredited_a, credited_a, uncredited_b, credited_b]
+
+    result = ctx.searchwindow._rank_by_credit(metas, 'Marlon Brando')
+
+    assert result == [credited_a, credited_b, uncredited_a, uncredited_b]
+
+
+def test_rank_by_credit_tolerates_malformed_credit_fields_and_an_empty_query(load_searchwindow):
+    ctx = load_searchwindow()
+    metas = [
+        {'id': 'tt1', 'name': 'String cast', 'cast': 'Marlon Brando'},
+        {'id': 'tt2', 'name': 'Non-string director entries', 'director': [None, 42, {'name': 'x'}]},
+        {'id': 'tt3', 'name': 'Null writer', 'writer': None},
+        {'id': 'tt4', 'name': 'Plain'},
+    ]
+
+    result = ctx.searchwindow._rank_by_credit(metas, '')  # must not raise
+
+    assert result == metas
+
+
+def test_run_query_ranks_the_returned_metas_by_credit(load_searchwindow):
+    ctx = load_searchwindow()
+    transport = 'https://a.example/manifest.json'
+    store = _FakeStore(addons=[_search_catalog_descriptor(transport)])
+    title_only = {'id': 'tt1', 'name': 'Listen to Me Marlon', 'type': 'movie'}
+    cast_credit = {'id': 'tt2', 'name': 'One-Eyed Jacks', 'type': 'movie', 'cast': ['Marlon Brando']}
+    client = _FakeAddonClient(catalog_results={transport: [title_only, cast_credit]})
+
+    result = ctx.searchwindow.run_query(store, client, 'Marlon Brando')
+
+    assert result[0]['id'] == 'tt2'
+    assert {m['id'] for m in result} == {'tt1', 'tt2'}
+
+
+# ---------------------------------------------------------------------------
 # SearchWindow._run_search() - aggregation, error handling, history recording
 # ---------------------------------------------------------------------------
 

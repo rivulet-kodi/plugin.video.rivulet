@@ -1,5 +1,4 @@
-"""SearchWindow: a persistent search-history/new-query picker - Rivulet's
-custom replacement for the classical `views.search()` directory. Unlike
+"""SearchWindow: a persistent search-history/new-query picker. Unlike
 the old bare `open_search()` function (which opened the coverflow
 directly with no window underneath it, so Back from the results fell all
 the way to Home), this window stays open under the coverflow the same
@@ -32,9 +31,9 @@ class SearchWindow(BaseWindow):
         self.should_close_caller = False
 
     def start(self):
-        """doModal() and return True if the caller should also close (a
-        classical-fallback navigation happened, e.g. after a movie/series
-        playback round trip)."""
+        """doModal() and return True if the caller should also close
+        (playback started somewhere down the chain, e.g. after a
+        movie/series round trip)."""
         self.should_close_caller = False
         self.doModal()
         return self.should_close_caller
@@ -129,6 +128,34 @@ class SearchWindow(BaseWindow):
             self.close()
 
 
+def _rank_by_credit(metas, query):
+    """Stable-sort `metas` so any meta crediting `query` in its
+    `cast`/`director`/`writer` list (case-insensitive, exact match
+    against a list entry) is ranked ahead of the rest, preserving each
+    group's original relative order otherwise.
+
+    The protocol has no field-scoped query - `search=` is always plain
+    full-text, so a query that came from a Cast/Directors/Writers meta
+    link (see lib.stremio.metalinks) genuinely returns both the
+    person's credited titles and unrelated title matches (Cinemeta's
+    own "Marlon Brando" search returns both One-Eyed Jacks, where he is
+    cast+director, and "Listen to Me Marlon", a title-only match). We
+    RANK rather than filter: filtering would hide results the addon
+    actually returned, and would silently break for addons whose
+    search previews omit cast/director/writer entirely.
+    """
+    needle = query.casefold()
+
+    def _credit_rank(meta_obj):
+        for field in ('cast', 'director', 'writer'):
+            for entry in meta_obj.get(field) or []:
+                if isinstance(entry, str) and entry.casefold() == needle:
+                    return 0
+        return 1
+
+    return sorted(metas, key=_credit_rank)
+
+
 def run_query(store, client, query):
     """Fan `query` across every search-capable catalog
     (`iter_catalogs(..., extra_required='search')`) and return the
@@ -160,7 +187,7 @@ def run_query(store, client, query):
             for meta_obj in results or []:
                 meta_obj['type'] = meta_obj.get('type') or cat.get('type')
                 metas.append(meta_obj)
-    return metas
+    return _rank_by_credit(metas, query)
 
 
 def open_search():
