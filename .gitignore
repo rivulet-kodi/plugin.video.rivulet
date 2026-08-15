@@ -27,3 +27,6 @@ venv/
 /*.zip
 /dist/
 /build/
+
+# Generated GitHub Pages repository tree (.github/workflows/repo.yml)
+/_repo/

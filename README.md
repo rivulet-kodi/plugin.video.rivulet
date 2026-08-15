@@ -80,9 +80,10 @@ In Kodi's native UI:
 
 ## Install
 
-1. Grab `plugin.video.rivulet-<version>.zip` from a
-   [release](https://github.com/rivulet-kodi/plugin.video.rivulet/releases/latest) or from
-   the "Build addon zip" GitHub Actions artifact.
+1. Download
+   [`plugin.video.rivulet.zip`](https://rivulet-kodi.github.io/plugin.video.rivulet/plugin.video.rivulet.zip)
+   — that URL always serves the current release. (Per-version zips are on the
+   [releases page](https://github.com/rivulet-kodi/plugin.video.rivulet/releases/latest).)
 2. In Kodi: **Settings → Add-ons → Install from zip file** and pick the
    downloaded zip.
 3. Open **Rivulet** from the Videos section of the home screen.
@@ -97,16 +98,18 @@ the repository once — no separate download needed, useful on set-top boxes
    `https://rivulet-kodi.github.io/plugin.video.rivulet/` as the path, and
    give it a name (e.g. `Rivulet`).
 2. **Settings → Add-ons → Install from zip file → Rivulet →
-   repository.rivulet → repository.rivulet-<version>.zip**.
+   `repository.rivulet.zip`** (or descend into `repository.rivulet/` for the
+   versioned filename).
 3. From then on, Kodi offers Rivulet — and its future updates — from
    **Settings → Add-ons → Install from repository → Rivulet Repository**,
    with automatic update checks like any other Kodi repo.
 
-Alternatively, grab `repository.rivulet-<version>.zip` from a
-[release](https://github.com/rivulet-kodi/plugin.video.rivulet/releases/latest)
-or from the "Build addon zip" GitHub Actions artifact, and install it the
-same way as step 2 above (**Install from zip file**) without adding a
-source.
+Alternatively, download
+[`repository.rivulet.zip`](https://rivulet-kodi.github.io/plugin.video.rivulet/repository.rivulet.zip)
+directly and install it the same way as step 2 above (**Install from zip
+file**) without adding a source. Prefer these version-less URLs when linking
+people to the addon: a `repository.rivulet-1.0.0.zip` style link breaks
+silently as soon as the next release ships.
 
 The repository is served from GitHub Pages at
 [rivulet-kodi.github.io/plugin.video.rivulet](https://rivulet-kodi.github.io/plugin.video.rivulet/),

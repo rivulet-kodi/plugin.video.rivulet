@@ -99,6 +99,29 @@ jobs:
                   cmd += ["--", *info["archive_paths"]]
               subprocess.run(cmd, check=True)
 
+              # GitHub Pages serves no directory autoindex, so
+              # .../plugin.video.rivulet/ was a 404 and the way people
+              # actually install a Kodi repo - add a file source, then
+              # "Install from zip file" and browse it - showed an empty
+              # folder. Kodi's HTTP directory reader lists <a href> targets,
+              # and the zip dialog filters them to .zip, so a plain listing
+              # per addon folder is all that flow needs.
+              (addon_dir / "index.html").write_text(
+                  "<!DOCTYPE html>\n<meta charset=\"utf-8\">\n"
+                  f"<title>{addon_id} {version}</title>\n"
+                  f"<h1>{addon_id} {version}</h1>\n<ul>\n"
+                  f'<li><a href="{zip_path.name}">{zip_path.name}</a></li>\n'
+                  '<li><a href="addon.xml">addon.xml</a></li>\n'
+                  "</ul>\n"
+              )
+
+              # Version-less alias at the repository root. The versioned
+              # filename is what ends up copied into forum posts and then
+              # 404s the moment the next release lands - people were still
+              # passing round repository.rivulet-1.0.0.zip well after 1.0.1
+              # shipped. This URL stays correct across releases.
+              shutil.copyfile(zip_path, repo_dir / f"{addon_id}.zip")
+
           addons_xml_path = repo_dir / "addons.xml"
           ET.ElementTree(addons_root).write(
               addons_xml_path, encoding="UTF-8", xml_declaration=True
