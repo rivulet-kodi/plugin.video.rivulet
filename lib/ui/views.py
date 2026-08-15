@@ -38,6 +38,15 @@ from lib.ui.dependencies import get_client, get_store
 #: of them one after another.
 _MAX_ADDON_WORKERS = 8
 
+#: Ceiling on `skip` pages `fetch_catalog_pages()` will walk for one
+#: catalog. Pages are fetched serially (each `skip` depends on the
+#: previous page's size), so this bounds both the wait behind the busy
+#: dialog and how much a pathological catalog can pour into the
+#: coverflow. At the 100 metas Cinemeta serves per page that is 2000
+#: titles; at the 20 an addon like AIOLists serves, 400 - past what a
+#: coverflow is browsable at either way.
+_MAX_CATALOG_PAGES = 20
+
 
 def _url_for(action, **params):
     """Local convenience wrapper binding urlutil.url_for() to the router's
@@ -204,6 +213,139 @@ def _fetch_catalog(transport, ctype, cid, extra=None):
     caller decides how to surface it."""
     client = get_client()
     return client.catalog(transport, ctype, cid, extra=extra)
+
+
+def iter_catalog_pages(transport, ctype, cid, extra=None, catalog=None):
+    """Yield a catalog's pages, following the protocol's `skip` paging
+    until the addon runs out of items.
+
+    `_fetch_catalog()` returns exactly one page, which is all the addon
+    chooses to serve per request - Cinemeta serves 100 metas, but an
+    addon is free to serve fewer, and AIOLists serves 20. Browsing such a
+    catalog through a single call therefore showed only its first page
+    (a 300-title list opened as 20 titles) with no way to reach the rest,
+    since the coverflow has no "next page" affordance to hang further
+    requests off.
+
+    A generator rather than one combined list because the pages are
+    fetched SERIALLY - each `skip` depends on how much the addon has
+    already served - and on a real device one page of AIOLists takes
+    several seconds. Collecting all 20 pages before showing anything
+    would trade "20 titles now" for "400 titles a minute from now",
+    which is a worse screen: the user sees a handful of posters before
+    they scroll. The coverflow instead opens on the first page and
+    appends the rest as they land (see
+    `lib.ui.infowindow.ShowcaseWindow.start`); `fetch_catalog_pages()`
+    below is the eager wrapper for callers that do want the whole list.
+
+    The first page is always yielded, and an `AddonError` fetching it
+    propagates - the caller has nothing to show and already surfaces the
+    failure. Paging past it is attempted only when `catalog` declares the
+    `skip` extra (`catalog_supports_extra`); without that declaration -
+    or with no `catalog` to inspect at all, as the discover-link path
+    has - the generator stops after that one page, exactly as the
+    unpaged behaviour was. `extra` (a list of `(name, value)` pairs, e.g.
+    a chosen genre) is preserved on every page, with `skip` appended; a
+    caller that already supplies its own `skip` is left alone and fetched
+    once.
+
+    Each request's `skip` is the number of metas the addon has actually
+    served so far, not a multiple of the first page's length - an addon
+    whose pages vary in size then still gets asked for the item straight
+    after the last one it gave us.
+
+    Stops at the first page that is empty, shorter than the first page
+    (the last page, by the protocol's own convention), contains no meta
+    id unseen so far (an addon that ignores `skip` and re-serves page
+    one - otherwise an infinite loop), or when `_MAX_CATALOG_PAGES` have
+    been fetched. Duplicate ids across pages are dropped, so an addon
+    with a shifting window can't feed the coverflow the same title
+    twice; a meta with no `id` at all is always kept, since it cannot be
+    compared - a cosmetic duplicate beats losing a title the addon
+    served. An `AddonError` on a LATER page ends the walk quietly: the
+    pages already yielded are a browsable screenful, which beats
+    replacing them with an error.
+
+    Consumers may stop early (the coverflow closing mid-walk does), in
+    which case no further request is made.
+    """
+    from lib.stremio.addons import catalog_supports_extra
+
+    base_extra = list(extra or [])
+    first = _fetch_catalog(transport, ctype, cid, extra=base_extra or None)
+
+    seen = set()
+
+    def _dedupe(page):
+        """This page's not-yet-seen metas, in order."""
+        fresh = []
+        for meta_obj in page:
+            key = meta_obj.get('id') if isinstance(meta_obj, dict) else None
+            if key is not None:
+                if key in seen:
+                    continue
+                seen.add(key)
+            fresh.append(meta_obj)
+        return fresh
+
+    yield _dedupe(first)
+
+    if not first or not catalog_supports_extra(catalog, 'skip'):
+        return
+    if any(name == 'skip' for name, _value in base_extra):
+        return
+
+    page_size = len(first)
+    #: Metas the addon has actually served so far, duplicates and all -
+    #: NOT the deduped count. This is what the next `skip` is counted
+    #: from, so a page that comes back longer or shorter than the first
+    #: can't make the following request skip past (or back over) items
+    #: the addon never served.
+    served = len(first)
+
+    for page_index in range(1, _MAX_CATALOG_PAGES):
+        try:
+            page = _fetch_catalog(
+                transport, ctype, cid,
+                extra=base_extra + [('skip', served)],
+            )
+        except AddonError as exc:
+            log('views.iter_catalog_pages: %s page %d failed: %s - keeping what landed'
+                % (safe_url_for_log(transport), page_index, type(exc).__name__),
+                xbmc.LOGWARNING)
+            return
+        if not page:
+            return
+        served += len(page)
+        fresh = _dedupe(page)
+        # A page with nothing new means the addon is ignoring `skip` and
+        # re-serving the same window - stop rather than loop to the cap.
+        if not fresh:
+            log('views.iter_catalog_pages: %s page %d added nothing new - stopping'
+                % (safe_url_for_log(transport), page_index), xbmc.LOGINFO)
+            return
+        yield fresh
+        if len(page) < page_size:
+            return
+
+    log('views.iter_catalog_pages: %s hit the %d-page cap'
+        % (safe_url_for_log(transport), _MAX_CATALOG_PAGES), xbmc.LOGINFO)
+
+
+def fetch_catalog_pages(transport, ctype, cid, extra=None, catalog=None):
+    """Every page of a catalog as one combined list - the eager form of
+    `iter_catalog_pages()`, for callers that cannot show partial results
+    and would rather wait (the discover-link path, which passes no
+    `catalog` and so never pages anyway).
+
+    The coverflow deliberately does NOT use this: see the generator's
+    docstring for why a long catalog must open on its first page rather
+    than behind a minute-long spinner.
+    """
+    metas = []
+    for page in iter_catalog_pages(transport, ctype, cid, extra=extra, catalog=catalog):
+        metas.extend(page)
+    return metas
 
 
 def _sync_addons_if_logged_in(store, notify_success=False):

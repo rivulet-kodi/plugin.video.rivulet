@@ -243,13 +243,105 @@ def test_open_catalog_no_selection_does_not_fallback_or_close(load_catalogpicker
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'movie'}]
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: None)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None, more_pages=None: None)
 
     win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, {'type': 'movie', 'id': 'top'})
 
     assert win.should_close_caller is False
     assert win.closed is False
     assert ctx.env.executed_builtins == []
+
+
+# ---------------------------------------------------------------------------
+# CatalogPickerWindow._fetch_and_show() - `skip` paging
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_and_show_does_not_page_a_catalog_without_skip(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker()
+    win = _make_window(ctx.catalogpicker)
+    calls = []
+
+    def fake_fetch(transport, ctype, cid, extra=None):
+        calls.append(extra)
+        return [{'id': 'tt%d' % n, 'name': 'M%d' % n, 'type': 'movie'} for n in range(20)]
+
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', fake_fetch)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None, more_pages=None: None)
+
+    win._open_catalog(
+        'https://a.example/manifest.json', {'name': 'Addon A'}, {'id': 'top', 'type': 'movie'},
+    )
+
+    assert calls == [None]
+
+
+def test_fetch_and_show_opens_on_the_first_page_without_fetching_the_rest(load_catalogpicker, monkeypatch):
+    """The point of the lazy walk: the coverflow must open after ONE
+    request. Waiting for all 20 pages of a 400-title AIOLists list took a
+    minute on a real device, against ~6s for the first page - so anything
+    that fetches page two before `open_showcase()` is a regression, even
+    though the end result would look the same."""
+    ctx = load_catalogpicker()
+    win = _make_window(ctx.catalogpicker)
+    fetched = []
+
+    def fake_fetch(transport, ctype, cid, extra=None):
+        skip = next((value for name, value in extra or [] if name == 'skip'), 0)
+        fetched.append(skip)
+        return [{'id': 'tt%d' % n, 'name': 'M%d' % n, 'type': 'movie'} for n in range(skip, skip + 20)]
+
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', fake_fetch)
+    opened = {}
+
+    def fake_showcase(metas, catalog_title=None, more_pages=None):
+        opened['metas'] = metas
+        opened['fetched_by_now'] = list(fetched)
+        opened['more_pages'] = more_pages
+        return None
+
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', fake_showcase)
+
+    win._open_catalog(
+        'https://a.example/manifest.json', {'name': 'AIOLists'},
+        {'id': 'list', 'type': 'movie', 'name': 'Criterion', 'extra': [{'name': 'skip'}]},
+    )
+
+    assert opened['fetched_by_now'] == [0]  # exactly one request before the window opened
+    assert len(opened['metas']) == 20
+    assert opened['more_pages'] is not None
+
+
+def test_fetch_and_show_hands_the_remaining_pages_to_the_coverflow(load_catalogpicker, monkeypatch):
+    """The generator handed over must actually continue the walk from
+    page two - proving the picker passes the SAME iterator it already
+    took the first page from, not a fresh one that would re-serve page
+    one."""
+    ctx = load_catalogpicker()
+    win = _make_window(ctx.catalogpicker)
+
+    def fake_fetch(transport, ctype, cid, extra=None):
+        skip = next((value for name, value in extra or [] if name == 'skip'), 0)
+        if skip >= 40:
+            return []
+        return [{'id': 'tt%d' % n, 'name': 'M%d' % n, 'type': 'movie'} for n in range(skip, skip + 20)]
+
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', fake_fetch)
+    captured = {}
+    monkeypatch.setattr(
+        ctx.infowindow, 'open_showcase',
+        lambda metas, catalog_title=None, more_pages=None: captured.update(
+            metas=metas, rest=list(more_pages or []),
+        ) and None,
+    )
+
+    win._open_catalog(
+        'https://a.example/manifest.json', {'name': 'AIOLists'},
+        {'id': 'list', 'type': 'movie', 'name': 'Criterion', 'extra': [{'name': 'skip'}]},
+    )
+
+    assert [m['id'] for m in captured['metas']] == ['tt%d' % n for n in range(20)]
+    assert [m['id'] for page in captured['rest'] for m in page] == ['tt%d' % n for n in range(20, 40)]
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +357,7 @@ def test_fetch_and_show_passes_addon_and_catalog_name_as_breadcrumb_title(load_c
     captured = {}
     monkeypatch.setattr(
         ctx.infowindow, 'open_showcase',
-        lambda m, catalog_title=None: captured.setdefault('catalog_title', catalog_title) and None,
+        lambda m, catalog_title=None, more_pages=None: captured.setdefault('catalog_title', catalog_title) and None,
     )
 
     win._open_catalog(
@@ -285,7 +377,7 @@ def test_fetch_and_show_falls_back_to_the_catalog_name_alone_without_an_addon_na
     captured = {}
     monkeypatch.setattr(
         ctx.infowindow, 'open_showcase',
-        lambda m, catalog_title=None: captured.setdefault('catalog_title', catalog_title) and None,
+        lambda m, catalog_title=None, more_pages=None: captured.setdefault('catalog_title', catalog_title) and None,
     )
 
     win._open_catalog(
@@ -302,7 +394,7 @@ def test_open_catalog_with_selection_opens_detail_and_closes_when_playback_start
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'series'}]
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: m[0])
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None, more_pages=None: m[0])
     captured = {}
 
     def fake_open_detail(stype, sid):
@@ -325,7 +417,7 @@ def test_open_catalog_with_selection_does_not_close_when_detail_returns_false(
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'series'}]
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: m[0])
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None, more_pages=None: m[0])
     monkeypatch.setattr(ctx.detailwindow, 'open_detail', lambda stype, sid: False)
 
     win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, {'type': 'movie', 'id': 'top'})
@@ -341,7 +433,7 @@ def test_open_catalog_selected_meta_without_type_falls_back_to_the_catalogs_own_
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt2', 'name': 'Two'}]  # no 'type' key on the selected meta
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: m[0])
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None, more_pages=None: m[0])
     captured = {}
 
     def fake_open_detail(stype, sid):
@@ -377,7 +469,7 @@ def test_open_catalog_fetch_shows_and_closes_the_busy_dialog(load_catalogpicker,
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'series'}]
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: None)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None, more_pages=None: None)
     windows = _capture_busy_windows(monkeypatch, ctx)
 
     win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, {'type': 'movie', 'id': 'top'})
@@ -395,7 +487,7 @@ def test_open_catalog_closes_busy_dialog_before_opening_coverflow(load_catalogpi
     windows = _capture_busy_windows(monkeypatch, ctx)
     captured = {}
 
-    def fake_open_showcase(m, catalog_title=None):
+    def fake_open_showcase(m, catalog_title=None, more_pages=None):
         captured['closed'] = windows[0].closed
         return None
 
@@ -456,7 +548,7 @@ def test_start_with_catalogs_calls_domodal_and_returns_should_close_caller(load_
     catalogs = [('https://a.example/manifest.json', {'name': 'A'}, {'id': 'top', 'type': 'movie'})]
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'movie'}]
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: m[0])
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None, more_pages=None: m[0])
     monkeypatch.setattr(ctx.detailwindow, 'open_detail', lambda stype, sid: True)
 
     # The fake doModal() is a no-op counter; simulate what a real modal event

@@ -227,7 +227,7 @@ class CatalogPickerWindow(BaseWindow):
         import xbmc
 
         from lib.ui.compat import L, log, notify
-        from lib.ui.views import _fetch_catalog
+        from lib.ui.views import iter_catalog_pages
 
         ctype = catalog.get('type')
         catalog_name = catalog.get('name') or catalog.get('id')
@@ -237,9 +237,19 @@ class CatalogPickerWindow(BaseWindow):
         # the catalog name, which is always present.
         catalog_title = '%s \u00b7 %s' % (addon_name, catalog_name) if addon_name else catalog_name
 
+        # A catalog that declares `skip` is walked page by page rather
+        # than one page deep, so a list longer than the addon's page size
+        # is reachable in full. Only the FIRST page is waited on here -
+        # the rest are handed to the coverflow and appended as they land
+        # (see ShowcaseWindow.start), because the pages are serial and an
+        # addon serving 20 at a time would otherwise hold a 400-title
+        # list behind a spinner for a minute before showing anything.
+        pages = iter_catalog_pages(
+            transport_url, ctype, catalog.get('id'), extra=extra, catalog=catalog,
+        )
         try:
             with busy_dialog(L(30033)):
-                metas = _fetch_catalog(transport_url, ctype, catalog.get('id'), extra=extra)
+                metas = next(pages, [])
         except AddonError as exc:
             log('catalogpicker: %s failed: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGERROR)
             notify(L(30032))
@@ -249,10 +259,10 @@ class CatalogPickerWindow(BaseWindow):
             notify(L(30030))
             return
 
-        log('catalogpicker: opening coverflow (%d results)' % len(metas), xbmc.LOGINFO)
+        log('catalogpicker: opening coverflow (%d results, paging in background)' % len(metas), xbmc.LOGINFO)
         try:
             from lib.ui.infowindow import open_showcase
-            selected = open_showcase(metas, catalog_title=catalog_title)
+            selected = open_showcase(metas, catalog_title=catalog_title, more_pages=pages)
         except Exception as exc:  # a skin/UI failure must surface, not vanish
             log('catalogpicker: coverflow failed to open: %r' % (exc,), xbmc.LOGERROR)
             notify(L(30032))

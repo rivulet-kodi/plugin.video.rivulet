@@ -562,7 +562,7 @@ def test_open_showcase_resolves_addon_path_and_delegates_to_start(load_infowindo
             captured['init_args'] = args
             super().__init__(*args, **kwargs)
 
-        def start(self, passed_metas, catalog_title=None):
+        def start(self, passed_metas, catalog_title=None, more_pages=None):
             captured['start_metas'] = passed_metas
             captured['start_catalog_title'] = catalog_title
             return passed_metas[0]
@@ -586,7 +586,7 @@ def test_open_showcase_passes_catalog_title_through_to_start(load_infowindow, mo
     captured = {}
 
     class RecordingWindow(infowindow.ShowcaseWindow):
-        def start(self, passed_metas, catalog_title=None):
+        def start(self, passed_metas, catalog_title=None, more_pages=None):
             captured['catalog_title'] = catalog_title
             return None
 
@@ -615,7 +615,7 @@ def test_open_showcase_closes_the_window_exactly_once_and_reraises_when_start_ra
             self.close_calls += 1
             super().close()
 
-        def start(self, passed_metas, catalog_title=None):
+        def start(self, passed_metas, catalog_title=None, more_pages=None):
             # Stands in for a crash inside onInit()/onAction() while the
             # modal loop is running - self.close() (the window's own,
             # normal-path close) never gets a chance to run. Every caller
@@ -1434,3 +1434,139 @@ def test_context_menu_with_select_not_focused_does_nothing(load_infowindow, monk
     _fire_context_menu(win, ctx)
 
     assert fetched == []
+
+
+# ---------------------------------------------------------------------------
+# ShowcaseWindow paging - `more_pages` appended to the live coverflow
+# ---------------------------------------------------------------------------
+
+
+def _drain_pages(win, ctx):
+    """Deliver the Action(noop) a paging worker posts: onAction() is what
+    drains the queue onto the strip on the real GUI thread."""
+    import xbmcgui
+    win.onAction(xbmcgui.Action(0))
+
+
+def test_paging_worker_appends_each_page_to_the_live_coverflow(load_infowindow):
+    """A catalog served 20 at a time opens on those 20 and grows as the
+    rest land - the point of handing the coverflow a generator rather
+    than waiting for every page before opening."""
+    ctx = load_infowindow()
+    win = _showcase_window(ctx, [_make_meta('tt%d' % n, 'M%d' % n) for n in range(20)])
+    pages = [
+        [_make_meta('tt%d' % n, 'M%d' % n) for n in range(20, 40)],
+        [_make_meta('tt%d' % n, 'M%d' % n) for n in range(40, 45)],
+    ]
+
+    win._paging_worker(iter(pages))
+    _drain_pages(win, ctx)
+
+    select = win.getControl(ctx.infowindow.SELECT)
+    assert len(select.items) == 45
+    assert len(win.metas) == 45
+    # Positions stay contiguous across the append, which is what
+    # _enrich_focused()/_open_credits() resolve a poster through.
+    assert [item.getProperty('position') for item in select.items[-5:]] == [
+        '40', '41', '42', '43', '44',
+    ]
+    assert win.metas[44]['id'] == 'tt44'
+
+
+def test_paging_appends_without_disturbing_the_focused_item(load_infowindow):
+    """Appending rather than rebuilding is what keeps a page landing
+    mid-scroll from moving the poster under the user's focus."""
+    ctx = load_infowindow()
+    win = _showcase_window(
+        ctx, [_make_meta('tt%d' % n, 'M%d' % n) for n in range(20)], focus_index=7,
+    )
+    select = win.getControl(ctx.infowindow.SELECT)
+    focused_before = select.items[7]
+
+    win._paging_worker(iter([[_make_meta('tt%d' % n, 'M%d' % n) for n in range(20, 40)]]))
+    _drain_pages(win, ctx)
+
+    assert select.selected_index == 7
+    assert select.items[7] is focused_before
+    assert select.items[7].getProperty('position') == '7'
+
+
+def test_paging_worker_stops_walking_once_the_window_closed(load_infowindow):
+    """A closed window must not keep fetching: `close()` sets the same
+    flag the worker polls between pages."""
+    ctx = load_infowindow()
+    win = _showcase_window(ctx, [_make_meta('tt1', 'One')])
+    consumed = []
+
+    def _pages():
+        for index in range(5):
+            consumed.append(index)
+            yield [_make_meta('tt%d' % (index + 2), 'M%d' % index)]
+
+    win.close()
+    win._paging_worker(_pages())
+
+    assert consumed == [0]  # the first page was already in flight; no more follow
+    assert win._pending_pages == []
+
+
+def test_paging_worker_survives_a_failing_page_walk(load_infowindow):
+    """The generator raising (an addon failure mid-walk) must leave the
+    window on whatever landed, not take it down - the worker runs on a
+    daemon thread with nobody to catch for it."""
+    ctx = load_infowindow()
+    win = _showcase_window(ctx, [_make_meta('tt1', 'One')])
+
+    def _pages():
+        yield [_make_meta('tt2', 'Two')]
+        raise RuntimeError('addon blew up mid-walk')
+
+    win._paging_worker(_pages())  # must not raise
+    _drain_pages(win, ctx)
+
+    # The page that landed before the failure is kept and rendered.
+    assert [meta['id'] for meta in win.metas] == ['tt1', 'tt2']
+    assert len(win.getControl(ctx.infowindow.SELECT).items) == 2
+
+
+def test_paging_worker_skips_empty_pages(load_infowindow):
+    ctx = load_infowindow()
+    win = _showcase_window(ctx, [_make_meta('tt1', 'One')])
+
+    win._paging_worker(iter([[], [_make_meta('tt2', 'Two')], []]))
+    _drain_pages(win, ctx)
+
+    assert [meta['id'] for meta in win.metas] == ['tt1', 'tt2']
+
+
+def test_start_without_more_pages_spawns_no_paging_worker(load_infowindow, monkeypatch):
+    """Every existing caller (library, search, credits) passes no pages
+    and must behave exactly as before."""
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow('ShowcaseWindow.xml', '/addon/path', 'Default', '1080i')
+    spawned = []
+    monkeypatch.setattr(
+        ctx.infowindow.ShowcaseWindow, '_spawn_paging',
+        lambda self, more: spawned.append(more),
+    )
+    monkeypatch.setattr(ctx.infowindow.ShowcaseWindow, 'doModal', lambda self: None)
+
+    win.start([_make_meta('tt1', 'One')])
+
+    assert spawned == []
+
+
+def test_start_with_more_pages_spawns_the_paging_worker(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow('ShowcaseWindow.xml', '/addon/path', 'Default', '1080i')
+    spawned = []
+    monkeypatch.setattr(
+        ctx.infowindow.ShowcaseWindow, '_spawn_paging',
+        lambda self, more: spawned.append(more),
+    )
+    monkeypatch.setattr(ctx.infowindow.ShowcaseWindow, 'doModal', lambda self: None)
+    pages = iter([[_make_meta('tt2', 'Two')]])
+
+    win.start([_make_meta('tt1', 'One')], more_pages=pages)
+
+    assert spawned == [pages]
