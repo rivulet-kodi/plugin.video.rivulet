@@ -12,6 +12,17 @@ on:
     tags: [ 'v*' ]
   workflow_dispatch:
 
+# Serialized, because a release pushes the commit and its tag together and both
+# match the triggers above: two runs then deployed to gh-pages at once, one lost
+# the ref-lock race ("cannot lock ref 'refs/heads/gh-pages'"), and because the
+# deploy precedes "Create GitHub release" the loser died before creating it -
+# v0.12.0 shipped to the repository with no GitHub release until the job was
+# re-run by hand. Queue instead: never cancel, since the cancelled run could be
+# the tag's, and the tag's is the only one that cuts a release.
+concurrency:
+  group: publish-repository
+  cancel-in-progress: false
+
 jobs:
   publish:
     permissions:
