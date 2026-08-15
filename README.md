@@ -5,7 +5,7 @@
 
   **A Kodi client for the Stremio addon protocol.**
 
-  Discover/Search catalogs, install community addons, resolve streams and
+  Browse and search catalogs, install community addons, resolve streams and
   play them back through a streaming server — all from a custom Kodi UI.
 
   [![Test](https://github.com/rivulet-kodi/plugin.video.rivulet/actions/workflows/test.yml/badge.svg)](https://github.com/rivulet-kodi/plugin.video.rivulet/actions/workflows/test.yml)
@@ -19,7 +19,7 @@
 ---
 
 Rivulet reimplements the [Stremio](https://www.stremio.com/) client
-experience inside Kodi: Discover/Search catalogs from the Stremio addon
+experience inside Kodi: browse and search catalogs from the Stremio addon
 protocol, addon management (install from manifest URL), meta/stream
 resolution, and playback through a
 [stremio-server-go](https://github.com/M0Rf30/stremio-server-go) streaming
@@ -41,7 +41,7 @@ account.
 
 ## Features
 
-- **Custom Home/Discover/Search/Detail/Streams UI** — no dropping to the
+- **Custom Home/Browse/Search/Detail/Streams UI** — no dropping to the
   classic Kodi directory for the parts of the flow that matter most.
 - **Addon manager** — install Stremio addons straight from a manifest URL,
   and remove them again, without leaving Kodi.
@@ -64,9 +64,9 @@ account.
 
 Rivulet's custom UI:
 
-| ![Home](artwork/screenshots/home.png) | ![Discover](artwork/screenshots/discover-coverflow.png) |
+| ![Home](artwork/screenshots/home.png) | ![Browsing a catalog](artwork/screenshots/discover-coverflow.png) |
 | :---: | :---: |
-| **Home** | **Discover** |
+| **Home** | **Browse** |
 
 | ![Detail + streams](artwork/screenshots/detail-streams.png) | ![Addon manager](artwork/screenshots/addons-manager.png) |
 | :---: | :---: |
