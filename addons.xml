@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.9.1" provider-name="M0Rf30">
+<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.10.0" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0" />
     <import addon="script.module.requests" version="2.22.0" />
@@ -10,9 +10,14 @@
   <extension point="xbmc.service" library="service.py" start="startup" />
   <extension point="xbmc.addon.metadata">
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
-    <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse Discover and Search catalogs, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote stremio-server-go streaming server, and optionally sync your addon collection with your Stremio account.</description>
+    <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse and search catalogs by type, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote stremio-server-go streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.9.1:
+    <news>v0.10.0:
+- New: Home opens straight into Movies, Series or Anime. Each row lists only the catalogs of that type, headed by the add-on publishing them, so the type is no longer repeated on every line and two add-ons offering "Popular" are finally told apart.
+- New: Rivulet's own progress, countdown, busy, confirmation and picker dialogs. Kodi drew these in whatever skin you use, so mid-flow the add-on dropped out of its own look entirely; they now match the rest of the screens.
+- New: the "next episode in N seconds" countdown can be skipped with OK to play immediately. Previously OK did nothing and the only key that worked was BACK, which cancelled it.
+- Improved: buffering no longer redraws the whole "Preparing stream" panel for every chunk received; only the numbers that actually changed are written.
+v0.9.1:
 - Fix: the background artwork was far darker than intended on Home, the poster browser and the stream list. 0.9.0 redrew the screens but left the previous interface's dimming underneath the new one, so the two stacked: on Home the fanart came out roughly twice as dark as it was meant to, and on the right of the screen it was almost invisible. Every screen's backdrop now uses the brightness the design actually calls for.
 - Fix: the poster browser had a faint horizontal band running across it, about three quarters of the way down, where two parts of the background shading met. It is gone, and the shading behind the posters is now one continuous fade.
 - Fix: four labels stayed in English whatever language Kodi was set to - the heading above the source list, and the Add-ons, Discover and Search screen names in each of those screens' headers. All four now follow Kodi's language setting. No new translations were needed; the words were already translated and simply were not being used.
