@@ -619,3 +619,43 @@ msgstr "wyjście"
 msgctxt "#30212"
 msgid "%d%% WATCHED"
 msgstr "%d%% OBEJRZANE"
+
+msgctxt "#30213"
+msgid "Movies"
+msgstr "Filmy"
+
+msgctxt "#30214"
+msgid "Series"
+msgstr "Seriale"
+
+msgctxt "#30215"
+msgid "Anime"
+msgstr "Anime"
+
+msgctxt "#30216"
+msgid "Browse movie catalogs"
+msgstr "Przeglądaj katalogi filmów"
+
+msgctxt "#30217"
+msgid "Browse series and TV catalogs"
+msgstr "Przeglądaj katalogi seriali i TV"
+
+msgctxt "#30218"
+msgid "Browse anime catalogs"
+msgstr "Przeglądaj katalogi anime"
+
+msgctxt "#30219"
+msgid "Home screen"
+msgstr "Ekran główny"
+
+msgctxt "#30220"
+msgid "Show Movies"
+msgstr "Pokaż Filmy"
+
+msgctxt "#30221"
+msgid "Show Series"
+msgstr "Pokaż Seriale"
+
+msgctxt "#30222"
+msgid "Show Anime"
+msgstr "Pokaż Anime"

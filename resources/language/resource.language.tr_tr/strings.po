@@ -619,3 +619,43 @@ msgstr "çıkış"
 msgctxt "#30212"
 msgid "%d%% WATCHED"
 msgstr "%d%% İZLENDİ"
+
+msgctxt "#30213"
+msgid "Movies"
+msgstr "Filmler"
+
+msgctxt "#30214"
+msgid "Series"
+msgstr "Diziler"
+
+msgctxt "#30215"
+msgid "Anime"
+msgstr "Anime"
+
+msgctxt "#30216"
+msgid "Browse movie catalogs"
+msgstr "Film kataloglarına göz at"
+
+msgctxt "#30217"
+msgid "Browse series and TV catalogs"
+msgstr "Dizi ve TV kataloglarına göz at"
+
+msgctxt "#30218"
+msgid "Browse anime catalogs"
+msgstr "Anime kataloglarına göz at"
+
+msgctxt "#30219"
+msgid "Home screen"
+msgstr "Ana ekran"
+
+msgctxt "#30220"
+msgid "Show Movies"
+msgstr "Filmleri göster"
+
+msgctxt "#30221"
+msgid "Show Series"
+msgstr "Dizileri göster"
+
+msgctxt "#30222"
+msgid "Show Anime"
+msgstr "Anime göster"

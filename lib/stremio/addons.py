@@ -395,7 +395,7 @@ def catalog_extra_options(catalog, name):
     return result
 
 
-def iter_catalogs(addons, extra_required=None):
+def iter_catalogs(addons, extra_required=None, types=None):
     """Yield `(transport_url, manifest, catalog)` for every catalog declared
     by `addons` - a list of descriptor dicts shaped like
     `{"transportUrl": ..., "manifest": {...}, ...}`
@@ -411,11 +411,21 @@ def iter_catalogs(addons, extra_required=None):
     declare that extra prop name are yielded - this is a plain existence
     check on the prop name, not a full is_extra_supported() validation of
     every other required prop.
+
+    When `types` is given (a set/sequence of Stremio content types, e.g.
+    `{"movie"}`), only catalogs whose own `type` is in it are yielded.
+    The type strings are addon-authored and unconstrained by the
+    protocol, so this is a plain membership test - see
+    `lib.ui.homewindow`'s row definitions for how the ones Rivulet
+    surfaces are grouped.
     """
+    wanted = set(types) if types is not None else None
     for descriptor in addons or []:
         manifest = descriptor.get('manifest') or {}
         transport_url = descriptor.get('transportUrl')
         for catalog in manifest.get('catalogs') or []:
             if extra_required and extra_required not in _catalog_extra_names(catalog):
+                continue
+            if wanted is not None and catalog.get('type') not in wanted:
                 continue
             yield transport_url, manifest, catalog

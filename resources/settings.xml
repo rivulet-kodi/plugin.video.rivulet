@@ -15,6 +15,25 @@
                 </setting>
             </group>
         </category>
+        <category id="home" label="30219">
+            <group id="1">
+                <setting id="home_show_movies" type="boolean" label="30220">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="home_show_series" type="boolean" label="30221">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="home_show_anime" type="boolean" label="30222">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+            </group>
+        </category>
         <category id="server" label="30101">
             <group id="1">
                 <setting id="server_enable" type="boolean" label="30103">

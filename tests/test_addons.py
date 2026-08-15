@@ -280,6 +280,52 @@ def test_iter_catalogs_no_catalogs_yields_nothing():
     assert list(iter_catalogs(addons)) == []
 
 
+def test_iter_catalogs_filters_by_type():
+    addons = [_addon("https://a.example/manifest.json", [
+        {"id": "top", "type": "movie", "name": "Top"},
+        {"id": "top", "type": "series", "name": "Top"},
+        {"id": "cur", "type": "anime", "name": "Currently airing"},
+    ])]
+
+    results = list(iter_catalogs(addons, types={"movie"}))
+
+    assert [c["type"] for _, _, c in results] == ["movie"]
+
+
+def test_iter_catalogs_type_filter_accepts_several_types():
+    # The Series row asks for series+tv together (see homewindow._TYPE_ROWS).
+    addons = [_addon("https://a.example/manifest.json", [
+        {"id": "top", "type": "movie", "name": "Top"},
+        {"id": "top", "type": "series", "name": "Top"},
+        {"id": "ch", "type": "tv", "name": "Channels"},
+    ])]
+
+    results = list(iter_catalogs(addons, types={"series", "tv"}))
+
+    assert {c["type"] for _, _, c in results} == {"series", "tv"}
+
+
+def test_iter_catalogs_no_type_filter_yields_every_type():
+    addons = [_addon("https://a.example/manifest.json", [
+        {"id": "top", "type": "movie", "name": "Top"},
+        {"id": "top", "type": "series", "name": "Top"},
+    ])]
+
+    assert len(list(iter_catalogs(addons))) == 2
+
+
+def test_iter_catalogs_type_filter_combines_with_extra_required():
+    addons = [_addon("https://a.example/manifest.json", [
+        {"id": "s", "type": "movie", "name": "Searchable", "extra": [{"name": "search"}]},
+        {"id": "p", "type": "movie", "name": "Plain"},
+        {"id": "s", "type": "series", "name": "Searchable", "extra": [{"name": "search"}]},
+    ])]
+
+    results = list(iter_catalogs(addons, extra_required="search", types={"movie"}))
+
+    assert [(c["type"], c["name"]) for _, _, c in results] == [("movie", "Searchable")]
+
+
 # --- catalog_extra_options ----------------------------------------------
 
 

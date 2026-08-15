@@ -619,3 +619,43 @@ msgstr "afsluiten"
 msgctxt "#30212"
 msgid "%d%% WATCHED"
 msgstr "%d%% GEZIEN"
+
+msgctxt "#30213"
+msgid "Movies"
+msgstr "Films"
+
+msgctxt "#30214"
+msgid "Series"
+msgstr "Series"
+
+msgctxt "#30215"
+msgid "Anime"
+msgstr "Anime"
+
+msgctxt "#30216"
+msgid "Browse movie catalogs"
+msgstr "Bladeren door filmcatalogi"
+
+msgctxt "#30217"
+msgid "Browse series and TV catalogs"
+msgstr "Bladeren door serie- en TV-catalogi"
+
+msgctxt "#30218"
+msgid "Browse anime catalogs"
+msgstr "Bladeren door animecatalogi"
+
+msgctxt "#30219"
+msgid "Home screen"
+msgstr "Startscherm"
+
+msgctxt "#30220"
+msgid "Show Movies"
+msgstr "Films tonen"
+
+msgctxt "#30221"
+msgid "Show Series"
+msgstr "Series tonen"
+
+msgctxt "#30222"
+msgid "Show Anime"
+msgstr "Anime tonen"

@@ -619,3 +619,43 @@ msgstr "خروج"
 msgctxt "#30212"
 msgid "%d%% WATCHED"
 msgstr "%d%% شوهد"
+
+msgctxt "#30213"
+msgid "Movies"
+msgstr "أفلام"
+
+msgctxt "#30214"
+msgid "Series"
+msgstr "مسلسلات"
+
+msgctxt "#30215"
+msgid "Anime"
+msgstr "أنيمي"
+
+msgctxt "#30216"
+msgid "Browse movie catalogs"
+msgstr "تصفح كتالوجات الأفلام"
+
+msgctxt "#30217"
+msgid "Browse series and TV catalogs"
+msgstr "تصفح كتالوجات المسلسلات والتلفزيون"
+
+msgctxt "#30218"
+msgid "Browse anime catalogs"
+msgstr "تصفح كتالوجات الأنيمي"
+
+msgctxt "#30219"
+msgid "Home screen"
+msgstr "الشاشة الرئيسية"
+
+msgctxt "#30220"
+msgid "Show Movies"
+msgstr "إظهار الأفلام"
+
+msgctxt "#30221"
+msgid "Show Series"
+msgstr "إظهار المسلسلات"
+
+msgctxt "#30222"
+msgid "Show Anime"
+msgstr "إظهار الأنيمي"
