@@ -135,6 +135,21 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         #: cost the coverflow's scroll feel is most sensitive to.
         self._last_background = None
         self._reset_enrich_state()
+        self._reset_paging_state()
+
+    def _reset_paging_state(self):
+        #: pages a `more_pages` walker has produced but the UI thread has
+        #: not appended yet. Written under `_paging_lock`, drained by
+        #: `_apply_pending_pages()` on the UI thread - the same queue +
+        #: Action(noop) handoff the enrich workers use, for the same
+        #: reason (a ListItem must not be touched off the GUI thread).
+        self._pending_pages = []
+        self._paging_lock = threading.Lock()
+        #: set by `close()` to tell a running walker to stop between
+        #: pages. Deliberately NOT a "walker finished" flag: the worker
+        #: must be able to tell "nobody cancelled me" from "the window
+        #: went away", and only the latter should end the walk.
+        self._paging_stopped = threading.Event()
 
     def _reset_enrich_state(self):
         #: indices whose full meta has been fetched (or found already complete)
@@ -149,7 +164,7 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         #: fired yet - superseded (and cancelled) by the next focus change.
         self._enrich_timer = None
 
-    def start(self, metas, catalog_title=None):
+    def start(self, metas, catalog_title=None, more_pages=None):
         """doModal() with `metas` (a list of Stremio meta dicts) loaded as
         the coverflow's items; returns the selected meta, or None if the
         window closed without a selection. An empty `metas` never opens
@@ -157,15 +172,81 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
 
         `catalog_title`, if given, renders as a "RIVULET / <TITLE>"
         breadcrumb in the header - see `_header_label()`. Left as None,
-        the header stays the bare "RIVULET" it always was."""
+        the header stays the bare "RIVULET" it always was.
+
+        `more_pages`, if given, is an iterable of further meta pages
+        (`lib.ui.views.iter_catalog_pages` past its first page). It is
+        walked on a daemon thread and each page appended to the live
+        coverflow as it arrives, so a catalog the addon serves 20 at a
+        time opens immediately on those 20 instead of behind a spinner
+        counting to 400. Exhausting it is best-effort: a page that never
+        arrives, or an addon that fails halfway, just leaves the strip at
+        whatever did land."""
         self.metas = list(metas or [])
         self.selected = None
         self.catalog_title = catalog_title
         self._reset_enrich_state()
+        self._reset_paging_state()
         if not self.metas:
             return None
+        if more_pages is not None:
+            self._spawn_paging(more_pages)
         self.doModal()
         return self.selected
+
+    def _spawn_paging(self, more_pages):
+        """Walk `more_pages` on a daemon thread, queueing each page for
+        the UI thread (see `_reset_paging_state`)."""
+        thread = threading.Thread(target=self._paging_worker, args=(more_pages,), daemon=True)
+        thread.start()
+
+    def _paging_worker(self, more_pages):
+        import xbmc
+
+        try:
+            for page in more_pages:
+                if self._paging_stopped.is_set():
+                    # The window closed while this page was in flight -
+                    # stop walking rather than fetch for a dead strip.
+                    return
+                if not page:
+                    continue
+                with self._paging_lock:
+                    self._pending_pages.append(list(page))
+                # Wake the UI thread to drain the queue, exactly as the
+                # enrich workers do - see `_enrich_fetch`'s tail.
+                xbmc.executebuiltin('Action(noop)')
+        except Exception:
+            # Daemon thread with nobody to catch for it; a failed walk
+            # must never take the window down. Same nested guard as
+            # `_enrich_worker`: reporting can itself fail during teardown.
+            try:
+                from lib.ui.compat import log
+
+                log('infowindow: catalog paging worker failed', xbmc.LOGDEBUG)
+            except Exception:
+                pass
+
+    def _apply_pending_pages(self):
+        """Append whatever the paging worker has queued onto the live
+        coverflow. Always call this from the UI thread.
+
+        Appending (rather than rebuilding) keeps the user's scroll
+        position and every already-enriched item untouched: the indices
+        `_enriched`/`_enrich_pending` are keyed by only ever grow, so a
+        page landing mid-scroll cannot renumber the item under focus.
+        """
+        with self._paging_lock:
+            if not self._pending_pages:
+                return
+            pages, self._pending_pages = self._pending_pages, []
+        items = []
+        for page in pages:
+            for meta in page:
+                items.append(self._make_item(len(self.metas), meta))
+                self.metas.append(meta)
+        if items:
+            self.getControl(SELECT).addItems(items)
 
     def _make_item(self, index, meta, props=None):
         item = xbmcgui.ListItem(meta.get('name') or meta.get('id') or '?')
@@ -212,6 +293,10 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
             self._enrich_focused(items[0], settle=False)
 
     def onAction(self, action):
+        # Before reading focus: a queued page appends items, and doing it
+        # first means the strip is whole by the time anything below asks
+        # what is focused.
+        self._apply_pending_pages()
         if self.getFocusId() == SELECT:
             focused = self.getControl(SELECT).getSelectedItem()
             if focused is not None:
@@ -271,6 +356,9 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         # playback - must not leave a settle timer armed to fetch for a
         # window that is no longer on screen.
         self._cancel_enrich_timer()
+        # Same for the paging walk: setting this is what the worker polls
+        # between pages to stop fetching for a strip nobody is looking at.
+        self._paging_stopped.set()
         super().close()
 
     def _cancel_enrich_timer(self):
@@ -486,7 +574,7 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         )
 
 
-def open_showcase(metas, catalog_title=None):
+def open_showcase(metas, catalog_title=None, more_pages=None):
     """Build and run a ShowcaseWindow over `metas`; returns the selected
     meta dict, or None if the user closed the overlay without picking one
     (or `metas` was empty). Every caller already wraps this call in its own
@@ -498,12 +586,14 @@ def open_showcase(metas, catalog_title=None):
     e.g. if onInit() or a mid-modal callback raised).
 
     `catalog_title`, if given, becomes the header's "RIVULET / <TITLE>"
-    breadcrumb - see `ShowcaseWindow.start()`."""
+    breadcrumb - see `ShowcaseWindow.start()`. `more_pages` is the
+    catalog's remaining pages, appended to the strip as they arrive -
+    see `ShowcaseWindow.start()` for why they are not waited on."""
     from lib.ui.compat import ADDON
     path = ADDON.getAddonInfo('path')
     win = ShowcaseWindow('ShowcaseWindow.xml', path, 'Default', '1080i')
     try:
-        return win.start(metas, catalog_title=catalog_title)
+        return win.start(metas, catalog_title=catalog_title, more_pages=more_pages)
     finally:
         try:
             win.close()

@@ -14,6 +14,7 @@ from lib.stremio.addons import (
     build_resource_url,
     catalog_extra_options,
     catalog_required_extra_names,
+    catalog_supports_extra,
     encode_extra,
     iter_catalogs,
     safe_url_for_log,
@@ -392,6 +393,35 @@ def test_catalog_extra_options_real_cinemeta_year_catalog_shape():
         "extraSupported": ["genre", "skip"],
     }
     assert catalog_extra_options(catalog, "genre") == ["2026", "2025", "1920"]
+
+
+# --- catalog_supports_extra --------------------------------------------
+
+
+def test_catalog_supports_extra_modern_array():
+    catalog = {"id": "list", "extra": [{"name": "skip"}]}
+    assert catalog_supports_extra(catalog, "skip") is True
+    assert catalog_supports_extra(catalog, "genre") is False
+
+
+def test_catalog_supports_extra_legacy_extra_supported():
+    catalog = {"id": "top", "extraSupported": ["search", "genre", "skip"]}
+    assert catalog_supports_extra(catalog, "skip") is True
+
+
+def test_catalog_supports_extra_counts_a_required_prop_as_supported():
+    catalog = {"id": "search", "extra": [{"name": "search", "isRequired": True}]}
+    assert catalog_supports_extra(catalog, "search") is True
+
+
+def test_catalog_supports_extra_legacy_extra_required_only():
+    catalog = {"id": "search", "extraRequired": ["search"]}
+    assert catalog_supports_extra(catalog, "search") is True
+
+
+@pytest.mark.parametrize("catalog", [None, "nope", 42, {}, {"extra": "nope"}])
+def test_catalog_supports_extra_never_raises_on_malformed_input(catalog):
+    assert catalog_supports_extra(catalog, "skip") is False
 
 
 # --- catalog_required_extra_names --------------------------------------

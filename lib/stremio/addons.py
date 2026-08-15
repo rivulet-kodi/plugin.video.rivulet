@@ -323,6 +323,21 @@ def _catalog_extra_names(catalog):
     return names
 
 
+def catalog_supports_extra(catalog, name):
+    """Whether `catalog` declares extra prop `name` at all (required or
+    not), across both the modern `extra` array and the legacy
+    `extraSupported`/`extraRequired` forms - the same plain existence
+    check `iter_catalogs(extra_required=...)` applies, exposed for
+    callers that hold a single catalog rather than iterating.
+
+    Used to decide whether a catalog can be paged with `skip` (see
+    `lib.ui.views.fetch_catalog_pages`). Never raises: a
+    missing/non-dict catalog, or a non-list `extra`, returns False."""
+    if not isinstance(catalog, dict):
+        return False
+    return name in _catalog_extra_names(catalog)
+
+
 def catalog_required_extra_names(catalog):
     """Extra prop names a catalog marks REQUIRED, from either the modern
     `extra: [{name, isRequired, ...}]` array (ManifestExtra.is_required in
