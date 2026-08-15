@@ -231,10 +231,19 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         """Append whatever the paging worker has queued onto the live
         coverflow. Always call this from the UI thread.
 
-        Appending (rather than rebuilding) keeps the user's scroll
-        position and every already-enriched item untouched: the indices
-        `_enriched`/`_enrich_pending` are keyed by only ever grow, so a
-        page landing mid-scroll cannot renumber the item under focus.
+        Appending (rather than rebuilding) keeps every already-enriched
+        item untouched: indices only ever grow, so a page landing
+        mid-scroll cannot renumber the item under focus.
+
+        The cursor, however, is NOT preserved for free: `addItems()` on a
+        ControlList resets the selected position to 0, so a page landing
+        while the user scrolls would otherwise yank them back to the
+        first poster - the further they had scrolled, the more jarring.
+        Save the position and restore it after the append, the same
+        guard `streamswindow._merge_and_refresh()` applies for the same
+        reason. Restoring by INDEX is sound here where that one needs
+        object identity: this only ever appends, so every existing item
+        keeps the index it already had.
         """
         with self._paging_lock:
             if not self._pending_pages:
@@ -245,8 +254,16 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
             for meta in page:
                 items.append(self._make_item(len(self.metas), meta))
                 self.metas.append(meta)
-        if items:
-            self.getControl(SELECT).addItems(items)
+        if not items:
+            return
+        control = self.getControl(SELECT)
+        focus_index = control.getSelectedPosition()
+        control.addItems(items)
+        # A negative position means nothing was focused (an empty list
+        # cannot happen here - the window never opens without a first
+        # page) - leave Kodi's own default alone in that case.
+        if focus_index > 0:
+            control.selectItem(focus_index)
 
     def _make_item(self, index, meta, props=None):
         item = xbmcgui.ListItem(meta.get('name') or meta.get('id') or '?')

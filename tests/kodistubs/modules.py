@@ -252,7 +252,14 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
         repopulated/re-selected at runtime, unlike every other fake user
         of this class so far). `setPercent()`/`getPercent()` stand in for
         `ControlProgress`'s same-named methods (added for
-        lib.ui.dialogs' RivuletProgress/RivuletBusy/RivuletCountdown)."""
+        lib.ui.dialogs' RivuletProgress/RivuletBusy/RivuletCountdown).
+
+        `addItems()` resets the selection to 0, as the real ControlList
+        does. That is not a detail worth faking for its own sake - it is
+        the behaviour behind a real bug (a catalog page landing while the
+        user scrolled the coverflow snapped them back to the first
+        poster), which this fake previously could not reproduce because
+        it left `selected_index` alone."""
 
         def __init__(self):
             self.items = []
@@ -265,6 +272,10 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
 
         def addItems(self, items):
             self.items.extend(items)
+            # Kodi moves the cursor back to the top when items are added;
+            # a caller that needs to keep it must save/restore around
+            # this call (see infowindow._apply_pending_pages()).
+            self.selected_index = 0
 
         def reset(self):
             self.items = []
