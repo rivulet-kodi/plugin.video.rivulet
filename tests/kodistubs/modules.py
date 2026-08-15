@@ -7,9 +7,51 @@ concurrent `install_kodi_stubs()` calls (e.g. under `pytest-xdist`, which
 runs each worker in its own process, or nested calls within one test)
 never share mutable module state.
 """
+import os
 import types
+import xml.etree.ElementTree as ET
 
 from .fakes import FakeListItem
+
+#: tests/kodistubs/modules.py -> tests/kodistubs -> tests -> repo root, the
+#: same layout tests/conftest.py's REPO_ROOT relies on.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_SKIN_DIR = os.path.join(_REPO_ROOT, 'resources', 'skins', 'Default', '1080i')
+
+#: xml filename -> frozenset of every id a <control id="..."> element
+#: declares in resources/skins/Default/1080i/<filename>, or None for a
+#: filename with no such file. Populated lazily by _declared_control_ids()
+#: and never invalidated - the skin files don't change mid test-run, and
+#: this is on WindowXML.__init__'s path for every window built across a
+#: 1510-test suite, so parsing each file more than once would be wasted
+#: work many times over.
+_SKIN_CONTROL_IDS = {}
+
+
+def _declared_control_ids(xml_name):
+    """Return the set of ids `resources/skins/Default/1080i/<xml_name>`
+    declares via `<control id="...">`, or None if `xml_name` is falsy or
+    names a file that does not exist there.
+
+    None is WindowXML's escape hatch, not an error: a test that builds
+    the fake directly with no args (or a bogus name) never went near a
+    real window's controls and must keep today's permissive
+    getControl(), same as before this check existed."""
+    if not xml_name:
+        return None
+    if xml_name in _SKIN_CONTROL_IDS:
+        return _SKIN_CONTROL_IDS[xml_name]
+    path = os.path.join(_SKIN_DIR, xml_name)
+    if not os.path.isfile(path):
+        ids = None
+    else:
+        ids = frozenset(
+            int(control.get('id'))
+            for control in ET.parse(path).getroot().iter('control')
+            if control.get('id') is not None
+        )
+    _SKIN_CONTROL_IDS[xml_name] = ids
+    return ids
 
 
 def make_xbmc(env, info_labels=None):
@@ -287,7 +329,18 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
         before/around it. `show()`/`.shown` stand in for the real
         non-blocking `WindowXMLDialog.show()` (used by
         lib.ui.dialogs' RivuletProgress/RivuletBusy/RivuletCountdown,
-        which must never doModal() - see that module's docstring)."""
+        which must never doModal() - see that module's docstring).
+
+        `getControl()` enforces the same "Non-Existent Control" contract
+        real Kodi does: `lib.ui.uicommon.open_window()` always calls
+        `window_cls(xml_name, addon_skin_path(), 'Default', '1080i')`, so
+        `args[0]` is the skin filename - resolved here to the set of ids
+        that file's own <control id="..."> elements declare. Asking for
+        any other id raises, exactly like a real device. This is what
+        would have caught `RuntimeError: Non-Existent Control 30340/
+        30341` before it shipped: ConfirmDialog/OptionListDialog wrote to
+        controls before doModal() had loaded the window, a try/except
+        swallowed the real exception, and the picker rendered empty."""
 
         def __init__(self, *args, **kwargs):
             self._controls = {}
@@ -295,8 +348,11 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
             self.modal_calls = 0
             self.closed = False
             self.shown = False
+            self._valid_control_ids = _declared_control_ids(args[0] if args else None)
 
         def getControl(self, control_id):
+            if self._valid_control_ids is not None and control_id not in self._valid_control_ids:
+                raise RuntimeError('Non-Existent Control %d' % control_id)
             return self._controls.setdefault(control_id, FakeWindowControl())
 
         def setFocusId(self, control_id):

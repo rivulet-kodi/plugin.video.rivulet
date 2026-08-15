@@ -395,3 +395,38 @@ def test_choose_populates_two_line_rows_and_plain_string_rows(load_dialogs, monk
     d.choose('Cast & crew', ['Plain row', ('Idris Farrow', 'Constable Mabel Thorne (voice)')])
     labels = [(item.getLabel(), item.label2) for item in captured['items']]
     assert labels == [('Plain row', ''), ('Idris Farrow', 'Constable Mabel Thorne (voice)')]
+
+
+# ---------------------------------------------------------------------------
+# WindowXML fake's getControl() - Non-Existent Control contract
+# ---------------------------------------------------------------------------
+
+
+def test_getcontrol_resolves_a_control_id_declared_by_the_window_xml(load_dialogs):
+    """A control id ConfirmDialog.xml actually declares (see the
+    <control id="..."> elements there) resolves, exactly like real
+    Kodi - and memoises the same FakeWindowControl on repeat calls (see
+    tests/kodistubs/modules.py's WindowXML.getControl())."""
+    ctx = load_dialogs()
+    d = ctx.dialogs
+    import xbmcgui
+    window = xbmcgui.WindowXML('ConfirmDialog.xml', '/addon/path', 'Default', '1080i')
+
+    control = window.getControl(d.CONFIRM_YES)
+
+    assert window.getControl(d.CONFIRM_YES) is control
+
+
+def test_getcontrol_raises_non_existent_control_for_an_undeclared_id(load_dialogs):
+    """A control id ConfirmDialog.xml does NOT declare raises RuntimeError
+    the same way a real device does - the check that would have caught
+    `RuntimeError: Non-Existent Control 30340/30341` before it shipped
+    (see _ConfirmWindow/_OptionListWindow's onInit() docstrings above):
+    ConfirmDialog/OptionListDialog wrote to controls before doModal() had
+    loaded the window, and a defensive try/except silently swallowed it."""
+    load_dialogs()  # installs the fresh xbmcgui stubs this asserts against
+    import xbmcgui
+    window = xbmcgui.WindowXML('ConfirmDialog.xml', '/addon/path', 'Default', '1080i')
+
+    with pytest.raises(RuntimeError, match='Non-Existent Control'):
+        window.getControl(99999)
