@@ -619,3 +619,43 @@ msgstr "終了"
 msgctxt "#30212"
 msgid "%d%% WATCHED"
 msgstr "%d%% 視聴済み"
+
+msgctxt "#30213"
+msgid "Movies"
+msgstr "映画"
+
+msgctxt "#30214"
+msgid "Series"
+msgstr "シリーズ"
+
+msgctxt "#30215"
+msgid "Anime"
+msgstr "アニメ"
+
+msgctxt "#30216"
+msgid "Browse movie catalogs"
+msgstr "映画カタログを見る"
+
+msgctxt "#30217"
+msgid "Browse series and TV catalogs"
+msgstr "シリーズ・TVカタログを見る"
+
+msgctxt "#30218"
+msgid "Browse anime catalogs"
+msgstr "アニメカタログを見る"
+
+msgctxt "#30219"
+msgid "Home screen"
+msgstr "ホーム画面"
+
+msgctxt "#30220"
+msgid "Show Movies"
+msgstr "映画を表示"
+
+msgctxt "#30221"
+msgid "Show Series"
+msgstr "シリーズを表示"
+
+msgctxt "#30222"
+msgid "Show Anime"
+msgstr "アニメを表示"

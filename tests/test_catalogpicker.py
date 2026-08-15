@@ -472,8 +472,9 @@ def test_open_catalog_picker_opens_window_with_discovered_catalogs(load_catalogp
             captured['init_args'] = args
             super().__init__(*args, **kwargs)
 
-        def start(self, catalogs):
+        def start(self, catalogs, heading=''):
             captured['catalogs'] = catalogs
+            captured['heading'] = heading
             return True
 
     monkeypatch.setattr(ctx.catalogpicker, 'CatalogPickerWindow', RecordingWindow)
@@ -508,7 +509,7 @@ def test_open_catalog_picker_window_is_closed_exactly_once_when_start_raises(
             self.close_calls += 1
             super().close()
 
-        def start(self, catalogs):
+        def start(self, catalogs, heading=''):
             # Stands in for a crash inside onInit()/onAction() while the
             # modal loop is running - self.close() (the window's own,
             # normal-path close) never gets a chance to run.
@@ -562,6 +563,31 @@ def test_oninit_marks_search_only_catalog_rows_in_label2(load_catalogpicker):
     items = win.getControl(picker.LIST).items
     assert items[0].label2 == 'Addon A \u00b7 movie \u00b7 STR30199'
     assert items[1].label2 == 'Addon B \u00b7 movie'
+
+
+def test_oninit_heading_names_the_row_the_user_came_in_through(load_catalogpicker):
+    ctx = load_catalogpicker()
+    picker = ctx.catalogpicker
+    win = _make_window(picker)
+    win.catalogs = [('https://a.example/manifest.json', {'name': 'Addon A'}, _GENRE_OPTIONAL_CATALOG)]
+    win.heading = 'Movies'
+
+    win.onInit()
+
+    # The skin's header is "RIVULET / <SECTION>"; the section is the row.
+    assert win.getControl(picker.HEADING).label == 'RIVULET / MOVIES'
+
+
+def test_oninit_heading_falls_back_to_the_generic_title_when_unfiltered(load_catalogpicker):
+    ctx = load_catalogpicker()
+    picker = ctx.catalogpicker
+    win = _make_window(picker)
+    win.catalogs = [('https://a.example/manifest.json', {'name': 'Addon A'}, _GENRE_OPTIONAL_CATALOG)]
+
+    win.onInit()
+
+    # No heading -> the label the skin used to hardcode, not "RIVULET / ".
+    assert win.getControl(picker.HEADING).label == 'RIVULET / STR30000'
 
 
 def test_open_catalog_search_only_prompts_and_fetches_with_search_extra(load_catalogpicker, monkeypatch):
@@ -775,7 +801,7 @@ def test_open_catalog_picker_omits_and_logs_catalogs_requiring_unsupportable_ext
     captured = {}
 
     class RecordingWindow(ctx.catalogpicker.CatalogPickerWindow):
-        def start(self, catalogs):
+        def start(self, catalogs, heading=''):
             captured['catalogs'] = catalogs
             return True
 
@@ -802,7 +828,7 @@ def test_open_catalog_picker_omits_genre_required_catalog_with_no_declared_optio
     captured = {}
 
     class RecordingWindow(ctx.catalogpicker.CatalogPickerWindow):
-        def start(self, catalogs):
+        def start(self, catalogs, heading=''):
             captured['catalogs'] = catalogs
             return True
 

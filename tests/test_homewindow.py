@@ -38,15 +38,29 @@ _RELOAD_MODULE_NAMES = (
 )
 
 
-class _FakeStore:
-    """Fake `lib.store.Store`: only `get_auth()` matters to HomeWindow.onInit()
-    (its truthiness decides whether the Library row is shown)."""
+#: Catalog descriptors covering every type row, for _menu_items()'s
+#: auto-hide check (a row whose types nothing publishes is left out).
+_ALL_TYPE_ADDONS = [{'transportUrl': 'https://a/manifest.json', 'manifest': {'catalogs': [
+    {'type': 'movie', 'id': 'm'}, {'type': 'series', 'id': 's'}, {'type': 'anime', 'id': 'a'},
+]}}]
 
-    def __init__(self, auth=None):
+
+class _FakeStore:
+    """Fake `lib.store.Store` for HomeWindow.onInit(): `get_auth()`'s
+    truthiness decides whether the Library row is shown, and
+    `get_addons()` supplies the catalogs the type rows auto-hide
+    against (defaulting to one of every type, so a test that only cares
+    about Library still gets all three rows)."""
+
+    def __init__(self, auth=None, addons=None):
         self._auth = auth
+        self._addons = _ALL_TYPE_ADDONS if addons is None else addons
 
     def get_auth(self):
         return self._auth
+
+    def get_addons(self):
+        return self._addons
 
 
 class _FakeVersionStore:
@@ -85,11 +99,12 @@ def load_homewindow():
     Every call is torn down automatically, in reverse order, at test end.
     """
     with contextlib.ExitStack() as stack:
-        def _load(addon_info=None, localized=None):
+        def _load(addon_info=None, localized=None, settings=None):
             return stack.enter_context(install_kodi_stubs(
                 reload=_RELOAD_MODULE_NAMES,
                 addon_info=addon_info,
                 localized=localized,
+                settings=settings,
             ))
 
         yield _load
@@ -115,32 +130,81 @@ def _window_with_focused_action(homewindow_mod, action):
 def test_menu_items_includes_library_when_show_library_true(load_homewindow):
     ctx = load_homewindow()
 
-    items = ctx.homewindow._menu_items(True)
+    items = ctx.homewindow._menu_items(True, _ALL_TYPE_ADDONS)
 
     assert [item.getProperty('action') for item in items] == [
-        'discover', 'search', 'library', 'addons', 'settings',
+        'movies', 'series', 'anime', 'search', 'library', 'addons', 'settings',
     ]
     assert [item.getLabel() for item in items] == [
-        'STR30000', 'STR30001', 'STR30002', 'STR30003', 'STR30004',
+        'STR30213', 'STR30214', 'STR30215', 'STR30001', 'STR30002', 'STR30003', 'STR30004',
     ]
     assert [item.art['icon'] for item in items] == [
-        ctx.compat.addon_media_path('discover.png'),
+        ctx.compat.addon_media_path('movies.png'),
+        ctx.compat.addon_media_path('series.png'),
+        ctx.compat.addon_media_path('anime.png'),
         ctx.compat.addon_media_path('search.png'),
         ctx.compat.addon_media_path('library.png'),
         ctx.compat.addon_media_path('addons.png'),
         ctx.compat.addon_media_path('settings.png'),
     ]
     assert [item.getProperty('subtitle') for item in items] == [
-        'STR30148', 'STR30149', 'STR30150', 'STR30151', 'STR30152',
+        'STR30216', 'STR30217', 'STR30218', 'STR30149', 'STR30150', 'STR30151', 'STR30152',
     ]
 
 
 def test_menu_items_omits_library_when_show_library_false(load_homewindow):
     ctx = load_homewindow()
 
-    items = ctx.homewindow._menu_items(False)
+    items = ctx.homewindow._menu_items(False, _ALL_TYPE_ADDONS)
 
-    assert [item.getProperty('action') for item in items] == ['discover', 'search', 'addons', 'settings']
+    assert [item.getProperty('action') for item in items] == [
+        'movies', 'series', 'anime', 'search', 'addons', 'settings',
+    ]
+
+
+def test_menu_items_hides_a_type_row_its_setting_turns_off(load_homewindow):
+    ctx = load_homewindow(settings={'home_show_series': 'false'})
+
+    items = ctx.homewindow._menu_items(False, _ALL_TYPE_ADDONS)
+
+    actions = [item.getProperty('action') for item in items]
+    assert 'series' not in actions
+    assert 'movies' in actions and 'anime' in actions
+
+
+def test_menu_items_hides_a_type_row_nothing_publishes(load_homewindow):
+    # Only movie catalogs installed - Series and Anime would open empty.
+    addons = [{'transportUrl': 'https://a/manifest.json',
+               'manifest': {'catalogs': [{'type': 'movie', 'id': 'm'}]}}]
+    ctx = load_homewindow()
+
+    items = ctx.homewindow._menu_items(False, addons)
+
+    assert [item.getProperty('action') for item in items] == [
+        'movies', 'search', 'addons', 'settings',
+    ]
+
+
+def test_menu_items_groups_tv_catalogs_under_the_series_row(load_homewindow):
+    # An addon publishing only "tv" catalogs still gets a Series row -
+    # linear/live channels are television, not a row of their own.
+    addons = [{'transportUrl': 'https://a/manifest.json',
+               'manifest': {'catalogs': [{'type': 'tv', 'id': 'ch'}]}}]
+    ctx = load_homewindow()
+
+    items = ctx.homewindow._menu_items(False, addons)
+
+    assert [item.getProperty('action') for item in items] == [
+        'series', 'search', 'addons', 'settings',
+    ]
+
+
+def test_menu_items_with_no_addons_shows_no_type_rows(load_homewindow):
+    ctx = load_homewindow()
+
+    items = ctx.homewindow._menu_items(False, [])
+
+    assert [item.getProperty('action') for item in items] == ['search', 'addons', 'settings']
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +251,7 @@ def test_oninit_shows_library_row_when_authenticated(load_homewindow, monkeypatc
     win.onInit()
 
     actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
-    assert actions == ['discover', 'search', 'library', 'addons', 'settings']
+    assert actions == ['movies', 'series', 'anime', 'search', 'library', 'addons', 'settings']
     assert win.getControl(ctx.homewindow.BACKGROUND).image == ctx.compat.ADDON_FANART
     assert win.getControl(ctx.homewindow.STATUS_LABEL).label == '[COLOR FF38BDF8]\u25cf[/COLOR] Logged in as ?'
     assert win.getFocusId() == ctx.homewindow.LIST
@@ -285,26 +349,45 @@ def test_onclick_focused_item_with_unrecognized_action_does_not_crash_or_close(l
     assert win.closed is False
 
 
-def test_onclick_discover_closes_when_catalog_picker_returns_true(load_homewindow, monkeypatch):
+def test_onclick_type_row_closes_when_catalog_picker_returns_true(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     calls = []
-    monkeypatch.setattr(ctx.catalogpicker, 'open_catalog_picker', lambda: (calls.append(1), True)[1])
-    win = _window_with_focused_action(ctx.homewindow, 'discover')
+    monkeypatch.setattr(
+        ctx.catalogpicker, 'open_catalog_picker',
+        lambda types=None, heading='': (calls.append((types, heading)), True)[1],
+    )
+    win = _window_with_focused_action(ctx.homewindow, 'movies')
 
     win.onClick(ctx.homewindow.LIST)
 
-    assert calls == [1]
+    # The picker is filtered to the row's own types and headed by its label.
+    assert calls == [(ctx.homewindow.TYPE_ROW_TYPES['movies'], 'STR30213')]
     assert win.closed is True
 
 
-def test_onclick_discover_stays_open_when_catalog_picker_returns_false(load_homewindow, monkeypatch):
+def test_onclick_type_row_stays_open_when_catalog_picker_returns_false(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    monkeypatch.setattr(ctx.catalogpicker, 'open_catalog_picker', lambda: False)
-    win = _window_with_focused_action(ctx.homewindow, 'discover')
+    monkeypatch.setattr(ctx.catalogpicker, 'open_catalog_picker', lambda types=None, heading='': False)
+    win = _window_with_focused_action(ctx.homewindow, 'movies')
 
     win.onClick(ctx.homewindow.LIST)
 
     assert win.closed is False
+
+
+def test_onclick_series_row_passes_its_own_types(load_homewindow, monkeypatch):
+    ctx = load_homewindow()
+    calls = []
+    monkeypatch.setattr(
+        ctx.catalogpicker, 'open_catalog_picker',
+        lambda types=None, heading='': (calls.append(types), False)[1],
+    )
+    win = _window_with_focused_action(ctx.homewindow, 'series')
+
+    win.onClick(ctx.homewindow.LIST)
+
+    assert calls == [ctx.homewindow.TYPE_ROW_TYPES['series']]
+    assert 'tv' in calls[0]
 
 
 def test_onclick_search_closes_when_open_search_returns_true(load_homewindow, monkeypatch):

@@ -15,6 +15,7 @@ from lib.ui.dependencies import get_store
 from lib.ui.uicommon import BACK_ACTIONS, BaseWindow, busy_dialog, open_window
 
 LIST = 30002
+HEADING = 30006
 
 #: ACTION_CONTEXT_MENU ("C"/menu button) - the secondary affordance for
 #: browsing a catalog's declared genre/year options, mirroring
@@ -83,14 +84,18 @@ class CatalogPickerWindow(BaseWindow):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.catalogs = []
+        self.heading = ''
         self.should_close_caller = False
 
-    def start(self, catalogs):
+    def start(self, catalogs, heading=''):
         """doModal() with `catalogs` (a list of `(transport_url, manifest,
         catalog)` tuples, as `lib.stremio.addons.iter_catalogs` yields)
-        loaded as the picker's rows. Returns True if playback started
-        somewhere down the chain and the caller should also close."""
+        loaded as the picker's rows, under `heading` (the Home row the
+        user came in through - "MOVIES", "SERIES", ...). Returns True if
+        playback started somewhere down the chain and the caller should
+        also close."""
         self.catalogs = list(catalogs or [])
+        self.heading = heading or ''
         self.should_close_caller = False
         if not self.catalogs:
             return False
@@ -103,7 +108,9 @@ class CatalogPickerWindow(BaseWindow):
         addon_name = manifest.get('name', '?')
         catalog_name = catalog.get('name') or catalog.get('id')
         catalog_type = catalog.get('type')
-        label2 = '%s \u00b7 %s' % (addon_name, catalog_type)
+        # The type is already named by the heading on a filtered screen,
+        # so repeating it per row just crowds out the addon name.
+        label2 = addon_name if self.heading else '%s \u00b7 %s' % (addon_name, catalog_type)
         if _classify_catalog(catalog) == 'search':
             label2 = '%s \u00b7 %s' % (label2, L(30199))
         item = xbmcgui.ListItem(label=catalog_name, label2=label2)
@@ -122,7 +129,16 @@ class CatalogPickerWindow(BaseWindow):
         # item.
         control.reset()
         control.addItems(items)
+        self.getControl(HEADING).setLabel(self._heading_text())
         self.setFocusId(LIST)
+
+    def _heading_text(self):
+        """The header line, in the skin's "RIVULET / <SECTION>" form.
+        Falls back to the generic catalog-picker title when the screen is
+        not filtered to a type, which is what the skin used to hardcode."""
+        from lib.ui.compat import L
+
+        return 'RIVULET / %s' % ((self.heading or L(30000)).upper(),)
 
     def _focused_catalog(self):
         """The `(transport_url, manifest, catalog)` tuple under the LIST's
@@ -238,16 +254,18 @@ class CatalogPickerWindow(BaseWindow):
             self.close()
 
 
-def open_catalog_picker():
-    """List every installed addon's catalogs and open the coverflow for
-    the one picked. Returns True if the caller should also close (see
-    the module docstring)."""
+def open_catalog_picker(types=None, heading=''):
+    """List the installed addons' catalogs and open the coverflow for the
+    one picked. `types` restricts the list to those Stremio content types
+    (see `lib.ui.homewindow`'s type rows); `heading` names the screen for
+    the row the user came in through. Returns True if the caller should
+    also close (see the module docstring)."""
     import xbmc
 
     from lib.stremio.addons import iter_catalogs
     from lib.ui.compat import L, log, notify
 
-    catalogs = _reachable_catalogs(list(iter_catalogs(get_store().get_addons())))
+    catalogs = _reachable_catalogs(list(iter_catalogs(get_store().get_addons(), types=types)))
     if not catalogs:
         notify(L(30030))
         return False
@@ -256,7 +274,7 @@ def open_catalog_picker():
     win = None
     try:
         win = open_window(CatalogPickerWindow, 'CatalogPickerWindow.xml')
-        return win.start(catalogs)
+        return win.start(catalogs, heading)
     except Exception as exc:  # a skin/UI failure must surface, not vanish
         log('catalogpicker: window failed to open: %r' % (exc,), xbmc.LOGERROR)
         notify(L(30032))

@@ -619,3 +619,43 @@ msgstr "sair"
 msgctxt "#30212"
 msgid "%d%% WATCHED"
 msgstr "%d%% VISTO"
+
+msgctxt "#30213"
+msgid "Movies"
+msgstr "Filmes"
+
+msgctxt "#30214"
+msgid "Series"
+msgstr "Séries"
+
+msgctxt "#30215"
+msgid "Anime"
+msgstr "Anime"
+
+msgctxt "#30216"
+msgid "Browse movie catalogs"
+msgstr "Navegar catálogos de filmes"
+
+msgctxt "#30217"
+msgid "Browse series and TV catalogs"
+msgstr "Navegar catálogos de séries e TV"
+
+msgctxt "#30218"
+msgid "Browse anime catalogs"
+msgstr "Navegar catálogos de anime"
+
+msgctxt "#30219"
+msgid "Home screen"
+msgstr "Tela inicial"
+
+msgctxt "#30220"
+msgid "Show Movies"
+msgstr "Mostrar Filmes"
+
+msgctxt "#30221"
+msgid "Show Series"
+msgstr "Mostrar Séries"
+
+msgctxt "#30222"
+msgid "Show Anime"
+msgstr "Mostrar Anime"

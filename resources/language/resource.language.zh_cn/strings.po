@@ -619,3 +619,43 @@ msgstr "退出"
 msgctxt "#30212"
 msgid "%d%% WATCHED"
 msgstr "%d%% 已观看"
+
+msgctxt "#30213"
+msgid "Movies"
+msgstr "电影"
+
+msgctxt "#30214"
+msgid "Series"
+msgstr "剧集"
+
+msgctxt "#30215"
+msgid "Anime"
+msgstr "动漫"
+
+msgctxt "#30216"
+msgid "Browse movie catalogs"
+msgstr "浏览电影目录"
+
+msgctxt "#30217"
+msgid "Browse series and TV catalogs"
+msgstr "浏览剧集和电视目录"
+
+msgctxt "#30218"
+msgid "Browse anime catalogs"
+msgstr "浏览动漫目录"
+
+msgctxt "#30219"
+msgid "Home screen"
+msgstr "主屏幕"
+
+msgctxt "#30220"
+msgid "Show Movies"
+msgstr "显示电影"
+
+msgctxt "#30221"
+msgid "Show Series"
+msgstr "显示剧集"
+
+msgctxt "#30222"
+msgid "Show Anime"
+msgstr "显示动漫"

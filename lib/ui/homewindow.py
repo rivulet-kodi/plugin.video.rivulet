@@ -19,9 +19,30 @@ BACKGROUND = 30000
 LIST = 30002
 STATUS_LABEL = 30005  # plain text label; set at runtime via setLabel(), not a skin <label>
 
+#: The content-type rows that replaced the single "Discover" entry, in
+#: menu order: (action, {Stremio catalog types}, setting id).
+#:
+#: `series` deliberately carries `tv` alongside it. An addon that
+#: publishes live/linear channels types them "tv", and those are episodic
+#: listings a viewer thinks of as television - grouping them under Series
+#: keeps them reachable without a row of their own that would sit empty
+#: for nearly everyone. "anime" is the one type common enough to earn its
+#: own row: it is what the large anime catalog addons (and AIOStreams)
+#: actually publish, and its audience wants it separated from film.
+_TYPE_ROWS = (
+    ('movies', frozenset({'movie'}), 'home_show_movies'),
+    ('series', frozenset({'series', 'tv'}), 'home_show_series'),
+    ('anime', frozenset({'anime'}), 'home_show_anime'),
+)
+
+#: action -> the set of catalog types its picker is filtered to.
+TYPE_ROW_TYPES = {action: types for action, types, _ in _TYPE_ROWS}
+
 #: (localized-string id, action) - the authoritative definition of Home's menu rows.
 _MENU = (
-    (30000, 'discover'),
+    (30213, 'movies'),
+    (30214, 'series'),
+    (30215, 'anime'),
     (30001, 'search'),
     (30002, 'library'),
     (30003, 'addons'),
@@ -33,7 +54,9 @@ _MENU = (
 #: label per row - localized via L(), not plain literals, so it follows
 #: Kodi's language setting the same as every other row's main label.
 _SUBTITLES = {
-    'discover': 30148,
+    'movies': 30216,
+    'series': 30217,
+    'anime': 30218,
     'search': 30149,
     'library': 30150,
     'addons': 30151,
@@ -41,12 +64,42 @@ _SUBTITLES = {
 }
 
 
-def _menu_items(show_library):
+def _available_types(addons):
+    """Return the set of catalog types `addons` actually publish.
+
+    Drives the auto-hide half of a type row's visibility: a row whose
+    types nothing installed publishes would open an empty picker, so it
+    is left out entirely rather than offered and then disappointing.
+    """
+    from lib.stremio.addons import iter_catalogs
+
+    return {catalog.get('type') for _, _, catalog in iter_catalogs(addons)}
+
+
+def _type_row_enabled(action, available):
+    """Whether the type row `action` should appear: its setting must be
+    on (all three default True) AND something installed must publish a
+    catalog of one of its types."""
+    from lib.ui.compat import setting_bool
+
+    types = TYPE_ROW_TYPES.get(action)
+    if types is None:
+        return True
+    if not types & available:
+        return False
+    setting_id = next(sid for act, _, sid in _TYPE_ROWS if act == action)
+    return setting_bool(setting_id, True)
+
+
+def _menu_items(show_library, addons=None):
     from lib.ui.compat import L, addon_media_path
 
+    available = _available_types(addons or [])
     items = []
     for string_id, action in _MENU:
         if action == 'library' and not show_library:
+            continue
+        if action in TYPE_ROW_TYPES and not _type_row_enabled(action, available):
             continue
         item = xbmcgui.ListItem(L(string_id))
         # One setProperties() call instead of two setProperty() calls
@@ -81,15 +134,19 @@ class HomeWindow(BaseWindow):
     def onInit(self):
         from lib.ui.compat import addon_fanart
 
-        auth = get_store().get_auth()
+        store = get_store()
+        auth = store.get_auth()
         self.getControl(BACKGROUND).setImage(addon_fanart())
         control = self.getControl(LIST)
         # reset() before addItems(): onInit() runs again when
         # uicommon.ModalStackWindow reopens a screen force-closed for
         # playback, and re-adding onto a retained list would double every
-        # item.
+        # item. Rebuilding also re-reads the type rows' settings and the
+        # installed catalogs, so toggling a row in Settings (or installing
+        # an addon that publishes a new type) is reflected on the way back
+        # here without restarting the addon.
         control.reset()
-        control.addItems(_menu_items(bool(auth)))
+        control.addItems(_menu_items(bool(auth), store.get_addons()))
         self.getControl(STATUS_LABEL).setLabel(_status_text(auth))
         self.setFocusId(LIST)
 
@@ -104,11 +161,12 @@ class HomeWindow(BaseWindow):
             handler(self)
 
 
-def _open_discover(window):
-    # Nested modal: Discover draws over Home, so Home stays open - backing
-    # all the way out returns here rather than exiting the addon.
+def _open_type_row(window, action):
+    # Nested modal: the picker draws over Home, so Home stays open -
+    # backing all the way out returns here rather than exiting the addon.
     from lib.ui.catalogpicker import open_catalog_picker
-    if open_catalog_picker():
+    from lib.ui.compat import L
+    if open_catalog_picker(types=TYPE_ROW_TYPES[action], heading=L(L_FOR_ACTION[action])):
         window.close()
 
 
@@ -134,8 +192,16 @@ def _open_settings(window):
     ADDON.openSettings()
 
 
+#: action -> the localized-string id its picker uses as a heading, so the
+#: filtered screen names the row the user came in through ("MOVIES")
+#: rather than the generic catalog-picker title.
+L_FOR_ACTION = {action: string_id for string_id, action in _MENU}
+
+
 _ACTIONS = {
-    'discover': _open_discover,
+    'movies': lambda window: _open_type_row(window, 'movies'),
+    'series': lambda window: _open_type_row(window, 'series'),
+    'anime': lambda window: _open_type_row(window, 'anime'),
     'search': _open_search,
     'library': _open_library,
     'addons': _open_addons,
