@@ -38,10 +38,15 @@ RAW_DIR = "/tmp/rivulet-shots"
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.path.join(_REPO_ROOT, "artwork", "screenshots")
 
-# Box (in the raw screenshot's own pixel coordinates) covering the
-# "Logged in as <email>" line on HomeWindow - blacked out before resize
-# so a real account email never ends up in a committed image.
-EMAIL_BOX = (300, 315, 1060, 425)
+# Box covering HomeWindow's "Logged in as <email>" status pill, blacked
+# out before resize so a real account email never ends up in a committed
+# image. Expressed as fractions of the screenshot's own width/height, not
+# absolute pixels: the raw capture's size follows whatever resolution
+# Kodi is running at, and the skin moved this pill from the left of the
+# header (pre-0.9.0) to the top right when the windows were reauthored at
+# 1920x1080 - an absolute box silently stops covering anything after a
+# layout change, which fails open and leaks the address.
+EMAIL_BOX_FRACTIONS = (0.55, 0.08, 0.95, 0.15)
 
 
 class KodiRPC:
@@ -123,6 +128,15 @@ def take_screenshot(rpc, name, settle=1.0):
     return dst
 
 
+def _raw_size(path):
+    """Return the raw screenshot's (width, height) via ImageMagick."""
+    out = subprocess.run(
+        ["magick", "identify", "-format", "%w %h", path],
+        check=True, capture_output=True, text=True,
+    ).stdout.split()
+    return int(out[0]), int(out[1])
+
+
 def curate(raw_path, out_name, redact=False, width=1400):
     """Optionally black out the account-email box, downscale, and drop
     the result into artwork/screenshots/<out_name>.png."""
@@ -130,7 +144,10 @@ def curate(raw_path, out_name, redact=False, width=1400):
         return
     cmd = ["magick", raw_path]
     if redact:
-        x1, y1, x2, y2 = EMAIL_BOX
+        raw_w, raw_h = _raw_size(raw_path)
+        fx1, fy1, fx2, fy2 = EMAIL_BOX_FRACTIONS
+        x1, x2 = int(raw_w * fx1), int(raw_w * fx2)
+        y1, y2 = int(raw_h * fy1), int(raw_h * fy2)
         cmd += ["-fill", "black", "-draw", f"rectangle {x1},{y1} {x2},{y2}"]
     dst = os.path.join(OUT_DIR, f"{out_name}.png")
     cmd += ["-resize", f"{width}x", "-strip", "-colors", "256", dst]
