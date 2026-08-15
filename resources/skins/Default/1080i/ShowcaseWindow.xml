@@ -180,11 +180,14 @@
                 </focusedlayout>
             </control>
 
-            <!-- Title of the focused poster, pinned under the strip so it
-                 does not ride up and down with the item as focus moves. -->
-            <control type="label"><left>96</left><top>1002</top><width>300</width><height>32</height><font>font27</font><textcolor>FFFFFFFF</textcolor><align>center</align>
-                <label>[B]$INFO[ListItem.Label][/B]</label>
-            </control>
+            <!-- No title under the strip: the hero block above already
+                 renders ListItem.Label at font60, so a second copy under
+                 the focused poster is the same string twice. It also had
+                 nowhere to sit - the strip runs to y=1050 on a 1080-tall
+                 frame, so the label's own 1002..1034 band lay on top of
+                 the poster rather than under it, colliding with whatever
+                 artwork (often the poster's own title treatment) happened
+                 to be there. -->
 
             <control type="image"><left>0</left><top>560</top><width>96</width><height>520</height><texture flipx="true" colordiffuse="FF0A0C0E">fade_out_h.png</texture></control>
             <control type="image"><left>1780</left><top>560</top><width>140</width><height>520</height><texture colordiffuse="FF0A0C0E">fade_out_h.png</texture></control>
