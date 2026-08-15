@@ -200,23 +200,36 @@ def goto_home(rpc, delay=2.0):
     Server URL field. So: back out until Kodi's own home is actually on
     screen, then relaunch and wait until the addon's Home actually is.
     """
-    for player in (rpc.call("Player.GetActivePlayers") or {}).get("result") or []:
-        rpc.call("Player.Stop", {"playerid": player["playerid"]})
-        time.sleep(1.5)
-    for _ in range(15):
+    # Stop playback inside the loop, not only before it: backing out of a
+    # screen can start a stream (a stuck "Preparing stream" dialog swallows
+    # Back until it resolves or is cancelled), and a fixed pre-loop stop
+    # cannot see one that appears afterwards. 0.5s per press was also too
+    # brisk for a dialog mid-resolve - one run exhausted its budget and
+    # aborted the whole capture.
+    for _ in range(30):
         if current_window(rpc) == WINDOW_KODI_HOME:
             break
+        for player in (rpc.call("Player.GetActivePlayers") or {}).get("result") or []:
+            rpc.call("Player.Stop", {"playerid": player["playerid"]})
+            time.sleep(1.5)
         rpc.call("Input.Back")
-        time.sleep(0.5)
+        time.sleep(0.8)
     else:
-        raise SystemExit("could not get back to Kodi's home screen")
+        raise SystemExit(
+            "could not get back to Kodi's home screen (stuck at window %s)"
+            % current_window(rpc))
     rpc.call("Addons.ExecuteAddon", {"addonid": "plugin.video.rivulet"})
-    for _ in range(24):
+    # Generous: a cold launch refreshes addon manifests over the network
+    # before HomeWindow opens, and 12s was not always enough.
+    for _ in range(60):
         time.sleep(0.5)
         if current_window(rpc) == WINDOW_RIVULET_HOME:
             break
     else:
-        raise SystemExit("Rivulet's HomeWindow never came up")
+        raise SystemExit(
+            "Rivulet's HomeWindow never came up (stuck at window %s) - if the addon"
+            " was already deep in its own window stack, restart Kodi for a clean slate"
+            % current_window(rpc))
     # Opening the addon fires a "Logged in as <email>" toast. It is not
     # covered by EMAIL_BOX_FRACTIONS (that only masks HomeWindow's status
     # pill) and it WILL be captured by any screenshot taken too soon after
@@ -225,9 +238,40 @@ def goto_home(rpc, delay=2.0):
     time.sleep(max(delay, 6.0))
 
 
-#: HomeWindow's rows, in order, as `lib.ui.homewindow._MENU` defines them.
-#: Library only appears when logged in, which the capture machine is.
-HOME_MOVIES, HOME_SERIES, HOME_ANIME, HOME_SEARCH, HOME_LIBRARY, HOME_ADDONS = range(6)
+def _home_rows():
+    """Map each HomeWindow action to its row index, read out of
+    `lib.ui.homewindow._MENU` - the authoritative definition.
+
+    Parsed with `ast` rather than imported: `lib.ui.homewindow` binds
+    `xbmcgui` at module scope and cannot load outside Kodi. These used to
+    be hardcoded, and went stale the moment the `other` row was inserted
+    at index 3 - every leg after it then walked to the wrong screen, which
+    is the same class of failure as counting keypresses.
+
+    Assumes every row is present, which holds on the capture machine: it
+    is logged in (Library) and has addons publishing types outside the
+    three curated rows (Other). A machine missing either would shift the
+    rows below it.
+    """
+    import ast
+
+    source = os.path.join(_REPO_ROOT, 'lib', 'ui', 'homewindow.py')
+    with open(source, encoding='utf-8') as handle:
+        tree = ast.parse(handle.read())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+                getattr(t, 'id', None) == '_MENU' for t in node.targets):
+            actions = [e.elts[1].value for e in node.value.elts]
+            return {action: index for index, action in enumerate(actions)}
+    raise SystemExit('could not find _MENU in %s' % source)
+
+
+#: HomeWindow's rows, by action name -> row index.
+HOME_ROWS = _home_rows()
+HOME_MOVIES = HOME_ROWS['movies']
+HOME_SEARCH = HOME_ROWS['search']
+HOME_LIBRARY = HOME_ROWS['library']
+HOME_ADDONS = HOME_ROWS['addons']
 
 #: Rows to step down in Kodi's "Video add-ons" folder to reach Rivulet.
 #: The folder lists ".." first, then user video plugins sorted by name;
