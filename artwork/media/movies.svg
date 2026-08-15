@@ -11,7 +11,12 @@
     </filter>
   </defs>
   <g filter="url(#glow)">
-    <rect x="52" y="66" width="152" height="124" rx="10" stroke="url(#flow)" stroke-width="14" fill="none"/>
-    <path d="M 92 66 L 92 190 M 164 66 L 164 190" stroke="url(#flow)" stroke-width="14" stroke-linecap="round"/>
+    <rect x="44" y="58" width="168" height="140" rx="14" stroke="url(#flow)" stroke-width="13" fill="none"/>
+    <rect x="58" y="84" width="22" height="22" rx="6" fill="url(#flow)"/>
+    <rect x="176" y="84" width="22" height="22" rx="6" fill="url(#flow)"/>
+    <rect x="58" y="117" width="22" height="22" rx="6" fill="url(#flow)"/>
+    <rect x="176" y="117" width="22" height="22" rx="6" fill="url(#flow)"/>
+    <rect x="58" y="150" width="22" height="22" rx="6" fill="url(#flow)"/>
+    <rect x="176" y="150" width="22" height="22" rx="6" fill="url(#flow)"/>
   </g>
 </svg>
