@@ -671,3 +671,15 @@ msgstr "bricht ab"
 msgctxt "#30225"
 msgid "plays now"
 msgstr "spielt jetzt ab"
+
+msgctxt "#30227"
+msgid "Other"
+msgstr "Sonstiges"
+
+msgctxt "#30228"
+msgid "Browse catalogs that aren't film, series or anime"
+msgstr "Kataloge durchsuchen, die keine Filme, Serien oder Anime sind"
+
+msgctxt "#30229"
+msgid "Show Other"
+msgstr "Sonstiges anzeigen"

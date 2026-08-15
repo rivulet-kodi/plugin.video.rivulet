@@ -671,3 +671,15 @@ msgstr "annuleert"
 msgctxt "#30225"
 msgid "plays now"
 msgstr "speelt nu af"
+
+msgctxt "#30227"
+msgid "Other"
+msgstr "Overige"
+
+msgctxt "#30228"
+msgid "Browse catalogs that aren't film, series or anime"
+msgstr "Bladeren door catalogi die geen films, series of anime zijn"
+
+msgctxt "#30229"
+msgid "Show Other"
+msgstr "Overige tonen"

@@ -523,6 +523,94 @@ def test_open_catalog_picker_opens_window_with_discovered_catalogs(load_catalogp
     ]
 
 
+# ---------------------------------------------------------------------------
+# open_catalog_picker() - types= filtering via base-type matching
+# ---------------------------------------------------------------------------
+
+
+def test_base_type_reduces_dotted_subtype_and_lowercases(load_catalogpicker):
+    ctx = load_catalogpicker()
+
+    assert ctx.catalogpicker._base_type('anime.movie') == 'anime'
+    assert ctx.catalogpicker._base_type('anime.series') == 'anime'
+    assert ctx.catalogpicker._base_type('TV') == 'tv'
+    assert ctx.catalogpicker._base_type('movie') == 'movie'
+    assert ctx.catalogpicker._base_type(None) == ''
+
+
+def test_open_catalog_picker_types_filter_matches_dotted_subtype_base(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker(addon_info={'path': '/addon/path'})
+    descriptor = {
+        'transportUrl': 'https://a.example/manifest.json',
+        'manifest': {'name': 'Addon A', 'catalogs': [
+            {'id': 'am', 'type': 'anime.movie'}, {'id': 'top', 'type': 'movie'},
+        ]},
+    }
+    monkeypatch.setattr(ctx.catalogpicker, 'get_store', lambda: _FakeStore(addons=[descriptor]))
+    captured = {}
+
+    class RecordingWindow(ctx.catalogpicker.CatalogPickerWindow):
+        def start(self, catalogs, heading=''):
+            captured['catalogs'] = catalogs
+            return True
+
+    monkeypatch.setattr(ctx.catalogpicker, 'CatalogPickerWindow', RecordingWindow)
+
+    result = ctx.catalogpicker.open_catalog_picker(types={'anime'})
+
+    assert result is True
+    assert [cat.get('id') for _t, _m, cat in captured['catalogs']] == ['am']
+
+
+def test_open_catalog_picker_types_filter_is_case_insensitive(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker(addon_info={'path': '/addon/path'})
+    descriptor = {
+        'transportUrl': 'https://a.example/manifest.json',
+        'manifest': {'name': 'Addon A', 'catalogs': [{'id': 'ch', 'type': 'TV'}]},
+    }
+    monkeypatch.setattr(ctx.catalogpicker, 'get_store', lambda: _FakeStore(addons=[descriptor]))
+    captured = {}
+
+    class RecordingWindow(ctx.catalogpicker.CatalogPickerWindow):
+        def start(self, catalogs, heading=''):
+            captured['catalogs'] = catalogs
+            return True
+
+    monkeypatch.setattr(ctx.catalogpicker, 'CatalogPickerWindow', RecordingWindow)
+
+    result = ctx.catalogpicker.open_catalog_picker(types={'series', 'tv'})
+
+    assert result is True
+    assert [cat.get('id') for _t, _m, cat in captured['catalogs']] == ['ch']
+
+
+def test_open_catalog_picker_types_filter_to_remainder_excludes_curated_types(load_catalogpicker, monkeypatch):
+    # The 'other' row's picker: filtered to exactly {'porn'} must not also
+    # surface the movie/series/anime catalogs the same addon publishes.
+    ctx = load_catalogpicker(addon_info={'path': '/addon/path'})
+    descriptor = {
+        'transportUrl': 'https://a.example/manifest.json',
+        'manifest': {'name': 'TPB 4K Porn', 'catalogs': [
+            {'id': 'm', 'type': 'movie'}, {'id': 's', 'type': 'series'},
+            {'id': 'a', 'type': 'anime'}, {'id': 'p', 'type': 'Porn'},
+        ]},
+    }
+    monkeypatch.setattr(ctx.catalogpicker, 'get_store', lambda: _FakeStore(addons=[descriptor]))
+    captured = {}
+
+    class RecordingWindow(ctx.catalogpicker.CatalogPickerWindow):
+        def start(self, catalogs, heading=''):
+            captured['catalogs'] = catalogs
+            return True
+
+    monkeypatch.setattr(ctx.catalogpicker, 'CatalogPickerWindow', RecordingWindow)
+
+    result = ctx.catalogpicker.open_catalog_picker(types={'porn'})
+
+    assert result is True
+    assert [cat.get('id') for _t, _m, cat in captured['catalogs']] == ['p']
+
+
 def test_open_catalog_picker_window_is_closed_exactly_once_when_start_raises(
     load_catalogpicker, monkeypatch,
 ):

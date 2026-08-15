@@ -671,3 +671,15 @@ msgstr "iptal eder"
 msgctxt "#30225"
 msgid "plays now"
 msgstr "şimdi oynatır"
+
+msgctxt "#30227"
+msgid "Other"
+msgstr "Diğer"
+
+msgctxt "#30228"
+msgid "Browse catalogs that aren't film, series or anime"
+msgstr "Film, dizi veya anime olmayan kataloglara göz at"
+
+msgctxt "#30229"
+msgid "Show Other"
+msgstr "Diğer göster"

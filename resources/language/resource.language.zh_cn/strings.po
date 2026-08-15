@@ -671,3 +671,15 @@ msgstr "取消"
 msgctxt "#30225"
 msgid "plays now"
 msgstr "立即播放"
+
+msgctxt "#30227"
+msgid "Other"
+msgstr "其他"
+
+msgctxt "#30228"
+msgid "Browse catalogs that aren't film, series or anime"
+msgstr "浏览不是电影、剧集或动漫的目录"
+
+msgctxt "#30229"
+msgid "Show Other"
+msgstr "显示其他"

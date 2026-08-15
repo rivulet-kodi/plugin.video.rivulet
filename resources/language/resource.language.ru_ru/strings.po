@@ -671,3 +671,15 @@ msgstr "отменяет"
 msgctxt "#30225"
 msgid "plays now"
 msgstr "воспроизводит сейчас"
+
+msgctxt "#30227"
+msgid "Other"
+msgstr "Прочее"
+
+msgctxt "#30228"
+msgid "Browse catalogs that aren't film, series or anime"
+msgstr "Каталоги, которые не фильмы, сериалы и аниме"
+
+msgctxt "#30229"
+msgid "Show Other"
+msgstr "Показывать Прочее"

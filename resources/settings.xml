@@ -18,6 +18,11 @@
                     <default>true</default>
                     <control type="toggle"/>
                 </setting>
+                <setting id="home_show_other" type="boolean" label="30229">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
             </group>
         </category>
         <category id="server" label="30101">

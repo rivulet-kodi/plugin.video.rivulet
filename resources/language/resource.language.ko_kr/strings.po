@@ -671,3 +671,15 @@ msgstr "취소함"
 msgctxt "#30225"
 msgid "plays now"
 msgstr "지금 재생함"
+
+msgctxt "#30227"
+msgid "Other"
+msgstr "기타"
+
+msgctxt "#30228"
+msgid "Browse catalogs that aren't film, series or anime"
+msgstr "영화, 시리즈 또는 애니메이션이 아닌 카탈로그 탐색"
+
+msgctxt "#30229"
+msgid "Show Other"
+msgstr "기타 표시"

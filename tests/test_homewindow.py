@@ -27,10 +27,15 @@ HomeWindow.xml's actual skin rendering is Kodi-skin-engine-only and is NOT,
 and cannot be, exercised by this suite.
 """
 import contextlib
+import os
 
 import pytest
 
 from tests.kodistubs import install_kodi_stubs
+
+#: The real addon directory, for the few assertions that must check what
+#: actually ships rather than what the stubbed path helper returns.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 _RELOAD_MODULE_NAMES = (
     'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.router', 'lib.ui.homewindow',
@@ -205,6 +210,75 @@ def test_menu_items_with_no_addons_shows_no_type_rows(load_homewindow):
     items = ctx.homewindow._menu_items(False, [])
 
     assert [item.getProperty('action') for item in items] == ['search', 'addons', 'settings']
+
+
+def test_menu_items_classifies_dotted_anime_subtypes_into_anime_row(load_homewindow):
+    # Stremio's dotted-subtype convention: 'anime.movie'/'anime.series'
+    # specialize 'anime' and must still join the Anime row, not go unrouted.
+    addons = [{'transportUrl': 'https://a/manifest.json',
+               'manifest': {'catalogs': [{'type': 'anime.movie', 'id': 'm'},
+                                          {'type': 'anime.series', 'id': 's'}]}}]
+    ctx = load_homewindow()
+
+    items = ctx.homewindow._menu_items(False, addons)
+
+    assert [item.getProperty('action') for item in items] == [
+        'anime', 'search', 'addons', 'settings',
+    ]
+
+
+def test_menu_items_type_matching_is_case_insensitive(load_homewindow):
+    # A capitalized 'TV' must join Series exactly like lowercase 'tv' does.
+    addons = [{'transportUrl': 'https://a/manifest.json',
+               'manifest': {'catalogs': [{'type': 'TV', 'id': 'ch'}]}}]
+    ctx = load_homewindow()
+
+    items = ctx.homewindow._menu_items(False, addons)
+
+    assert [item.getProperty('action') for item in items] == [
+        'series', 'search', 'addons', 'settings',
+    ]
+
+
+def test_menu_items_shows_other_row_for_a_type_no_curated_row_claims(load_homewindow):
+    # The real-world case: an addon publishing an arbitrary type like
+    # "Porn" has no curated row and must land in the catch-all instead.
+    addons = [{'transportUrl': 'https://a/manifest.json',
+               'manifest': {'catalogs': [{'type': 'Porn', 'id': 'p'}]}}]
+    ctx = load_homewindow()
+
+    items = ctx.homewindow._menu_items(False, addons)
+
+    assert [item.getProperty('action') for item in items] == [
+        'other', 'search', 'addons', 'settings',
+    ]
+    other = items[0]
+    assert other.getLabel() == 'STR30227'
+    assert other.getProperty('subtitle') == 'STR30228'
+
+
+def test_menu_items_omits_other_row_when_only_curated_types_are_installed(load_homewindow):
+    # Cinemeta-only (movie/series/anime): the common case must not change -
+    # no remainder exists, so 'other' stays out exactly like today.
+    ctx = load_homewindow()
+
+    items = ctx.homewindow._menu_items(True, _ALL_TYPE_ADDONS)
+
+    assert [item.getProperty('action') for item in items] == [
+        'movies', 'series', 'anime', 'search', 'library', 'addons', 'settings',
+    ]
+
+
+def test_menu_items_hides_other_row_its_setting_turns_off(load_homewindow):
+    addons = [{'transportUrl': 'https://a/manifest.json',
+               'manifest': {'catalogs': [{'type': 'Porn', 'id': 'p'}]}}]
+    ctx = load_homewindow(settings={'home_show_other': 'false'})
+
+    items = ctx.homewindow._menu_items(False, addons)
+
+    assert [item.getProperty('action') for item in items] == [
+        'search', 'addons', 'settings',
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -388,6 +462,26 @@ def test_onclick_series_row_passes_its_own_types(load_homewindow, monkeypatch):
 
     assert calls == [ctx.homewindow.TYPE_ROW_TYPES['series']]
     assert 'tv' in calls[0]
+
+
+def test_onclick_other_row_passes_only_the_unclaimed_remainder(load_homewindow, monkeypatch):
+    # 'other' has no fixed type set - it must be computed live from what's
+    # installed, and must NOT also carry movie/series/anime along with it.
+    ctx = load_homewindow()
+    addons = [{'transportUrl': 'https://a/manifest.json', 'manifest': {'catalogs': [
+        {'type': 'movie', 'id': 'm'}, {'type': 'Porn', 'id': 'p'},
+    ]}}]
+    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(addons=addons))
+    calls = []
+    monkeypatch.setattr(
+        ctx.catalogpicker, 'open_catalog_picker',
+        lambda types=None, heading='': (calls.append(types), False)[1],
+    )
+    win = _window_with_focused_action(ctx.homewindow, 'other')
+
+    win.onClick(ctx.homewindow.LIST)
+
+    assert calls == [{'porn'}]
 
 
 def test_onclick_search_closes_when_open_search_returns_true(load_homewindow, monkeypatch):
@@ -586,3 +680,27 @@ def test_open_home_still_opens_the_window_when_the_store_raises(load_homewindow,
 
     assert captured['instance'].modal_calls == 1
     assert ctx.env.notifications == []
+
+
+def test_every_menu_row_has_an_icon_shipped_for_it(load_homewindow):
+    """`_menu_items()` derives each row's icon from its action name
+    (`addon_media_path('%s.png' % action)`), so a row whose file is
+    missing renders with an empty icon slot - silently, since Kodi just
+    draws nothing. The `other` row shipped exactly that way: it was added
+    without an `other.png`, and the row it replaced (`discover`) left its
+    icon behind unreferenced.
+
+    Kodi resolves these at draw time against the real addon directory,
+    so this walks the repo rather than the stubbed path helper.
+    """
+    media = os.path.join(_REPO_ROOT, 'resources', 'media')
+    actions = [action for _string_id, action in load_homewindow().homewindow._MENU]
+
+    missing = [a for a in actions if not os.path.isfile(os.path.join(media, '%s.png' % a))]
+    assert not missing, 'Home rows with no resources/media/<action>.png: %s' % missing
+
+    unused = sorted(
+        name for name in os.listdir(media)
+        if name.endswith('.png') and name[:-len('.png')] not in actions
+    )
+    assert not unused, 'icons in resources/media nothing on Home draws: %s' % unused

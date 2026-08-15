@@ -23,6 +23,16 @@ HEADING = 30006
 _CONTEXT_MENU_ACTION = 117
 
 
+def _base_type(catalog_type):
+    """Reduce a Stremio catalog type to the key `lib.ui.homewindow`'s type
+    rows match on: everything before the first '.', lowercased. Addons
+    follow the convention of a dotted subtype (e.g. `anime.movie`/
+    `anime.series`) to specialize a base type, and type strings are
+    otherwise free-form and mixed-case - this is what lets `anime.movie`
+    join the Anime row and a stray `TV` join Series alongside `tv`."""
+    return (catalog_type or '').split('.', 1)[0].lower()
+
+
 def _classify_catalog(catalog):
     """How `catalog` must be opened, from its REQUIRED extras
     (`catalog_required_extra_names()`) minus `skip` (always satisfiable -
@@ -267,7 +277,11 @@ def open_catalog_picker(types=None, heading=''):
     from lib.stremio.addons import iter_catalogs
     from lib.ui.compat import L, log, notify
 
-    catalogs = _reachable_catalogs(list(iter_catalogs(get_store().get_addons(), types=types)))
+    catalogs = list(iter_catalogs(get_store().get_addons()))
+    if types is not None:
+        wanted = {_base_type(t) for t in types}
+        catalogs = [c for c in catalogs if _base_type(c[2].get('type')) in wanted]
+    catalogs = _reachable_catalogs(catalogs)
     if not catalogs:
         notify(L(30030))
         return False

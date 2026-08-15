@@ -671,3 +671,15 @@ msgstr "annulla"
 msgctxt "#30225"
 msgid "plays now"
 msgstr "riproduce ora"
+
+msgctxt "#30227"
+msgid "Other"
+msgstr "Altro"
+
+msgctxt "#30228"
+msgid "Browse catalogs that aren't film, series or anime"
+msgstr "Sfoglia i cataloghi che non sono film, serie o anime"
+
+msgctxt "#30229"
+msgid "Show Other"
+msgstr "Mostra Altro"

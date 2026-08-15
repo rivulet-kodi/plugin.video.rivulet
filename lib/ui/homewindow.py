@@ -20,7 +20,11 @@ LIST = 30002
 STATUS_LABEL = 30005  # plain text label; set at runtime via setLabel(), not a skin <label>
 
 #: The content-type rows that replaced the single "Discover" entry, in
-#: menu order: (action, {Stremio catalog types}, setting id).
+#: menu order: (action, {Stremio base catalog types} or None, setting id).
+#: A catalog's type is reduced to its base - everything before the first
+#: '.', lowercased, via `_base_type()` - before matching one of these
+#: sets, so `anime.movie`/`anime.series` (the Stremio dotted-subtype
+#: convention) join Anime and a stray `TV` joins Series the same as `tv`.
 #:
 #: `series` deliberately carries `tv` alongside it. An addon that
 #: publishes live/linear channels types them "tv", and those are episodic
@@ -29,20 +33,41 @@ STATUS_LABEL = 30005  # plain text label; set at runtime via setLabel(), not a s
 #: for nearly everyone. "anime" is the one type common enough to earn its
 #: own row: it is what the large anime catalog addons (and AIOStreams)
 #: actually publish, and its audience wants it separated from film.
+#:
+#: `other` carries `None` instead of a fixed set: it is a catch-all for
+#: whatever an addon publishes that the three curated rows do not claim
+#: (Stremio lets an addon declare any string as a type), so its actual
+#: type set cannot be a constant - it is computed live from installed
+#: addons by `_remainder_types()`. Every consumer of `TYPE_ROW_TYPES`
+#: must treat `None` as that sentinel, not as "unfiltered".
 _TYPE_ROWS = (
     ('movies', frozenset({'movie'}), 'home_show_movies'),
     ('series', frozenset({'series', 'tv'}), 'home_show_series'),
     ('anime', frozenset({'anime'}), 'home_show_anime'),
+    ('other', None, 'home_show_other'),
 )
 
-#: action -> the set of catalog types its picker is filtered to.
+#: action -> the set of catalog types its picker is filtered to, or
+#: `None` for `other`'s "compute the remainder" sentinel (see
+#: `_TYPE_ROWS`).
 TYPE_ROW_TYPES = {action: types for action, types, _ in _TYPE_ROWS}
+
+
+def _remainder_types(available):
+    """The `other` row's type set: every base type in `available` that no
+    curated row (a non-`None` entry in `_TYPE_ROWS`) claims. Computed
+    live rather than declared as a constant, because unlike Movies/
+    Series/Anime its membership depends entirely on what is installed."""
+    claimed = frozenset().union(*(types for _, types, _ in _TYPE_ROWS if types is not None))
+    return available - claimed
+
 
 #: (localized-string id, action) - the authoritative definition of Home's menu rows.
 _MENU = (
     (30213, 'movies'),
     (30214, 'series'),
     (30215, 'anime'),
+    (30227, 'other'),
     (30001, 'search'),
     (30002, 'library'),
     (30003, 'addons'),
@@ -57,6 +82,7 @@ _SUBTITLES = {
     'movies': 30216,
     'series': 30217,
     'anime': 30218,
+    'other': 30228,
     'search': 30149,
     'library': 30150,
     'addons': 30151,
@@ -65,26 +91,31 @@ _SUBTITLES = {
 
 
 def _available_types(addons):
-    """Return the set of catalog types `addons` actually publish.
+    """Return the set of base catalog types `addons` actually publish,
+    reduced via `lib.ui.catalogpicker._base_type()` - the same rule the
+    picker's own `types=` filter applies - so a dotted subtype like
+    `anime.movie` is counted under `anime` and a stray `TV` under `tv`.
 
     Drives the auto-hide half of a type row's visibility: a row whose
     types nothing installed publishes would open an empty picker, so it
     is left out entirely rather than offered and then disappointing.
     """
     from lib.stremio.addons import iter_catalogs
+    from lib.ui.catalogpicker import _base_type
 
-    return {catalog.get('type') for _, _, catalog in iter_catalogs(addons)}
+    return {_base_type(catalog.get('type')) for _, _, catalog in iter_catalogs(addons)}
 
 
 def _type_row_enabled(action, available):
     """Whether the type row `action` should appear: its setting must be
-    on (all three default True) AND something installed must publish a
-    catalog of one of its types."""
+    on (all four default True) AND something installed must publish a
+    catalog of one of its types - for `other`, "its types" is whatever
+    `_remainder_types()` computes, not a fixed set."""
     from lib.ui.compat import setting_bool
 
     types = TYPE_ROW_TYPES.get(action)
     if types is None:
-        return True
+        types = _remainder_types(available)
     if not types & available:
         return False
     setting_id = next(sid for act, _, sid in _TYPE_ROWS if act == action)
@@ -166,7 +197,10 @@ def _open_type_row(window, action):
     # backing all the way out returns here rather than exiting the addon.
     from lib.ui.catalogpicker import open_catalog_picker
     from lib.ui.compat import L
-    if open_catalog_picker(types=TYPE_ROW_TYPES[action], heading=L(L_FOR_ACTION[action])):
+    types = TYPE_ROW_TYPES[action]
+    if types is None:  # 'other': not a fixed set - compute the remainder live
+        types = _remainder_types(_available_types(get_store().get_addons()))
+    if open_catalog_picker(types=types, heading=L(L_FOR_ACTION[action])):
         window.close()
 
 
@@ -202,6 +236,7 @@ _ACTIONS = {
     'movies': lambda window: _open_type_row(window, 'movies'),
     'series': lambda window: _open_type_row(window, 'series'),
     'anime': lambda window: _open_type_row(window, 'anime'),
+    'other': lambda window: _open_type_row(window, 'other'),
     'search': _open_search,
     'library': _open_library,
     'addons': _open_addons,

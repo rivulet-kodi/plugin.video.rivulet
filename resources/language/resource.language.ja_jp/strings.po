@@ -671,3 +671,15 @@ msgstr "キャンセルする"
 msgctxt "#30225"
 msgid "plays now"
 msgstr "今すぐ再生"
+
+msgctxt "#30227"
+msgid "Other"
+msgstr "その他"
+
+msgctxt "#30228"
+msgid "Browse catalogs that aren't film, series or anime"
+msgstr "映画・シリーズ・アニメ以外のカタログを見る"
+
+msgctxt "#30229"
+msgid "Show Other"
+msgstr "その他を表示"

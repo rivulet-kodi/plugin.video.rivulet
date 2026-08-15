@@ -43,16 +43,20 @@
                 <left>1100</left><top>104</top><width>680</width><height>48</height><font>font10</font><textcolor>A8EEF3F6</textcolor><align>right</align><aligny>center</aligny>
                 <label></label>
             </control>
-            <!-- 92px rows, not 0.9.1's 120. The type rows take Home from 5
-                 entries to 7, and 7x120 would end at y=1088 - off a 1080
-                 screen, never mind the hint strip at y=968. Growing the list
-                 cannot solve it (the ceiling is ~y=900, which is 5 rows at
-                 120), so the row itself shrinks: 7x92 ends at y=892, clear of
-                 the strip. Internals keep 0.9.1's proportions, re-centred for
-                 the shorter row - 52px icon at top=20, and the 68px
+            <!-- 92px rows, not 0.9.1's 120, and sized for EIGHT of them.
+                 Home's maximum is movies/series/anime/other/search/library/
+                 addons/settings; at 120 that would need 960px and run off a
+                 1080 screen. 8x92 = 736: the list starts at 200 (40 clear of
+                 the RIVULET wordmark, which ends at 160) and ends at 936,
+                 with the hint strip moved down to 1000 to keep 64px between
+                 them. It was 7x92 = 644 at top=248 until the `other` row
+                 arrived and pushed Settings out of view - the list scrolled,
+                 so Settings stayed reachable, but nothing on screen said so.
+                 Internals keep 0.9.1's proportions, re-centred for the
+                 shorter row - 52px icon at top=20, and the 68px
                  title+subtitle block at top=12. -->
             <control type="list" id="30002">
-                <left>120</left><top>248</top><width>900</width><height>644</height>
+                <left>120</left><top>200</top><width>900</width><height>736</height>
                 <onleft>30002</onleft><onright>30002</onright>
                 <itemlayout height="92">
                     <control type="image"><left>34</left><top>20</top><width>52</width><height>52</height><texture colordiffuse="80FFFFFF">$INFO[ListItem.Icon]</texture><aspectratio>keep</aspectratio></control>
@@ -75,7 +79,7 @@
                     </control>
                 </focusedlayout>
             </control>
-            <control type="label"><left>120</left><top>968</top><width>600</width><height>32</height><font>Mono26</font><textcolor>57EEF3F6</textcolor><aligny>center</aligny>
+            <control type="label"><left>120</left><top>1000</top><width>600</width><height>32</height><font>Mono26</font><textcolor>57EEF3F6</textcolor><aligny>center</aligny>
                 <label>[COLOR FF38BDF8]OK[/COLOR] $ADDON[plugin.video.rivulet 30209]     [COLOR FF38BDF8]BACK[/COLOR] $ADDON[plugin.video.rivulet 30211]</label>
             </control>
         </control>
