@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<window>
+    <depth>0.52</depth>
+    <defaultcontrol>30333</defaultcontrol>
+    <coordinates><left>0</left><top>0</top></coordinates>
+    <controls>
+        <control type="group">
+            <left>0</left><top>0</top>
+            <animation type="WindowOpen" reversible="false">
+                <effect type="fade" delay="0" end="100" time="200" />
+            </animation>
+            <animation type="WindowClose" reversible="false">
+                <effect type="fade" start="100" end="0" time="160" />
+            </animation>
+            <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="C70A0C0E">white.png</texture></control>
+
+            <control type="image"><left>580</left><top>410</top><width>760</width><height>260</height><texture colordiffuse="FF12161A">white.png</texture></control>
+            <control type="image"><left>580</left><top>410</top><width>760</width><height>1</height><texture colordiffuse="1AFFFFFF">white.png</texture></control>
+            <control type="image"><left>580</left><top>669</top><width>760</width><height>1</height><texture colordiffuse="1AFFFFFF">white.png</texture></control>
+            <control type="image"><left>580</left><top>410</top><width>1</width><height>260</height><texture colordiffuse="1AFFFFFF">white.png</texture></control>
+            <control type="image"><left>1339</left><top>410</top><width>1</width><height>260</height><texture colordiffuse="1AFFFFFF">white.png</texture></control>
+
+            <control type="label" id="30330">
+                <left>628</left><top>452</top><width>664</width><height>44</height>
+                <font>font37</font><textcolor>FFEEF3F6</textcolor>
+                <label></label>
+            </control>
+
+            <control type="label" id="30331">
+                <left>628</left><top>502</top><width>664</width><height>36</height>
+                <font>font27</font><textcolor>B3EEF3F6</textcolor>
+                <label></label>
+            </control>
+
+            <!-- Secondary (30332), fixed 400px - fits "Start from
+                 beginning" (the longest realistic label) with room to
+                 spare. Unfocused: hollow border built from four
+                 white.png edges, same technique as the panel border
+                 above. Focused: palette's general focus fill
+                 (FF1B2126, not the accent) so it reads as focused
+                 without ever looking like the recommended action. -->
+            <control type="image"><left>628</left><top>560</top><width>400</width><height>1</height><texture colordiffuse="38FFFFFF">white.png</texture><visible>!Control.HasFocus(30332)</visible></control>
+            <control type="image"><left>628</left><top>623</top><width>400</width><height>1</height><texture colordiffuse="38FFFFFF">white.png</texture><visible>!Control.HasFocus(30332)</visible></control>
+            <control type="image"><left>628</left><top>560</top><width>1</width><height>64</height><texture colordiffuse="38FFFFFF">white.png</texture><visible>!Control.HasFocus(30332)</visible></control>
+            <control type="image"><left>1027</left><top>560</top><width>1</width><height>64</height><texture colordiffuse="38FFFFFF">white.png</texture><visible>!Control.HasFocus(30332)</visible></control>
+            <control type="image"><left>628</left><top>560</top><width>400</width><height>64</height><texture colordiffuse="FF1B2126">white.png</texture><visible>Control.HasFocus(30332)</visible></control>
+            <control type="button" id="30332">
+                <left>628</left><top>560</top><width>400</width><height>64</height>
+                <align>center</align><aligny>center</aligny>
+                <font>font13</font>
+                <texturefocus colordiffuse="00FFFFFF">white.png</texturefocus>
+                <texturenofocus colordiffuse="00FFFFFF">white.png</texturenofocus>
+                <textcolor>FFEEF3F6</textcolor>
+                <focusedcolor>FFEEF3F6</focusedcolor>
+                <label></label>
+                <onright>30333</onright>
+            </control>
+
+            <!-- Primary (30333), fixed 248px - right-flush against the
+                 same 1292 edge the heading/body use, so 400 + 16 gap +
+                 248 lands exactly on their 664-wide column. Unfocused:
+                 hollow accent border so it still reads as the
+                 recommended action before it has focus. Focused: solid
+                 accent fill + dark bold text per spec; takes focus on
+                 open via the window's <defaultcontrol>. -->
+            <control type="image"><left>1044</left><top>560</top><width>248</width><height>1</height><texture colordiffuse="8038BDF8">white.png</texture><visible>!Control.HasFocus(30333)</visible></control>
+            <control type="image"><left>1044</left><top>623</top><width>248</width><height>1</height><texture colordiffuse="8038BDF8">white.png</texture><visible>!Control.HasFocus(30333)</visible></control>
+            <control type="image"><left>1044</left><top>560</top><width>1</width><height>64</height><texture colordiffuse="8038BDF8">white.png</texture><visible>!Control.HasFocus(30333)</visible></control>
+            <control type="image"><left>1291</left><top>560</top><width>1</width><height>64</height><texture colordiffuse="8038BDF8">white.png</texture><visible>!Control.HasFocus(30333)</visible></control>
+            <control type="image"><left>1044</left><top>560</top><width>248</width><height>64</height><texture colordiffuse="FF38BDF8">white.png</texture><visible>Control.HasFocus(30333)</visible></control>
+            <control type="button" id="30333">
+                <left>1044</left><top>560</top><width>248</width><height>64</height>
+                <align>center</align><aligny>center</aligny>
+                <font>font13</font>
+                <texturefocus colordiffuse="00FFFFFF">white.png</texturefocus>
+                <texturenofocus colordiffuse="00FFFFFF">white.png</texturenofocus>
+                <textcolor>FF38BDF8</textcolor>
+                <focusedcolor>FF04222E</focusedcolor>
+                <label></label>
+                <onleft>30332</onleft>
+            </control>
+        </control>
+    </controls>
+</window>

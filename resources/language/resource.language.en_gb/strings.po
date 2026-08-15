@@ -659,3 +659,15 @@ msgstr ""
 msgctxt "#30222"
 msgid "Show Anime"
 msgstr ""
+
+msgctxt "#30223"
+msgid "cancel"
+msgstr ""
+
+msgctxt "#30224"
+msgid "cancels"
+msgstr ""
+
+msgctxt "#30225"
+msgid "plays now"
+msgstr ""

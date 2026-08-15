@@ -72,6 +72,11 @@ _DECLARED_MONO_CONTROLS = {
     30100: 'streamswindow SOURCES_COUNT - "%d SOURCES", digits and ASCII only',
     30101: 'streamswindow ADDONS_COUNT - "%d ADDONS", digits and ASCII only',
     30102: 'streamswindow CACHED_COUNT - "%d CACHED", digits and ASCII only',
+    30303: 'dialogs PROGRESS_PERCENT - "%d%%", digits and ASCII only',
+    30306: 'dialogs PROGRESS_STATS - caller-supplied speed/peers text '
+           '(e.g. strings.po #30082 "%s/s \u2014 %d peers"), digits/ASCII plus '
+           'the em dash, which NotoMono has',
+    30313: 'dialogs COUNTDOWN_REMAINING - "%d s", digits and ASCII only',
 }
 
 

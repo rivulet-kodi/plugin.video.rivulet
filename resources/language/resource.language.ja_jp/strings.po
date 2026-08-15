@@ -659,3 +659,15 @@ msgstr "シリーズを表示"
 msgctxt "#30222"
 msgid "Show Anime"
 msgstr "アニメを表示"
+
+msgctxt "#30223"
+msgid "cancel"
+msgstr "キャンセル"
+
+msgctxt "#30224"
+msgid "cancels"
+msgstr "キャンセルする"
+
+msgctxt "#30225"
+msgid "plays now"
+msgstr "今すぐ再生"

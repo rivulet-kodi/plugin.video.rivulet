@@ -659,3 +659,15 @@ msgstr "إظهار المسلسلات"
 msgctxt "#30222"
 msgid "Show Anime"
 msgstr "إظهار الأنيمي"
+
+msgctxt "#30223"
+msgid "cancel"
+msgstr "إلغاء"
+
+msgctxt "#30224"
+msgid "cancels"
+msgstr "يلغي"
+
+msgctxt "#30225"
+msgid "plays now"
+msgstr "يشغل الآن"

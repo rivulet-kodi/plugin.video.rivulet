@@ -47,7 +47,7 @@ of that episode ends NATURALLY (played through to completion, not
 stopped by the user - see `_wait_for_playback_end()`), if it's a
 series, the 'binge_enable' setting is on, `meta['videos']` has a next
 episode (`lib.ui.binge.next_video()`), and that episode's own streams
-can be fetched, `_try_binge_watch()` shows a cancellable countdown
+can be fetched, `_try_binge_watch()` shows a cancellable/skippable countdown
 offering to auto-play it - see that
 function's docstring for exactly how it reuses `play_direct()`'s
 `item_meta=`/`on_ready=close_windows_for_playback` contract and loops
@@ -145,13 +145,10 @@ _BINGE_COUNTDOWN_SETTING = 'binge_countdown'
 _BINGE_COUNTDOWN_DEFAULT_SECONDS = 10
 _BINGE_COUNTDOWN_MIN_SECONDS = 3
 
-#: One countdown tick per second: fine enough for a "N s" label, and the
-#: same `monitor.waitForAbort(tick)` idiom `_wait_for_playback_end()`
-#: already uses for its own poll loop below.
-_BINGE_COUNTDOWN_TICK_SECONDS = 1.0
-
-#: strings.po ids for the countdown DialogProgress (heading, then the
-#: '%s'/'%d'-parameterized "Playing <label> in <N> s" message).
+#: strings.po ids for the countdown dialog: the heading, and the
+#: '%s'/'%d'-parameterized "Playing <label> in <N> s" message, which
+#: `_binge_countdown()` re-formats on every tick because the remaining
+#: seconds are part of the sentence.
 _BINGE_DIALOG_HEADING_STRING_ID = 30182
 _BINGE_DIALOG_MESSAGE_STRING_ID = 30183
 
@@ -796,34 +793,33 @@ def _binge_item_meta(show_name, video, art, poster, meta):
 
 
 def _binge_countdown(label, seconds):
-    """Cancellable `xbmcgui.DialogProgress` counting `seconds` down to 0,
-    one `_BINGE_COUNTDOWN_TICK_SECONDS` tick at a time, showing
-    ``L(_BINGE_DIALOG_MESSAGE_STRING_ID) % (label, remaining)``. Mirrors
-    `_wait_for_playback_end()`'s own tri-state contract: True once the
-    countdown runs out uninterrupted (caller should auto-play), None if
-    the user cancelled via the dialog's own Cancel control (fall back to
-    reopening the picker - a deliberate "not now", not a Back action),
-    or False on a `monitor.waitForAbort()` abort (Kodi shutting down -
-    the caller must return False immediately, reopening nothing, same as
-    every other abort check in this module)."""
+    """Thin wrapper around `RivuletCountdown().run()` - the documented
+    seam `_try_binge_watch()` calls and the tests pin, kept even though
+    it is now a one-liner. Mirrors `_wait_for_playback_end()`'s own
+    tri-state contract: True once the countdown runs out uninterrupted
+    OR the user skips it via CountdownDialog.xml's OK/Select "play now"
+    affordance - a new affordance the old dialog never had, folded into
+    the same True the completion case returns since both mean
+    "auto-play now" (caller treats them identically; call out the skip
+    path in release notes) - None if the user cancelled via Back (fall
+    back to reopening the picker - a deliberate "not now", not a Back
+    action), or False on a `monitor.waitForAbort()` abort (Kodi
+    shutting down - the caller must return False immediately, reopening
+    nothing, same as every other abort check in this module)."""
     import xbmc
 
     from lib.ui.compat import L
+    from lib.ui.dialogs import RivuletCountdown
 
-    dialog = xbmcgui.DialogProgress()
-    dialog.create(L(_BINGE_DIALOG_HEADING_STRING_ID))
-    monitor = xbmc.Monitor()
-    try:
-        for remaining in range(seconds, 0, -1):
-            if dialog.iscanceled():
-                return None
-            percent = int((seconds - remaining) * 100 / seconds)
-            dialog.update(percent, L(_BINGE_DIALOG_MESSAGE_STRING_ID) % (label, remaining))
-            if monitor.waitForAbort(_BINGE_COUNTDOWN_TICK_SECONDS):
-                return False
-        return True
-    finally:
-        dialog.close()
+    # The message embeds the live countdown ("Playing <title> in 8 s"),
+    # so it is a per-tick formatter rather than a fixed string - which is
+    # also what CountdownDialog.xml's own design copy shows.
+    return RivuletCountdown().run(
+        L(_BINGE_DIALOG_HEADING_STRING_ID),
+        lambda remaining: L(_BINGE_DIALOG_MESSAGE_STRING_ID) % (label, remaining),
+        seconds,
+        monitor=xbmc.Monitor(),
+    )
 
 
 def _try_binge_watch(stype, meta, poster, art, video_id, played_info):

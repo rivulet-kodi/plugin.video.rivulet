@@ -659,3 +659,15 @@ msgstr "Dizileri göster"
 msgctxt "#30222"
 msgid "Show Anime"
 msgstr "Anime göster"
+
+msgctxt "#30223"
+msgid "cancel"
+msgstr "iptal"
+
+msgctxt "#30224"
+msgid "cancels"
+msgstr "iptal eder"
+
+msgctxt "#30225"
+msgid "plays now"
+msgstr "şimdi oynatır"

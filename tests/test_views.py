@@ -30,7 +30,7 @@ from lib.stremio.api import ApiError
 from lib.ui import urlutil
 from tests.kodistubs import install_kodi_stubs
 
-_RELOAD_MODULE_NAMES = ('lib.ui.compat', 'lib.ui.router', 'lib.ui.views', 'lib.ui.infowindow')
+_RELOAD_MODULE_NAMES = ('lib.ui.compat', 'lib.ui.router', 'lib.ui.views', 'lib.ui.infowindow', 'lib.ui.dialogs')
 
 #: Generous safety-valve timeout (seconds) for the Barrier/Event-gated
 #: fanout tests below: bounds a genuine deadlock/regression as a test
@@ -783,6 +783,19 @@ def test_sync_addons_now_refreshes_manifests_before_pushing_to_account(load_view
     # the push must see the freshly-refreshed manifest, not the stale one
     assert api.addon_collection_set_calls[0][1][0]['manifest'] == new_manifest
 
+def _stub_confirm(monkeypatch, ctx, answer, capture=None):
+    """Patches `lib.ui.dialogs.confirm` directly (already exhaustively
+    covered by tests/test_dialogs.py) rather than driving a real
+    `doModal()` - this suite only needs to prove `logout()` passes the
+    right heading/body/labels and reacts correctly to the result."""
+    def _confirm(heading, body, yeslabel, nolabel):
+        if capture is not None:
+            capture.append((heading, body, yeslabel, nolabel))
+        return answer
+
+    monkeypatch.setattr(ctx.dialogs, 'confirm', _confirm)
+
+
 def test_logout_without_auth_is_a_noop(load_views):
     ctx = load_views()
     views = ctx.views
@@ -795,8 +808,9 @@ def test_logout_without_auth_is_a_noop(load_views):
     assert 'Container.Refresh' not in ctx.env.executed_builtins
 
 
-def test_logout_declined_confirmation_is_a_noop(load_views):
-    ctx = load_views(dialog_yesno=[False])
+def test_logout_declined_confirmation_is_a_noop(load_views, monkeypatch):
+    ctx = load_views()
+    _stub_confirm(monkeypatch, ctx, False)
     views = ctx.views
     store = FakeStore(auth={'authKey': 'abc'})
     _wire_data_layer(views, store, FakeAddonClient())
@@ -807,8 +821,10 @@ def test_logout_declined_confirmation_is_a_noop(load_views):
     assert 'Container.Refresh' not in ctx.env.executed_builtins
 
 
-def test_logout_clears_auth_even_when_api_call_fails(load_views):
-    ctx = load_views(dialog_yesno=[True])
+def test_logout_clears_auth_even_when_api_call_fails(load_views, monkeypatch):
+    ctx = load_views()
+    captured = []
+    _stub_confirm(monkeypatch, ctx, True, capture=captured)
     views = ctx.views
     store = FakeStore(auth={'authKey': 'abc'})
     _wire_data_layer(views, store, FakeAddonClient())
@@ -817,8 +833,10 @@ def test_logout_clears_auth_even_when_api_call_fails(load_views):
     views.logout()
 
     assert store.auth_set_calls == [None]
+    assert captured == [('STR30021', 'STR30021', 'Yes', 'No')]
     assert any('network down' in msg for msg, _level in ctx.env.log_calls)
     assert 'Container.Refresh' in ctx.env.executed_builtins
+
 
 # ---------------------------------------------------------------------------
 # _sync_addons_if_logged_in() - auth-error handling

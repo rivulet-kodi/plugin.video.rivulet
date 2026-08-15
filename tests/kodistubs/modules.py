@@ -30,9 +30,19 @@ def make_xbmc(env, info_labels=None):
     def getInfoLabel(label):
         return labels.get(label, '')
 
+    #: Kodi's own core-string catalog (id < 1000), distinct from the addon's
+    #: strings.po - only the two ids `dialogs.confirm()` callers pass for
+    #: default Yes/No buttons are faked; anything else falls back to the
+    #: same 'STR<id>' marker `FakeAddon.getLocalizedString` uses.
+    _CORE_STRINGS = {106: 'No', 107: 'Yes'}
+
+    def getLocalizedString(string_id):
+        return _CORE_STRINGS.get(string_id, 'STR%d' % string_id)
+
     module.log = log
     module.executebuiltin = executebuiltin
     module.getInfoLabel = getInfoLabel
+    module.getLocalizedString = getLocalizedString
 
     class Monitor:
         def waitForAbort(self, timeout=None):
@@ -191,13 +201,16 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
     class FakeWindowControl:
         """Stand-in for one WindowXML control (`getControl(id)`'s
         return value): records addItems()/setImage()/setVisible()/
-        setLabel()/setText() calls. `getSelectedItem()` returns
-        `self.items[self.selected_index]` (default 0) - a test scripts a
-        scroll position by setting `.selected_index` before calling
-        onAction()/onClick(). `reset()`/`selectItem()`/`getSelectedPosition()`
-        stand in for `ControlList`'s same-named methods (added for
-        DetailWindow's season bar - a control repopulated/re-selected at
-        runtime, unlike every other fake user of this class so far)."""
+        setLabel()/setText()/setPercent() calls. `getSelectedItem()`
+        returns `self.items[self.selected_index]` (default 0) - a test
+        scripts a scroll position by setting `.selected_index` before
+        calling onAction()/onClick(). `reset()`/`selectItem()`/
+        `getSelectedPosition()` stand in for `ControlList`'s same-named
+        methods (added for DetailWindow's season bar - a control
+        repopulated/re-selected at runtime, unlike every other fake user
+        of this class so far). `setPercent()`/`getPercent()` stand in for
+        `ControlProgress`'s same-named methods (added for
+        lib.ui.dialogs' RivuletProgress/RivuletBusy/RivuletCountdown)."""
 
         def __init__(self):
             self.items = []
@@ -206,6 +219,7 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
             self.selected_index = 0
             self.label = None
             self.text = None
+            self.percent = None
 
         def addItems(self, items):
             self.items.extend(items)
@@ -224,6 +238,12 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
 
         def setText(self, text):
             self.text = text
+
+        def setPercent(self, percent):
+            self.percent = percent
+
+        def getPercent(self):
+            return self.percent
 
         def getSelectedItem(self):
             if not self.items:
@@ -264,13 +284,17 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
         and drive its onInit()/onClick()/onAction() directly from a
         test. No real window ever opens - doModal() only counts calls;
         a test drives the modal's effect (e.g. a click) itself
-        before/around it."""
+        before/around it. `show()`/`.shown` stand in for the real
+        non-blocking `WindowXMLDialog.show()` (used by
+        lib.ui.dialogs' RivuletProgress/RivuletBusy/RivuletCountdown,
+        which must never doModal() - see that module's docstring)."""
 
         def __init__(self, *args, **kwargs):
             self._controls = {}
             self._focus_id = None
             self.modal_calls = 0
             self.closed = False
+            self.shown = False
 
         def getControl(self, control_id):
             return self._controls.setdefault(control_id, FakeWindowControl())
@@ -280,6 +304,9 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
 
         def getFocusId(self):
             return self._focus_id
+
+        def show(self):
+            self.shown = True
 
         def doModal(self):
             self.modal_calls += 1

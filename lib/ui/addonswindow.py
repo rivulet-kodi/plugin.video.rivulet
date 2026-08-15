@@ -113,6 +113,9 @@ class AddonsWindow(BaseWindow):
         self._reload()
 
     def _remove(self, descriptor):
+        import xbmc
+
+        from lib.ui import dialogs
         from lib.ui.compat import L, notify
 
         manifest = descriptor.get('manifest') or {}
@@ -121,7 +124,7 @@ class AddonsWindow(BaseWindow):
             notify(L(_PROTECTED_MESSAGE_STRING_ID))
             return
 
-        if not xbmcgui.Dialog().yesno(L(30011), manifest.get('name', '?')):
+        if not dialogs.confirm(L(30011), manifest.get('name', '?'), xbmc.getLocalizedString(107), xbmc.getLocalizedString(106)):
             return
 
         from lib.ui.views import _sync_addons_if_logged_in

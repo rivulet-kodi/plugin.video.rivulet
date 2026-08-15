@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<window>
+    <depth>0.52</depth>
+    <coordinates><left>0</left><top>0</top></coordinates>
+    <controls>
+        <control type="group">
+            <left>0</left><top>0</top>
+            <animation type="WindowOpen" reversible="false">
+                <effect type="fade" delay="0" end="100" time="200" />
+            </animation>
+            <animation type="WindowClose" reversible="false">
+                <effect type="fade" start="100" end="0" time="160" />
+            </animation>
+            <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="C70A0C0E">white.png</texture></control>
+
+            <control type="image"><left>680</left><top>450</top><width>560</width><height>180</height><texture colordiffuse="FF12161A">white.png</texture></control>
+            <control type="image"><left>680</left><top>450</top><width>560</width><height>1</height><texture colordiffuse="1AFFFFFF">white.png</texture></control>
+            <control type="image"><left>680</left><top>629</top><width>560</width><height>1</height><texture colordiffuse="1AFFFFFF">white.png</texture></control>
+            <control type="image"><left>680</left><top>450</top><width>1</width><height>180</height><texture colordiffuse="1AFFFFFF">white.png</texture></control>
+            <control type="image"><left>1239</left><top>450</top><width>1</width><height>180</height><texture colordiffuse="1AFFFFFF">white.png</texture></control>
+
+            <control type="label" id="30320">
+                <left>680</left><top>486</top><width>560</width><height>40</height>
+                <font>font32</font><textcolor>FFEEF3F6</textcolor>
+                <align>center</align>
+                <label></label>
+            </control>
+
+            <control type="label" id="30321">
+                <left>680</left><top>536</top><width>560</width><height>32</height>
+                <font>font12</font><textcolor>80EEF3F6</textcolor>
+                <align>center</align>
+                <label></label>
+                <visible>!String.IsEmpty(Control.GetLabel(30321))</visible>
+            </control>
+
+            <!-- Marching-squares activity cue: default (indeterminate)
+                 state. Each square carries its own gate - hidden the
+                 instant 30322 below actually shows a real percent - and
+                 a staggered Conditional fade so the row reads as a wave
+                 travelling left to right rather than five static dots. -->
+            <control type="image">
+                <left>896</left><top>576</top><width>16</width><height>16</height>
+                <texture colordiffuse="FF38BDF8">white.png</texture>
+                <visible>!Control.IsVisible(30322)</visible>
+                <animation effect="fade" start="100" end="40" time="700" delay="0" pulse="true" condition="!Control.IsVisible(30322)">Conditional</animation>
+            </control>
+            <control type="image">
+                <left>924</left><top>576</top><width>16</width><height>16</height>
+                <texture colordiffuse="B338BDF8">white.png</texture>
+                <visible>!Control.IsVisible(30322)</visible>
+                <animation effect="fade" start="100" end="40" time="700" delay="120" pulse="true" condition="!Control.IsVisible(30322)">Conditional</animation>
+            </control>
+            <control type="image">
+                <left>952</left><top>576</top><width>16</width><height>16</height>
+                <texture colordiffuse="7338BDF8">white.png</texture>
+                <visible>!Control.IsVisible(30322)</visible>
+                <animation effect="fade" start="100" end="40" time="700" delay="240" pulse="true" condition="!Control.IsVisible(30322)">Conditional</animation>
+            </control>
+            <control type="image">
+                <left>980</left><top>576</top><width>16</width><height>16</height>
+                <texture colordiffuse="4038BDF8">white.png</texture>
+                <visible>!Control.IsVisible(30322)</visible>
+                <animation effect="fade" start="100" end="40" time="700" delay="360" pulse="true" condition="!Control.IsVisible(30322)">Conditional</animation>
+            </control>
+            <control type="image">
+                <left>1008</left><top>576</top><width>16</width><height>16</height>
+                <texture colordiffuse="1F38BDF8">white.png</texture>
+                <visible>!Control.IsVisible(30322)</visible>
+                <animation effect="fade" start="100" end="40" time="700" delay="480" pulse="true" condition="!Control.IsVisible(30322)">Conditional</animation>
+            </control>
+
+            <!-- Determinate state: no <visible> tag on purpose - mirrors
+                 infowindow.py's LOADING (id 30001) control, the one other
+                 place in this skin where Python owns a control's
+                 visibility outright via setVisible(). A static
+                 <visible>false</visible> here would fight Kodi's own
+                 condition evaluator every frame and setVisible(True)
+                 from RivuletBusy.update() would never stick. The caller
+                 (lib/ui/dialogs.py) is responsible for calling
+                 getControl(30322).setVisible(False) as part of create()
+                 so it starts hidden as specified. -->
+            <control type="progress" id="30322">
+                <left>728</left><top>576</top><width>464</width><height>12</height>
+                <texturebg colordiffuse="1FFFFFFF">white.png</texturebg>
+                <midtexture colordiffuse="FF38BDF8">white.png</midtexture>
+            </control>
+        </control>
+    </controls>
+</window>

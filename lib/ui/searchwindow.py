@@ -90,9 +90,10 @@ class SearchWindow(BaseWindow):
         self._run_search(query)
 
     def _clear_history(self):
+        from lib.ui import dialogs
         from lib.ui.compat import L
 
-        if not xbmcgui.Dialog().yesno(L(30044), L(30046)):
+        if not dialogs.confirm(L(30044), L(30046), xbmc.getLocalizedString(107), xbmc.getLocalizedString(106)):
             return
         self.store.clear_search_history()
         self._reload()

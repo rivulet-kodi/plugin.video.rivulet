@@ -6,7 +6,7 @@ Kodi runtime, no network).
 lib.ui.addonswindow imports xbmcgui, lib.ui.uicommon, and `get_store`/
 `get_client` (from lib.ui.dependencies) at module scope; every other
 collaborator (`lib.stremio.addons.AddonError`, `lib.ui.compat.L`/`log`/
-`notify`, `lib.ui.views._sync_addons_if_logged_in`) is imported lazily
+`notify`, `lib.ui.dialogs.confirm`, `lib.ui.views._sync_addons_if_logged_in`) is imported lazily
 inside the method that needs it - so this file fakes the shared
 Store/AddonClient providers by assigning directly to
 `addonswindow.get_store`/`addonswindow.get_client` (the same way
@@ -29,7 +29,7 @@ from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
     'lib.ui.compat', 'lib.ui.dependencies', 'lib.ui.uicommon', 'lib.ui.router', 'lib.ui.views',
-    'lib.ui.addonswindow',
+    'lib.ui.dialogs', 'lib.ui.addonswindow',
 )
 
 
@@ -104,6 +104,19 @@ def _wire_store(addonswindow_mod, store):
 
 def _wire_client(addonswindow_mod, client):
     addonswindow_mod.get_client = lambda: client
+
+
+def _stub_confirm(monkeypatch, ctx, answer, capture=None):
+    """Patches `lib.ui.dialogs.confirm` directly (already exhaustively
+    covered by tests/test_dialogs.py) rather than driving a real
+    `doModal()` - this suite only needs to prove `_remove()` passes the
+    right heading/body/labels and reacts correctly to the result."""
+    def _confirm(heading, body, yeslabel, nolabel):
+        if capture is not None:
+            capture.append((heading, body, yeslabel, nolabel))
+        return answer
+
+    monkeypatch.setattr(ctx.dialogs, 'confirm', _confirm)
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +274,9 @@ def _descriptor(transport='https://a.example/manifest.json', name='Addon A', pro
 
 def test_remove_confirmed_removes_notifies_and_reloads(load_addonswindow, monkeypatch):
     descriptor = _descriptor()
-    ctx = load_addonswindow(dialog_yesno=[True])
+    ctx = load_addonswindow()
+    captured = []
+    _stub_confirm(monkeypatch, ctx, True, capture=captured)
     store = _FakeStore(addons=[descriptor])
     _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
@@ -272,7 +287,7 @@ def test_remove_confirmed_removes_notifies_and_reloads(load_addonswindow, monkey
 
     assert store.removed == [descriptor['transportUrl']]
     assert ctx.env.notifications == [('Rivulet', 'STR30013', 'info', 4000)]
-    assert ctx.env.dialog_yesno_prompts == [('STR30011', 'Addon A')]
+    assert captured == [('STR30011', 'Addon A', 'Yes', 'No')]
     items_after = win.getControl(ctx.addonswindow.LIST).items
     assert len(items_after) == 1
     assert items_after[0].getProperty('position') == 'install'
@@ -280,7 +295,8 @@ def test_remove_confirmed_removes_notifies_and_reloads(load_addonswindow, monkey
 
 def test_remove_declined_leaves_addon_untouched(load_addonswindow, monkeypatch):
     descriptor = _descriptor()
-    ctx = load_addonswindow(dialog_yesno=[False])
+    ctx = load_addonswindow()
+    _stub_confirm(monkeypatch, ctx, False)
     store = _FakeStore(addons=[descriptor])
     _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
@@ -295,7 +311,9 @@ def test_remove_declined_leaves_addon_untouched(load_addonswindow, monkeypatch):
 
 def test_remove_protected_addon_notifies_and_never_calls_remove(load_addonswindow, monkeypatch):
     descriptor = _descriptor(protected=True)
-    ctx = load_addonswindow(dialog_yesno=[True])  # scripted answer must never even be consulted
+    ctx = load_addonswindow()
+    captured = []
+    _stub_confirm(monkeypatch, ctx, True, capture=captured)  # scripted answer must never even be consulted
     store = _FakeStore(addons=[descriptor])
     _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
@@ -305,7 +323,7 @@ def test_remove_protected_addon_notifies_and_never_calls_remove(load_addonswindo
     win.onClick(ctx.addonswindow.LIST)
 
     assert store.removed == []
-    assert ctx.env.dialog_yesno_prompts == []
+    assert captured == []
     assert ctx.env.notifications == [
         ('Rivulet', 'STR30191', 'info', 4000),
     ]
@@ -316,7 +334,8 @@ def test_remove_store_raises_valueerror_notifies_protected(load_addonswindow, mo
     check were ever bypassed, `Store.remove_addon`'s own `ValueError`
     refusal is still caught and notified the same way."""
     descriptor = _descriptor()
-    ctx = load_addonswindow(dialog_yesno=[True])
+    ctx = load_addonswindow()
+    _stub_confirm(monkeypatch, ctx, True)
     store = _FakeStore(addons=[descriptor])
 
     def _raise(transport_url):

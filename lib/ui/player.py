@@ -31,6 +31,7 @@ from lib.ui.compat import (
     setting_int,
 )
 from lib.ui.dependencies import get_client, get_store
+from lib.ui.dialogs import RivuletProgress, confirm
 from lib.ui.playbackmeta import (
     extract_file_name,
     filename_from_url,
@@ -100,7 +101,7 @@ _EARLY_START_ETA_SECONDS = 10
 #: into the buffering loop, whatever cleared the header floor is played.
 _TARGET_WAIT_SECONDS = 45
 
-#: DialogProgress percent bands for the staged "Preparing stream" dialog
+#: RivuletProgress percent bands for the staged "Preparing stream" dialog
 #: `_resolve_playable_item` owns (created once, threaded through every
 #: helper below). Order matches the real stage order so the whole
 #: progression reads as monotonic forward motion: connect -> resolve ->
@@ -142,7 +143,7 @@ def _maybe_resume_offset_ms(store, stype, sid, video_id):
     user has local progress for `(stype, sid, video_id)` between
     `RESUME_MIN_PERCENT` and `RESUME_MAX_PERCENT` of duration, the
     'resume_ask' setting is on, and they answer yes to the
-    `xbmcgui.Dialog().yesno()` prompt below - else `None` (nothing
+    `dialogs.confirm()` prompt below - else `None` (nothing
     cached, out of band, declined, or the setting is off). Never raises:
     a broken local progress cache must never block playback.
     """
@@ -162,10 +163,7 @@ def _maybe_resume_offset_ms(store, stype, sid, video_id):
     percent = (position_ms / duration_ms) * 100.0
     if percent < RESUME_MIN_PERCENT or percent > RESUME_MAX_PERCENT:
         return None
-    if not xbmcgui.Dialog().yesno(
-        L(30172), _lfmt(30173, format_hms(position_ms / 1000.0)),
-        yeslabel=L(30174), nolabel=L(30175),
-    ):
+    if not confirm(L(30172), _lfmt(30173, format_hms(position_ms / 1000.0)), L(30174), L(30175)):
         return None
     return position_ms
 
@@ -363,11 +361,11 @@ def _await_file_idx(server, stream, info_hash, url, dialog, monitor):
             return idx, rebuilt, True, stats
 
         percent = min(_METADATA_PERCENT_BASE + _METADATA_PERCENT_SPAN, _METADATA_PERCENT_BASE + attempt)
-        message = '%s\n%s' % (L(30088), _lfmt(30090, attempt + 1, _MAX_METADATA_ATTEMPTS))
-        stats_line = _stats_line(stats)
-        if stats_line:
-            message += '\n' + stats_line
-        dialog.update(percent, message)
+        dialog.update(
+            percent, L(30088),
+            attempt=_lfmt(30090, attempt + 1, _MAX_METADATA_ATTEMPTS),
+            stats=_stats_line(stats),
+        )
 
         if monitor.waitForAbort(1.0):
             return UNKNOWN_FILE_IDX, url, False, None
@@ -436,6 +434,11 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
 
         buffer_mb = setting_int('buffer_mb', 20, minimum=5)
         target = buffer_mb * 1024 * 1024
+        # Formatted once: target never changes for the rest of this call, so
+        # every per-chunk update below reuses this instead of paying
+        # human_size() again per chunk (see the throttle comment in the
+        # buffering loop below).
+        target_size = human_size(target)
         log(
             'player: pre-buffer target: buffer_mb=%d target_bytes=%d' % (buffer_mb, target),
             xbmc.LOGINFO,
@@ -476,14 +479,26 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
                 return False, url, None
 
             got = 0
+            # A 20 MB pre-buffer at 10 KB chunks is ~2000 iterations of this
+            # loop. RivuletProgress already dedupes identical writes into
+            # Kodi itself (measured: 324 calls instead of 20,480 for that
+            # run), but building the message here - two human_size() calls
+            # plus an _lfmt() lookup/format - still ran every time even when
+            # the user would see no difference. Only rebuild/send when the
+            # two values actually shown (the human-readable size and the
+            # integer percent) have moved; iscanceled() is still polled on
+            # EVERY chunk regardless, so cancel responsiveness never
+            # regresses.
+            last_size = None
+            last_percent = None
             try:
                 for chunk_len in server.iter_front(info_hash, file_idx, target, timeout=_FRONT_TIMEOUT):
                     got += chunk_len
                     percent = min(100, _BUFFER_PERCENT_BASE + got * _BUFFER_PERCENT_SPAN // target) if target else 100
-                    message = _lfmt(30081, human_size(got), human_size(target))
-                    if stats_line:
-                        message += '\n' + stats_line
-                    dialog.update(percent, message)
+                    size = human_size(got)
+                    if size != last_size or percent != last_percent:
+                        last_size, last_percent = size, percent
+                        dialog.update(percent, _lfmt(30081, size, target_size), stats=stats_line)
                     if dialog.iscanceled():
                         return False, url, None
                     if got >= target:
@@ -511,13 +526,11 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
             # About to sleep _ATTEMPT_PAUSE_SECONDS before retrying - show a
             # retrying hint so that silent pause isn't a dead-looking dialog.
             percent = min(100, _BUFFER_PERCENT_BASE + got * _BUFFER_PERCENT_SPAN // target) if target else 100
-            retry_message = '%s\n%s' % (
-                _lfmt(30081, human_size(got), human_size(target)),
-                _lfmt(30090, attempt + 1, _MAX_FRONT_ATTEMPTS),
+            dialog.update(
+                percent, _lfmt(30081, human_size(got), target_size),
+                attempt=_lfmt(30090, attempt + 1, _MAX_FRONT_ATTEMPTS),
+                stats=stats_line,
             )
-            if stats_line:
-                retry_message += '\n' + stats_line
-            dialog.update(percent, retry_message)
 
             if monitor.waitForAbort(_ATTEMPT_PAUSE_SECONDS):
                 return False, url, None
@@ -683,7 +696,7 @@ def _resolve_playable_item(stream, stype, sid, item_meta=None, video_id=None):
     (either here or inside `_prebuffer_torrent`) by the time this
     returns `None`.
 
-    Owns the single "Preparing stream" `DialogProgress` for the WHOLE
+    Owns the single "Preparing stream" `RivuletProgress` for the WHOLE
     resolve - created once here, threaded through `_wait_for_server`, the
     `resolve_stream()` call, and `_prebuffer_torrent` (which used to each
     create/close their own dialog, so a torrent stream that also had to
@@ -721,7 +734,7 @@ def _resolve_playable_item(stream, stype, sid, item_meta=None, video_id=None):
     title = behavior_hints.get('filename') or stream.get('title') or stream.get('name') or ''
 
     server = _server_client()
-    dialog = xbmcgui.DialogProgress()
+    dialog = RivuletProgress()
     dialog.create(L(30080), title)
     resolved_filename = None
     try:

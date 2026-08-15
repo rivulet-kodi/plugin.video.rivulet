@@ -171,6 +171,7 @@ class CatalogPickerWindow(BaseWindow):
         catalog (e.g. Popular) filtered, or unfiltered via the "All"
         entry. A catalog with no declared genre options has nothing to
         filter by."""
+        from lib.ui import dialogs
         from lib.ui.compat import L, notify
 
         focused = self._focused_catalog()
@@ -181,7 +182,7 @@ class CatalogPickerWindow(BaseWindow):
         if not options:
             notify(L(30030))
             return
-        choice = xbmcgui.Dialog().select(L(30194), [L(30198)] + options)
+        choice = dialogs.choose(L(30194), [L(30198)] + options)
         if choice < 0:
             return
         if choice == 0:
@@ -202,9 +203,10 @@ class CatalogPickerWindow(BaseWindow):
             # Required genre (e.g. Cinemeta's "New"/year catalog): no
             # unfiltered choice - the select opens immediately, with no
             # "All" entry, and a cancel just does nothing.
+            from lib.ui import dialogs
             from lib.ui.compat import L
             options = catalog_extra_options(catalog, 'genre')
-            choice = xbmcgui.Dialog().select(L(30194), options)
+            choice = dialogs.choose(L(30194), options)
             if choice < 0:
                 return
             self._fetch_and_show(transport_url, manifest, catalog, extra=[('genre', options[choice])])

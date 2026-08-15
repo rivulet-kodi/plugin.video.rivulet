@@ -27,7 +27,7 @@ from lib.stremio.addons import AddonError
 from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
-    'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.router',
+    'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.router', 'lib.ui.dialogs',
     'lib.ui.views', 'lib.ui.infowindow', 'lib.ui.detailwindow', 'lib.ui.catalogpicker',
 )
 
@@ -66,6 +66,19 @@ def load_catalogpicker():
 
 def _make_window(catalogpicker_mod):
     return catalogpicker_mod.CatalogPickerWindow('CatalogPickerWindow.xml', '/addon/path', 'Default', '1080i')
+
+
+def _stub_choose(monkeypatch, ctx, answer, capture=None):
+    """Patches `lib.ui.dialogs.choose` directly (already exhaustively
+    covered by tests/test_dialogs.py) rather than driving a real
+    `doModal()` - this suite only needs to prove the genre-filter call
+    sites pass the right heading/rows and react correctly to the index."""
+    def _choose(heading, rows):
+        if capture is not None:
+            capture.append((heading, list(rows)))
+        return answer
+
+    monkeypatch.setattr(ctx.dialogs, 'choose', _choose)
 
 
 # ---------------------------------------------------------------------------
@@ -342,17 +355,36 @@ def test_open_catalog_selected_meta_without_type_falls_back_to_the_catalogs_own_
     assert captured['args'] == ('movie', 'tt2')
 
 
+def _capture_busy_windows(monkeypatch, ctx):
+    """Records each `RivuletBusy._window` as it's created, the same way
+    tests/test_uicommon.py's busy_dialog tests grab `dialog._window` -
+    `_fetch_and_show()` never binds `as dialog` itself, so this hooks
+    `create()` instead to get the window reference before a later
+    `close()` clears it off the instance."""
+    windows = []
+    real_create = ctx.dialogs.RivuletBusy.create
+
+    def _create(self, heading, message=''):
+        real_create(self, heading, message)
+        windows.append(self._window)
+
+    monkeypatch.setattr(ctx.dialogs.RivuletBusy, 'create', _create)
+    return windows
+
+
 def test_open_catalog_fetch_shows_and_closes_the_busy_dialog(load_catalogpicker, monkeypatch):
     ctx = load_catalogpicker()
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'series'}]
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: None)
+    windows = _capture_busy_windows(monkeypatch, ctx)
 
     win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, {'type': 'movie', 'id': 'top'})
 
-    assert ctx.env.dialog_created == [('STR30033', '')]
-    assert ctx.env.dialog_closed_count == 1
+    assert len(windows) == 1
+    assert windows[0].getControl(ctx.dialogs.BUSY_HEADING).label == 'STR30033'
+    assert windows[0].closed is True
 
 
 def test_open_catalog_closes_busy_dialog_before_opening_coverflow(load_catalogpicker, monkeypatch):
@@ -360,22 +392,24 @@ def test_open_catalog_closes_busy_dialog_before_opening_coverflow(load_catalogpi
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'series'}]
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
+    windows = _capture_busy_windows(monkeypatch, ctx)
     captured = {}
 
     def fake_open_showcase(m, catalog_title=None):
-        captured['dialog_closed_count'] = ctx.env.dialog_closed_count
+        captured['closed'] = windows[0].closed
         return None
 
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', fake_open_showcase)
 
     win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, {'type': 'movie', 'id': 'top'})
 
-    assert captured['dialog_closed_count'] == 1
+    assert captured['closed'] is True
 
 
 def test_open_catalog_addon_error_still_closes_the_busy_dialog(load_catalogpicker, monkeypatch):
     ctx = load_catalogpicker()
     win = _make_window(ctx.catalogpicker)
+    windows = _capture_busy_windows(monkeypatch, ctx)
 
     def _raise(transport, ctype, cid, extra=None):
         raise AddonError('upstream down')
@@ -384,8 +418,9 @@ def test_open_catalog_addon_error_still_closes_the_busy_dialog(load_catalogpicke
 
     win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, {'type': 'movie', 'id': 'top'})
 
-    assert ctx.env.dialog_created == [('STR30033', '')]
-    assert ctx.env.dialog_closed_count == 1
+    assert len(windows) == 1
+    assert windows[0].getControl(ctx.dialogs.BUSY_HEADING).label == 'STR30033'
+    assert windows[0].closed is True
 
 
 # ---------------------------------------------------------------------------
@@ -638,33 +673,26 @@ def test_open_catalog_normal_catalog_click_does_not_prompt(load_catalogpicker, m
 
 def test_open_catalog_genre_required_opens_select_with_no_all_entry(load_catalogpicker, monkeypatch):
     ctx = load_catalogpicker()
-    import xbmcgui
     win = _make_window(ctx.catalogpicker)
-    captured = {}
-
-    def fake_select(self, heading, options):
-        captured['select'] = (heading, options)
-        return 1
-
-    monkeypatch.setattr(xbmcgui.Dialog, 'select', fake_select, raising=False)
+    captured = []
+    _stub_choose(monkeypatch, ctx, 1, capture=captured)
 
     def fake_fetch(transport, ctype, cid, extra=None):
-        captured['extra'] = extra
+        captured.append(('extra', extra))
         return []
 
     monkeypatch.setattr(ctx.views, '_fetch_catalog', fake_fetch)
 
     win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, _GENRE_REQUIRED_CATALOG)
 
-    assert captured['select'] == ('STR30194', ['2026', '2025'])
-    assert captured['extra'] == [('genre', '2025')]
+    assert captured[0] == ('STR30194', ['2026', '2025'])
+    assert captured[1] == ('extra', [('genre', '2025')])
 
 
 def test_open_catalog_genre_required_cancelled_select_fetches_nothing(load_catalogpicker, monkeypatch):
     ctx = load_catalogpicker()
-    import xbmcgui
     win = _make_window(ctx.catalogpicker)
-    monkeypatch.setattr(xbmcgui.Dialog, 'select', lambda self, heading, options: -1, raising=False)
+    _stub_choose(monkeypatch, ctx, -1)
     calls = []
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda *a, **k: calls.append((a, k)))
 
@@ -687,17 +715,12 @@ def test_onaction_context_menu_opens_select_with_all_first_then_declared_options
     win.onInit()
     win.getControl(picker.LIST).selected_index = 0
     win.setFocusId(picker.LIST)
-    captured = {}
-
-    def fake_select(self, heading, options):
-        captured['select'] = (heading, options)
-        return -1
-
-    monkeypatch.setattr(xbmcgui.Dialog, 'select', fake_select, raising=False)
+    captured = []
+    _stub_choose(monkeypatch, ctx, -1, capture=captured)
 
     win.onAction(xbmcgui.Action(picker._CONTEXT_MENU_ACTION))
 
-    assert captured['select'] == ('STR30194', ['STR30198', 'Action', 'Comedy'])
+    assert captured[0] == ('STR30194', ['STR30198', 'Action', 'Comedy'])
 
 
 def test_onaction_context_menu_all_fetches_with_no_extra(load_catalogpicker, monkeypatch):
@@ -709,7 +732,7 @@ def test_onaction_context_menu_all_fetches_with_no_extra(load_catalogpicker, mon
     win.onInit()
     win.getControl(picker.LIST).selected_index = 0
     win.setFocusId(picker.LIST)
-    monkeypatch.setattr(xbmcgui.Dialog, 'select', lambda self, heading, options: 0, raising=False)
+    _stub_choose(monkeypatch, ctx, 0)
     captured = {}
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda t, c, i, extra=None: captured.setdefault('extra', extra) or [])
 
@@ -727,7 +750,7 @@ def test_onaction_context_menu_option_fetches_with_genre_extra(load_catalogpicke
     win.onInit()
     win.getControl(picker.LIST).selected_index = 0
     win.setFocusId(picker.LIST)
-    monkeypatch.setattr(xbmcgui.Dialog, 'select', lambda self, heading, options: 2, raising=False)  # index 2 -> options[1] 'Comedy'
+    _stub_choose(monkeypatch, ctx, 2)  # index 2 -> options[1] 'Comedy'
     captured = {}
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda t, c, i, extra=None: captured.setdefault('extra', extra) or [])
 
@@ -745,7 +768,7 @@ def test_onaction_context_menu_cancelled_select_fetches_nothing(load_catalogpick
     win.onInit()
     win.getControl(picker.LIST).selected_index = 0
     win.setFocusId(picker.LIST)
-    monkeypatch.setattr(xbmcgui.Dialog, 'select', lambda self, heading, options: -1, raising=False)
+    _stub_choose(monkeypatch, ctx, -1)
     calls = []
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda *a, **k: calls.append((a, k)))
 

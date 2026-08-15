@@ -26,6 +26,7 @@ import contextlib
 import json
 import os
 import sys
+import types
 from urllib.parse import parse_qsl, urlencode, urlparse
 
 import pytest
@@ -35,7 +36,7 @@ import lib.serverbin as serverbin
 from lib.ui import urlutil
 from tests.kodistubs import FakeListItem, install_kodi_stubs
 
-_RELOAD_MODULE_NAMES = ('lib.ui.compat', 'lib.ui.router')
+_RELOAD_MODULE_NAMES = ('lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.dialogs', 'lib.ui.router')
 
 _MISSING = object()
 
@@ -61,9 +62,11 @@ class _Recorder:
 def load_router():
     """Factory fixture: `load_router(**config)` installs fresh stubs (via
     tests.kodistubs.install_kodi_stubs) reloading lib.ui.compat/
-    lib.ui.router, additionally binding lib.ui.views/lib.ui.player to fresh
-    `_Recorder`s, and returns a namespace with `.router`, `.compat`,
-    `.env`, `.views`, `.player`. Every call is torn down automatically, in
+    lib.ui.uicommon/lib.ui.dialogs/lib.ui.router (the latter two for
+    `_download_server_binary`'s `RivuletProgress`), additionally binding
+    lib.ui.views/lib.ui.player to fresh `_Recorder`s, and returns a
+    namespace with `.router`, `.compat`, `.uicommon`, `.dialogs`, `.env`,
+    `.views`, `.player`. Every call is torn down automatically, in
     reverse order, at test end - including restoring the `lib.ui`
     package's `views`/`player` attributes and sys.modules entries exactly
     - so no other test file ever observes the fakes.
@@ -490,9 +493,41 @@ def test_fail_gracefully_resolves_url_false_for_play_action(load_router):
 # ---------------------------------------------------------------------------
 
 
+def _record_progress_calls(monkeypatch, dialogs_mod):
+    """Monkeypatches `lib.ui.dialogs.RivuletProgress`'s create()/update()/
+    close() to record calls in the same (heading, message)/(percent,
+    message)/count shape the old `xbmcgui.DialogProgress` fake exposed as
+    `env.dialog_created`/`dialog_updates`/`dialog_closed_count`, while
+    still delegating to the real implementation so `_download_server_
+    binary`'s dialog is genuinely created/updated/closed against the
+    fake window/controls too."""
+    calls = types.SimpleNamespace(created=[], updated=[], closed=0)
+    orig_create = dialogs_mod.RivuletProgress.create
+    orig_update = dialogs_mod.RivuletProgress.update
+    orig_close = dialogs_mod.RivuletProgress.close
+
+    def create(self, heading, message=''):
+        calls.created.append((heading, message))
+        return orig_create(self, heading, message)
+
+    def update(self, percent, message='', attempt='', stats=''):
+        calls.updated.append((percent, message))
+        return orig_update(self, percent, message, attempt, stats)
+
+    def close(self):
+        calls.closed += 1
+        return orig_close(self)
+
+    monkeypatch.setattr(dialogs_mod.RivuletProgress, 'create', create)
+    monkeypatch.setattr(dialogs_mod.RivuletProgress, 'update', update)
+    monkeypatch.setattr(dialogs_mod.RivuletProgress, 'close', close)
+    return calls
+
+
 def test_server_download_success_notifies_with_path_and_closes_dialog(load_router, monkeypatch):
     ctx = load_router(localized={30062: 'installed to %s'})
     monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=server_download'])
+    progress = _record_progress_calls(monkeypatch, ctx.dialogs)
 
     calls = []
 
@@ -508,9 +543,9 @@ def test_server_download_success_notifies_with_path_and_closes_dialog(load_route
 
     assert os.path.basename(calls[0]) == 'bin'
     expected_path = os.path.join(calls[0], 'stremio-server')
-    assert ctx.env.dialog_created == [('STR30061', '')]
-    assert ctx.env.dialog_updates == [(0, 'STR30061'), (100, 'STR30061')]
-    assert ctx.env.dialog_closed_count == 1
+    assert progress.created == [('STR30061', '')]
+    assert progress.updated == [(0, 'STR30061'), (100, 'STR30061')]
+    assert progress.closed == 1
     assert ctx.env.notifications == [('Rivulet', 'installed to %s' % expected_path, 'info', 4000)]
 
 
@@ -521,6 +556,7 @@ def test_server_download_no_asset_error_notifies_platform_and_logs_warning(load_
     unsupported platform from a release that's simply missing an asset."""
     ctx = load_router()
     monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=server_download'])
+    progress = _record_progress_calls(monkeypatch, ctx.dialogs)
 
     def fake_install_binary(dest_dir, progress_cb=None):
         raise serverbin.NoAssetError('no release asset for Linux/arm64')
@@ -536,7 +572,7 @@ def test_server_download_no_asset_error_notifies_platform_and_logs_warning(load_
         level == xbmc_mod.LOGWARNING and 'router: server_download:' in msg
         for msg, level in ctx.env.log_calls
     )
-    assert ctx.env.dialog_closed_count == 1
+    assert progress.closed == 1
     assert ctx.env.end_of_directory == []
     assert ctx.env.resolved == []
 
@@ -548,6 +584,7 @@ def test_server_download_unsupported_platform_error_notifies_and_logs_warning(lo
     dedicated 30091 message."""
     ctx = load_router()
     monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=server_download'])
+    progress = _record_progress_calls(monkeypatch, ctx.dialogs)
 
     def fake_install_binary(dest_dir, progress_cb=None):
         raise serverbin.UnsupportedPlatformError('exec() is forbidden on Android 10+')
@@ -562,7 +599,7 @@ def test_server_download_unsupported_platform_error_notifies_and_logs_warning(lo
         level == xbmc_mod.LOGWARNING and 'router: server_download:' in msg
         for msg, level in ctx.env.log_calls
     )
-    assert ctx.env.dialog_closed_count == 1
+    assert progress.closed == 1
     assert ctx.env.end_of_directory == []
     assert ctx.env.resolved == []
 
@@ -570,6 +607,7 @@ def test_server_download_unsupported_platform_error_notifies_and_logs_warning(lo
 def test_server_download_download_error_notifies_and_logs_error(load_router, monkeypatch):
     ctx = load_router()
     monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=server_download'])
+    progress = _record_progress_calls(monkeypatch, ctx.dialogs)
 
     def fake_install_binary(dest_dir, progress_cb=None):
         progress_cb(10, 100)
@@ -585,17 +623,22 @@ def test_server_download_download_error_notifies_and_logs_error(load_router, mon
         level == xbmc_mod.LOGERROR and 'router: server_download failed:' in msg
         for msg, level in ctx.env.log_calls
     )
-    assert ctx.env.dialog_updates == [(10, 'STR30061')]
-    assert ctx.env.dialog_closed_count == 1
+    assert progress.updated == [(10, 'STR30061')]
+    assert progress.closed == 1
 
 
 def test_server_download_user_cancel_mid_download_notifies_download_error(load_router, monkeypatch):
-    """DialogProgress.iscanceled() is checked by the REAL progress_cb defined
-    inside _download_server_binary() (not mocked here) - only
+    """RivuletProgress.iscanceled() is checked by the REAL progress_cb
+    defined inside _download_server_binary() (not mocked here) - only
     install_binary() itself is faked, and it just drives that real
-    callback, exactly like a real download loop would."""
-    ctx = load_router(cancel=True)
+    callback, exactly like a real download loop would. iscanceled()
+    itself is forced to True here rather than via a real BACK_ACTIONS
+    onAction(), since the test has no handle on the dialog's window
+    until _download_server_binary() creates it internally."""
+    ctx = load_router()
     monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=server_download'])
+    progress = _record_progress_calls(monkeypatch, ctx.dialogs)
+    monkeypatch.setattr(ctx.dialogs.RivuletProgress, 'iscanceled', lambda self: True)
 
     def fake_install_binary(dest_dir, progress_cb=None):
         progress_cb(10, 100)  # real progress_cb sees iscanceled()=True and raises
@@ -606,7 +649,7 @@ def test_server_download_user_cancel_mid_download_notifies_download_error(load_r
     ctx.router.run()
 
     assert [msg for _, msg, _, _ in ctx.env.notifications] == ['STR30063']
-    assert ctx.env.dialog_closed_count == 1
+    assert progress.closed == 1
 
 
 # ---------------------------------------------------------------------------

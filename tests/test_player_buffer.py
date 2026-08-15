@@ -58,6 +58,61 @@ INFO_HASH = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
 _RELOADED_MODULES = ('lib.ui.compat', 'lib.ui.player')
 
 
+class _FakeProgressDialog:
+    """Local stand-in for lib.ui.dialogs.RivuletProgress: mirrors the
+    create/update/iscanceled/close surface lib.ui.player drives, recording
+    into `env` the same way the old fake xbmcgui.DialogProgress did
+    (dialog_created/dialog_updates/dialog_closed_count/
+    dialog_iscanceled_calls), widened to the real four-argument
+    update(percent, message, attempt, stats) shape. RivuletProgress's own
+    window/panel wiring is exhaustively covered by tests/test_dialogs.py -
+    this only needs to prove what lib.ui.player PASSES it.
+    """
+
+    def __init__(self, env):
+        self._env = env
+
+    def create(self, heading, message=''):
+        self._env.dialog_created.append((heading, message))
+
+    def update(self, percent, message='', attempt='', stats=''):
+        self._env.dialog_updates.append((percent, message, attempt, stats))
+
+    def iscanceled(self):
+        self._env.dialog_iscanceled_calls += 1
+        cancel = self._env.cancel
+        return bool(cancel()) if callable(cancel) else bool(cancel)
+
+    def close(self):
+        self._env.dialog_closed_count += 1
+
+
+def _make_fake_confirm(env, answers):
+    """Local stand-in for lib.ui.dialogs.confirm(): records into
+    `env.dialog_yesno_prompts` exactly like the old fake
+    `xbmcgui.Dialog().yesno()` did, so existing count/emptiness
+    assertions keep working unchanged."""
+    queued = list(answers or [])
+
+    def confirm(heading, body, yeslabel, nolabel):
+        env.dialog_yesno_prompts.append((heading, body))
+        return queued.pop(0) if queued else False
+
+    return confirm
+
+
+def _wire_player_dialogs(ctx, yesno_answers=None):
+    """lib.ui.player imports RivuletProgress/confirm from lib.ui.dialogs at
+    module scope (`from lib.ui.dialogs import RivuletProgress, confirm`);
+    point those two names at the local fakes above instead of reloading
+    lib.ui.uicommon/lib.ui.dialogs and driving a real WindowXMLDialog
+    event loop from this file."""
+    ctx.env.dialog_iscanceled_calls = 0
+    ctx.player.RivuletProgress = lambda: _FakeProgressDialog(ctx.env)
+    ctx.player.confirm = _make_fake_confirm(ctx.env, yesno_answers)
+    return ctx
+
+
 @pytest.fixture
 def kodi_stubs():
     """Install fresh stubs (via tests.kodistubs.install_kodi_stubs),
@@ -75,7 +130,7 @@ def kodi_stubs():
     args.
     """
     with install_kodi_stubs(reload=_RELOADED_MODULES, localized={30090: 'attempt %d of %d'}) as ctx:
-        yield ctx
+        yield _wire_player_dialogs(ctx)
 
 
 # --- fake ServerClient ---------------------------------------------------
@@ -187,6 +242,15 @@ def _resolved_one(env):
     return env.resolved[0]
 
 
+class _NullMonitor:
+    """Minimal xbmc.Monitor stand-in for calling _prebuffer_torrent()
+    directly, below the full play()/kodi_stubs stack: waitForAbort()
+    never fires, so a single scripted attempt runs start to finish."""
+
+    def waitForAbort(self, timeout=None):
+        return False
+
+
 # With the default _FakeAddon settings (buffer_mb=1, clamped up to the 5
 # MiB floor by setting_int(minimum=5)), every test below that doesn't
 # override buffer_mb targets this many bytes.
@@ -235,7 +299,7 @@ def test_happy_path_streams_front_to_target_then_resolves_true(kodi_stubs, monke
     # percent = 40 + got * 60 // target; pinned by the exact byte counts
     # above so a flipped clamp/off-by-one reddens this. Filtered to the
     # buffer band (>=40) since resolve/engine-warm ticks precede it.
-    assert [percent for percent, _ in env.dialog_updates if percent >= 40] == [70, 100]
+    assert [percent for percent, _, _, _ in env.dialog_updates if percent >= 40] == [70, 100]
     assert env.dialog_closed_count == 1
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (2, True)
@@ -261,6 +325,61 @@ def test_partial_front_above_header_floor_resolves_true_without_reaching_target(
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (2, True)
     assert list_item.path == 'http://server/x/0'
+
+
+def test_buffering_loop_throttles_dialog_update_to_when_displayed_values_move(kodi_stubs, monkeypatch):
+    """Per-chunk dialog.update() must only rebuild/send when human_size(got)
+    or the integer percent - the two values the user actually sees - have
+    moved since the previous chunk. A 20 MB pre-buffer at 10 KB chunks is
+    ~2000 chunks; skipping the rebuild on the ones that would look
+    identical is the whole point of the throttle (see _prebuffer_torrent's
+    comment). The five middle 1 KB chunks below round to the same
+    '1.9 MB'/62% the first chunk already showed and must not re-trigger
+    update(); the final chunk (landing exactly on the 5 MB target) moves
+    both and must.
+    """
+    env = kodi_stubs.env
+    player = kodi_stubs.player
+    chunks = [2_000_000, 1_000, 1_000, 1_000, 1_000, 1_000, 3_237_880]  # sums exactly to the 5 MB target
+    script = _ServerScript(
+        resolve_url='http://server/x/0', iter_front_attempts=[chunks],
+    ).install(monkeypatch, player)
+    dialog = player.RivuletProgress()
+
+    proceed, _, _ = player._prebuffer_torrent(
+        script.build_class()('http://server'), _torrent_stream(fileIdx=0),
+        'http://server/x/0', dialog, _NullMonitor(),
+    )
+
+    assert proceed is True
+    buffer_updates = [(percent, message) for percent, message, _, _ in env.dialog_updates if percent >= 40]
+    assert buffer_updates == [
+        (62, 'buffered 1.9 MB of 5.0 MB'),
+        (100, 'buffered 5.0 MB of 5.0 MB'),
+    ]
+
+
+def test_buffering_loop_polls_iscanceled_on_every_chunk_even_when_update_is_skipped(kodi_stubs, monkeypatch):
+    """Cancellation responsiveness must never regress: iscanceled() is
+    polled on EVERY chunk regardless of whether the throttle above skipped
+    that chunk's dialog.update() - the same seven-chunk script as the
+    throttle test above, five of which are throttled.
+    """
+    env = kodi_stubs.env
+    player = kodi_stubs.player
+    chunks = [2_000_000, 1_000, 1_000, 1_000, 1_000, 1_000, 3_237_880]
+    script = _ServerScript(
+        resolve_url='http://server/x/0', iter_front_attempts=[chunks],
+    ).install(monkeypatch, player)
+    dialog = player.RivuletProgress()
+
+    proceed, _, _ = player._prebuffer_torrent(
+        script.build_class()('http://server'), _torrent_stream(fileIdx=0),
+        'http://server/x/0', dialog, _NullMonitor(),
+    )
+
+    assert proceed is True
+    assert env.dialog_iscanceled_calls >= len(chunks)
 
 
 # --- cancellation: either trigger resolves False and closes the dialog ----
@@ -517,7 +636,7 @@ def test_metadata_arrives_on_third_create_poll(kodi_stubs, monkeypatch):
     # metadata-wait phase now ticks 20-35% with the live attempt count
     # (was an indeterminate 0%); filter by the stage-line marker so the
     # new resolve-stage tick ahead of it doesn't shift indices.
-    metadata_updates = [percent for percent, message in env.dialog_updates if 'STR30088' in message]
+    metadata_updates = [percent for percent, message, _, _ in env.dialog_updates if 'STR30088' in message]
     assert metadata_updates == [20, 21]
     assert script.torrent_url_calls == [(INFO_HASH, 1, tuple(stream['announce']))]
     assert script.iter_front_calls == [(INFO_HASH, 1, DEFAULT_TARGET_BYTES)]  # continues with the shared, not reset, budget
@@ -583,7 +702,7 @@ def test_non_torrent_stream_shows_resolve_feedback_then_closes_without_prebuffer
     assert script.create_engine_calls == []
     assert script.iter_front_calls == []
     assert env.dialog_created == [('STR30080', '')]  # title falls back to '' - stream has no title/filename
-    assert [percent for percent, _ in env.dialog_updates] == [15]  # resolve stage only
+    assert [percent for percent, _, _, _ in env.dialog_updates] == [15]  # resolve stage only
     assert env.dialog_closed_count == 1
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (10, True)
@@ -607,7 +726,7 @@ def test_server_dependent_non_torrent_stream_shows_connect_and_resolve_stages(ko
     assert script.is_available_calls == 2  # one miss, then up
     assert script.create_engine_calls == []
     assert script.iter_front_calls == []
-    percents = [percent for percent, _ in env.dialog_updates]
+    percents = [percent for percent, _, _, _ in env.dialog_updates]
     assert percents == [2, 15]  # one connect tick (min(10, 1*10//5)), then the fixed resolve tick
     assert env.dialog_closed_count == 1
     handle, succeeded, list_item = _resolved_one(env)
@@ -980,7 +1099,7 @@ def test_server_available_immediately_no_wait_dialog(kodi_stubs, monkeypatch):
     kodi_stubs.player.play(20, _torrent_stream(fileIdx=0), 'movie', 'tt20')
 
     assert script.is_available_calls == 1  # single probe, no wait loop
-    assert not any('STR30086' in message for _, message in env.dialog_updates)  # connect stage never ticks
+    assert not any('STR30086' in message for _, message, _, _ in env.dialog_updates)  # connect stage never ticks
     handle, succeeded, _ = _resolved_one(env)
     assert (handle, succeeded) == (20, True)
 
@@ -1067,7 +1186,7 @@ def test_stage_percents_progress_monotonically_connect_to_buffer(kodi_stubs, mon
 
     kodi_stubs.player.play(42, _torrent_stream(), 'movie', 'tt42')  # fileIdx missing -> metadata wait engages
 
-    percents = [percent for percent, _ in env.dialog_updates]
+    percents = [percent for percent, _, _, _ in env.dialog_updates]
     assert percents == sorted(percents)  # never regresses
     assert percents[0] <= 10  # starts in the connect band
     assert 40 <= percents[-1] <= 100  # ends in the buffer band
@@ -1604,13 +1723,10 @@ def test_play_direct_on_ready_exception_is_logged_and_swallowed_but_playback_sti
 @contextlib.contextmanager
 def _kodi_stubs_with_yesno(yesno_answers):
     """Like the `kodi_stubs` fixture above, but with scripted
-    `xbmcgui.Dialog().yesno()` answers queued up front -- that fixture
-    has no such parameter (no other test in this file needs one)."""
-    with install_kodi_stubs(
-        reload=_RELOADED_MODULES, localized={30090: 'attempt %d of %d'},
-        dialog_yesno=yesno_answers,
-    ) as ctx:
-        yield ctx
+    `dialogs.confirm()` answers queued up front -- that fixture has no
+    such parameter (no other test in this file needs one)."""
+    with install_kodi_stubs(reload=_RELOADED_MODULES, localized={30090: 'attempt %d of %d'}) as ctx:
+        yield _wire_player_dialogs(ctx, yesno_answers)
 
 
 class _FakeProgressStore:

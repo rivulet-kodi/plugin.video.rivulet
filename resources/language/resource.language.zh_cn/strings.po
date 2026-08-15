@@ -659,3 +659,15 @@ msgstr "显示剧集"
 msgctxt "#30222"
 msgid "Show Anime"
 msgstr "显示动漫"
+
+msgctxt "#30223"
+msgid "cancel"
+msgstr "取消"
+
+msgctxt "#30224"
+msgid "cancels"
+msgstr "取消"
+
+msgctxt "#30225"
+msgid "plays now"
+msgstr "立即播放"

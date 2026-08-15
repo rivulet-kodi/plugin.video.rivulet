@@ -60,6 +60,7 @@ plain-bool-or-1-based-callable convention as `ctx.env.cancel`/
 """
 import contextlib
 import threading
+import types
 
 import pytest
 
@@ -68,7 +69,8 @@ from lib.stremio.addons import AddonError
 from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
-    'lib.ui.compat', 'lib.ui.dependencies', 'lib.ui.uicommon', 'lib.ui.player', 'lib.ui.streamswindow',
+    'lib.ui.compat', 'lib.ui.dependencies', 'lib.ui.uicommon', 'lib.ui.dialogs', 'lib.ui.player',
+    'lib.ui.streamswindow',
 )
 
 
@@ -1248,16 +1250,47 @@ def test_open_streams_reads_stream_sort_setting_and_applies_it_to_final_order(lo
 
 
 def _cancel_after(n):
-    """Builds a zero-arg closure for `ctx.env.cancel` that reports
-    cancelled (True) starting from its (n+1)th call onward. Mirrors
-    DialogProgress.iscanceled()'s no-arg call convention (unlike
-    Monitor.waitForAbort()'s 1-based-count-arg convention)."""
+    """Builds a zero-arg closure for a scripted `iscanceled()` check that
+    reports cancelled (True) starting from its (n+1)th call onward -
+    same no-arg call convention `RivuletBusy.iscanceled()` itself uses
+    (unlike `Monitor.waitForAbort()`'s 1-based-count-arg convention)."""
     state = {'calls': 0}
 
     def _check():
         state['calls'] += 1
         return state['calls'] > n
     return _check
+
+
+def _record_busy_calls(monkeypatch, dialogs_mod):
+    """Monkeypatches `lib.ui.dialogs.RivuletBusy`'s create()/update()/
+    close() to record calls in the same (heading, message)/(percent,
+    message)/count shape the old `xbmcgui.DialogProgress` fake exposed
+    as `env.dialog_created`/`dialog_updates`/`dialog_closed_count`,
+    while still delegating to the real implementation so the fetch
+    loop's dialog is genuinely created/updated/closed against the fake
+    window/controls too. Mirrors test_router.py's `_record_progress_calls`."""
+    calls = types.SimpleNamespace(created=[], updated=[], closed=0)
+    orig_create = dialogs_mod.RivuletBusy.create
+    orig_update = dialogs_mod.RivuletBusy.update
+    orig_close = dialogs_mod.RivuletBusy.close
+
+    def create(self, heading, message=''):
+        calls.created.append((heading, message))
+        return orig_create(self, heading, message)
+
+    def update(self, percent, message='', attempt='', stats=''):
+        calls.updated.append((percent, message))
+        return orig_update(self, percent, message, attempt, stats)
+
+    def close(self):
+        calls.closed += 1
+        return orig_close(self)
+
+    monkeypatch.setattr(dialogs_mod.RivuletBusy, 'create', create)
+    monkeypatch.setattr(dialogs_mod.RivuletBusy, 'update', update)
+    monkeypatch.setattr(dialogs_mod.RivuletBusy, 'close', close)
+    return calls
 
 
 def test_open_streams_busy_dialog_reports_progress_and_skips_unsupported_addons(
@@ -1286,21 +1319,22 @@ def test_open_streams_busy_dialog_reports_progress_and_skips_unsupported_addons(
 
     monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
     monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: (False, False))
+    busy = _record_busy_calls(monkeypatch, ctx.dialogs)
 
     result = sw.open_streams('movie', 'tt1')
 
     assert result is False
     assert [call[0] for call in client.calls] == ['t-alpha']  # the unsupported addon is never even queried
     assert [s for _info, s in captured['pairs']] == [alpha_stream]
-    assert ctx.env.dialog_created == [('STR30033', '')]
+    assert busy.created == [('STR30033', '')]
     # total_addons is 1 (the unsupported addon never counts toward the
     # denominator) - one 'Checking Alpha...' update at 100%, on top of
     # busy_dialog's own initial update(0, message) on entry.
-    assert ctx.env.dialog_updates == [
+    assert busy.updated == [
         (0, ''),
         (100, 'Checking Alpha...'),
     ]
-    assert ctx.env.dialog_closed_count == 1
+    assert busy.closed == 1
 
 
 def test_open_streams_cancelled_while_still_waiting_for_a_non_empty_result_falls_back_to_no_results(
@@ -1325,7 +1359,14 @@ def test_open_streams_cancelled_while_still_waiting_for_a_non_empty_result_falls
     }
     client = _FakeAddonClient({'t-empty-a': [], 't-empty-b': []})
     _wire_data_layer(sw, _FakeStore(addons=[empty_a, empty_b]), client)
-    ctx.env.cancel = _cancel_after(1)  # 1st check -> not cancelled; 2nd -> cancelled, breaks
+    # RivuletBusy.iscanceled() is checked by the REAL wait loop inside
+    # _fetch_stream_pairs()/open_streams() (not mocked here) - it has no
+    # BACK_ACTIONS onAction() to drive since the dialog is created
+    # internally, so the scripted check is patched onto the class
+    # itself instead, same as test_router.py's mid-download cancel test.
+    _scripted_cancel = _cancel_after(1)
+    monkeypatch.setattr(ctx.dialogs.RivuletBusy, 'iscanceled', lambda self: _scripted_cancel())
+    busy = _record_busy_calls(monkeypatch, ctx.dialogs)
 
     def _unexpected(*a, **k):
         raise AssertionError('StreamsWindow must never be constructed when the wait is cancelled with nothing found')
@@ -1336,7 +1377,7 @@ def test_open_streams_cancelled_while_still_waiting_for_a_non_empty_result_falls
 
     assert result is False
     assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
-    assert ctx.env.dialog_closed_count == 1
+    assert busy.closed == 1
 
 
 def test_open_streams_cancelled_before_first_addon_falls_back_to_no_results(
@@ -1350,7 +1391,10 @@ def test_open_streams_cancelled_before_first_addon_falls_back_to_no_results(
     }
     client = _FakeAddonClient({'t1': [{'url': 'https://a.example/a.mp4'}]})
     _wire_data_layer(sw, _FakeStore(addons=[descriptor]), client)
-    ctx.env.cancel = True  # already cancelled before the wait ever starts
+    # Already cancelled before the wait ever starts - see the comment on
+    # the scripted RivuletBusy.iscanceled() patch above.
+    monkeypatch.setattr(ctx.dialogs.RivuletBusy, 'iscanceled', lambda self: True)
+    busy = _record_busy_calls(monkeypatch, ctx.dialogs)
 
     def _unexpected(*a, **k):
         raise AssertionError('StreamsWindow must never be constructed on an empty aggregate')
@@ -1367,7 +1411,7 @@ def test_open_streams_cancelled_before_first_addon_falls_back_to_no_results(
     # user-visible outcome: no window, and the "no results" notification.
     assert result is False
     assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
-    assert ctx.env.dialog_closed_count == 1
+    assert busy.closed == 1
 
 
 # ---------------------------------------------------------------------------
@@ -2264,11 +2308,22 @@ def test_open_streams_binge_watch_cancelling_the_countdown_reopens_the_original_
         lambda stream, stype, sid, item_meta=None, on_ready=None, video_id=None: play_direct_calls.append(stream) or True,
     )
     ctx.env.player_is_playing = lambda n: n == 1
-    # dialog.iscanceled() is shared by EVERY busy_dialog in this flow - the
-    # first two calls are the (single-addon) fetches for the played episode
-    # then the next one; only from the THIRD call on (the countdown's own
-    # first tick) does the user's Cancel actually land.
-    ctx.env.cancel = _cancel_after(2)
+    # RivuletBusy.iscanceled() (the played/next episode fetches) and
+    # RivuletCountdown's own window are unrelated dialogs now, so a
+    # single shared counter can no longer drive both - only the
+    # countdown's own window is marked cancelled here, and only once
+    # RivuletCountdown.run() actually opens it (before its first tick),
+    # matching test_dialogs.py's own "back action before the first tick"
+    # convention for a dialog created internally.
+    real_open_window = ctx.dialogs.open_window
+
+    def _cancel_countdown_window(window_cls, xml_name, *args, **kwargs):
+        window = real_open_window(window_cls, xml_name, *args, **kwargs)
+        if window_cls is ctx.dialogs._CountdownWindow:
+            window._canceled = True
+        return window
+
+    monkeypatch.setattr(ctx.dialogs, 'open_window', _cancel_countdown_window)
 
     result = sw.open_streams('series', 's1e1', meta=_TWO_EPISODE_SERIES_META, video_id='s1e1')
 

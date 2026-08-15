@@ -659,3 +659,15 @@ msgstr "Series tonen"
 msgctxt "#30222"
 msgid "Show Anime"
 msgstr "Anime tonen"
+
+msgctxt "#30223"
+msgid "cancel"
+msgstr "annuleren"
+
+msgctxt "#30224"
+msgid "cancels"
+msgstr "annuleert"
+
+msgctxt "#30225"
+msgid "plays now"
+msgstr "speelt nu af"

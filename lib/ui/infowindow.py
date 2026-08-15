@@ -528,8 +528,9 @@ def open_credits_picker(store, client, meta):
     other at import time; no real cycle.
 
     Groups `meta['links']` via `lib.stremio.metalinks.iter_link_groups()`
-    and shows an `xbmcgui.Dialog().select()` picker, one row per link
-    ('Category: name', in group order). A cancelled picker, or a meta
+    and shows a `dialogs.choose()` picker, one two-line row per link
+    (name as the primary line, its category as the dim sublabel, in
+    group order). A cancelled picker, or a meta
     with no usable links (the latter after `notify(L(30197))`), does
     nothing. Otherwise dispatches the pick:
       - search (a person): reruns `lib.ui.searchwindow.run_query()` and
@@ -544,6 +545,7 @@ def open_credits_picker(store, client, meta):
     import xbmc
 
     from lib.stremio import metalinks
+    from lib.ui import dialogs
     from lib.ui.compat import L, log, notify
 
     groups = metalinks.iter_link_groups(meta)
@@ -551,14 +553,14 @@ def open_credits_picker(store, client, meta):
         notify(L(30197))
         return
 
-    labels = []
+    rows = []
     links = []
     for category, members in groups:
         for name, parsed in members:
-            labels.append('%s: %s' % (category, name))
+            rows.append((name, category))
             links.append(parsed)
 
-    choice = xbmcgui.Dialog().select(L(30196), labels)
+    choice = dialogs.choose(L(30196), rows)
     if choice < 0:
         return
     parsed = links[choice]

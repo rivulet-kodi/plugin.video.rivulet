@@ -21,13 +21,14 @@ are plain in-memory fakes. DetailWindow.xml's actual skin rendering is
 Kodi-skin-engine-only and is NOT, and cannot be, exercised by this suite.
 """
 import contextlib
+import types
 
 import pytest
 
 from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
-    'lib.ui.compat', 'lib.ui.router', 'lib.ui.uicommon',
+    'lib.ui.compat', 'lib.ui.router', 'lib.ui.uicommon', 'lib.ui.dialogs',
     'lib.ui.views', 'lib.ui.streamswindow', 'lib.ui.dependencies', 'lib.ui.infowindow',
     'lib.ui.detailwindow',
 )
@@ -673,6 +674,19 @@ def test_onaction_season_nav_without_focus_on_the_bar_does_not_repopulate(load_d
 # ---------------------------------------------------------------------------
 
 
+def _stub_choose(monkeypatch, ctx, answer, capture=None):
+    """Patches `lib.ui.dialogs.choose` directly (already exhaustively
+    covered by tests/test_dialogs.py) rather than driving a real
+    `doModal()` - mirrors tests/test_catalogpicker.py's own helper of
+    the same name."""
+    def _choose(heading, rows):
+        if capture is not None:
+            capture.append((heading, list(rows)))
+        return answer
+
+    monkeypatch.setattr(ctx.dialogs, 'choose', _choose)
+
+
 def test_context_menu_uses_self_meta_directly_with_no_extra_fetch(load_detailwindow, monkeypatch):
     ctx = load_detailwindow()
     import xbmcgui
@@ -687,17 +701,12 @@ def test_context_menu_uses_self_meta_directly_with_no_extra_fetch(load_detailwin
     monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: object())
     monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
     captured = []
-
-    def _select(self, heading, options, **kwargs):
-        captured.append((heading, list(options)))
-        return -1
-
-    monkeypatch.setattr(xbmcgui.Dialog, 'select', _select, raising=False)
+    _stub_choose(monkeypatch, ctx, -1, capture=captured)
 
     win.onAction(xbmcgui.Action(ctx.detailwindow._CONTEXT_MENU_ACTION))
 
     assert fetch_calls == []  # self.meta was already full - no re-fetch
-    assert captured == [('STR30196', ['Cast: Bryan Cranston'])]
+    assert captured == [('STR30196', [('Bryan Cranston', 'Cast')])]
 
 
 # ---------------------------------------------------------------------------
@@ -1049,6 +1058,39 @@ def test_open_detail_series_window_is_closed_exactly_once_when_start_raises(
     assert ctx.env.notifications == [('Rivulet', 'STR30032', 'info', 4000)]
 
 
+def _record_busy_calls(monkeypatch, dialogs_mod):
+    """Monkeypatches `lib.ui.dialogs.RivuletBusy`'s create()/update()/
+    close() to record calls in the same (heading, message)/(percent,
+    message)/count shape the old `xbmcgui.DialogProgress` fake exposed
+    as `env.dialog_created`/`dialog_updates`/`dialog_closed_count`,
+    while still delegating to the real implementation so the fetch's
+    dialog is genuinely created/updated/closed against the fake
+    window/controls too. Mirrors test_streamswindow.py's own helper of
+    the same name."""
+    calls = types.SimpleNamespace(created=[], updated=[], closed=0)
+    orig_create = dialogs_mod.RivuletBusy.create
+    orig_update = dialogs_mod.RivuletBusy.update
+    orig_close = dialogs_mod.RivuletBusy.close
+
+    def create(self, heading, message=''):
+        calls.created.append((heading, message))
+        return orig_create(self, heading, message)
+
+    def update(self, percent, message='', attempt='', stats=''):
+        calls.updated.append((percent, message))
+        return orig_update(self, percent, message, attempt, stats)
+
+    def close(self):
+        calls.closed += 1
+        return orig_close(self)
+
+    monkeypatch.setattr(dialogs_mod.RivuletBusy, 'create', create)
+    monkeypatch.setattr(dialogs_mod.RivuletBusy, 'update', update)
+    monkeypatch.setattr(dialogs_mod.RivuletBusy, 'close', close)
+    return calls
+
+
+
 def test_open_detail_movie_success_wraps_the_fetch_in_a_busy_dialog(
     load_detailwindow, monkeypatch,
 ):
@@ -1056,13 +1098,14 @@ def test_open_detail_movie_success_wraps_the_fetch_in_a_busy_dialog(
     meta = {'id': 'tt1', 'name': 'A Movie', 'poster': 'https://x/poster.jpg', 'videos': []}
     monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: meta)
     monkeypatch.setattr(ctx.streamswindow, 'open_streams', lambda stype, sid, poster=None, heading='', art=None, meta=None, video_id=None: True)
+    busy = _record_busy_calls(monkeypatch, ctx.dialogs)
 
     result = ctx.detailwindow.open_detail('movie', 'tt1')
 
     assert result is True
-    assert ctx.env.dialog_created == [('STR30033', '')]
-    assert ctx.env.dialog_updates == [(0, '')]
-    assert ctx.env.dialog_closed_count == 1
+    assert busy.created == [('STR30033', '')]
+    assert busy.updated == [(0, '')]
+    assert busy.closed == 1
 
 
 def test_open_detail_movie_closes_the_busy_dialog_before_opening_streams(
@@ -1071,10 +1114,11 @@ def test_open_detail_movie_closes_the_busy_dialog_before_opening_streams(
     ctx = load_detailwindow()
     meta = {'id': 'tt1', 'name': 'A Movie', 'poster': 'https://x/poster.jpg', 'videos': []}
     monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: meta)
+    busy = _record_busy_calls(monkeypatch, ctx.dialogs)
     captured = {}
 
     def fake_open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
-        captured['dialog_closed_count'] = ctx.env.dialog_closed_count
+        captured['dialog_closed_count'] = busy.closed
         return True
 
     monkeypatch.setattr(ctx.streamswindow, 'open_streams', fake_open_streams)
@@ -1082,7 +1126,7 @@ def test_open_detail_movie_closes_the_busy_dialog_before_opening_streams(
     result = ctx.detailwindow.open_detail('movie', 'tt1')
 
     assert result is True
-    assert captured['dialog_closed_count'] == 1
+    assert captured['dialog_closed_count'] == 1  # closed BEFORE open_streams ran, not just eventually
 
 
 def test_open_detail_series_closes_the_busy_dialog_before_building_the_window(
@@ -1091,11 +1135,12 @@ def test_open_detail_series_closes_the_busy_dialog_before_building_the_window(
     ctx = load_detailwindow(addon_info={'path': '/addon/path'})
     meta = {'id': 'tt1', 'name': 'One', 'videos': [{'id': 'v1', 'season': 1, 'episode': 1}]}
     monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: meta)
+    busy = _record_busy_calls(monkeypatch, ctx.dialogs)
     captured = {}
 
     class RecordingWindow(ctx.detailwindow.DetailWindow):
         def __init__(self, *args, **kwargs):
-            captured['dialog_closed_count'] = ctx.env.dialog_closed_count
+            captured['dialog_closed_count'] = busy.closed
             super().__init__(*args, **kwargs)
 
         def start(self, meta_obj, stype):
@@ -1106,7 +1151,7 @@ def test_open_detail_series_closes_the_busy_dialog_before_building_the_window(
     result = ctx.detailwindow.open_detail('series', 'tt1')
 
     assert result is True
-    assert captured['dialog_closed_count'] == 1
+    assert captured['dialog_closed_count'] == 1  # closed BEFORE the window was even constructed
 
 
 def test_open_detail_not_found_still_closes_the_busy_dialog_around_the_fetch(
@@ -1114,9 +1159,10 @@ def test_open_detail_not_found_still_closes_the_busy_dialog_around_the_fetch(
 ):
     ctx = load_detailwindow()
     monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: None)
+    busy = _record_busy_calls(monkeypatch, ctx.dialogs)
 
     result = ctx.detailwindow.open_detail('movie', 'tt404')
 
     assert result is False
-    assert ctx.env.dialog_created == [('STR30033', '')]
-    assert ctx.env.dialog_closed_count == 1
+    assert busy.created == [('STR30033', '')]
+    assert busy.closed == 1

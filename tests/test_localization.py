@@ -376,8 +376,9 @@ def _resolve_int_args(node, consts, containers, loop_containers):
 def iter_l_call_ids(tree):
     """Yield `(lineno, string_id)` for every statically-resolvable `L(<int>)`,
     `_lfmt(<int>, ...)` (`lib.ui.player`'s `L(...) % args` wrapper), or
-    `<expr>.getLocalizedString(<int>)` call in `tree` (see module docstring
-    for exactly what "statically-resolvable" covers)."""
+    `<addon>.getLocalizedString(<int>)` call in `tree` (see module docstring
+    for exactly what "statically-resolvable" covers). `xbmc.getLocalizedString`
+    is deliberately excluded - that reads Kodi's own catalog, not ours."""
     consts = _module_level_int_constants(tree)
     containers = _module_level_containers(tree)
     loop_containers = _for_loop_row_containers(tree, containers)
@@ -391,6 +392,14 @@ def iter_l_call_ids(tree):
             arg = node.args[0]
         elif isinstance(func, ast.Attribute) and func.attr == "getLocalizedString":
             if len(node.args) != 1 or node.keywords:
+                continue
+            # `xbmc.getLocalizedString(...)` reads KODI'S OWN catalog, not
+            # this addon's, so its ids are not ours to define - 106/107 are
+            # Kodi's "No"/"Yes", used for the confirm dialog's default
+            # buttons precisely so Kodi keeps translating them. Only an
+            # addon-scoped receiver (`ADDON.getLocalizedString(...)`) is
+            # checked against strings.po.
+            if isinstance(func.value, ast.Name) and func.value.id == "xbmc":
                 continue
             arg = node.args[0]
         else:

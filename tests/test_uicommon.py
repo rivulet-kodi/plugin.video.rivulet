@@ -8,7 +8,9 @@ xbmc/xbmcgui stubs in tests/kodistubs (no real Kodi runtime, no network).
 lib.ui.uicommon imports xbmc/xbmcgui at module scope (`class BaseWindow
 (xbmcgui.WindowXML)`, `xbmc.executebuiltin(...)` inside
 dismiss_busy_dialog()), so load_uicommon reloads it fresh each call
-alongside lib.ui.compat (addon_skin_path()'s `ADDON`).
+alongside lib.ui.compat (addon_skin_path()'s `ADDON`) and lib.ui.dialogs
+(busy_dialog()'s function-local `RivuletBusy` import - see that
+function's own comment for why it isn't a module-scope import).
 
 BaseWindow is also the shared base for HomeWindow/CatalogPickerWindow/
 StreamsWindow/AddonsWindow/SearchWindow's back-navigation onAction() -
@@ -37,7 +39,7 @@ import pytest
 
 from tests.kodistubs import install_kodi_stubs
 
-_RELOAD_MODULE_NAMES = ('lib.ui.compat', 'lib.ui.uicommon')
+_RELOAD_MODULE_NAMES = ('lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.dialogs')
 
 
 @pytest.fixture
@@ -121,6 +123,19 @@ def test_dismiss_busy_dialog_closes_every_dialog(load_uicommon):
     assert ctx.env.executed_builtins == ['Dialog.Close(all, true)']
 
 
+class _FakeAction:
+    """Minimal `xbmcgui.Action`-shaped stand-in: only `getId()` is used
+    by `RivuletBusy`'s `onAction()`. Built directly rather than
+    importing the fake `xbmcgui` module, matching test_dialogs.py's own
+    convention."""
+
+    def __init__(self, action_id):
+        self._id = action_id
+
+    def getId(self):
+        return self._id
+
+
 # ---------------------------------------------------------------------------
 # busy_dialog()
 # ---------------------------------------------------------------------------
@@ -128,46 +143,50 @@ def test_dismiss_busy_dialog_closes_every_dialog(load_uicommon):
 
 def test_busy_dialog_creates_and_updates_on_enter_then_closes_on_normal_exit(load_uicommon):
     ctx = load_uicommon()
+    d = ctx.dialogs
 
-    with ctx.uicommon.busy_dialog('My Heading', 'my message'):
-        assert ctx.env.dialog_created == [('My Heading', 'my message')]
-        assert ctx.env.dialog_updates[0] == (0, 'my message')
-        assert ctx.env.dialog_closed_count == 0
+    with ctx.uicommon.busy_dialog('My Heading', 'my message') as dialog:
+        window = dialog._window
+        assert window.getControl(d.BUSY_HEADING).label == 'My Heading'
+        assert window.getControl(d.BUSY_MESSAGE).label == 'my message'
+        assert window.closed is False
 
-    assert ctx.env.dialog_closed_count == 1
+    assert window.closed is True
 
 
 def test_busy_dialog_defaults_message_to_empty_string(load_uicommon):
     ctx = load_uicommon()
 
-    with ctx.uicommon.busy_dialog('My Heading'):
-        pass
-
-    assert ctx.env.dialog_created == [('My Heading', '')]
+    with ctx.uicommon.busy_dialog('My Heading') as dialog:
+        assert dialog._window.getControl(ctx.dialogs.BUSY_MESSAGE).label == ''
 
 
 def test_busy_dialog_yields_the_dialog_for_progress_updates_and_cancellation(load_uicommon):
     ctx = load_uicommon()
-    ctx.env.cancel = True
 
     with ctx.uicommon.busy_dialog('My Heading', 'my message') as dialog:
         dialog.update(42, 'progress')
-        assert dialog.iscanceled() is True
+        assert dialog._window.getControl(ctx.dialogs.BUSY_MESSAGE).label == 'progress'
+        assert dialog.iscanceled() is False
 
-    assert ctx.env.dialog_updates == [(0, 'my message'), (42, 'progress')]
+        dialog._window.onAction(_FakeAction(92))  # ACTION_NAV_BACK
+
+        assert dialog.iscanceled() is True
 
 
 def test_busy_dialog_closes_the_dialog_even_when_the_body_raises(load_uicommon):
     ctx = load_uicommon()
+    windows = []
 
     class _MarkerError(Exception):
         pass
 
     with pytest.raises(_MarkerError):
-        with ctx.uicommon.busy_dialog('My Heading', 'my message'):
+        with ctx.uicommon.busy_dialog('My Heading', 'my message') as dialog:
+            windows.append(dialog._window)
             raise _MarkerError('boom')
 
-    assert ctx.env.dialog_closed_count == 1
+    assert windows[0].closed is True
 
 
 # ---------------------------------------------------------------------------

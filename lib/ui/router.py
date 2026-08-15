@@ -79,14 +79,14 @@ def _download_server_binary():
     into the location lib.service_runner.resolve_binary() already searches.
     """
     import xbmc
-    import xbmcgui
 
     from lib import serverbin
     from lib.ui.compat import L, addon_profile_dir, log, notify
+    from lib.ui.dialogs import RivuletProgress
 
     dest_dir = os.path.join(addon_profile_dir(), 'bin')
 
-    dialog = xbmcgui.DialogProgress()
+    dialog = RivuletProgress()
     dialog.create(L(30061))
 
     def progress_cb(done, total):

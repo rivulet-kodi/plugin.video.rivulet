@@ -26,7 +26,7 @@ from lib.store import ConcurrentUpdateError
 from lib.stremio import addons as addons_lib
 from lib.stremio.addons import AddonError, safe_url_for_log, validate_transport_url
 from lib.stremio.api import ApiError, StremioAPI
-from lib.ui import compat, router, urlutil
+from lib.ui import compat, dialogs, router, urlutil
 from lib.ui.compat import L, log, notify
 from lib.ui.dependencies import get_client, get_store
 
@@ -439,7 +439,7 @@ def logout():
     if not auth:
         _finish_action(handle, refresh=False)
         return
-    if not xbmcgui.Dialog().yesno(L(30021), L(30021)):
+    if not dialogs.confirm(L(30021), L(30021), xbmc.getLocalizedString(107), xbmc.getLocalizedString(106)):
         _finish_action(handle, refresh=False)
         return
 

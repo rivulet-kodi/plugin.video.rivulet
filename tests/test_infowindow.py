@@ -46,7 +46,7 @@ _RELOAD_MODULE_NAMES = (
     # picker tests below monkeypatch `ctx.dependencies.get_store`/
     # `get_client`, `ctx.searchwindow.run_query`, and
     # `ctx.detailwindow.open_detail` directly.
-    'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.streamswindow', 'lib.ui.views',
+    'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.streamswindow', 'lib.ui.views', 'lib.ui.dialogs',
     'lib.ui.dependencies', 'lib.ui.searchwindow', 'lib.ui.detailwindow', 'lib.ui.infowindow',
 )
 
@@ -1219,23 +1219,19 @@ class _Store:
         return self._addons
 
 
-def _stub_select(monkeypatch, answers=None, capture=None):
-    """kodistubs has no fake `xbmcgui.Dialog.select()` yet - this suite is
-    its first caller. Patches the class directly (fresh per test, since
-    `make_xbmcgui()` defines a brand-new `Dialog` class each
-    `install_kodi_stubs()` call) to pop successive `answers` (default: a
-    single -1, i.e. cancelled), recording each `(heading, options)` call
-    into `capture` if given."""
-    import xbmcgui
-
+def _stub_choose(monkeypatch, ctx, answers=None, capture=None):
+    """Patches `lib.ui.dialogs.choose` directly (already exhaustively
+    covered by tests/test_dialogs.py) to pop successive `answers`
+    (default: a single -1, i.e. cancelled), recording each
+    `(heading, rows)` call into `capture` if given."""
     queue = list(answers) if answers is not None else [-1]
 
-    def _select(self, heading, options, **kwargs):
+    def _choose(heading, rows):
         if capture is not None:
-            capture.append((heading, list(options)))
+            capture.append((heading, list(rows)))
         return queue.pop(0) if queue else -1
 
-    monkeypatch.setattr(xbmcgui.Dialog, 'select', _select, raising=False)
+    monkeypatch.setattr(ctx.dialogs, 'choose', _choose)
 
 
 def _showcase_window(ctx, metas, focus_index=0):
@@ -1267,13 +1263,13 @@ def test_context_menu_fetches_full_meta_and_opens_select_with_category_name_labe
     monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: object())
     monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
     captured = []
-    _stub_select(monkeypatch, capture=captured)
+    _stub_choose(monkeypatch, ctx, capture=captured)
     win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
 
     _fire_context_menu(win, ctx)
 
     assert fetched == [('movie', 'tt1')]
-    assert captured == [('STR30196', ['Directors: Francis Ford Coppola', 'Cast: Marlon Brando'])]
+    assert captured == [('STR30196', [('Francis Ford Coppola', 'Directors'), ('Marlon Brando', 'Cast')])]
 
 
 def test_context_menu_person_entry_runs_run_query_and_opens_results(load_infowindow, monkeypatch):
@@ -1283,7 +1279,7 @@ def test_context_menu_person_entry_runs_run_query_and_opens_results(load_infowin
     store, client = object(), object()
     monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: store)
     monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: client)
-    _stub_select(monkeypatch, answers=[0])
+    _stub_choose(monkeypatch, ctx, answers=[0])
     run_query_calls = []
     person_metas = [{'id': 'tt2', 'name': 'One-Eyed Jacks', 'type': 'movie'}]
 
@@ -1308,7 +1304,7 @@ def test_context_menu_person_entry_with_no_results_notifies(load_infowindow, mon
     monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: full_meta)
     monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: object())
     monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
-    _stub_select(monkeypatch, answers=[0])
+    _stub_choose(monkeypatch, ctx, answers=[0])
     monkeypatch.setattr(ctx.searchwindow, 'run_query', lambda store, client, query: [])
     opened = []
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas))
@@ -1332,7 +1328,7 @@ def test_context_menu_genre_entry_with_installed_transport_fetches_catalog_and_o
     monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: full_meta)
     monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: _Store([{'transportUrl': transport}]))
     monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
-    _stub_select(monkeypatch, answers=[0])
+    _stub_choose(monkeypatch, ctx, answers=[0])
     fetch_calls = []
     genre_metas = [{'id': 'tt9', 'name': 'Some Drama', 'type': 'movie'}]
 
@@ -1363,7 +1359,7 @@ def test_context_menu_genre_entry_with_uninstalled_transport_is_skipped_and_logg
     monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: full_meta)
     monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: _Store([]))  # nothing installed
     monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
-    _stub_select(monkeypatch, answers=[0])
+    _stub_choose(monkeypatch, ctx, answers=[0])
     fetch_calls = []
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda *a, **k: fetch_calls.append((a, k)) or [])
     win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
@@ -1380,7 +1376,7 @@ def test_context_menu_with_no_usable_links_notifies_and_shows_no_picker(load_inf
     monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: object())
     monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
     captured = []
-    _stub_select(monkeypatch, capture=captured)
+    _stub_choose(monkeypatch, ctx, capture=captured)
     win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
 
     _fire_context_menu(win, ctx)
@@ -1395,7 +1391,7 @@ def test_context_menu_cancelled_select_does_nothing(load_infowindow, monkeypatch
     monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: full_meta)
     monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: object())
     monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
-    _stub_select(monkeypatch)  # default answers=[-1]
+    _stub_choose(monkeypatch, ctx)  # default answers=[-1]
     run_query_calls = []
     monkeypatch.setattr(ctx.searchwindow, 'run_query', lambda *a: run_query_calls.append(a))
     win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
@@ -1415,7 +1411,7 @@ def test_context_menu_detail_entry_opens_detailwindow_directly(load_infowindow, 
     monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: full_meta)
     monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: object())
     monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
-    _stub_select(monkeypatch, answers=[0])
+    _stub_choose(monkeypatch, ctx, answers=[0])
     captured = []
     monkeypatch.setattr(ctx.detailwindow, 'open_detail', lambda stype, sid: captured.append((stype, sid)))
     win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])

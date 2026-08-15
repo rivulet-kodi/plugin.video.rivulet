@@ -48,8 +48,8 @@ from lib.stremio.addons import AddonError
 from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
-    'lib.ui.compat', 'lib.ui.dependencies', 'lib.ui.uicommon', 'lib.ui.infowindow', 'lib.ui.detailwindow',
-    'lib.ui.searchwindow',
+    'lib.ui.compat', 'lib.ui.dependencies', 'lib.ui.uicommon', 'lib.ui.dialogs',
+    'lib.ui.infowindow', 'lib.ui.detailwindow', 'lib.ui.searchwindow',
 )
 
 
@@ -668,8 +668,23 @@ def test_run_search_coverflow_open_failure_is_logged_notified_and_does_not_close
 # ---------------------------------------------------------------------------
 
 
+def _stub_confirm(monkeypatch, ctx, answer, capture=None):
+    """Patches `lib.ui.dialogs.confirm` directly (already exhaustively
+    covered by tests/test_dialogs.py) rather than driving a real
+    `doModal()` - this suite only needs to prove `_clear_history()`
+    passes the right heading/body/labels and reacts correctly to the
+    result."""
+    def _confirm(heading, body, yeslabel, nolabel):
+        if capture is not None:
+            capture.append((heading, body, yeslabel, nolabel))
+        return answer
+
+    monkeypatch.setattr(ctx.dialogs, 'confirm', _confirm)
+
+
 def test_clear_history_declined_leaves_history_untouched_and_does_not_reload(load_searchwindow, monkeypatch):
-    ctx = load_searchwindow(dialog_yesno=[False])
+    ctx = load_searchwindow()
+    _stub_confirm(monkeypatch, ctx, False)
     store = _FakeStore(history=['batman'])
     _wire_store(ctx.searchwindow, store)
     win = _make_window(ctx.searchwindow)
@@ -683,7 +698,9 @@ def test_clear_history_declined_leaves_history_untouched_and_does_not_reload(loa
 
 
 def test_clear_history_confirmed_clears_and_reloads_to_new_search_only(load_searchwindow, monkeypatch):
-    ctx = load_searchwindow(dialog_yesno=[True])
+    ctx = load_searchwindow()
+    captured = []
+    _stub_confirm(monkeypatch, ctx, True, capture=captured)
     store = _FakeStore(history=['batman'])
     _wire_store(ctx.searchwindow, store)
     win = _make_window(ctx.searchwindow)
@@ -692,7 +709,7 @@ def test_clear_history_confirmed_clears_and_reloads_to_new_search_only(load_sear
     win._clear_history()
 
     assert store.cleared == 1
-    assert ctx.env.dialog_yesno_prompts == [('STR30044', 'STR30046')]
+    assert captured == [('STR30044', 'STR30046', 'Yes', 'No')]
     items = win.getControl(ctx.searchwindow.LIST).items
     assert len(items) == 1
     assert items[0].getProperty('position') == 'new'
