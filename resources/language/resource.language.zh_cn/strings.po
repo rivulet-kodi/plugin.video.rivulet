@@ -683,3 +683,7 @@ msgstr "浏览不是电影、剧集或动漫的目录"
 msgctxt "#30229"
 msgid "Show Other"
 msgstr "显示其他"
+
+msgctxt "#30230"
+msgid "Open Rivulet automatically on Kodi startup"
+msgstr "Kodi 启动时自动打开 Rivulet"

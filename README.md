@@ -59,6 +59,10 @@ account.
 - **One-click streaming server** — download the right
   `stremio-server-go` build for your platform and run it embedded, or
   point Rivulet at any server you already run.
+- **Optional launch on startup** — turn on **Settings → Home screen →
+  Open Rivulet automatically on Kodi startup** to have a dedicated media
+  box boot straight into Rivulet instead of Kodi's home screen. Off by
+  default.
 
 ## Screenshots
 

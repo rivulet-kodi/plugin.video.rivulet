@@ -683,3 +683,7 @@ msgstr "Каталоги, которые не фильмы, сериалы и а
 msgctxt "#30229"
 msgid "Show Other"
 msgstr "Показывать Прочее"
+
+msgctxt "#30230"
+msgid "Open Rivulet automatically on Kodi startup"
+msgstr "Открывать Rivulet автоматически при запуске Kodi"

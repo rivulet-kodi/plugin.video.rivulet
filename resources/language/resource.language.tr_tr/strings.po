@@ -683,3 +683,7 @@ msgstr "Film, dizi veya anime olmayan kataloglara göz at"
 msgctxt "#30229"
 msgid "Show Other"
 msgstr "Diğer göster"
+
+msgctxt "#30230"
+msgid "Open Rivulet automatically on Kodi startup"
+msgstr "Kodi başlangıcında Rivulet'i otomatik olarak aç"
