@@ -955,11 +955,11 @@ def stream_fields(info):
     layout - everything `format_label()` packs into one BBcode string,
     split back out so the skin can lay each piece out in its own column
     (the packed label/details pair above are unchanged and still used
-    for `ListItem.Label`/`Label2`). Every value is a plain string ready
     for `ListItem.setProperties()`; a field with nothing to show is ''
     rather than omitted, so the skin's own
     `!String.IsEmpty(ListItem.Property(...))` visibility guard is
-    always well-defined.
+    always well-defined -- except `cache_state`, which is never '' (see
+    below): it renders a dim em-dash instead of a blank cell.
 
     `release` is `info['source']` (Remux/BluRay/WEB-DL/...), not
     `info['release']` (scene edition/DV-profile tags like
@@ -979,7 +979,12 @@ def stream_fields(info):
     elif cached is False:
         cache_state, cache_color = 'DL', 'FFFB923C'
     else:
-        cache_state, cache_color = '', '4DEEF3F6'
+        # Design line 280: no cache info renders a dim em-dash rather than
+        # a blank cell, so the column stays visually aligned. Mono26
+        # (NotoMono) carries U+2014 in its cmap, so this is safe to draw
+        # in that font. `cache_state` is therefore NEVER '' -- see the
+        # skin, which no longer guards this label's visibility.
+        cache_state, cache_color = '\u2014', '4DEEF3F6'
 
     resolution = info.get('resolution') or ''
     return {

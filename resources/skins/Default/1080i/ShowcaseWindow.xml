@@ -19,17 +19,18 @@
                  the opening frame dark instead of flashing skin-default
                  white. -->
             <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="E60A0C0E">white.png</texture></control>
-            <control type="image" id="30000"><width>1920</width><height>1080</height><texture colordiffuse="FF777777"></texture><aspectratio>scale</aspectratio></control>
-            <!-- Scrim stack over the fanart, approximating the design's
-                 4-stop gradient (rgba(10,12,14, .55/.72/.94/1) at
-                 0/26/52/74% of the frame height) with what Kodi can
-                 actually draw: a flat wash for the .55 baseline everywhere,
-                 fade_bottom.png ramped up to full FF0A0C0E opacity by
-                 799px (74% of 1080), then a flat solid rect for the
-                 remaining 26% where the design is already fully opaque. -->
-            <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="8C0A0C0E">white.png</texture></control>
-            <control type="image"><left>0</left><top>0</top><width>1920</width><height>799</height><texture colordiffuse="FF0A0C0E">fade_bottom.png</texture></control>
-            <control type="image"><left>0</left><top>799</top><width>1920</width><height>281</height><texture colordiffuse="FF0A0C0E">white.png</texture></control>
+            <!-- Design line 93 is filter:brightness(.55); colordiffuse
+                 multiplies, so .55*255 = 0x8C. Was FF777777 (.47). -->
+            <control type="image" id="30000"><width>1920</width><height>1080</height><texture colordiffuse="FF8C8C8C"></texture><aspectratio>scale</aspectratio></control>
+            <!-- Scrim over the fanart: fade_bottom.png/fade_edge.png bake
+                 pure black pixels, and colordiffuse multiplies, so a black
+                 source can only ever render black regardless of tint - that
+                 produced a full-width seam where the old ramp met a separate
+                 FF0A0C0E rect. fade_v.png is white RGB with the design's
+                 4-stop alpha ramp (.55/.72/.94/solid at 0/26/52/74% of
+                 frame height) baked into it, so one FF0A0C0E-tinted control
+                 reproduces the exact gradient continuously, with no seam. -->
+            <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="FF0A0C0E">fade_v.png</texture></control>
             <control type="image" id="30001"><top>535</top><left>810</left><width>300</width><height>10</height><texture>white.png</texture>
                 <animation effect="zoom" pulse="true" center="auto" start="0,100" end="100,100" time="1000" condition="Control.IsVisible(30001)">Conditional</animation>
             </control>
@@ -185,8 +186,8 @@
                 <label>[B]$INFO[ListItem.Label][/B]</label>
             </control>
 
-            <control type="image"><left>0</left><top>592</top><width>96</width><height>458</height><texture flipx="true">fade_edge.png</texture></control>
-            <control type="image"><left>1780</left><top>592</top><width>140</width><height>458</height><texture>fade_edge.png</texture></control>
+            <control type="image"><left>0</left><top>560</top><width>96</width><height>520</height><texture flipx="true" colordiffuse="FF0A0C0E">fade_out_h.png</texture></control>
+            <control type="image"><left>1780</left><top>560</top><width>140</width><height>520</height><texture colordiffuse="FF0A0C0E">fade_out_h.png</texture></control>
         </control>
     </controls>
 </window>

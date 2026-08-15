@@ -91,7 +91,7 @@
             </control>
 
             <control type="list" id="30002">
-                <left>512</left><top>244</top><width>1280</width><height>660</height>
+                <left>512</left><top>244</top><width>1294</width><height>660</height>
                 <onup>30007</onup>
                 <onleft>30002</onleft><onright>30002</onright>
                 <pagecontrol>30006</pagecontrol>
@@ -107,23 +107,23 @@
                     <control type="label"><left>244</left><top>46</top><width>110</width><height>36</height><font>Mono26</font><textcolor>B838BDF8</textcolor>
                         <label>$INFO[ListItem.Property(code)]</label>
                     </control>
-                    <control type="label"><left>372</left><top>46</top><width>636</width><height>36</height><font>font13</font><textcolor>EBEEF3F6</textcolor>
+                    <control type="label"><left>372</left><top>46</top><width>650</width><height>36</height><font>font13</font><textcolor>EBEEF3F6</textcolor>
                         <label>$INFO[ListItem.Property(title)]</label>
                     </control>
-                    <control type="label"><left>244</left><top>84</top><width>764</width><height>28</height><font>font10</font><textcolor>6BEEF3F6</textcolor>
+                    <control type="label"><left>244</left><top>84</top><width>778</width><height>28</height><font>font10</font><textcolor>6BEEF3F6</textcolor>
                         <label>$INFO[ListItem.Property(line2)]</label>
                     </control>
                     <control type="label">
-                        <left>1028</left><top>0</top><width>220</width><height>132</height>
+                        <left>1042</left><top>0</top><width>220</width><height>132</height>
                         <font>Mono26</font><textcolor>FF38BDF8</textcolor>
                         <align>right</align><aligny>center</aligny>
                         <label>$INFO[ListItem.Property(watched_percent)]</label>
                         <visible>!String.IsEmpty(ListItem.Property(watched_percent))</visible>
                     </control>
-                    <control type="image"><left>32</left><top>131</top><width>1216</width><height>1</height><texture colordiffuse="12FFFFFF">white.png</texture></control>
+                    <control type="image"><left>32</left><top>131</top><width>1230</width><height>1</height><texture colordiffuse="12FFFFFF">white.png</texture></control>
                 </itemlayout>
                 <focusedlayout height="132">
-                    <control type="image"><width>1280</width><height>132</height><texture colordiffuse="FF1B2126">white.png</texture></control>
+                    <control type="image"><width>1294</width><height>132</height><texture colordiffuse="FF1B2126">white.png</texture></control>
                     <control type="image"><width>6</width><height>132</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
                     <control type="image"><left>32</left><top>14</top><width>184</width><height>104</height><texture>$INFO[ListItem.Property(thumb)]</texture><aspectratio>scale</aspectratio></control>
                     <control type="progress">
@@ -136,20 +136,20 @@
                     <control type="label"><left>244</left><top>46</top><width>110</width><height>36</height><font>Mono26</font><textcolor>FF38BDF8</textcolor>
                         <label>$INFO[ListItem.Property(code)]</label>
                     </control>
-                    <control type="label"><left>372</left><top>46</top><width>636</width><height>36</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
+                    <control type="label"><left>372</left><top>46</top><width>650</width><height>36</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
                         <label>[B]$INFO[ListItem.Property(title)][/B]</label>
                     </control>
-                    <control type="label"><left>244</left><top>84</top><width>764</width><height>28</height><font>font10</font><textcolor>99EEF3F6</textcolor>
+                    <control type="label"><left>244</left><top>84</top><width>778</width><height>28</height><font>font10</font><textcolor>99EEF3F6</textcolor>
                         <label>$INFO[ListItem.Property(line2)]</label>
                     </control>
                     <control type="label">
-                        <left>1028</left><top>0</top><width>220</width><height>132</height>
+                        <left>1042</left><top>0</top><width>220</width><height>132</height>
                         <font>Mono26</font><textcolor>FF38BDF8</textcolor>
                         <align>right</align><aligny>center</aligny>
                         <label>$INFO[ListItem.Property(watched_percent)]</label>
                         <visible>!String.IsEmpty(ListItem.Property(watched_percent))</visible>
                     </control>
-                    <control type="image"><left>32</left><top>131</top><width>1216</width><height>1</height><texture colordiffuse="12FFFFFF">white.png</texture></control>
+                    <control type="image"><left>32</left><top>131</top><width>1230</width><height>1</height><texture colordiffuse="12FFFFFF">white.png</texture></control>
                 </focusedlayout>
             </control>
 

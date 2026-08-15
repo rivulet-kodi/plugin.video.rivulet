@@ -63,13 +63,16 @@ def _status_text(auth):
     result onInit() already fetched for `show_library`: uses the shared
     "Logged in as <email/name/?>" string (30022), the same one
     `lib.ui.views.login()` shows as a post-login notification; the
-    logged-out case uses its own string id (30190)."""
+    logged-out case uses its own string id (30190). Both states are
+    prefixed with a `[COLOR]`-tinted `●` indicator dot per the design's
+    status pill (font10 is NotoSans and covers U+25CF; Mono26 does not)."""
     from lib.ui.compat import L
 
     if not auth:
-        return L(30190)
+        return '[COLOR 57EEF3F6]\u25cf[/COLOR] %s' % L(30190)
     user = auth.get('user') or {}
-    return L(30022) % (user.get('email') or user.get('name') or '?')
+    text = L(30022) % (user.get('email') or user.get('name') or '?')
+    return '[COLOR FF38BDF8]\u25cf[/COLOR] %s' % text
 
 
 class HomeWindow(BaseWindow):

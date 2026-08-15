@@ -153,7 +153,8 @@ def test_status_text_reports_email_when_authenticated_with_email(load_homewindow
 
     text = ctx.homewindow._status_text({'authKey': 'x', 'user': {'email': 'me@example.com', 'name': 'Me'}})
 
-    assert text == 'Logged in as me@example.com'
+    assert text == '[COLOR FF38BDF8]\u25cf[/COLOR] Logged in as me@example.com'
+    assert 'Logged in as me@example.com' in text
 
 
 def test_status_text_falls_back_to_name_when_email_is_absent(load_homewindow):
@@ -161,7 +162,7 @@ def test_status_text_falls_back_to_name_when_email_is_absent(load_homewindow):
 
     text = ctx.homewindow._status_text({'authKey': 'x', 'user': {'name': 'Me'}})
 
-    assert text == 'Logged in as Me'
+    assert text == '[COLOR FF38BDF8]\u25cf[/COLOR] Logged in as Me'
 
 
 def test_status_text_reports_not_logged_in_when_auth_is_none(load_homewindow):
@@ -169,7 +170,8 @@ def test_status_text_reports_not_logged_in_when_auth_is_none(load_homewindow):
 
     text = ctx.homewindow._status_text(None)
 
-    assert text == 'STR30190'
+    assert text == '[COLOR 57EEF3F6]\u25cf[/COLOR] STR30190'
+    assert 'STR30190' in text
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +189,7 @@ def test_oninit_shows_library_row_when_authenticated(load_homewindow, monkeypatc
     actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
     assert actions == ['discover', 'search', 'library', 'addons', 'settings']
     assert win.getControl(ctx.homewindow.BACKGROUND).image == ctx.compat.ADDON_FANART
-    assert win.getControl(ctx.homewindow.STATUS_LABEL).label == 'Logged in as ?'
+    assert win.getControl(ctx.homewindow.STATUS_LABEL).label == '[COLOR FF38BDF8]\u25cf[/COLOR] Logged in as ?'
     assert win.getFocusId() == ctx.homewindow.LIST
 
 
@@ -200,7 +202,7 @@ def test_oninit_hides_library_row_when_not_authenticated(load_homewindow, monkey
 
     actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
     assert 'library' not in actions
-    assert win.getControl(ctx.homewindow.STATUS_LABEL).label == 'STR30190'
+    assert win.getControl(ctx.homewindow.STATUS_LABEL).label == '[COLOR 57EEF3F6]\u25cf[/COLOR] STR30190'
 
 
 def test_oninit_sets_status_label_to_email_when_authenticated_with_email(load_homewindow, monkeypatch):
@@ -211,7 +213,7 @@ def test_oninit_sets_status_label_to_email_when_authenticated_with_email(load_ho
 
     win.onInit()
 
-    assert win.getControl(ctx.homewindow.STATUS_LABEL).label == 'Logged in as me@example.com'
+    assert win.getControl(ctx.homewindow.STATUS_LABEL).label == '[COLOR FF38BDF8]\u25cf[/COLOR] Logged in as me@example.com'
 
 
 def test_oninit_sets_status_label_to_name_when_email_is_absent(load_homewindow, monkeypatch):
@@ -222,7 +224,7 @@ def test_oninit_sets_status_label_to_name_when_email_is_absent(load_homewindow, 
 
     win.onInit()
 
-    assert win.getControl(ctx.homewindow.STATUS_LABEL).label == 'Logged in as Me'
+    assert win.getControl(ctx.homewindow.STATUS_LABEL).label == '[COLOR FF38BDF8]\u25cf[/COLOR] Logged in as Me'
 
 
 # ---------------------------------------------------------------------------

@@ -12,11 +12,19 @@
             <animation type="WindowClose" reversible="false">
                 <effect type="fade" start="100" end="0" time="160" />
             </animation>
-            <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="FF141414">white.png</texture></control>
-            <control type="image" id="30000"><width>1920</width><height>1080</height><texture colordiffuse="FF3A3A3A"></texture><aspectratio>scale</aspectratio></control>
-            <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="CC000000">white.png</texture></control>
-            <!-- Left-to-right legibility scrim (design: solid to 44% of the
-                 width, 62% opacity at x=1190, 38% at the right edge). A solid
+            <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="FF0A0C0E">white.png</texture></control>
+            <!-- Backdrop dim. The design (line 40) is filter:brightness(.5),
+                 and colordiffuse multiplies, so .5*255 = 0x80. This was
+                 FF3A3A3A (0.23) inherited from the pre-1a skin, sitting under
+                 a CC000000 80% black sheet that 1a does not have at all -
+                 together they rendered the fanart 2.1x darker than the
+                 reference. Kodi cannot do the design's saturate(.8); the
+                 multiply is the whole effect. -->
+            <control type="image" id="30000"><width>1920</width><height>1080</height><texture colordiffuse="FF808080"></texture><aspectratio>scale</aspectratio></control>
+            <!-- Left-to-right legibility scrim. Design line 41: solid to 44%
+                 of the width, .86 opacity at 62% (x=1190), .62 at the right
+                 edge. fade_h.png bakes exactly those stops (alpha 255 -> 219
+                 -> 158). A solid
                  FF0A0C0E panel covers the menu column to x=845, then a single
                  fade_h.png ramp carries the falloff across the remaining
                  1075px. fade_h.png is white with a baked alpha ramp, so

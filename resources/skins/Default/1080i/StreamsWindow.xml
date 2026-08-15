@@ -12,8 +12,11 @@
             <animation type="WindowClose" reversible="false">
                 <effect type="fade" start="100" end="0" time="160" />
             </animation>
-            <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="FF0F1214">white.png</texture></control>
-            <control type="image" id="30000"><width>1920</width><height>1080</height><texture colordiffuse="FF3A3A3A"></texture><aspectratio>scale</aspectratio></control>
+            <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="FF0A0C0E">white.png</texture></control>
+            <!-- Design line 218 is filter:brightness(.3); colordiffuse
+                 multiplies, so .3*255 = 0x4D. Was FF3A3A3A (.23), inherited
+                 from the pre-1a skin. -->
+            <control type="image" id="30000"><width>1920</width><height>1080</height><texture colordiffuse="FF4D4D4D"></texture><aspectratio>scale</aspectratio></control>
             <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="D60A0C0E">white.png</texture></control>
             <control type="image"><width>1150</width><height>1080</height><texture colordiffuse="F70A0C0E">white.png</texture></control>
 
@@ -59,7 +62,7 @@
             <control type="label">
                 <left>512</left><top>150</top><width>400</width><height>52</height>
                 <font>font13</font><textcolor>FFFFFFFF</textcolor><aligny>center</aligny>
-                <label>[B]Sources[/B]</label>
+                <label>[B]$ADDON[plugin.video.rivulet 30041][/B]</label>
             </control>
 
             <control type="list" id="30002">
@@ -70,13 +73,28 @@
                     <control type="image"><width>1312</width><height>1</height><texture colordiffuse="12FFFFFF">white.png</texture></control>
 
                     <control type="image">
-                        <left>30</left><top>35</top><width>112</width><height>48</height>
+                        <left>30</left><top>35</top><width>112</width><height>1</height>
+                        <visible>!String.IsEmpty(ListItem.Property(quality))</visible>
+                        <texture colordiffuse="$INFO[ListItem.Property(quality_color)]">white.png</texture>
+                    </control>
+                    <control type="image">
+                        <left>30</left><top>82</top><width>112</width><height>1</height>
+                        <visible>!String.IsEmpty(ListItem.Property(quality))</visible>
+                        <texture colordiffuse="$INFO[ListItem.Property(quality_color)]">white.png</texture>
+                    </control>
+                    <control type="image">
+                        <left>30</left><top>35</top><width>1</width><height>48</height>
+                        <visible>!String.IsEmpty(ListItem.Property(quality))</visible>
+                        <texture colordiffuse="$INFO[ListItem.Property(quality_color)]">white.png</texture>
+                    </control>
+                    <control type="image">
+                        <left>141</left><top>35</top><width>1</width><height>48</height>
                         <visible>!String.IsEmpty(ListItem.Property(quality))</visible>
                         <texture colordiffuse="$INFO[ListItem.Property(quality_color)]">white.png</texture>
                     </control>
                     <control type="label">
                         <left>30</left><top>35</top><width>112</width><height>48</height>
-                        <font>Mono26</font><textcolor>FF1A1400</textcolor><align>center</align><aligny>center</aligny>
+                        <font>Mono26</font><textcolor>$INFO[ListItem.Property(quality_color)]</textcolor><align>center</align><aligny>center</aligny>
                         <visible>!String.IsEmpty(ListItem.Property(quality))</visible>
                         <label>$INFO[ListItem.Property(quality)]</label>
                     </control>
@@ -128,7 +146,6 @@
                     <control type="label">
                         <left>1152</left><top>0</top><width>130</width><height>118</height>
                         <font>Mono26</font><textcolor>$INFO[ListItem.Property(cache_color)]</textcolor><align>right</align><aligny>center</aligny>
-                        <visible>!String.IsEmpty(ListItem.Property(cache_state))</visible>
                         <label>$INFO[ListItem.Property(cache_state)]</label>
                     </control>
                 </itemlayout>
@@ -195,7 +212,6 @@
                     <control type="label">
                         <left>1152</left><top>0</top><width>130</width><height>118</height>
                         <font>Mono26</font><textcolor>$INFO[ListItem.Property(cache_color)]</textcolor><align>right</align><aligny>center</aligny>
-                        <visible>!String.IsEmpty(ListItem.Property(cache_state))</visible>
                         <label>$INFO[ListItem.Property(cache_state)]</label>
                     </control>
                 </focusedlayout>

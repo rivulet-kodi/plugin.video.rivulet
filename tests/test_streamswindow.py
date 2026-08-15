@@ -264,8 +264,11 @@ def test_oninit_missing_discrete_fields_are_empty_strings_not_omitted(load_strea
     win.onInit()
 
     item = win.getControl(ctx.streamswindow.LIST).items[0]
-    for key in ('quality', 'release', 'flags', 'provider', 'size', 'seeders', 'cache_state'):
+    for key in ('quality', 'release', 'flags', 'provider', 'size', 'seeders'):
         assert item.getProperty(key) == ''
+    # cache_state is the one exception: a stream with no cache verdict
+    # renders a dim em-dash rather than a blank cell (streaminfo.stream_fields()).
+    assert item.getProperty('cache_state') == '\u2014'
 
 
 def test_oninit_renders_sources_addons_and_cached_summary_counts(load_streamswindow):

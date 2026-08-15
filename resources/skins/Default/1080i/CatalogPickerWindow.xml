@@ -15,7 +15,7 @@
             <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="FF0A0C0E">white.png</texture></control>
             <control type="image"><left>96</left><top>60</top><width>34</width><height>34</height><texture>logo.png</texture><aspectratio>keep</aspectratio></control>
             <control type="label"><left>150</left><top>60</top><width>700</width><height>34</height><font>font10</font><textcolor>4DEEF3F6</textcolor>
-                <label>RIVULET / DISCOVER</label>
+                <label>RIVULET / $ADDON[plugin.video.rivulet 30000]</label>
             </control>
             <control type="label"><right>96</right><top>60</top><width>450</width><height>34</height><font>font10</font><textcolor>80EEF3F6</textcolor><align>right</align>
                 <label>$INFO[Container(30002).CurrentItem]/$INFO[Container(30002).NumItems]</label>

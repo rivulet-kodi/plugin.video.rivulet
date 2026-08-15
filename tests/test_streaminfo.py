@@ -770,22 +770,27 @@ def test_stream_fields_cached_false_is_orange_dl_state():
     assert fields["cache_color"] == "FFFB923C"
 
 
-def test_stream_fields_unknown_cache_state_is_empty_string_not_fabricated():
+def test_stream_fields_no_cache_info_is_dim_em_dash_not_fabricated():
+    # Design line 280: a stream with no cache verdict draws a dim em-dash
+    # rather than a blank cell, so the column stays visually aligned
+    # instead of leaving a hole - never a fabricated CACHED/DL guess.
     info = _info(service="", cached=None)
     fields = stream_fields(info)
-    assert fields["cache_state"] == ""
+    assert fields["cache_state"] == "\u2014"
     assert fields["cache_color"] == "4DEEF3F6"
 
 
-def test_stream_fields_missing_size_seeders_and_cache_are_all_empty_strings():
-    # A stream with nothing parseable for size/seeders/cache must report
-    # '' for each - never a fabricated placeholder - so the skin's
-    # !String.IsEmpty(...) guard can collapse the column cleanly.
+def test_stream_fields_missing_size_and_seeders_are_empty_strings():
+    # A stream with nothing parseable for size/seeders must report ''
+    # for each - never a fabricated placeholder - so the skin's
+    # !String.IsEmpty(...) guard can collapse those columns cleanly.
+    # cache_state is the one exception - see
+    # test_stream_fields_no_cache_info_is_dim_em_dash_not_fabricated.
     info = _info(size_text="", seeders=None, service="", cached=None)
     fields = stream_fields(info)
     assert fields["size"] == ""
     assert fields["seeders"] == ""
-    assert fields["cache_state"] == ""
+    assert fields["cache_state"] == "\u2014"
 
 
 def test_stream_fields_seeders_is_a_plain_decimal_string_no_marker():
@@ -798,11 +803,13 @@ def test_stream_fields_seeders_is_a_plain_decimal_string_no_marker():
     assert "\u25b2" not in fields["seeders"]
 
 
-def test_stream_fields_none_info_returns_every_field_empty():
+def test_stream_fields_none_info_cache_state_is_dim_em_dash():
+    # Every other field is empty for a None info, but cache_state is
+    # never '' - see stream_fields()'s own docstring.
     fields = stream_fields(None)
     assert fields == {
         "quality": "", "quality_color": "C7EEF3F6", "release": "", "flags": "",
-        "provider": "", "size": "", "seeders": "", "cache_state": "", "cache_color": "4DEEF3F6",
+        "provider": "", "size": "", "seeders": "", "cache_state": "\u2014", "cache_color": "4DEEF3F6",
     }
 
 
