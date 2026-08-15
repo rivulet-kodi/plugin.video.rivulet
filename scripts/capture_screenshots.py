@@ -137,9 +137,30 @@ def _raw_size(path):
     return int(out[0]), int(out[1])
 
 
+def optimise(path):
+    """Shrink `path` losslessly, in place.
+
+    These 11 images ship inside every addon zip and are served on every
+    page load of the project site, so the bytes are worth reclaiming.
+    Both tools are optional - a machine without them still produces
+    correct, just larger, output.
+    """
+    if shutil.which("optipng"):
+        subprocess.run(["optipng", "-quiet", "-o5", path], check=False)
+    if shutil.which("zopflipng"):
+        # zopflipng cannot rewrite in place; -y overwrites the temp copy.
+        tmp = path + ".zopfli"
+        if subprocess.run(["zopflipng", "-y", path, tmp], check=False,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+            if os.path.getsize(tmp) < os.path.getsize(path):
+                os.replace(tmp, path)
+            else:
+                os.remove(tmp)
+
+
 def curate(raw_path, out_name, redact=False, width=1400):
-    """Optionally black out the account-email box, downscale, and drop
-    the result into artwork/screenshots/<out_name>.png."""
+    """Optionally black out the account-email box, downscale, optimise,
+    and drop the result into artwork/screenshots/<out_name>.png."""
     if raw_path is None:
         return
     cmd = ["magick", raw_path]
@@ -152,14 +173,85 @@ def curate(raw_path, out_name, redact=False, width=1400):
     dst = os.path.join(OUT_DIR, f"{out_name}.png")
     cmd += ["-resize", f"{width}x", "-strip", "-colors", "256", dst]
     subprocess.run(cmd, check=True)
+    optimise(dst)
 
 
-def goto_home(rpc, delay=2.5):
-    """(Re)launch the addon - always lands back on HomeWindow, regardless
-    of how deep the previous walk went. Cheap and idempotent, so it's the
-    reliable way to reset navigation state between screens."""
+#: Kodi reports a distinct window id per screen over JSON-RPC. Its labels
+#: for the addon's own dialogs are meaningless (Kodi maps custom ids onto
+#: its own table, so 13001 reads as "Immediate HDD spindown"), but the ids
+#: themselves are stable and are what makes this walk deterministic.
+WINDOW_KODI_HOME = 10000
+WINDOW_RIVULET_HOME = 13000
+
+
+def current_window(rpc):
+    result = rpc.call("GUI.GetProperties", {"properties": ["currentwindow"]}) or {}
+    return ((result.get("result") or {}).get("currentwindow") or {}).get("id")
+
+
+def goto_home(rpc, delay=2.0):
+    """Return to Rivulet's HomeWindow, verified rather than assumed.
+
+    `Addons.ExecuteAddon` re-enters the addon but does NOT dismiss what is
+    already open, and every Rivulet screen is a WindowXMLDialog, so Kodi
+    keeps routing input to whichever is topmost. Backing out a fixed
+    number of times is not enough either - the walk used to drift a screen
+    deeper on each leg, and one run typed the search query into Kodi's own
+    Server URL field. So: back out until Kodi's own home is actually on
+    screen, then relaunch and wait until the addon's Home actually is.
+    """
+    for player in (rpc.call("Player.GetActivePlayers") or {}).get("result") or []:
+        rpc.call("Player.Stop", {"playerid": player["playerid"]})
+        time.sleep(1.5)
+    for _ in range(15):
+        if current_window(rpc) == WINDOW_KODI_HOME:
+            break
+        rpc.call("Input.Back")
+        time.sleep(0.5)
+    else:
+        raise SystemExit("could not get back to Kodi's home screen")
     rpc.call("Addons.ExecuteAddon", {"addonid": "plugin.video.rivulet"})
-    time.sleep(delay)
+    for _ in range(24):
+        time.sleep(0.5)
+        if current_window(rpc) == WINDOW_RIVULET_HOME:
+            break
+    else:
+        raise SystemExit("Rivulet's HomeWindow never came up")
+    # Opening the addon fires a "Logged in as <email>" toast. It is not
+    # covered by EMAIL_BOX_FRACTIONS (that only masks HomeWindow's status
+    # pill) and it WILL be captured by any screenshot taken too soon after
+    # a relaunch - one run leaked an address into search-results.png. Wait
+    # it out rather than trying to mask it.
+    time.sleep(max(delay, 6.0))
+
+
+#: HomeWindow's rows, in order, as `lib.ui.homewindow._MENU` defines them.
+#: Library only appears when logged in, which the capture machine is.
+HOME_MOVIES, HOME_SERIES, HOME_ANIME, HOME_SEARCH, HOME_LIBRARY, HOME_ADDONS = range(6)
+
+#: Rows to step down in Kodi's "Video add-ons" folder to reach Rivulet.
+#: The folder lists ".." first, then user video plugins sorted by name;
+#: on this machine that is ".." / Rai Play / Rivulet. Confirmed against
+#: `Addons.GetAddons(type=xbmc.python.pluginsource, content=video)`
+#: rather than guessed - re-check it if the capture machine's installed
+#: add-ons change.
+RIVULET_BROWSER_ROW = 2
+
+
+def select_row(rpc, index):
+    """Focus Home's row `index` and open it.
+
+    Counts DOWN ONLY, from the freshly-built HomeWindow `goto_home()`
+    guarantees, whose selection starts at row 0. It must not try to
+    "return to the top" first: Kodi's lists WRAP, so Input.Up from row 0
+    lands on the last row, and a fixed run of Ups walks the selection
+    somewhere unpredictable - which is how one capture opened Kodi's addon
+    settings dialog (window 10140) instead of the Movies picker.
+    """
+    for _ in range(index):
+        rpc.call("Input.Down")
+        time.sleep(0.3)
+    rpc.call("Input.Select")
 
 
 def main():
@@ -171,70 +263,63 @@ def main():
     goto_home(rpc, delay=3.0)
     curate(take_screenshot(rpc, "home"), "home", redact=True)
 
-    rpc.call("Input.Select")  # Discover
-    time.sleep(2.5)
+    select_row(rpc, HOME_MOVIES)
+    time.sleep(3.0)
     curate(take_screenshot(rpc, "discover_catalogs"), "discover-catalogs")
 
     rpc.call("Input.Select")  # first catalog -> coverflow
-    time.sleep(3.0)
+    time.sleep(3.5)
     curate(take_screenshot(rpc, "discover_coverflow"), "discover-coverflow")
 
     rpc.call("Input.Select")  # a title -> detail + streams
-    time.sleep(2.5)
+    time.sleep(3.5)
     curate(take_screenshot(rpc, "detail_streams"), "detail-streams")
 
-    rpc.call("Input.Select")  # a stream -> resolving dialog
+    rpc.call("Input.Select")  # a stream -> the "Preparing stream" dialog
     time.sleep(3.0)
     curate(take_screenshot(rpc, "resolving_stream"), "resolving-stream")
     rpc.call("Input.Back")  # cancel - real resolution can take minutes/fail
+    time.sleep(1.5)
 
     goto_home(rpc)
-    rpc.call("Input.Down")  # Discover -> Search
-    time.sleep(0.4)
-    rpc.call("Input.Select")
-    time.sleep(2.0)
+    select_row(rpc, HOME_SEARCH)
+    time.sleep(2.5)
     curate(take_screenshot(rpc, "search"), "search")
 
     rpc.call("Input.Select")  # open keyboard
     time.sleep(1.5)
     rpc.call("Input.SendText", {"text": "star wars", "done": True})
-    time.sleep(8.0)
+    # The fan-out queries every installed addon; 8s was not enough and the
+    # shot caught the spinner instead of results.
+    time.sleep(16.0)
     curate(take_screenshot(rpc, "search_results"), "search-results")
 
     goto_home(rpc)
-    rpc.call("Input.Down")
-    time.sleep(0.3)
-    rpc.call("Input.Down")  # Discover -> Search -> Library
-    time.sleep(0.4)
-    rpc.call("Input.Select")
-    time.sleep(2.0)
+    select_row(rpc, HOME_LIBRARY)
+    time.sleep(2.5)
     curate(take_screenshot(rpc, "library"), "library")
 
-    goto_home(rpc)  # focus persists on Library from the run above
-    rpc.call("Input.Down")  # Library -> Addons
-    time.sleep(0.4)
-    rpc.call("Input.Select")
-    time.sleep(2.0)
+    goto_home(rpc)
+    select_row(rpc, HOME_ADDONS)
+    time.sleep(2.5)
     curate(take_screenshot(rpc, "addons_manager"), "addons-manager")
 
-    # Exit the addon entirely, then Kodi's own native Add-ons browser.
-    rpc.call("Input.Back")  # close AddonsWindow -> Home
+    # Kodi's own add-on browser. Jump straight to the Video add-ons folder
+    # by path rather than counting rows down the category list - that count
+    # is a property of the user's Kodi install, and the old fixed 11 landed
+    # in "Audio encoders" here.
+    rpc.call("Input.Back")   # close AddonsWindow -> Rivulet Home
     time.sleep(1.0)
-    rpc.call("Input.Back")  # close HomeWindow -> Kodi shell
+    rpc.call("Input.Back")   # close Rivulet -> Kodi shell
     time.sleep(1.5)
-    rpc.call("GUI.ActivateWindow", {"window": "addonbrowser"})
-    time.sleep(1.2)
-    rpc.call("Input.Select")  # My add-ons
-    time.sleep(1.2)
-    for _ in range(11):  # ".." -> ... -> Video add-ons (alphabetical category list)
+    rpc.call("GUI.ActivateWindow",
+             {"window": "addonbrowser", "parameters": ["addons://user/xbmc.addon.video/"]})
+    time.sleep(2.0)
+    # Sorted by name with ".." first, so Rivulet sits at RIVULET_BROWSER_ROW.
+    # Verified against Addons.GetAddons rather than assumed.
+    for _ in range(RIVULET_BROWSER_ROW):
         rpc.call("Input.Down")
-        time.sleep(0.15)
-    rpc.call("Input.Select")
-    time.sleep(1.2)
-    rpc.call("Input.Down")  # ".." -> first video addon
-    time.sleep(0.2)
-    rpc.call("Input.Down")  # -> Rivulet (alphabetical: .. , Rai Play, Rivulet, ...)
-    time.sleep(0.3)
+        time.sleep(0.25)
     curate(take_screenshot(rpc, "kodi_video_addons"), "kodi-addon-browser")
 
     rpc.call("Input.Select")  # addon info dialog
