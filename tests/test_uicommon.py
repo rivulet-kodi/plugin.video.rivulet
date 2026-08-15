@@ -197,7 +197,7 @@ def test_open_window_builds_against_the_skin_quadruple_and_forwards_extra_args(l
 
     result = ctx.uicommon.open_window(DummyWindow, 'Some.xml', 'extra-positional', flag=True)
 
-    assert captured['args'] == ('Some.xml', '/addon/path', 'Default', '720p', 'extra-positional')
+    assert captured['args'] == ('Some.xml', '/addon/path', 'Default', '1080i', 'extra-positional')
     assert captured['kwargs'] == {'flag': True}
     assert isinstance(result, DummyWindow)
 
@@ -213,7 +213,7 @@ def test_open_window_with_no_extra_args_passes_only_the_skin_quadruple(load_uico
 
     ctx.uicommon.open_window(DummyWindow, 'Some.xml')
 
-    assert captured['args'] == ('Some.xml', '/addon/path', 'Default', '720p')
+    assert captured['args'] == ('Some.xml', '/addon/path', 'Default', '1080i')
     assert captured['kwargs'] == {}
 
 
@@ -305,7 +305,7 @@ def test_close_windows_for_playback_a_broken_close_does_not_block_the_rest(load_
 
 
 def _make_stack_window(uicommon_mod):
-    return uicommon_mod.BaseWindow('Some.xml', '/addon/path', 'Default', '720p')
+    return uicommon_mod.BaseWindow('Some.xml', '/addon/path', 'Default', '1080i')
 
 
 def test_domodal_pushes_itself_then_pops_on_a_normal_return(load_uicommon, monkeypatch):
@@ -398,7 +398,7 @@ def test_domodal_does_not_reopen_when_kodi_is_shutting_down(load_uicommon, monke
 def test_basewindow_onaction_back_actions_close_the_window(load_uicommon, action_id):
     ctx = load_uicommon()
     import xbmcgui
-    win = ctx.uicommon.BaseWindow('Some.xml', '/addon/path', 'Default', '720p')
+    win = ctx.uicommon.BaseWindow('Some.xml', '/addon/path', 'Default', '1080i')
 
     win.onAction(xbmcgui.Action(action_id))
 
@@ -408,7 +408,7 @@ def test_basewindow_onaction_back_actions_close_the_window(load_uicommon, action
 def test_basewindow_onaction_non_back_action_does_not_close(load_uicommon):
     ctx = load_uicommon()
     import xbmcgui
-    win = ctx.uicommon.BaseWindow('Some.xml', '/addon/path', 'Default', '720p')
+    win = ctx.uicommon.BaseWindow('Some.xml', '/addon/path', 'Default', '1080i')
 
     win.onAction(xbmcgui.Action(1))  # ACTION_MOVE_LEFT-ish, not a back action
 

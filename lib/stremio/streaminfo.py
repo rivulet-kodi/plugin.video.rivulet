@@ -931,6 +931,70 @@ def format_label(info, include_addon=True):
     return ' \u00b7 '.join(part for part in (head, tail) if part)
 
 
+# ---------------------------------------------------------------------------
+# stream_fields
+# ---------------------------------------------------------------------------
+
+# StreamsWindow.xml's quality badge tints itself via
+# `ListItem.Property(quality_color)`, an ARGB `colordiffuse` hex, not a
+# BBcode colour name - translated from the SAME `_RESOLUTION_COLORS`
+# mapping `format_label()` uses above, so the badge and the packed label
+# never disagree about which colour a resolution gets. Only 2160p/1080p
+# get a distinct colour in the design; every other resolution (720p,
+# 480p, unknown) falls back to a dim neutral tint.
+_QUALITY_COLOR_HEX = {
+    'gold': 'FFFFD700',
+    'lime': 'FF4ADE80',
+    'cyan': 'C7EEF3F6',
+    'white': 'C7EEF3F6',
+}
+
+
+def stream_fields(info):
+    """Discrete, display-ready per-column fields for StreamsWindow's row
+    layout - everything `format_label()` packs into one BBcode string,
+    split back out so the skin can lay each piece out in its own column
+    (the packed label/details pair above are unchanged and still used
+    for `ListItem.Label`/`Label2`). Every value is a plain string ready
+    for `ListItem.setProperties()`; a field with nothing to show is ''
+    rather than omitted, so the skin's own
+    `!String.IsEmpty(ListItem.Property(...))` visibility guard is
+    always well-defined.
+
+    `release` is `info['source']` (Remux/BluRay/WEB-DL/...), not
+    `info['release']` (scene edition/DV-profile tags like
+    Extended/Hybrid/P8) - the design's big bold row label is the
+    former. `flags` joins codec + HDR/DV + audio tags, mirroring
+    `format_label()`'s own codec/HDR grouping with audio appended.
+    """
+    info = info or {}
+
+    codec_hdr_bits = ([info['codec']] if info.get('codec') else []) + list(info.get('hdr') or [])
+    flags_bits = codec_hdr_bits + list(info.get('audio') or [])
+
+    seeders = info.get('seeders')
+    cached = info.get('cached')
+    if cached is True:
+        cache_state, cache_color = 'CACHED', 'FF4ADE80'
+    elif cached is False:
+        cache_state, cache_color = 'DL', 'FFFB923C'
+    else:
+        cache_state, cache_color = '', '4DEEF3F6'
+
+    resolution = info.get('resolution') or ''
+    return {
+        'quality': resolution,
+        'quality_color': _QUALITY_COLOR_HEX.get(_RESOLUTION_COLORS.get(resolution, 'white'), 'C7EEF3F6'),
+        'release': info.get('source') or '',
+        'flags': ' \u00b7 '.join(flags_bits),
+        'provider': info.get('addon') or '',
+        'size': info.get('size_text') or '',
+        'seeders': str(seeders) if seeders is not None else '',
+        'cache_state': cache_state,
+        'cache_color': cache_color,
+    }
+
+
 def format_plot(info):
     """Multi-line plot text for the streams view's info panel."""
     info = info or {}

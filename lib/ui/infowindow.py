@@ -1,7 +1,7 @@
 """ShowcaseWindow: a fullscreen coverflow overlay for one catalog page.
 
 Ports the reference addon's `platformcode/xbmc_info_window.py::InfoWindow`
-(`resources/skins/Default/720p/InfoWindow.xml`) to Rivulet/Stremio metas:
+(`resources/skins/Default/1080i/InfoWindow.xml`) to Rivulet/Stremio metas:
 a caller opens it via `open_showcase()` (below) with one already-fetched
 catalog page - `catalogpicker.CatalogPickerWindow._open_catalog()`,
 `searchwindow.SearchWindow._run_search()`,
@@ -21,6 +21,9 @@ Control ids mirror the reference addon's InfoWindow 1:1 (see
     LOADING    = 30001  busy indicator, hidden once items are loaded
     SELECT     = 30002  horizontal fixedlist - the coverflow itself
     CLOSE      = 30003  close button
+HEADER = 30100 is a Rivulet-only addition (the reference addon has no
+breadcrumb) for the header wordmark label, so `onInit()` can set its
+`RIVULET [/ CATALOG]` text - see `_header_label()`.
 
 The coverflow's visual rendering (ShowcaseWindow.xml's fixedlist/
 focusedlayout, the background crossfade) is Kodi-skin-engine-only and
@@ -37,6 +40,7 @@ BACKGROUND = 30000
 LOADING = 30001
 SELECT = 30002
 CLOSE = 30003
+HEADER = 30100
 
 #: Settle time before a focus change fires its meta fetch. Scrolling through
 #: a sparse catalog would otherwise spawn one fetch per item passed over, and
@@ -86,7 +90,32 @@ def _item_properties(meta):
         'rating': meta.get('imdbRating') or '',
         'plot': meta.get('description') or '',
         'year': meta.get('releaseInfo') or date_only or '',
+        'runtime': meta.get('runtime') or '',
     }
+
+
+#: The header wordmark's separator, at the design's rgba(238,243,246,.18) -
+#: not one of the addon's named text tints (those stop at .2/33), computed
+#: the same way here.
+_HEADER_SEPARATOR_COLOR = '2EEEF3F6'
+_HEADER_TITLE_COLOR = '9EEEF3F6'
+
+
+def _header_label(catalog_title=None):
+    """Build the inline-markup ShowcaseWindow.xml's header wordmark label
+    renders: bare `RIVULET` when `catalog_title` is falsy (every caller
+    that predates `open_showcase(metas, catalog_title=...)`), or
+    `RIVULET / <TITLE>` once a caller hands over its own catalog/section
+    title - see `open_showcase()`.
+
+    Pure helper - no xbmc - so it is trivially unit-testable on its own.
+    """
+    if not catalog_title:
+        return '[COLOR 57EEF3F6]RIVULET[/COLOR]'
+    return (
+        '[COLOR 57EEF3F6]RIVULET[/COLOR] [COLOR %s]/[/COLOR] [COLOR %s]%s[/COLOR]'
+        % (_HEADER_SEPARATOR_COLOR, _HEADER_TITLE_COLOR, catalog_title.upper())
+    )
 
 
 class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
@@ -97,6 +126,9 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         super().__init__(*args, **kwargs)
         self.metas = []
         self.selected = None
+        #: catalog/section title for the header breadcrumb - None keeps
+        #: the header a bare "RIVULET", see `_header_label()`/`start()`.
+        self.catalog_title = None
         #: fanart last pushed to BACKGROUND - lets onAction() skip
         #: setImage() when a keypress doesn't actually change focus (e.g.
         #: the enrich worker's Action(noop) wake-up), the per-keypress
@@ -117,13 +149,18 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         #: fired yet - superseded (and cancelled) by the next focus change.
         self._enrich_timer = None
 
-    def start(self, metas):
+    def start(self, metas, catalog_title=None):
         """doModal() with `metas` (a list of Stremio meta dicts) loaded as
         the coverflow's items; returns the selected meta, or None if the
         window closed without a selection. An empty `metas` never opens
-        the modal at all and returns None immediately."""
+        the modal at all and returns None immediately.
+
+        `catalog_title`, if given, renders as a "RIVULET / <TITLE>"
+        breadcrumb in the header - see `_header_label()`. Left as None,
+        the header stays the bare "RIVULET" it always was."""
         self.metas = list(metas or [])
         self.selected = None
+        self.catalog_title = catalog_title
         self._reset_enrich_state()
         if not self.metas:
             return None
@@ -143,6 +180,7 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
     def onInit(self):
         if not self.metas:
             return
+        self.getControl(HEADER).setLabel(_header_label(self.catalog_title))
         # Computed once per meta and reused for the background fallback
         # below - _make_item() used to call _item_properties() again just
         # for metas[0], recomputing what this loop already has in hand.
@@ -448,7 +486,7 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         )
 
 
-def open_showcase(metas):
+def open_showcase(metas, catalog_title=None):
     """Build and run a ShowcaseWindow over `metas`; returns the selected
     meta dict, or None if the user closed the overlay without picking one
     (or `metas` was empty). Every caller already wraps this call in its own
@@ -457,12 +495,15 @@ def open_showcase(metas):
     exception from .start() keeps propagating unchanged here - this
     only guarantees
     the window is closed first (it may not have had a chance to self-close,
-    e.g. if onInit() or a mid-modal callback raised)."""
+    e.g. if onInit() or a mid-modal callback raised).
+
+    `catalog_title`, if given, becomes the header's "RIVULET / <TITLE>"
+    breadcrumb - see `ShowcaseWindow.start()`."""
     from lib.ui.compat import ADDON
     path = ADDON.getAddonInfo('path')
-    win = ShowcaseWindow('ShowcaseWindow.xml', path, 'Default', '720p')
+    win = ShowcaseWindow('ShowcaseWindow.xml', path, 'Default', '1080i')
     try:
-        return win.start(metas)
+        return win.start(metas, catalog_title=catalog_title)
     finally:
         try:
             win.close()

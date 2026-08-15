@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<window>
+    <depth>0.52</depth>
+    <coordinates><left>0</left><top>0</top></coordinates>
+    <controls>
+        <control type="group">
+            <left>0</left><top>0</top>
+            <visible>!Player.HasVideo</visible>
+            <animation type="WindowOpen" reversible="false">
+                <effect type="fade" delay="0" end="100" time="200" />
+            </animation>
+            <animation type="WindowClose" reversible="false">
+                <effect type="fade" start="100" end="0" time="160" />
+            </animation>
+            <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="FF0A0C0E">white.png</texture></control>
+            <control type="image"><left>96</left><top>60</top><width>34</width><height>34</height><texture>logo.png</texture><aspectratio>keep</aspectratio></control>
+            <control type="label"><left>150</left><top>60</top><width>700</width><height>34</height><font>font10</font><textcolor>4DEEF3F6</textcolor>
+                <label>RIVULET / DISCOVER</label>
+            </control>
+            <control type="label"><right>96</right><top>60</top><width>450</width><height>34</height><font>font10</font><textcolor>80EEF3F6</textcolor><align>right</align>
+                <label>$INFO[Container(30002).CurrentItem]/$INFO[Container(30002).NumItems]</label>
+            </control>
+            <control type="list" id="30002">
+                <left>96</left><top>165</top><width>1728</width><height>708</height>
+                <onleft>30002</onleft><onright>30002</onright>
+                <pagecontrol>30010</pagecontrol>
+                <itemlayout height="118">
+                    <control type="label"><left>32</left><top>24</top><width>1664</width><height>36</height><font>font13</font><textcolor>C7EEF3F6</textcolor>
+                        <label>$INFO[ListItem.Label]</label>
+                    </control>
+                    <control type="label"><left>32</left><top>66</top><width>1664</width><height>30</height><font>font10</font><textcolor>6BEEF3F6</textcolor>
+                        <label>$INFO[ListItem.Label2]</label>
+                    </control>
+                </itemlayout>
+                <focusedlayout height="118">
+                    <control type="image"><width>1728</width><height>118</height><texture colordiffuse="FF1B2126">white.png</texture></control>
+                    <control type="image"><width>6</width><height>118</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                    <control type="label"><left>32</left><top>24</top><width>1664</width><height>36</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
+                        <label>[B]$INFO[ListItem.Label][/B]</label>
+                    </control>
+                    <control type="label"><left>32</left><top>66</top><width>1664</width><height>30</height><font>font10</font><textcolor>B3EEF3F6</textcolor>
+                        <label>$INFO[ListItem.Label2]</label>
+                    </control>
+                </focusedlayout>
+            </control>
+            <control type="scrollbar" id="30010">
+                <left>1839</left><top>165</top><width>21</width><height>708</height>
+                <texturesliderbar colordiffuse="33FFFFFF">white.png</texturesliderbar>
+                <textureslidernib colordiffuse="FF38BDF8">white.png</textureslidernib>
+                <textureslidernibfocus colordiffuse="FF38BDF8">white.png</textureslidernibfocus>
+                <showonepage>false</showonepage>
+                <orientation>vertical</orientation>
+            </control>
+            <control type="label">
+                <left>96</left><top>968</top><width>800</width><height>36</height>
+                <font>Mono26</font><textcolor>57EEF3F6</textcolor>
+                <label>[COLOR FF38BDF8]OK[/COLOR] $ADDON[plugin.video.rivulet 30209]   [COLOR FF38BDF8]BACK[/COLOR] $ADDON[plugin.video.rivulet 30210]</label>
+            </control>
+        </control>
+    </controls>
+</window>

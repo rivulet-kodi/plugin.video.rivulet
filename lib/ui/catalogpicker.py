@@ -147,8 +147,8 @@ class CatalogPickerWindow(BaseWindow):
         focused = self._focused_catalog()
         if focused is None:
             return
-        transport_url, _manifest, catalog = focused
-        self._open_catalog(transport_url, catalog)
+        transport_url, manifest, catalog = focused
+        self._open_catalog(transport_url, manifest, catalog)
 
     def _open_genre_filter(self):
         """Context-menu (117) affordance: browse an optional-genre
@@ -160,7 +160,7 @@ class CatalogPickerWindow(BaseWindow):
         focused = self._focused_catalog()
         if focused is None:
             return
-        transport_url, _manifest, catalog = focused
+        transport_url, manifest, catalog = focused
         options = catalog_extra_options(catalog, 'genre')
         if not options:
             notify(L(30030))
@@ -169,18 +169,18 @@ class CatalogPickerWindow(BaseWindow):
         if choice < 0:
             return
         if choice == 0:
-            self._fetch_and_show(transport_url, catalog)
+            self._fetch_and_show(transport_url, manifest, catalog)
             return
-        self._fetch_and_show(transport_url, catalog, extra=[('genre', options[choice - 1])])
+        self._fetch_and_show(transport_url, manifest, catalog, extra=[('genre', options[choice - 1])])
 
-    def _open_catalog(self, transport_url, catalog):
+    def _open_catalog(self, transport_url, manifest, catalog):
         kind = _classify_catalog(catalog)
         if kind == 'search':
             from lib.ui.compat import L
             query = xbmcgui.Dialog().input(L(30001))
             if not query:
                 return
-            self._fetch_and_show(transport_url, catalog, extra=[('search', query)])
+            self._fetch_and_show(transport_url, manifest, catalog, extra=[('search', query)])
             return
         if kind == 'genre':
             # Required genre (e.g. Cinemeta's "New"/year catalog): no
@@ -191,11 +191,11 @@ class CatalogPickerWindow(BaseWindow):
             choice = xbmcgui.Dialog().select(L(30194), options)
             if choice < 0:
                 return
-            self._fetch_and_show(transport_url, catalog, extra=[('genre', options[choice])])
+            self._fetch_and_show(transport_url, manifest, catalog, extra=[('genre', options[choice])])
             return
-        self._fetch_and_show(transport_url, catalog)
+        self._fetch_and_show(transport_url, manifest, catalog)
 
-    def _fetch_and_show(self, transport_url, catalog, extra=None):
+    def _fetch_and_show(self, transport_url, manifest, catalog, extra=None):
         import xbmc
 
         from lib.ui.compat import L, log, notify
@@ -203,6 +203,12 @@ class CatalogPickerWindow(BaseWindow):
 
         ctype = catalog.get('type')
         catalog_name = catalog.get('name') or catalog.get('id')
+        addon_name = manifest.get('name')
+        # "ADDON · CATALOG" when both are on hand, matching the design's
+        # breadcrumb (e.g. "CINEMETA · POPULAR MOVIES") - otherwise just
+        # the catalog name, which is always present.
+        catalog_title = '%s \u00b7 %s' % (addon_name, catalog_name) if addon_name else catalog_name
+
         try:
             with busy_dialog(L(30033)):
                 metas = _fetch_catalog(transport_url, ctype, catalog.get('id'), extra=extra)
@@ -218,7 +224,7 @@ class CatalogPickerWindow(BaseWindow):
         log('catalogpicker: opening coverflow (%d results)' % len(metas), xbmc.LOGINFO)
         try:
             from lib.ui.infowindow import open_showcase
-            selected = open_showcase(metas)
+            selected = open_showcase(metas, catalog_title=catalog_title)
         except Exception as exc:  # a skin/UI failure must surface, not vanish
             log('catalogpicker: coverflow failed to open: %r' % (exc,), xbmc.LOGERROR)
             notify(L(30032))

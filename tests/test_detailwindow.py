@@ -56,7 +56,7 @@ def load_detailwindow():
 
 
 def _make_window(detailwindow_mod):
-    return detailwindow_mod.DetailWindow('DetailWindow.xml', '/addon/path', 'Default', '720p')
+    return detailwindow_mod.DetailWindow('DetailWindow.xml', '/addon/path', 'Default', '1080i')
 
 
 def _window_with_focused_row(detailwindow_mod, meta, stype, row_id):
@@ -155,6 +155,141 @@ def test_group_by_season_single_season_yields_one_group(load_detailwindow):
     groups = ctx.detailwindow._group_by_season(videos)
 
     assert [(season, label) for season, label, _videos in groups] == [(1, 'Season 1')]
+
+
+# ---------------------------------------------------------------------------
+# _season_count() - left column's 'N SEASONS' segment
+# ---------------------------------------------------------------------------
+
+
+def test_season_count_excludes_specials(load_detailwindow):
+    ctx = load_detailwindow()
+    groups = ctx.detailwindow._group_by_season([
+        {'id': 'v1', 'season': 1, 'episode': 1},
+        {'id': 'v2', 'season': 2, 'episode': 1},
+        {'id': 'v3', 'season': 0, 'episode': 1},
+    ])
+
+    assert ctx.detailwindow._season_count(groups) == 2
+
+
+def test_season_count_zero_for_specials_only(load_detailwindow):
+    ctx = load_detailwindow()
+    groups = ctx.detailwindow._group_by_season([{'id': 'v1', 'season': 0, 'episode': 1}])
+
+    assert ctx.detailwindow._season_count(groups) == 0
+
+
+# ---------------------------------------------------------------------------
+# _metadata_line()/_genres_line() - the left column's series-level metadata,
+# skipping any segment (year/season-count/rating, genres) with no source
+# value rather than leaving a dangling separator behind.
+# ---------------------------------------------------------------------------
+
+
+def test_metadata_line_joins_every_present_segment(load_detailwindow):
+    ctx = load_detailwindow()
+    meta = {'releaseInfo': '2025-', 'imdbRating': '7.6'}
+
+    line = ctx.detailwindow._metadata_line(meta, 2)
+
+    assert line == '2025 \u00b7 2 SEASONS \u00b7 [COLOR FF38BDF8]\u2605 7.6[/COLOR]'
+
+
+def test_metadata_line_singular_season(load_detailwindow):
+    ctx = load_detailwindow()
+
+    assert ctx.detailwindow._metadata_line({}, 1) == '1 SEASON'
+
+
+def test_metadata_line_falls_back_from_release_info_to_year(load_detailwindow):
+    ctx = load_detailwindow()
+
+    assert ctx.detailwindow._metadata_line({'year': '2019'}, 0) == '2019'
+
+
+def test_metadata_line_missing_year_rating_and_season_is_empty_string(load_detailwindow):
+    ctx = load_detailwindow()
+
+    assert ctx.detailwindow._metadata_line({}, 0) == ''
+    assert ctx.detailwindow._metadata_line(None, 0) == ''
+
+
+def test_metadata_line_skips_missing_segments_without_dangling_separators(load_detailwindow):
+    ctx = load_detailwindow()
+
+    line = ctx.detailwindow._metadata_line({'imdbRating': '8.1'}, 0)
+
+    assert line == '[COLOR FF38BDF8]\u2605 8.1[/COLOR]'
+
+
+def test_genres_line_joins_and_caps_at_three(load_detailwindow):
+    ctx = load_detailwindow()
+
+    line = ctx.detailwindow._genres_line({'genres': ['Comedy', 'Mystery', 'Crime', 'Drama']})
+
+    assert line == 'Comedy \u00b7 Mystery \u00b7 Crime'
+
+
+def test_genres_line_empty_when_meta_has_no_genres(load_detailwindow):
+    ctx = load_detailwindow()
+
+    assert ctx.detailwindow._genres_line({}) == ''
+    assert ctx.detailwindow._genres_line(None) == ''
+
+
+# ---------------------------------------------------------------------------
+# _episode_code()/_episode_title() - the split halves of _episode_label(),
+# each now its own ListItem Property (see _episode_properties()).
+# ---------------------------------------------------------------------------
+
+
+def test_episode_code_zero_pads_season_and_episode(load_detailwindow):
+    ctx = load_detailwindow()
+
+    assert ctx.detailwindow._episode_code({'season': 1, 'episode': 3}) == 'S01E03'
+    assert ctx.detailwindow._episode_code({}) == 'S00E00'
+
+
+def test_episode_title_falls_back_title_then_name_then_id(load_detailwindow):
+    ctx = load_detailwindow()
+
+    assert ctx.detailwindow._episode_title({'title': 'A Title', 'name': 'A Name', 'id': 'vid'}) == 'A Title'
+    assert ctx.detailwindow._episode_title({'name': 'A Name', 'id': 'vid'}) == 'A Name'
+    assert ctx.detailwindow._episode_title({'id': 'vid'}) == 'vid'
+    assert ctx.detailwindow._episode_title({}) == ''
+
+
+def test_episode_properties_include_split_code_and_title(load_detailwindow):
+    ctx = load_detailwindow()
+    video = {'id': 'v1', 'season': 1, 'episode': 2, 'title': 'Second'}
+
+    properties = ctx.detailwindow._episode_properties(video)
+
+    assert properties['code'] == 'S01E02'
+    assert properties['title'] == 'Second'
+
+
+# ---------------------------------------------------------------------------
+# _watched_percent() - 0-100 int from a Store.get_progress() payload, or
+# None (never 0-as-"no data") when nothing usable was recorded.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('progress,expected', [
+    ({'position_ms': 21000, 'duration_ms': 50000}, 42),
+    ({'position_ms': 50000, 'duration_ms': 50000}, 100),
+    ({'position_ms': 60000, 'duration_ms': 50000}, 100),
+    (None, None),
+    ({}, None),
+    ({'position_ms': 0, 'duration_ms': 50000}, None),
+    ({'position_ms': 21000, 'duration_ms': 0}, None),
+], ids=['42-percent', 'exactly-done', 'clamped-at-100', 'no-progress', 'empty-dict',
+        'zero-position', 'zero-duration'])
+def test_watched_percent(load_detailwindow, progress, expected):
+    ctx = load_detailwindow()
+
+    assert ctx.detailwindow._watched_percent(progress) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +393,196 @@ def test_oninit_hides_season_bar_when_there_are_no_episodes(load_detailwindow):
 
     assert win.getControl(picker.SEASON_BAR).visible is False
     assert win.getControl(picker.LIST).items == []
+
+
+def test_oninit_sets_heading_bold_and_left_column_metadata(load_detailwindow):
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+    win = _make_window(picker)
+    win.start({
+        'id': 'tt1', 'name': 'The Sheep Detectives', 'releaseInfo': '2025-',
+        'imdbRating': '7.6', 'genres': ['Comedy', 'Mystery', 'Crime'],
+        'videos': [
+            {'id': 'v-1x01', 'season': 1, 'episode': 1, 'title': 'S1E1'},
+            {'id': 'v-2x01', 'season': 2, 'episode': 1, 'title': 'S2E1'},
+        ],
+    }, 'series')
+
+    win.onInit()
+
+    assert win.getControl(picker.HEADING).label == '[B]THE SHEEP DETECTIVES[/B]'
+    assert win.getControl(picker.METADATA_LINE).label == (
+        '2025 \u00b7 2 SEASONS \u00b7 [COLOR FF38BDF8]\u2605 7.6[/COLOR]'
+    )
+    assert win.getControl(picker.GENRES_LINE).label == 'Comedy \u00b7 Mystery \u00b7 Crime'
+
+
+def test_oninit_left_column_metadata_shows_only_season_count_when_year_rating_and_genres_are_missing(
+    load_detailwindow,
+):
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+    win = _make_window(picker)
+    win.start({'id': 'tt1', 'videos': [{'id': 'v1', 'season': 1, 'episode': 1, 'title': 'Ep'}]}, 'series')
+
+    win.onInit()
+
+    # One real season and nothing else: no dangling ' \u00b7 ' separators.
+    assert win.getControl(picker.METADATA_LINE).label == '1 SEASON'
+    assert win.getControl(picker.GENRES_LINE).label == ''
+
+
+def test_oninit_left_column_metadata_empty_when_there_is_nothing_to_show_at_all(load_detailwindow):
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+    win = _make_window(picker)
+    win.start({'id': 'tt1'}, 'movie')
+
+    win.onInit()
+
+    assert win.getControl(picker.METADATA_LINE).label == ''
+    assert win.getControl(picker.GENRES_LINE).label == ''
+
+
+def test_oninit_sets_season_count_for_the_default_season(load_detailwindow):
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+    win = _make_window(picker)
+    win.start({
+        'id': 'tt1',
+        'videos': [
+            {'id': 'v-1x01', 'season': 1, 'episode': 1, 'title': 'A'},
+            {'id': 'v-1x02', 'season': 1, 'episode': 2, 'title': 'B'},
+            {'id': 'v-2x01', 'season': 2, 'episode': 1, 'title': 'C'},
+        ],
+    }, 'series')
+
+    win.onInit()
+
+    assert win.getControl(picker.SEASON_COUNT).label == '2 EPISODES'
+
+
+def test_season_count_updates_when_the_selected_season_changes(load_detailwindow):
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+    import xbmcgui
+    win = _make_window(picker)
+    win.start({
+        'id': 'tt1',
+        'videos': [
+            {'id': 'v-1x01', 'season': 1, 'episode': 1, 'title': 'A'},
+            {'id': 'v-2x01', 'season': 2, 'episode': 1, 'title': 'B'},
+            {'id': 'v-2x02', 'season': 2, 'episode': 2, 'title': 'C'},
+        ],
+    }, 'series')
+    win.onInit()
+    assert win.getControl(picker.SEASON_COUNT).label == '1 EPISODE'
+    win.setFocusId(picker.SEASON_BAR)
+    win.getControl(picker.SEASON_BAR).selected_index = 1
+
+    win.onAction(xbmcgui.Action(2))  # ACTION_MOVE_RIGHT
+
+    assert win.getControl(picker.SEASON_COUNT).label == '2 EPISODES'
+
+
+def test_season_count_empty_when_there_are_no_episodes(load_detailwindow):
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+    win = _make_window(picker)
+    win.start({'id': 'tt1'}, 'movie')
+
+    win.onInit()
+
+    assert win.getControl(picker.SEASON_COUNT).label == ''
+
+
+def test_episode_row_code_and_title_are_separate_properties_and_label_stays_combined(load_detailwindow):
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+    win = _make_window(picker)
+    win.start({'id': 'tt1', 'videos': [{'id': 'v1', 'season': 1, 'episode': 3, 'title': 'The Title'}]}, 'series')
+
+    win.onInit()
+
+    item = win.getControl(picker.LIST).items[0]
+    assert item.getProperty('code') == 'S01E03'
+    assert item.getProperty('title') == 'The Title'
+    assert item.getLabel() == 'S01E03 \u00b7 The Title'
+
+
+# ---------------------------------------------------------------------------
+# DetailWindow._build_episode_items() - watched_percent Property (the
+# localized '%d%% WATCHED' text, WATCHED_STRING_ID/30212) + legacy
+# resumetime/totaltime video info, from the local Store.get_progress()
+# cache (mirrors lib.ui.player._maybe_resume_offset_ms()'s own shape/guard).
+# A test that never wires a fake store (most of this file) exercises the
+# real lazy get_store() and gets back nothing useful in this sandbox (no
+# real Kodi profile directory) - _episode_progress()'s own broad
+# except/None catches that, so those tests are unaffected either way.
+# ---------------------------------------------------------------------------
+
+
+class _FakeProgressStore:
+    def __init__(self, progress_by_video_id):
+        self._progress_by_video_id = progress_by_video_id
+        self.calls = []
+
+    def get_progress(self, stype, sid, video_id):
+        self.calls.append((stype, sid, video_id))
+        return self._progress_by_video_id.get(video_id)
+
+
+def test_oninit_sets_watched_percent_and_resume_info_from_the_local_progress_cache(
+    load_detailwindow, monkeypatch,
+):
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+    store = _FakeProgressStore({'v1': {'position_ms': 21000, 'duration_ms': 50000}})
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: store)
+    win = _make_window(picker)
+    win.start({'id': 'tt1', 'videos': [{'id': 'v1', 'season': 1, 'episode': 1, 'title': 'Ep'}]}, 'series')
+
+    win.onInit()
+
+    item = win.getControl(picker.LIST).items[0]
+    label = item.getProperty('watched_percent')
+    assert label == '42% WATCHED'
+    assert label.count('%') == 1
+    assert item.legacy_info == {'resumetime': 21.0, 'totaltime': 50.0}
+    assert store.calls == [('series', 'tt1', 'v1')]
+
+
+def test_oninit_watched_percent_empty_when_no_progress_recorded(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+    store = _FakeProgressStore({})
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: store)
+    win = _make_window(picker)
+    win.start({'id': 'tt1', 'videos': [{'id': 'v1', 'season': 1, 'episode': 1, 'title': 'Ep'}]}, 'series')
+
+    win.onInit()
+
+    item = win.getControl(picker.LIST).items[0]
+    assert item.getProperty('watched_percent') == ''
+    assert item.legacy_info == {}
+
+
+def test_oninit_watched_percent_empty_when_store_raises(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+
+    class _RaisingStore:
+        def get_progress(self, stype, sid, video_id):
+            raise OSError('corrupt cache')
+
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: _RaisingStore())
+    win = _make_window(picker)
+    win.start({'id': 'tt1', 'videos': [{'id': 'v1', 'season': 1, 'episode': 1, 'title': 'Ep'}]}, 'series')
+
+    win.onInit()
+
+    item = win.getControl(picker.LIST).items[0]
+    assert item.getProperty('watched_percent') == ''
 
 
 # ---------------------------------------------------------------------------
@@ -685,7 +1010,7 @@ def test_open_detail_series_builds_window_against_skin_path_and_starts_with_the_
     result = ctx.detailwindow.open_detail('series', 'tt1')
 
     assert result is True
-    assert captured['init_args'] == ('DetailWindow.xml', '/addon/path', 'Default', '720p')
+    assert captured['init_args'] == ('DetailWindow.xml', '/addon/path', 'Default', '1080i')
     assert captured['start_args'] == (meta, 'series')
 
 

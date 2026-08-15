@@ -100,7 +100,7 @@ def _window_with_focused_action(homewindow_mod, action):
     carrying `action` as its 'action' Property - the shape onClick() reads,
     without needing a real onInit()/Store round-trip."""
     import xbmcgui
-    win = homewindow_mod.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '720p')
+    win = homewindow_mod.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     item = xbmcgui.ListItem('label')
     item.setProperty('action', action)
     win.getControl(homewindow_mod.LIST).addItems([item])
@@ -180,7 +180,7 @@ def test_status_text_reports_not_logged_in_when_auth_is_none(load_homewindow):
 def test_oninit_shows_library_row_when_authenticated(load_homewindow, monkeypatch):
     ctx = load_homewindow(localized={30022: 'Logged in as %s'})
     monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(auth={'authKey': 'x'}))
-    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '720p')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onInit()
 
@@ -194,7 +194,7 @@ def test_oninit_shows_library_row_when_authenticated(load_homewindow, monkeypatc
 def test_oninit_hides_library_row_when_not_authenticated(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(auth=None))
-    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '720p')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onInit()
 
@@ -207,7 +207,7 @@ def test_oninit_sets_status_label_to_email_when_authenticated_with_email(load_ho
     ctx = load_homewindow(localized={30022: 'Logged in as %s'})
     auth = {'authKey': 'x', 'user': {'email': 'me@example.com', 'name': 'Me'}}
     monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(auth=auth))
-    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '720p')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onInit()
 
@@ -218,7 +218,7 @@ def test_oninit_sets_status_label_to_name_when_email_is_absent(load_homewindow, 
     ctx = load_homewindow(localized={30022: 'Logged in as %s'})
     auth = {'authKey': 'x', 'user': {'name': 'Me'}}
     monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(auth=auth))
-    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '720p')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onInit()
 
@@ -234,7 +234,7 @@ def test_oninit_sets_status_label_to_name_when_email_is_absent(load_homewindow, 
 def test_onaction_back_actions_close_the_window(load_homewindow, action_id):
     ctx = load_homewindow()
     import xbmcgui
-    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '720p')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onAction(xbmcgui.Action(action_id))
 
@@ -244,7 +244,7 @@ def test_onaction_back_actions_close_the_window(load_homewindow, action_id):
 def test_onaction_non_back_action_does_not_close(load_homewindow):
     ctx = load_homewindow()
     import xbmcgui
-    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '720p')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onAction(xbmcgui.Action(1))
 
@@ -258,7 +258,7 @@ def test_onaction_non_back_action_does_not_close(load_homewindow):
 
 def test_onclick_ignores_control_ids_other_than_list(load_homewindow):
     ctx = load_homewindow()
-    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '720p')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onClick(9999)
 
@@ -267,7 +267,7 @@ def test_onclick_ignores_control_ids_other_than_list(load_homewindow):
 
 def test_onclick_list_with_no_focused_item_does_not_crash(load_homewindow):
     ctx = load_homewindow()
-    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '720p')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onClick(ctx.homewindow.LIST)
 
@@ -434,7 +434,7 @@ def test_open_home_builds_the_window_against_the_skin_path_and_blocks_on_domodal
 
     ctx.homewindow.open_home()
 
-    assert captured['init_args'] == ('HomeWindow.xml', '/addon/path', 'Default', '720p')
+    assert captured['init_args'] == ('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     assert captured['instance'].modal_calls == 1
 
 

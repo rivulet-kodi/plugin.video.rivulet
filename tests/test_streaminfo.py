@@ -16,6 +16,7 @@ from lib.stremio.streaminfo import (
     format_plot,
     parse_stream,
     sort_streams,
+    stream_fields,
 )
 from lib.ui import playbackmeta
 
@@ -706,6 +707,114 @@ def test_format_label_no_service_omits_cache_segment_entirely():
     assert "RD" not in label
     assert "[COLOR lime]" not in label
     assert "[COLOR orange]" not in label
+
+
+# --- stream_fields -----------------------------------------------------
+
+
+@pytest.mark.parametrize("resolution,color", [
+    ("2160p", "FFFFD700"),
+    ("1080p", "FF4ADE80"),
+    ("720p", "C7EEF3F6"),
+    ("480p", "C7EEF3F6"),
+    ("", "C7EEF3F6"),
+], ids=["2160p-gold", "1080p-green", "720p-dim", "480p-dim", "unknown-dim"])
+def test_stream_fields_quality_color_matches_the_palette(resolution, color):
+    fields = stream_fields(_info(resolution=resolution))
+    assert fields["quality"] == resolution
+    assert fields["quality_color"] == color
+
+
+def test_stream_fields_release_is_the_source_field_not_the_release_tag_list():
+    # info['release'] (Extended/Hybrid/P8/...) is a DIFFERENT concept from
+    # the design's bold row label, which is info['source'] (Remux/BluRay/
+    # WEB-DL/...) - stream_fields() must not conflate the two.
+    info = _info(source="BluRay", release=["Hybrid", "P8"])
+    fields = stream_fields(info)
+    assert fields["release"] == "BluRay"
+
+
+def test_stream_fields_flags_joins_codec_hdr_and_audio_in_order():
+    info = _info(codec="HEVC", hdr=["DV", "HDR10"], audio=["Atmos"])
+    fields = stream_fields(info)
+    assert fields["flags"] == "HEVC \u00b7 DV \u00b7 HDR10 \u00b7 Atmos"
+
+
+def test_stream_fields_flags_drops_empty_pieces_without_dangling_separators():
+    info = _info(codec="", hdr=["DV", "HDR"], audio=[])
+    fields = stream_fields(info)
+    assert fields["flags"] == "DV \u00b7 HDR"
+
+
+def test_stream_fields_flags_empty_string_when_nothing_detected():
+    fields = stream_fields(_info())
+    assert fields["flags"] == ""
+
+
+def test_stream_fields_provider_is_the_addon_name():
+    info = _info(addon="AIOStreams")
+    assert stream_fields(info)["provider"] == "AIOStreams"
+
+
+def test_stream_fields_cached_true_is_green_cached_state():
+    info = _info(service="RD", cached=True)
+    fields = stream_fields(info)
+    assert fields["cache_state"] == "CACHED"
+    assert fields["cache_color"] == "FF4ADE80"
+
+
+def test_stream_fields_cached_false_is_orange_dl_state():
+    info = _info(service="RD", cached=False)
+    fields = stream_fields(info)
+    assert fields["cache_state"] == "DL"
+    assert fields["cache_color"] == "FFFB923C"
+
+
+def test_stream_fields_unknown_cache_state_is_empty_string_not_fabricated():
+    info = _info(service="", cached=None)
+    fields = stream_fields(info)
+    assert fields["cache_state"] == ""
+    assert fields["cache_color"] == "4DEEF3F6"
+
+
+def test_stream_fields_missing_size_seeders_and_cache_are_all_empty_strings():
+    # A stream with nothing parseable for size/seeders/cache must report
+    # '' for each - never a fabricated placeholder - so the skin's
+    # !String.IsEmpty(...) guard can collapse the column cleanly.
+    info = _info(size_text="", seeders=None, service="", cached=None)
+    fields = stream_fields(info)
+    assert fields["size"] == ""
+    assert fields["seeders"] == ""
+    assert fields["cache_state"] == ""
+
+
+def test_stream_fields_seeders_is_a_plain_decimal_string_no_marker():
+    # The seeders MARKER (\u25b2) is the skin's job (a static glyph next
+    # to $INFO[ListItem.Property(seeders)]), not this helper's - keeping
+    # it out of the property means the skin can hide the marker too via
+    # the same visibility guard when the property is empty.
+    fields = stream_fields(_info(seeders=72))
+    assert fields["seeders"] == "72"
+    assert "\u25b2" not in fields["seeders"]
+
+
+def test_stream_fields_none_info_returns_every_field_empty():
+    fields = stream_fields(None)
+    assert fields == {
+        "quality": "", "quality_color": "C7EEF3F6", "release": "", "flags": "",
+        "provider": "", "size": "", "seeders": "", "cache_state": "", "cache_color": "4DEEF3F6",
+    }
+
+
+def test_stream_fields_against_real_aiostreams_fixture():
+    info = parse_stream(AIOSTREAMS_STREAM, addon_name="AIOStreams")
+    fields = stream_fields(info)
+    assert fields["quality"] == "2160p"
+    assert fields["quality_color"] == "FFFFD700"
+    assert fields["release"] == "WEB-DL"
+    assert "HEVC" in fields["flags"]
+    assert fields["provider"] == "AIOStreams"
+    assert fields["seeders"] == "50"
 
 
 # --- format_details ---------------------------------------------------------

@@ -123,7 +123,10 @@ def test_open_library_fetch_filters_removed_and_missing_id(load_librarywindow, m
     api = _FakeStremioAPI(datastore_result=entries)
     _wire_data_layer(librarywindow, monkeypatch, _FakeStore(auth=auth), api)
     captured = {}
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: captured.setdefault('metas', metas) and None)
+    monkeypatch.setattr(
+        ctx.infowindow, 'open_showcase',
+        lambda metas, catalog_title=None: captured.update(metas=metas, catalog_title=catalog_title) or None,
+    )
 
     result = librarywindow.open_library()
 
@@ -131,6 +134,7 @@ def test_open_library_fetch_filters_removed_and_missing_id(load_librarywindow, m
     assert captured['metas'] == [
         {'id': 'tt1', 'name': 'Kept Movie', 'type': 'movie', 'poster': 'p1', 'background': 'b1'},
     ]
+    assert captured['catalog_title'] == 'STR30002'
     assert api.calls == [('abc123', 'libraryItem', True)]
 
 
@@ -141,7 +145,7 @@ def test_open_library_empty_fetch_notifies_and_returns_false(load_librarywindow,
     api = _FakeStremioAPI(datastore_result=[])
     _wire_data_layer(librarywindow, monkeypatch, _FakeStore(auth=auth), api)
     opened = []
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas))
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas, catalog_title=None: opened.append(metas))
 
     result = librarywindow.open_library()
 
@@ -163,7 +167,7 @@ def test_open_library_selection_opens_detail_and_returns_its_result(load_library
     api = _FakeStremioAPI(datastore_result=[entry])
     _wire_data_layer(librarywindow, monkeypatch, _FakeStore(auth=auth), api)
     chosen = {'id': 'tt9', 'name': 'Batman', 'type': 'movie'}
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: chosen)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas, catalog_title=None: chosen)
     captured = {}
 
     def fake_open_detail(stype, sid):
@@ -185,7 +189,7 @@ def test_open_library_no_selection_returns_false_without_opening_detail(load_lib
     entry = {'_id': 'tt1', 'name': 'One', 'type': 'movie'}
     api = _FakeStremioAPI(datastore_result=[entry])
     _wire_data_layer(librarywindow, monkeypatch, _FakeStore(auth=auth), api)
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: None)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas, catalog_title=None: None)
 
     def _unexpected(*a, **k):
         raise AssertionError('open_detail must not be called without a selection')

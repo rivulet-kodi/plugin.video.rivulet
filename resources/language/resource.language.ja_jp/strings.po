@@ -567,3 +567,55 @@ msgstr "すべて"
 msgctxt "#30199"
 msgid "search only"
 msgstr "検索専用"
+
+msgctxt "#30200"
+msgid "%d SOURCE"
+msgstr "%d ソース"
+
+msgctxt "#30201"
+msgid "%d SOURCES"
+msgstr "%d ソース"
+
+msgctxt "#30202"
+msgid "%d ADDON"
+msgstr "%d アドオン"
+
+msgctxt "#30203"
+msgid "%d ADDONS"
+msgstr "%d アドオン"
+
+msgctxt "#30204"
+msgid "%d SEASON"
+msgstr "%d シーズン"
+
+msgctxt "#30205"
+msgid "%d SEASONS"
+msgstr "%d シーズン"
+
+msgctxt "#30206"
+msgid "%d EPISODE"
+msgstr "%d エピソード"
+
+msgctxt "#30207"
+msgid "%d EPISODES"
+msgstr "%d エピソード"
+
+msgctxt "#30208"
+msgid "%d CACHED"
+msgstr "%d キャッシュ済み"
+
+msgctxt "#30209"
+msgid "select"
+msgstr "選択"
+
+msgctxt "#30210"
+msgid "back"
+msgstr "戻る"
+
+msgctxt "#30211"
+msgid "exit"
+msgstr "終了"
+
+msgctxt "#30212"
+msgid "%d%% WATCHED"
+msgstr "%d%% 視聴済み"

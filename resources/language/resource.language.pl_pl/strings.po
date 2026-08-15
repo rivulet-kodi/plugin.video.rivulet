@@ -567,3 +567,55 @@ msgstr "Wszystkie"
 msgctxt "#30199"
 msgid "search only"
 msgstr "tylko wyszukiwanie"
+
+msgctxt "#30200"
+msgid "%d SOURCE"
+msgstr "%d ŹRÓDŁO"
+
+msgctxt "#30201"
+msgid "%d SOURCES"
+msgstr "%d ŹRÓDŁA"
+
+msgctxt "#30202"
+msgid "%d ADDON"
+msgstr "%d DODATEK"
+
+msgctxt "#30203"
+msgid "%d ADDONS"
+msgstr "%d DODATKI"
+
+msgctxt "#30204"
+msgid "%d SEASON"
+msgstr "%d SEZON"
+
+msgctxt "#30205"
+msgid "%d SEASONS"
+msgstr "%d SEZONY"
+
+msgctxt "#30206"
+msgid "%d EPISODE"
+msgstr "%d ODCINEK"
+
+msgctxt "#30207"
+msgid "%d EPISODES"
+msgstr "%d ODCINKI"
+
+msgctxt "#30208"
+msgid "%d CACHED"
+msgstr "%d BUFOROWANE"
+
+msgctxt "#30209"
+msgid "select"
+msgstr "wybierz"
+
+msgctxt "#30210"
+msgid "back"
+msgstr "wstecz"
+
+msgctxt "#30211"
+msgid "exit"
+msgstr "wyjście"
+
+msgctxt "#30212"
+msgid "%d%% WATCHED"
+msgstr "%d%% OBEJRZANE"

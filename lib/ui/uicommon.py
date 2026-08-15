@@ -19,7 +19,7 @@ bits every one of those screens needs so they stay consistent:
   it before opening any further window.
 - `open_window(window_cls, xml_name, *args, **kwargs)`: build one of our
   windows against the addon's own skin directory
-  (`resources/skins/Default/720p/<xml_name>`), matching
+  (`resources/skins/Default/1080i/<xml_name>`), matching
   `infowindow.open_showcase`'s resolution so every screen is constructed
   identically.
 - `ModalStackWindow`/`close_windows_for_playback()`: every one of these
@@ -115,11 +115,11 @@ def addon_skin_path():
 
 
 def open_window(window_cls, xml_name, *args, **kwargs):
-    """Build `window_cls(xml_name, addon_skin_path(), 'Default', '720p')`
+    """Build `window_cls(xml_name, addon_skin_path(), 'Default', '1080i')`
     and return it (unconstructed screens are useless - callers still call
     `.start(...)` themselves, since each screen's `start()` signature
     differs)."""
-    return window_cls(xml_name, addon_skin_path(), 'Default', '720p', *args, **kwargs)
+    return window_cls(xml_name, addon_skin_path(), 'Default', '1080i', *args, **kwargs)
 
 
 #: Live Rivulet screens, in the order their `doModal()` calls are

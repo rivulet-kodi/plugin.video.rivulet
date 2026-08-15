@@ -92,6 +92,13 @@ LIST = 30002
 POSTER = 30004
 HEADING = 30005
 INFO_PANEL = 30008
+#: The left column's "NN SOURCES" / "NN ADDONS" / "NN CACHED" summary -
+#: three separate labels (see StreamsWindow.xml) rather than 3 lines of
+#: INFO_PANEL, since a textbox only supports one font/colour for its
+#: whole content and the CACHED line needs its own green tint.
+SOURCES_COUNT = 30100
+ADDONS_COUNT = 30101
+CACHED_COUNT = 30102
 
 #: Cap on concurrent addon HTTP calls a streams fan-out below opens at
 #: once - mirrors `lib.ui.views._MAX_ADDON_WORKERS`'s bounded-pool
@@ -109,6 +116,19 @@ _MAX_STREAM_ADDON_WORKERS = 8
 #: `StreamsWindow._rebuild_list()` appends to INFO_PANEL while
 #: `open_streams()`'s fan-out still has an addon outstanding.
 _LOADING_STRING_ID = 30185
+
+#: strings.po ids for the left column's localized 'N SOURCE(S)' / 'N
+#: ADDON(S)' / 'N CACHED' summary counts (see _rebuild_list()) -
+#: singular msgstr picked for a count of exactly 1, plural otherwise
+#: (0 included, matching the plural rule every target language's own
+#: translation uses for "not one"). CACHED has only one form: it
+#: describes how many of the sources are cached, not a countable noun
+#: of its own.
+_SOURCE_STRING_ID = 30200
+_SOURCES_STRING_ID = 30201
+_ADDON_STRING_ID = 30202
+_ADDONS_STRING_ID = 30203
+_CACHED_STRING_ID = 30208
 
 #: Brief settle pause before reopening the picker after playback ends -
 #: gives Kodi's player teardown a moment to finish before a fresh modal
@@ -297,12 +317,18 @@ class StreamsWindow(BaseWindow):
         control.selectItem(min(max(focus_index, 0), len(self.pairs) - 1))
 
     def _rebuild_list(self):
-        """Build LIST's rows from `self.pairs` and INFO_PANEL's text
-        from `self.meta` - shared by `onInit()` and `_apply_pending()`'s
-        live merge so both build rows identically (single-provider
-        dedupe included) instead of duplicating this logic. Never
-        touches focus - callers position the cursor themselves once
-        this returns."""
+        """Build LIST's rows from `self.pairs`, INFO_PANEL's text and the
+        SOURCES_COUNT/ADDONS_COUNT/CACHED_COUNT summary labels from
+        `self.meta`/`self.pairs` - shared by `onInit()` and
+        `_apply_pending()`'s live merge so both build rows identically
+        (single-provider dedupe included) instead of duplicating this
+        logic. Each row's ListItem carries both the packed Label/Label2
+        (format_label()/format_details()) AND the discrete
+        `streaminfo.stream_fields()` properties StreamsWindow.xml's row
+        layout reads column-by-column; the packed pair is the skin's own
+        fallback for a row with no discretely parsed quality/source/
+        addon. Never touches focus - callers position the cursor
+        themselves once this returns."""
         providers = {info.get('addon') for info, _stream in self.pairs if info.get('addon')}
         single_provider = next(iter(providers)) if len(providers) == 1 else None
 
@@ -320,7 +346,15 @@ class StreamsWindow(BaseWindow):
             # streaminfo.format_details() - never the provider name.
             line2 = streaminfo.format_details(info).replace('\r', ' ').replace('\n', ' ')
             item = xbmcgui.ListItem(line1, label2=line2)
-            item.setProperty('position', str(index))
+            # The packed label/label2 above stay the ultimate fallback
+            # StreamsWindow.xml renders when a row has no discretely
+            # parsed quality/source/addon at all (see the skin's own
+            # comment) - `stream_fields()` never replaces them, it adds
+            # the discrete per-column properties the new row layout
+            # reads via $INFO[ListItem.Property(...)].
+            properties = streaminfo.stream_fields(info)
+            properties['position'] = str(index)
+            item.setProperties(properties)
             items.append(item)
         control = self.getControl(LIST)
         # reset() before addItems(): a rebuild - onInit() reopening a
@@ -347,6 +381,25 @@ class StreamsWindow(BaseWindow):
         if self._loading:
             lines.append(L(_LOADING_STRING_ID))
         self.getControl(INFO_PANEL).setText('\n'.join(lines))
+
+        # Left column summary counts (design's stacked 'NN SOURCES' /
+        # 'NN ADDONS' / 'NN CACHED' lines) - their own labels, not more
+        # INFO_PANEL text, since INFO_PANEL is a textbox (one font/colour
+        # for its whole content) and CACHED needs its own green tint.
+        # `providers` is the same ephemeral set already built above for
+        # the single-provider dedupe. Singular/plural msgstr picked per
+        # count - '1 ADDONS' is wrong in English, and worse once
+        # translated, since most locales don't pluralize like English.
+        cached_count = sum(1 for info, _stream in self.pairs if info.get('cached') is True)
+        source_count = len(self.pairs)
+        addon_count = len(providers)
+        self.getControl(SOURCES_COUNT).setLabel(
+            L(_SOURCE_STRING_ID if source_count == 1 else _SOURCES_STRING_ID) % source_count
+        )
+        self.getControl(ADDONS_COUNT).setLabel(
+            L(_ADDON_STRING_ID if addon_count == 1 else _ADDONS_STRING_ID) % addon_count
+        )
+        self.getControl(CACHED_COUNT).setLabel(L(_CACHED_STRING_ID) % cached_count)
 
     def onInit(self):
         from lib.ui.compat import L, addon_fanart

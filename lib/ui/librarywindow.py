@@ -47,7 +47,7 @@ def open_library():
     log('librarywindow: opening library showcase (%d items)' % len(metas), xbmc.LOGINFO)
     try:
         from lib.ui.infowindow import open_showcase
-        selected = open_showcase(metas)
+        selected = open_showcase(metas, catalog_title=L(30002))
     except Exception as exc:  # a skin/UI failure must surface, not vanish
         log('librarywindow: coverflow failed to open: %r' % (exc,), xbmc.LOGERROR)
         notify(L(30032))

@@ -124,7 +124,7 @@ def load_searchwindow():
 
 
 def _make_window(searchwindow_mod):
-    return searchwindow_mod.SearchWindow('SearchWindow.xml', '/addon/path', 'Default', '720p')
+    return searchwindow_mod.SearchWindow('SearchWindow.xml', '/addon/path', 'Default', '1080i')
 
 
 def _wire_store(searchwindow_mod, store):
@@ -442,7 +442,7 @@ def test_run_search_addonerror_from_one_addon_is_skipped_others_still_aggregate(
     win.onInit()
     captured = {}
 
-    def _fake_open_showcase(metas):
+    def _fake_open_showcase(metas, catalog_title=None):
         captured['metas'] = metas
         return None
 
@@ -506,7 +506,7 @@ def test_run_search_no_results_notifies_and_does_not_open_the_coverflow(load_sea
     win = _make_window(ctx.searchwindow)
     win.onInit()
     opened = []
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas))
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas, catalog_title=None: opened.append(metas))
 
     win._run_search('nomatch')
 
@@ -544,8 +544,9 @@ def test_run_search_nonempty_aggregate_opens_the_coverflow(load_searchwindow, mo
     win.onInit()
     captured = {}
 
-    def fake_open_showcase(passed_metas):
+    def fake_open_showcase(passed_metas, catalog_title=None):
         captured['metas'] = passed_metas
+        captured['catalog_title'] = catalog_title
         return None
 
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', fake_open_showcase)
@@ -553,6 +554,7 @@ def test_run_search_nonempty_aggregate_opens_the_coverflow(load_searchwindow, mo
     win._run_search('batman')
 
     assert captured['metas'] == metas
+    assert captured['catalog_title'] == 'STR30001 \u00b7 batman'
     assert win.closed is False
 
 
@@ -565,7 +567,7 @@ def test_run_search_no_selection_from_the_coverflow_does_not_close(load_searchwi
     _wire_client(ctx.searchwindow, _FakeAddonClient(catalog_results={transport: metas}))
     win = _make_window(ctx.searchwindow)
     win.onInit()
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: None)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: None)
 
     win._run_search('batman')
 
@@ -582,7 +584,7 @@ def test_run_search_selection_that_opens_detail_sets_should_close_caller_and_clo
     _wire_client(ctx.searchwindow, _FakeAddonClient(catalog_results={transport: metas}))
     win = _make_window(ctx.searchwindow)
     win.onInit()
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: m[0])
     captured = {}
 
     def fake_open_detail(stype, sid):
@@ -607,7 +609,7 @@ def test_run_search_selection_without_a_type_falls_back_to_movie(load_searchwind
     _wire_client(ctx.searchwindow, _FakeAddonClient(catalog_results={transport: metas}))
     win = _make_window(ctx.searchwindow)
     win.onInit()
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: m[0])
     captured = {}
 
     def fake_open_detail(stype, sid):
@@ -630,7 +632,7 @@ def test_run_search_detail_returning_false_does_not_close(load_searchwindow, mon
     _wire_client(ctx.searchwindow, _FakeAddonClient(catalog_results={transport: metas}))
     win = _make_window(ctx.searchwindow)
     win.onInit()
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: m[0])
     monkeypatch.setattr(ctx.detailwindow, 'open_detail', lambda stype, sid: False)
 
     win._run_search('batman')
@@ -722,7 +724,7 @@ def test_start_returns_true_when_the_modal_run_sets_should_close_caller(load_sea
     metas = [{'id': 'tt9', 'name': 'Batman', 'type': 'movie'}]
     _wire_client(ctx.searchwindow, _FakeAddonClient(catalog_results={transport: metas}))
     win = _make_window(ctx.searchwindow)
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: m[0])
     monkeypatch.setattr(ctx.detailwindow, 'open_detail', lambda stype, sid: True)
 
     # The fake doModal() is a no-op counter; simulate what a real modal
@@ -767,7 +769,7 @@ def test_open_search_opens_window_against_the_right_skin_and_returns_start_resul
     result = ctx.searchwindow.open_search()
 
     assert result is True
-    assert captured['init_args'] == ('SearchWindow.xml', '/addon/path', 'Default', '720p')
+    assert captured['init_args'] == ('SearchWindow.xml', '/addon/path', 'Default', '1080i')
     assert captured['started'] is True
 
 

@@ -124,7 +124,7 @@ def _wire_data_layer(streamswindow_mod, store, client):
 
 
 def _make_window(streamswindow_mod):
-    return streamswindow_mod.StreamsWindow('StreamsWindow.xml', '/addon/path', 'Default', '720p')
+    return streamswindow_mod.StreamsWindow('StreamsWindow.xml', '/addon/path', 'Default', '1080i')
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +230,96 @@ def test_oninit_sets_position_property_in_pair_order_and_focuses_the_list(load_s
     items = win.getControl(ctx.streamswindow.LIST).items
     assert [item.getProperty('position') for item in items] == ['0', '1']
     assert win.getFocusId() == ctx.streamswindow.LIST
+
+
+def test_oninit_sets_discrete_stream_fields_properties_on_each_row(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    info = {
+        'resolution': '2160p', 'source': 'Remux', 'codec': 'HEVC', 'hdr': ['DV', 'HDR10'],
+        'audio': ['Atmos'], 'size_text': '55.46 GB', 'seeders': 72, 'service': 'RD',
+        'cached': True, 'addon': 'AIOStreams Stable',
+    }
+    win.pairs = [(info, {})]
+
+    win.onInit()
+
+    item = win.getControl(ctx.streamswindow.LIST).items[0]
+    assert item.getProperty('quality') == '2160p'
+    assert item.getProperty('quality_color') == 'FFFFD700'
+    assert item.getProperty('release') == 'Remux'
+    assert item.getProperty('flags') == 'HEVC \u00b7 DV \u00b7 HDR10 \u00b7 Atmos'
+    assert item.getProperty('provider') == 'AIOStreams Stable'
+    assert item.getProperty('size') == '55.46 GB'
+    assert item.getProperty('seeders') == '72'
+    assert item.getProperty('cache_state') == 'CACHED'
+    assert item.getProperty('cache_color') == 'FF4ADE80'
+
+
+def test_oninit_missing_discrete_fields_are_empty_strings_not_omitted(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = [({'raw': 'A'}, {})]
+
+    win.onInit()
+
+    item = win.getControl(ctx.streamswindow.LIST).items[0]
+    for key in ('quality', 'release', 'flags', 'provider', 'size', 'seeders', 'cache_state'):
+        assert item.getProperty(key) == ''
+
+
+def test_oninit_renders_sources_addons_and_cached_summary_counts(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = [
+        ({'addon': 'AddonA', 'cached': True}, {}),
+        ({'addon': 'AddonA', 'cached': False}, {}),
+        ({'addon': 'AddonB', 'cached': True}, {}),
+    ]
+
+    win.onInit()
+
+    assert win.getControl(ctx.streamswindow.SOURCES_COUNT).label == '3 SOURCES'
+    assert win.getControl(ctx.streamswindow.ADDONS_COUNT).label == '2 ADDONS'
+    assert win.getControl(ctx.streamswindow.CACHED_COUNT).label == '2 CACHED'
+
+
+def test_oninit_summary_counts_are_zero_when_there_are_no_pairs(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = []
+
+    win.onInit()
+
+    assert win.getControl(ctx.streamswindow.SOURCES_COUNT).label == '0 SOURCES'
+    assert win.getControl(ctx.streamswindow.ADDONS_COUNT).label == '0 ADDONS'
+    assert win.getControl(ctx.streamswindow.CACHED_COUNT).label == '0 CACHED'
+
+
+@pytest.mark.parametrize('pair_count,expected', [(1, '1 SOURCE'), (2, '2 SOURCES')], ids=['n1-singular', 'n2-plural'])
+def test_oninit_sources_count_label_singular_vs_plural(load_streamswindow, pair_count, expected):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = [({'addon': 'AddonA', 'cached': False}, {})] * pair_count
+
+    win.onInit()
+
+    assert win.getControl(ctx.streamswindow.SOURCES_COUNT).label == expected
+
+
+@pytest.mark.parametrize(
+    'addon_names,expected',
+    [(['AddonA'], '1 ADDON'), (['AddonA', 'AddonB'], '2 ADDONS')],
+    ids=['n1-singular', 'n2-plural'],
+)
+def test_oninit_addons_count_label_singular_vs_plural(load_streamswindow, addon_names, expected):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = [({'addon': name, 'cached': False}, {}) for name in addon_names]
+
+    win.onInit()
+
+    assert win.getControl(ctx.streamswindow.ADDONS_COUNT).label == expected
 
 
 @pytest.mark.parametrize('poster,expect_fanart', [

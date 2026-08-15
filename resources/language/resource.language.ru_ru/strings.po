@@ -567,3 +567,55 @@ msgstr "Все"
 msgctxt "#30199"
 msgid "search only"
 msgstr "только поиск"
+
+msgctxt "#30200"
+msgid "%d SOURCE"
+msgstr "%d ИСТОЧНИК"
+
+msgctxt "#30201"
+msgid "%d SOURCES"
+msgstr "%d ИСТОЧНИКА"
+
+msgctxt "#30202"
+msgid "%d ADDON"
+msgstr "%d ДОПОЛНЕНИЕ"
+
+msgctxt "#30203"
+msgid "%d ADDONS"
+msgstr "%d ДОПОЛНЕНИЯ"
+
+msgctxt "#30204"
+msgid "%d SEASON"
+msgstr "%d СЕЗОН"
+
+msgctxt "#30205"
+msgid "%d SEASONS"
+msgstr "%d СЕЗОНА"
+
+msgctxt "#30206"
+msgid "%d EPISODE"
+msgstr "%d ЭПИЗОД"
+
+msgctxt "#30207"
+msgid "%d EPISODES"
+msgstr "%d ЭПИЗОДА"
+
+msgctxt "#30208"
+msgid "%d CACHED"
+msgstr "%d В КЭШЕ"
+
+msgctxt "#30209"
+msgid "select"
+msgstr "выбрать"
+
+msgctxt "#30210"
+msgid "back"
+msgstr "назад"
+
+msgctxt "#30211"
+msgid "exit"
+msgstr "выход"
+
+msgctxt "#30212"
+msgid "%d%% WATCHED"
+msgstr "%d%% ПРОСМОТРЕНО"

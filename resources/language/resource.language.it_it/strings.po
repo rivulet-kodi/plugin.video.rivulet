@@ -567,3 +567,55 @@ msgstr "Tutti"
 msgctxt "#30199"
 msgid "search only"
 msgstr "sola ricerca"
+
+msgctxt "#30200"
+msgid "%d SOURCE"
+msgstr "%d FONTE"
+
+msgctxt "#30201"
+msgid "%d SOURCES"
+msgstr "%d FONTI"
+
+msgctxt "#30202"
+msgid "%d ADDON"
+msgstr "%d ADD-ON"
+
+msgctxt "#30203"
+msgid "%d ADDONS"
+msgstr "%d ADD-ON"
+
+msgctxt "#30204"
+msgid "%d SEASON"
+msgstr "%d STAGIONE"
+
+msgctxt "#30205"
+msgid "%d SEASONS"
+msgstr "%d STAGIONI"
+
+msgctxt "#30206"
+msgid "%d EPISODE"
+msgstr "%d EPISODIO"
+
+msgctxt "#30207"
+msgid "%d EPISODES"
+msgstr "%d EPISODI"
+
+msgctxt "#30208"
+msgid "%d CACHED"
+msgstr "%d IN CACHE"
+
+msgctxt "#30209"
+msgid "select"
+msgstr "seleziona"
+
+msgctxt "#30210"
+msgid "back"
+msgstr "indietro"
+
+msgctxt "#30211"
+msgid "exit"
+msgstr "esci"
+
+msgctxt "#30212"
+msgid "%d%% WATCHED"
+msgstr "%d%% VISTO"

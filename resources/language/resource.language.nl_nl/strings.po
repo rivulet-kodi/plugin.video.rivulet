@@ -567,3 +567,55 @@ msgstr "Alle"
 msgctxt "#30199"
 msgid "search only"
 msgstr "alleen zoeken"
+
+msgctxt "#30200"
+msgid "%d SOURCE"
+msgstr "%d BRON"
+
+msgctxt "#30201"
+msgid "%d SOURCES"
+msgstr "%d BRONNEN"
+
+msgctxt "#30202"
+msgid "%d ADDON"
+msgstr "%d ADD-ON"
+
+msgctxt "#30203"
+msgid "%d ADDONS"
+msgstr "%d ADD-ONS"
+
+msgctxt "#30204"
+msgid "%d SEASON"
+msgstr "%d SEIZOEN"
+
+msgctxt "#30205"
+msgid "%d SEASONS"
+msgstr "%d SEIZOENEN"
+
+msgctxt "#30206"
+msgid "%d EPISODE"
+msgstr "%d AFLEVERING"
+
+msgctxt "#30207"
+msgid "%d EPISODES"
+msgstr "%d AFLEVERINGEN"
+
+msgctxt "#30208"
+msgid "%d CACHED"
+msgstr "%d GECACHED"
+
+msgctxt "#30209"
+msgid "select"
+msgstr "selecteren"
+
+msgctxt "#30210"
+msgid "back"
+msgstr "terug"
+
+msgctxt "#30211"
+msgid "exit"
+msgstr "afsluiten"
+
+msgctxt "#30212"
+msgid "%d%% WATCHED"
+msgstr "%d%% GEZIEN"

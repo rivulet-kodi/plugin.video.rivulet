@@ -567,3 +567,55 @@ msgstr "전체"
 msgctxt "#30199"
 msgid "search only"
 msgstr "검색 전용"
+
+msgctxt "#30200"
+msgid "%d SOURCE"
+msgstr "%d 소스"
+
+msgctxt "#30201"
+msgid "%d SOURCES"
+msgstr "%d 소스"
+
+msgctxt "#30202"
+msgid "%d ADDON"
+msgstr "%d 애드온"
+
+msgctxt "#30203"
+msgid "%d ADDONS"
+msgstr "%d 애드온"
+
+msgctxt "#30204"
+msgid "%d SEASON"
+msgstr "%d 시즌"
+
+msgctxt "#30205"
+msgid "%d SEASONS"
+msgstr "%d 시즌"
+
+msgctxt "#30206"
+msgid "%d EPISODE"
+msgstr "%d 에피소드"
+
+msgctxt "#30207"
+msgid "%d EPISODES"
+msgstr "%d 에피소드"
+
+msgctxt "#30208"
+msgid "%d CACHED"
+msgstr "%d 캐시됨"
+
+msgctxt "#30209"
+msgid "select"
+msgstr "선택"
+
+msgctxt "#30210"
+msgid "back"
+msgstr "뒤로"
+
+msgctxt "#30211"
+msgid "exit"
+msgstr "종료"
+
+msgctxt "#30212"
+msgid "%d%% WATCHED"
+msgstr "%d%% 시청함"

@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<window>
+    <depth>0.52</depth>
+    <coordinates><left>0</left><top>0</top></coordinates>
+    <controls>
+        <control type="group">
+            <left>0</left><top>0</top>
+            <visible>!Player.HasVideo</visible>
+            <animation type="WindowOpen" reversible="false">
+                <effect type="slide" start="0,100" end="0,0" delay="160" time="160" />
+                <effect type="fade" delay="160" end="100" time="100" />
+            </animation>
+            <animation type="WindowClose" reversible="false">
+                <effect type="slide" start="0,0" end="0,100" delay="160" time="160" />
+                <effect type="fade" delay="160" start="100" end="0" time="100" />
+            </animation>
+            <!-- Fallback wash: covers the instant this window opens, before
+                 the background image below has a texture to draw - keeps
+                 the opening frame dark instead of flashing skin-default
+                 white. -->
+            <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="E60A0C0E">white.png</texture></control>
+            <control type="image" id="30000"><width>1920</width><height>1080</height><texture colordiffuse="FF777777"></texture><aspectratio>scale</aspectratio></control>
+            <!-- Scrim stack over the fanart, approximating the design's
+                 4-stop gradient (rgba(10,12,14, .55/.72/.94/1) at
+                 0/26/52/74% of the frame height) with what Kodi can
+                 actually draw: a flat wash for the .55 baseline everywhere,
+                 fade_bottom.png ramped up to full FF0A0C0E opacity by
+                 799px (74% of 1080), then a flat solid rect for the
+                 remaining 26% where the design is already fully opaque. -->
+            <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="8C0A0C0E">white.png</texture></control>
+            <control type="image"><left>0</left><top>0</top><width>1920</width><height>799</height><texture colordiffuse="FF0A0C0E">fade_bottom.png</texture></control>
+            <control type="image"><left>0</left><top>799</top><width>1920</width><height>281</height><texture colordiffuse="FF0A0C0E">white.png</texture></control>
+            <control type="image" id="30001"><top>535</top><left>810</left><width>300</width><height>10</height><texture>white.png</texture>
+                <animation effect="zoom" pulse="true" center="auto" start="0,100" end="100,100" time="1000" condition="Control.IsVisible(30001)">Conditional</animation>
+            </control>
+
+            <!-- Header: wordmark, breadcrumb, position counter, close. -->
+            <control type="image"><left>96</left><top>60</top><width>36</width><height>36</height><texture>logo.png</texture><aspectratio>keep</aspectratio></control>
+            <!-- Breadcrumb: ShowcaseWindow.py's onInit() sets this label's
+                 text via setLabel() (not an $INFO[] binding - the title is
+                 built with inline [COLOR] markup, not a single ListItem/
+                 Window property) to "RIVULET" alone, or "RIVULET /
+                 <CATALOG>" once open_showcase() is handed a catalog_title -
+                 see infowindow.py's `_header_label()`. -->
+            <control type="label" id="30100"><left>144</left><top>60</top><width>760</width><height>36</height><font>font10</font><aligny>center</aligny>
+                <label>[COLOR 57EEF3F6]RIVULET[/COLOR]</label>
+            </control>
+            <control type="label"><right>190</right><top>60</top><width>140</width><height>36</height><font>Mono26</font><align>right</align><aligny>center</aligny>
+                <label>[COLOR 80EEF3F6]$INFO[Container(30002).CurrentItem][/COLOR][COLOR 47EEF3F6]/$INFO[Container(30002).NumItems][/COLOR]</label>
+            </control>
+            <control type="button" id="30003">
+                <left>1774</left><top>53</top><width>50</width><height>50</height><aligny>center</aligny><align>center</align>
+                <texturefocus colordiffuse="FFFFFFFF">close.png</texturefocus>
+                <texturenofocus colordiffuse="73FFFFFF">close.png</texturenofocus>
+                <ondown>30002</ondown>
+            </control>
+
+            <!-- Title. -->
+            <control type="label"><left>96</left><top>168</top><width>1180</width><height>76</height><font>font60</font><textcolor>FFFFFFFF</textcolor>
+                <label>[B]$INFO[ListItem.Label][/B]</label>
+            </control>
+
+            <!-- Year chip: hollow 1px border, always leftmost when present -
+                 it never has to reflow, only the rating chip after it does. -->
+            <control type="image"><left>96</left><top>256</top><width>110</width><height>1</height><texture colordiffuse="1AFFFFFF">white.png</texture><visible>!String.IsEmpty(ListItem.Property(year))</visible></control>
+            <control type="image"><left>96</left><top>295</top><width>110</width><height>1</height><texture colordiffuse="1AFFFFFF">white.png</texture><visible>!String.IsEmpty(ListItem.Property(year))</visible></control>
+            <control type="image"><left>96</left><top>256</top><width>1</width><height>40</height><texture colordiffuse="1AFFFFFF">white.png</texture><visible>!String.IsEmpty(ListItem.Property(year))</visible></control>
+            <control type="image"><left>205</left><top>256</top><width>1</width><height>40</height><texture colordiffuse="1AFFFFFF">white.png</texture><visible>!String.IsEmpty(ListItem.Property(year))</visible></control>
+            <control type="label"><left>96</left><top>256</top><width>110</width><height>40</height><font>Mono26</font><textcolor>C7EEF3F6</textcolor><align>center</align><aligny>center</aligny>
+                <label>$INFO[ListItem.Property(year)]</label>
+                <visible>!String.IsEmpty(ListItem.Property(year))</visible>
+            </control>
+
+            <!-- Rating chip: filled + bordered, in two positions depending
+                 on whether the year chip ahead of it is present - the same
+                 reflow trick the pre-1a layout used for its year/rating
+                 line, just applied to a boxed chip instead of flowed text. -->
+            <control type="image"><left>220</left><top>256</top><width>110</width><height>40</height><texture colordiffuse="6638BDF8">white.png</texture><visible>!String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating))</visible></control>
+            <control type="image"><left>222</left><top>258</top><width>106</width><height>36</height><texture colordiffuse="2438BDF8">white.png</texture><visible>!String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating))</visible></control>
+            <control type="label"><left>220</left><top>256</top><width>110</width><height>40</height><font>Mono26</font><textcolor>FF38BDF8</textcolor><align>center</align><aligny>center</aligny>
+                <label>$INFO[ListItem.Property(rating)]</label>
+                <visible>!String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating))</visible>
+            </control>
+            <control type="image"><left>96</left><top>256</top><width>110</width><height>40</height><texture colordiffuse="6638BDF8">white.png</texture><visible>String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating))</visible></control>
+            <control type="image"><left>98</left><top>258</top><width>106</width><height>36</height><texture colordiffuse="2438BDF8">white.png</texture><visible>String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating))</visible></control>
+            <control type="label"><left>96</left><top>256</top><width>110</width><height>40</height><font>Mono26</font><textcolor>FF38BDF8</textcolor><align>center</align><aligny>center</aligny>
+                <label>$INFO[ListItem.Property(rating)]</label>
+                <visible>String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating))</visible>
+            </control>
+
+            <!-- Runtime chip: same hollow-border styling as the year chip,
+                 reflowing into whichever slot the year/rating chips ahead
+                 of it leave open - the slot depends only on how many of
+                 them are present, not which ones, so three positions cover
+                 every combination. -->
+            <control type="image"><left>96</left><top>256</top><width>110</width><height>1</height><texture colordiffuse="1AFFFFFF">white.png</texture><visible>String.IsEmpty(ListItem.Property(year)) + String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime))</visible></control>
+            <control type="image"><left>96</left><top>295</top><width>110</width><height>1</height><texture colordiffuse="1AFFFFFF">white.png</texture><visible>String.IsEmpty(ListItem.Property(year)) + String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime))</visible></control>
+            <control type="image"><left>96</left><top>256</top><width>1</width><height>40</height><texture colordiffuse="1AFFFFFF">white.png</texture><visible>String.IsEmpty(ListItem.Property(year)) + String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime))</visible></control>
+            <control type="image"><left>205</left><top>256</top><width>1</width><height>40</height><texture colordiffuse="1AFFFFFF">white.png</texture><visible>String.IsEmpty(ListItem.Property(year)) + String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime))</visible></control>
+            <control type="label"><left>96</left><top>256</top><width>110</width><height>40</height><font>Mono26</font><textcolor>C7EEF3F6</textcolor><align>center</align><aligny>center</aligny>
+                <label>$INFO[ListItem.Property(runtime)]</label>
+                <visible>String.IsEmpty(ListItem.Property(year)) + String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime))</visible>
+            </control>
+            <control type="image"><left>220</left><top>256</top><width>110</width><height>1</height><texture colordiffuse="1AFFFFFF">white.png</texture><visible>!String.IsEmpty(ListItem.Property(year)) + String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime)) | String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime))</visible></control>
+            <control type="image"><left>220</left><top>295</top><width>110</width><height>1</height><texture colordiffuse="1AFFFFFF">white.png</texture><visible>!String.IsEmpty(ListItem.Property(year)) + String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime)) | String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime))</visible></control>
+            <control type="image"><left>220</left><top>256</top><width>1</width><height>40</height><texture colordiffuse="1AFFFFFF">white.png</texture><visible>!String.IsEmpty(ListItem.Property(year)) + String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime)) | String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime))</visible></control>
+            <control type="image"><left>329</left><top>256</top><width>1</width><height>40</height><texture colordiffuse="1AFFFFFF">white.png</texture><visible>!String.IsEmpty(ListItem.Property(year)) + String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime)) | String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime))</visible></control>
+            <control type="label"><left>220</left><top>256</top><width>110</width><height>40</height><font>Mono26</font><textcolor>C7EEF3F6</textcolor><align>center</align><aligny>center</aligny>
+                <label>$INFO[ListItem.Property(runtime)]</label>
+                <visible>!String.IsEmpty(ListItem.Property(year)) + String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime)) | String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime))</visible>
+            </control>
+            <control type="image"><left>344</left><top>256</top><width>110</width><height>1</height><texture colordiffuse="1AFFFFFF">white.png</texture><visible>!String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime))</visible></control>
+            <control type="image"><left>344</left><top>295</top><width>110</width><height>1</height><texture colordiffuse="1AFFFFFF">white.png</texture><visible>!String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime))</visible></control>
+            <control type="image"><left>344</left><top>256</top><width>1</width><height>40</height><texture colordiffuse="1AFFFFFF">white.png</texture><visible>!String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime))</visible></control>
+            <control type="image"><left>453</left><top>256</top><width>1</width><height>40</height><texture colordiffuse="1AFFFFFF">white.png</texture><visible>!String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime))</visible></control>
+            <control type="label"><left>344</left><top>256</top><width>110</width><height>40</height><font>Mono26</font><textcolor>C7EEF3F6</textcolor><align>center</align><aligny>center</aligny>
+                <label>$INFO[ListItem.Property(runtime)]</label>
+                <visible>!String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime))</visible>
+            </control>
+
+            <!-- Genre, in the four positions the chips ahead of it can
+                 leave it: the slot only depends on how many of
+                 year/rating/runtime are present (0-3), never on which
+                 ones - so, unlike the chips themselves, one visible
+                 condition per count covers every combination. -->
+            <control type="label"><left>468</left><top>256</top><width>808</width><height>40</height><font>font12</font><textcolor>80EEF3F6</textcolor><aligny>center</aligny>
+                <label>$INFO[ListItem.Property(genre)]</label>
+                <visible>!String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime))</visible>
+            </control>
+            <control type="label"><left>344</left><top>256</top><width>932</width><height>40</height><font>font12</font><textcolor>80EEF3F6</textcolor><aligny>center</aligny>
+                <label>$INFO[ListItem.Property(genre)]</label>
+                <visible>!String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating)) + String.IsEmpty(ListItem.Property(runtime)) | !String.IsEmpty(ListItem.Property(year)) + String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime)) | String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime))</visible>
+            </control>
+            <control type="label"><left>220</left><top>256</top><width>1056</width><height>40</height><font>font12</font><textcolor>80EEF3F6</textcolor><aligny>center</aligny>
+                <label>$INFO[ListItem.Property(genre)]</label>
+                <visible>!String.IsEmpty(ListItem.Property(year)) + String.IsEmpty(ListItem.Property(rating)) + String.IsEmpty(ListItem.Property(runtime)) | String.IsEmpty(ListItem.Property(year)) + !String.IsEmpty(ListItem.Property(rating)) + String.IsEmpty(ListItem.Property(runtime)) | String.IsEmpty(ListItem.Property(year)) + String.IsEmpty(ListItem.Property(rating)) + !String.IsEmpty(ListItem.Property(runtime))</visible>
+            </control>
+            <control type="label"><left>96</left><top>256</top><width>1180</width><height>40</height><font>font12</font><textcolor>80EEF3F6</textcolor><aligny>center</aligny>
+                <label>$INFO[ListItem.Property(genre)]</label>
+                <visible>String.IsEmpty(ListItem.Property(year)) + String.IsEmpty(ListItem.Property(rating)) + String.IsEmpty(ListItem.Property(runtime))</visible>
+            </control>
+
+            <control type="textbox"><left>96</left><top>322</top><width>1080</width><height>140</height><font>font27</font><textcolor>B8EEF3F6</textcolor>
+                <label>$INFO[ListItem.Property(plot)]</label>
+                <autoscroll time="3000" delay="3000" repeat="3000">true</autoscroll>
+            </control>
+
+            <control type="fixedlist" id="30002">
+                <!-- 1676 = one focused slot (336: 308 ring + 28 gap) + five
+                     unfocused (5x268: 240 poster + 28 gap). -->
+                <top>592</top><left>96</left><width>1676</width><height>458</height>
+                <viewtype>wrap</viewtype><orientation>horizontal</orientation>
+                <scrolltime tween="cubic" easing="out">300</scrolltime>
+                <!-- focusposition 0: the focused poster leads the strip,
+                     flush against the frame's left edge like the rest of
+                     this window's content. -->
+                <focusposition>0</focusposition>
+                <onup>30003</onup>
+                <itemlayout width="268" height="458">
+                    <control type="image">
+                        <top>98</top><left>14</left><width>240</width><height>360</height>
+                        <texture colordiffuse="8CFFFFFF">$INFO[ListItem.Property(thumbnail)]</texture>
+                        <aspectratio align="center" aligny="center">keep</aspectratio>
+                    </control>
+                </itemlayout>
+                <focusedlayout width="336" height="458">
+                    <!-- 4px accent outline as four edges around the
+                         300x450 poster, per spec, rather than a backing
+                         plate. -->
+                    <control type="image"><top>0</top><left>0</left><width>308</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                    <control type="image"><top>454</top><left>0</left><width>308</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                    <control type="image"><top>0</top><left>0</left><width>4</width><height>458</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                    <control type="image"><top>0</top><left>304</left><width>4</width><height>458</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                    <control type="image">
+                        <top>4</top><left>4</left><width>300</width><height>450</height>
+                        <texture>$INFO[ListItem.Property(thumbnail)]</texture>
+                        <aspectratio align="center" aligny="center">keep</aspectratio>
+                    </control>
+                </focusedlayout>
+            </control>
+
+            <!-- Title of the focused poster, pinned under the strip so it
+                 does not ride up and down with the item as focus moves. -->
+            <control type="label"><left>96</left><top>1002</top><width>300</width><height>32</height><font>font27</font><textcolor>FFFFFFFF</textcolor><align>center</align>
+                <label>[B]$INFO[ListItem.Label][/B]</label>
+            </control>
+
+            <control type="image"><left>0</left><top>592</top><width>96</width><height>458</height><texture flipx="true">fade_edge.png</texture></control>
+            <control type="image"><left>1780</left><top>592</top><width>140</width><height>458</height><texture>fade_edge.png</texture></control>
+        </control>
+    </controls>
+</window>

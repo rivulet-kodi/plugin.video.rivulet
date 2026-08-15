@@ -95,7 +95,7 @@ def load_addonswindow():
 
 
 def _make_window(addonswindow_mod):
-    return addonswindow_mod.AddonsWindow('AddonsWindow.xml', '/addon/path', 'Default', '720p')
+    return addonswindow_mod.AddonsWindow('AddonsWindow.xml', '/addon/path', 'Default', '1080i')
 
 
 def _wire_store(addonswindow_mod, store):
@@ -359,7 +359,7 @@ def test_open_addons_opens_window_and_runs_modal(load_addonswindow, monkeypatch)
     result = ctx.addonswindow.open_addons()
 
     assert result is None
-    assert captured['init_args'] == ('AddonsWindow.xml', '/addon/path', 'Default', '720p')
+    assert captured['init_args'] == ('AddonsWindow.xml', '/addon/path', 'Default', '1080i')
     assert captured['modal_called'] is True
 
 

@@ -31,13 +31,16 @@ _DEFAULT_SETTINGS = {
 
 # Default localized-string map (`xbmcaddon.Addon.getLocalizedString`). Only
 # ids production code formats with `%` need real placeholders (see
-# `_prebuffer_torrent`'s dialog.update() text, and lib/ui's "Searching %s...",
-# "Checking %s...", "Season %d" strings); every other id not explicitly
-# configured falls back to a deterministic 'STR<id>' marker (see
-# `FakeAddon.getLocalizedString`) so assertions never need real strings.po
-# text. 30189-30192, 30194, 30196, and 30197 are plain (non-`%`) strings, so
-# they deliberately stay out of this dict and fall through to their
-# 'STR<id>' marker.
+# `_prebuffer_torrent`'s dialog.update() text, lib/ui's "Searching %s...",
+# "Checking %s...", "Season %d" strings, and streamswindow.py/
+# detailwindow.py's singular/plural 'N SOURCE(S)'/'N ADDON(S)'/
+# 'N SEASON(S)'/'N EPISODE(S)'/'N CACHED' summary labels, and
+# detailwindow.py's per-episode '%d%% WATCHED' readout); every other id
+# not explicitly configured falls back to a deterministic 'STR<id>' marker
+# (see `FakeAddon.getLocalizedString`) so assertions never need real
+# strings.po text. 30189-30192, 30194, 30196, 30197, and 30209-30211
+# (select/back/exit) are plain (non-`%`) strings, so they deliberately
+# stay out of this dict and fall through to their 'STR<id>' marker.
 _DEFAULT_LOCALIZED = {
     30081: 'buffered %s of %s',
     30082: 'speed %s, %s peers',
@@ -45,6 +48,16 @@ _DEFAULT_LOCALIZED = {
     30186: 'Searching %s...',
     30187: 'Checking %s...',
     30188: 'Season %d',
+    30200: '%d SOURCE',
+    30201: '%d SOURCES',
+    30202: '%d ADDON',
+    30203: '%d ADDONS',
+    30204: '%d SEASON',
+    30205: '%d SEASONS',
+    30206: '%d EPISODE',
+    30207: '%d EPISODES',
+    30208: '%d CACHED',
+    30212: '%d%% WATCHED',
 }
 
 

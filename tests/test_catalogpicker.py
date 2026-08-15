@@ -65,7 +65,7 @@ def load_catalogpicker():
 
 
 def _make_window(catalogpicker_mod):
-    return catalogpicker_mod.CatalogPickerWindow('CatalogPickerWindow.xml', '/addon/path', 'Default', '720p')
+    return catalogpicker_mod.CatalogPickerWindow('CatalogPickerWindow.xml', '/addon/path', 'Default', '1080i')
 
 
 # ---------------------------------------------------------------------------
@@ -158,11 +158,14 @@ def test_onclick_dispatches_to_open_catalog_with_the_focused_row(load_catalogpic
     win.onInit()
     win.getControl(picker.LIST).selected_index = 1  # simulate scrolling to the 2nd row
     calls = []
-    monkeypatch.setattr(win, '_open_catalog', lambda transport, catalog: calls.append((transport, catalog)))
+    monkeypatch.setattr(
+        win, '_open_catalog',
+        lambda transport, manifest, catalog: calls.append((transport, manifest, catalog)),
+    )
 
     win.onClick(picker.LIST)
 
-    assert calls == [('https://b.example/manifest.json', {'id': 'new', 'type': 'series'})]
+    assert calls == [('https://b.example/manifest.json', {'name': 'B'}, {'id': 'new', 'type': 'series'})]
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +182,7 @@ def test_open_catalog_addon_error_is_logged_and_does_not_close(load_catalogpicke
 
     monkeypatch.setattr(ctx.views, '_fetch_catalog', _raise)
 
-    win._open_catalog('https://a.example/manifest.json', {'type': 'movie', 'id': 'top'})
+    win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, {'type': 'movie', 'id': 'top'})
 
     assert win.should_close_caller is False
     assert win.closed is False
@@ -198,7 +201,7 @@ def test_open_catalog_addon_error_log_never_leaks_credentials_path_or_query(load
 
     monkeypatch.setattr(ctx.views, '_fetch_catalog', _raise)
 
-    win._open_catalog(secret_transport, {'type': 'movie', 'id': 'top'})
+    win._open_catalog(secret_transport, {'name': 'Addon A'}, {'type': 'movie', 'id': 'top'})
 
     all_messages = ' '.join(msg for msg, _level in ctx.env.log_calls)
     assert 'hunter2' not in all_messages
@@ -214,7 +217,7 @@ def test_open_catalog_empty_results_does_not_close_or_fallback(load_catalogpicke
     win = _make_window(ctx.catalogpicker)
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: [])
 
-    win._open_catalog('https://a.example/manifest.json', {'type': 'movie', 'id': 'top'})
+    win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, {'type': 'movie', 'id': 'top'})
 
     assert win.should_close_caller is False
     assert win.closed is False
@@ -227,13 +230,56 @@ def test_open_catalog_no_selection_does_not_fallback_or_close(load_catalogpicker
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'movie'}]
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: None)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: None)
 
-    win._open_catalog('https://a.example/manifest.json', {'type': 'movie', 'id': 'top'})
+    win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, {'type': 'movie', 'id': 'top'})
 
     assert win.should_close_caller is False
     assert win.closed is False
     assert ctx.env.executed_builtins == []
+
+
+# ---------------------------------------------------------------------------
+# CatalogPickerWindow._fetch_and_show() - the "RIVULET / <TITLE>" breadcrumb
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_and_show_passes_addon_and_catalog_name_as_breadcrumb_title(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker()
+    win = _make_window(ctx.catalogpicker)
+    metas = [{'id': 'tt1', 'name': 'One', 'type': 'movie'}]
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
+    captured = {}
+    monkeypatch.setattr(
+        ctx.infowindow, 'open_showcase',
+        lambda m, catalog_title=None: captured.setdefault('catalog_title', catalog_title) and None,
+    )
+
+    win._open_catalog(
+        'https://a.example/manifest.json', {'name': 'Cinemeta'}, {'name': 'Popular Movies', 'type': 'movie'},
+    )
+
+    assert captured['catalog_title'] == 'Cinemeta \u00b7 Popular Movies'
+
+
+def test_fetch_and_show_falls_back_to_the_catalog_name_alone_without_an_addon_name(
+    load_catalogpicker, monkeypatch,
+):
+    ctx = load_catalogpicker()
+    win = _make_window(ctx.catalogpicker)
+    metas = [{'id': 'tt1', 'name': 'One', 'type': 'movie'}]
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
+    captured = {}
+    monkeypatch.setattr(
+        ctx.infowindow, 'open_showcase',
+        lambda m, catalog_title=None: captured.setdefault('catalog_title', catalog_title) and None,
+    )
+
+    win._open_catalog(
+        'https://a.example/manifest.json', {}, {'name': 'Popular Movies', 'type': 'movie'},
+    )
+
+    assert captured['catalog_title'] == 'Popular Movies'
 
 
 def test_open_catalog_with_selection_opens_detail_and_closes_when_playback_started(
@@ -243,7 +289,7 @@ def test_open_catalog_with_selection_opens_detail_and_closes_when_playback_start
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'series'}]
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: m[0])
     captured = {}
 
     def fake_open_detail(stype, sid):
@@ -252,7 +298,7 @@ def test_open_catalog_with_selection_opens_detail_and_closes_when_playback_start
 
     monkeypatch.setattr(ctx.detailwindow, 'open_detail', fake_open_detail)
 
-    win._open_catalog('https://a.example/manifest.json', {'type': 'movie', 'id': 'top'})
+    win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, {'type': 'movie', 'id': 'top'})
 
     assert captured['args'] == ('series', 'tt1')
     assert win.should_close_caller is True
@@ -266,10 +312,10 @@ def test_open_catalog_with_selection_does_not_close_when_detail_returns_false(
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'series'}]
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: m[0])
     monkeypatch.setattr(ctx.detailwindow, 'open_detail', lambda stype, sid: False)
 
-    win._open_catalog('https://a.example/manifest.json', {'type': 'movie', 'id': 'top'})
+    win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, {'type': 'movie', 'id': 'top'})
 
     assert win.should_close_caller is False
     assert win.closed is False
@@ -282,7 +328,7 @@ def test_open_catalog_selected_meta_without_type_falls_back_to_the_catalogs_own_
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt2', 'name': 'Two'}]  # no 'type' key on the selected meta
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: m[0])
     captured = {}
 
     def fake_open_detail(stype, sid):
@@ -291,7 +337,7 @@ def test_open_catalog_selected_meta_without_type_falls_back_to_the_catalogs_own_
 
     monkeypatch.setattr(ctx.detailwindow, 'open_detail', fake_open_detail)
 
-    win._open_catalog('https://a.example/manifest.json', {'type': 'movie', 'id': 'top'})
+    win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, {'type': 'movie', 'id': 'top'})
 
     assert captured['args'] == ('movie', 'tt2')
 
@@ -301,9 +347,9 @@ def test_open_catalog_fetch_shows_and_closes_the_busy_dialog(load_catalogpicker,
     win = _make_window(ctx.catalogpicker)
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'series'}]
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: None)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: None)
 
-    win._open_catalog('https://a.example/manifest.json', {'type': 'movie', 'id': 'top'})
+    win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, {'type': 'movie', 'id': 'top'})
 
     assert ctx.env.dialog_created == [('STR30033', '')]
     assert ctx.env.dialog_closed_count == 1
@@ -316,13 +362,13 @@ def test_open_catalog_closes_busy_dialog_before_opening_coverflow(load_catalogpi
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
     captured = {}
 
-    def fake_open_showcase(m):
+    def fake_open_showcase(m, catalog_title=None):
         captured['dialog_closed_count'] = ctx.env.dialog_closed_count
         return None
 
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', fake_open_showcase)
 
-    win._open_catalog('https://a.example/manifest.json', {'type': 'movie', 'id': 'top'})
+    win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, {'type': 'movie', 'id': 'top'})
 
     assert captured['dialog_closed_count'] == 1
 
@@ -336,7 +382,7 @@ def test_open_catalog_addon_error_still_closes_the_busy_dialog(load_catalogpicke
 
     monkeypatch.setattr(ctx.views, '_fetch_catalog', _raise)
 
-    win._open_catalog('https://a.example/manifest.json', {'type': 'movie', 'id': 'top'})
+    win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, {'type': 'movie', 'id': 'top'})
 
     assert ctx.env.dialog_created == [('STR30033', '')]
     assert ctx.env.dialog_closed_count == 1
@@ -375,7 +421,7 @@ def test_start_with_catalogs_calls_domodal_and_returns_should_close_caller(load_
     catalogs = [('https://a.example/manifest.json', {'name': 'A'}, {'id': 'top', 'type': 'movie'})]
     metas = [{'id': 'tt1', 'name': 'One', 'type': 'movie'}]
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda transport, ctype, cid, extra=None: metas)
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m: m[0])
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: m[0])
     monkeypatch.setattr(ctx.detailwindow, 'open_detail', lambda stype, sid: True)
 
     # The fake doModal() is a no-op counter; simulate what a real modal event
@@ -435,7 +481,7 @@ def test_open_catalog_picker_opens_window_with_discovered_catalogs(load_catalogp
     result = ctx.catalogpicker.open_catalog_picker()
 
     assert result is True
-    assert captured['init_args'] == ('CatalogPickerWindow.xml', '/addon/path', 'Default', '720p')
+    assert captured['init_args'] == ('CatalogPickerWindow.xml', '/addon/path', 'Default', '1080i')
     assert captured['catalogs'] == [
         ('https://a.example/manifest.json', descriptor['manifest'], {'id': 'top', 'type': 'movie'}),
     ]
@@ -529,7 +575,7 @@ def test_open_catalog_search_only_prompts_and_fetches_with_search_extra(load_cat
 
     monkeypatch.setattr(ctx.views, '_fetch_catalog', fake_fetch)
 
-    win._open_catalog('https://a.example/manifest.json', _SEARCH_CATALOG)
+    win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, _SEARCH_CATALOG)
 
     assert ctx.env.dialog_input_prompts == ['STR30001']
     assert captured['extra'] == [('search', 'batman')]
@@ -541,7 +587,7 @@ def test_open_catalog_search_only_cancelled_prompt_fetches_nothing(load_catalogp
     calls = []
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda *a, **k: calls.append((a, k)))
 
-    win._open_catalog('https://a.example/manifest.json', _SEARCH_CATALOG)
+    win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, _SEARCH_CATALOG)
 
     assert calls == []
     assert ctx.env.notifications == []
@@ -558,7 +604,7 @@ def test_open_catalog_normal_catalog_click_does_not_prompt(load_catalogpicker, m
 
     monkeypatch.setattr(ctx.views, '_fetch_catalog', fake_fetch)
 
-    win._open_catalog('https://a.example/manifest.json', _GENRE_OPTIONAL_CATALOG)
+    win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, _GENRE_OPTIONAL_CATALOG)
 
     assert ctx.env.dialog_input_prompts == []
     assert captured['extra'] is None
@@ -582,7 +628,7 @@ def test_open_catalog_genre_required_opens_select_with_no_all_entry(load_catalog
 
     monkeypatch.setattr(ctx.views, '_fetch_catalog', fake_fetch)
 
-    win._open_catalog('https://a.example/manifest.json', _GENRE_REQUIRED_CATALOG)
+    win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, _GENRE_REQUIRED_CATALOG)
 
     assert captured['select'] == ('STR30194', ['2026', '2025'])
     assert captured['extra'] == [('genre', '2025')]
@@ -596,7 +642,7 @@ def test_open_catalog_genre_required_cancelled_select_fetches_nothing(load_catal
     calls = []
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda *a, **k: calls.append((a, k)))
 
-    win._open_catalog('https://a.example/manifest.json', _GENRE_REQUIRED_CATALOG)
+    win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, _GENRE_REQUIRED_CATALOG)
 
     assert calls == []
 

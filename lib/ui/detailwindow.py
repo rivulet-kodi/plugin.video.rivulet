@@ -30,6 +30,35 @@ HEADING = 30005
 LIST = 30002
 SEASON_BAR = 30007
 
+#: Right-aligned "N EPISODES" readout for the season the episode list
+#: (LIST) is currently showing - a plain window label DetailWindow sets
+#: directly via setLabel() (like HEADING), not a per-ListItem Property:
+#: there is exactly one active season at a time, never one value per row.
+SEASON_COUNT = 30100
+
+#: Left column's "year \u00b7 N SEASONS \u00b7 \u2605 rating" line, built
+#: from the series meta already in hand - see _metadata_line().
+METADATA_LINE = 30101
+
+#: Left column's genre line - see _genres_line().
+GENRES_LINE = 30102
+
+#: strings.po ids for the localized 'N SEASON(S)' segment _metadata_line()
+#: builds and the 'N EPISODE(S)' readout _set_season_count() sets -
+#: singular msgstr for a count of exactly 1, plural otherwise. Both
+#: callers only reach these once the count is already known > 0 (see
+#: each function's own docstring for its own zero-count guard).
+_SEASON_STRING_ID = 30204
+_SEASONS_STRING_ID = 30205
+_EPISODE_STRING_ID = 30206
+_EPISODES_STRING_ID = 30207
+
+#: strings.po id for the per-episode '%d%% WATCHED' readout
+#: _build_episode_items() sets as the `watched_percent` Property -
+#: DetailWindow.xml's label reads that property verbatim (one $INFO
+#: substitution, no literal English appended in the skin).
+_WATCHED_STRING_ID = 30212
+
 #: ACTION_MOVE_LEFT / ACTION_MOVE_RIGHT - navigating the season bar
 #: (id SEASON_BAR) with either fires onAction() while it still has focus;
 #: that is this module's cue to check whether the selected season moved.
@@ -57,12 +86,29 @@ def _ordered_videos(videos):
     )
 
 
+def _episode_code(video):
+    """'S01E03' - zero-padded season/episode (Specials as S00Exx), the
+    mono/blue half of `_episode_label()` now split into its own
+    ListItem `code` Property so the skin can style it apart from the
+    title."""
+    return 'S%02dE%02d' % (video.get('season') or 0, video.get('episode') or 0)
+
+
+def _episode_title(video):
+    """title -> name -> id fallback chain - the other half of
+    `_episode_label()`, as its own ListItem `title` Property."""
+    return video.get('title') or video.get('name') or video.get('id') or ''
+
+
 def _episode_label(video):
-    """'S01E03 · The Title' - zero-padded season/episode (Specials as
-    S00Exx), falling back title -> name -> id when a video is missing
-    a proper title."""
-    title = video.get('title') or video.get('name') or video.get('id')
-    return 'S%02dE%02d \u00b7 %s' % (video.get('season') or 0, video.get('episode') or 0, title)
+    """'S01E03 \u00b7 The Title' - `_episode_code()` and
+    `_episode_title()` joined, kept as the item's plain Label (every
+    existing caller - `_episode_rows()`, `_episode_heading()`, the
+    row's own `xbmcgui.ListItem(...)` constructor - still reads the one
+    combined string); DetailWindow.xml's itemlayout instead reads the
+    two halves apart via the `code`/`title` Properties
+    `_episode_properties()` sets alongside it."""
+    return '%s \u00b7 %s' % (_episode_code(video), _episode_title(video))
 
 
 def _episode_rows(videos):
@@ -98,13 +144,28 @@ def _group_by_season(videos):
     return groups
 
 
+def _season_count(season_groups):
+    """Count of distinct non-Specials seasons in `season_groups` (see
+    `_group_by_season()`) - the left column's 'N SEASONS' segment.
+    Specials (season 0) is a bucket, never a season, so it's excluded."""
+    return sum(1 for season, _label, _videos in season_groups if season != 0)
+
+
 def _episode_properties(video):
     """Map one video/episode meta to the string Properties
     `DetailWindow.xml`'s itemlayout reads via
     `$INFO[ListItem.Property(...)]`: `thumb` (episode still - may be
-    empty, the row's thumb `<control>` degrades gracefully to nothing)
-    and `line2` (first line of the episode's plot, falling back to its
-    air date, falling back to empty)."""
+    empty, the row's thumb `<control>` degrades gracefully to nothing),
+    `line2` (first line of the episode's plot, falling back to its air
+    date, falling back to empty), and `code`/`title` - the episode code
+    and title split back out of `_episode_label()`'s one combined
+    string so the skin can style them apart (mono/blue code, bold white
+    title). Per-episode `runtime` was investigated (neither the Stremio
+    Video shape nor anything this addon's meta/store carries one) and
+    is deliberately NOT exposed here - there is no real value to bind.
+    `watched_percent` - the localized '%d%% WATCHED' readout, when there
+    is any - is set separately by `DetailWindow._build_episode_items()`, which
+    needs a `Store` this pure function deliberately does not touch."""
     video = video or {}
     plot = (video.get('overview') or '').strip()
     line1 = plot.splitlines()[0] if plot else ''
@@ -113,6 +174,8 @@ def _episode_properties(video):
     return {
         'thumb': video.get('thumbnail') or '',
         'line2': line1 or aired or '',
+        'code': _episode_code(video),
+        'title': _episode_title(video),
     }
 
 
@@ -134,6 +197,60 @@ def _show_art(meta):
     poster = meta.get('poster')
     fanart = meta.get('background') or meta.get('logo') or poster
     return {'poster': poster, 'fanart': fanart}
+
+
+def _metadata_line(meta, season_count):
+    """'2025 \u00b7 2 SEASONS \u00b7 [COLOR FF38BDF8]\u2605 7.6[/COLOR]'
+    for the left column (METADATA_LINE/30101) - built from series-level
+    meta only, never a per-episode video. Any segment whose source
+    value is missing (no year, no real season yet, no rating) is
+    skipped outright rather than left as a dangling ' \u00b7 ' - the
+    same join-only-what-exists shape
+    lib.ui.streamswindow._rebuild_list() already uses for its own
+    year/rating/genres info panel."""
+    from lib.ui.compat import L
+
+    meta = meta or {}
+    segments = []
+    year = str(meta.get('releaseInfo') or meta.get('year') or '').rstrip('-')
+    if year:
+        segments.append(year)
+    if season_count > 0:
+        segments.append(L(_SEASON_STRING_ID if season_count == 1 else _SEASONS_STRING_ID) % season_count)
+    rating = meta.get('imdbRating')
+    if rating:
+        segments.append('[COLOR FF38BDF8]\u2605 %s[/COLOR]' % rating)
+    return ' \u00b7 '.join(segments)
+
+
+#: Left column genre line cap - matches the [:3] StreamsWindow's own
+#: info-panel genre line already applies (streamswindow.py's
+#: _rebuild_list()), so a long genre array can't overflow the 340px
+#: column.
+_MAX_GENRES = 3
+
+
+def _genres_line(meta):
+    """'Comedy \u00b7 Mystery \u00b7 Crime' for the left column
+    (GENRES_LINE/30102), capped at `_MAX_GENRES` genres - empty string,
+    never a lone separator, when the meta carries no genres at all."""
+    genres = ((meta or {}).get('genres') or [])[:_MAX_GENRES]
+    return ' \u00b7 '.join(genres)
+
+
+def _watched_percent(progress):
+    """0-100 int watched percentage from a `Store.get_progress()`
+    payload (`{'position_ms', 'duration_ms', ...}`) - None (never
+    0-as-"no data") when there is nothing recorded or the duration is
+    unusable, mirroring `lib.ui.player._maybe_resume_offset_ms()`'s own
+    position/duration guard."""
+    if not progress:
+        return None
+    position_ms = progress.get('position_ms') or 0
+    duration_ms = progress.get('duration_ms') or 0
+    if duration_ms <= 0 or position_ms <= 0:
+        return None
+    return min(100, int(round((position_ms / duration_ms) * 100)))
 
 
 class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
@@ -190,30 +307,79 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
 
     def _build_episode_items(self, videos):
         """One `xbmcgui.ListItem` per video in `videos` - `row_id`
-        property plus `_episode_properties()`'s thumb/line2 - the
-        row-building logic the initial populate and every season switch
-        both reuse, factored out so either can build from any video
-        subset."""
+        property plus `_episode_properties()`'s thumb/line2/code/title,
+        plus a best-effort `watched_percent` Property (the localized
+        '%d%% WATCHED' text, WATCHED_STRING_ID/30212 - DetailWindow.xml's
+        label reads it verbatim, no literal English baked into the skin)
+        and matching legacy resumetime/totaltime video info, for the
+        skin's ListItem.PercentPlayed-bound progress bar, from the local
+        Store.get_progress() cache - the row-building logic the initial
+        populate and every season switch both reuse, factored out so
+        either can build from any video subset."""
+        from lib.ui.compat import L
+
+        sid = self.meta.get('id')
         items = []
         for video in videos:
             item = xbmcgui.ListItem(_episode_label(video))
             properties = _episode_properties(video)
             properties['row_id'] = video.get('id')
-            # One setProperties() call instead of 3 setProperty() calls
-            # (row_id, thumb, line2) - each is a Python->C++ boundary
-            # crossing.
+            progress = self._episode_progress(self.stype, sid, video.get('id'))
+            percent = _watched_percent(progress)
+            properties['watched_percent'] = L(_WATCHED_STRING_ID) % percent if percent is not None else ''
+            # One setProperties() call instead of one setProperty() call
+            # per key - each is a Python->C++ boundary crossing.
             item.setProperties(properties)
+            if percent is not None:
+                # The same legacy setInfo('video', {resumetime,
+                # totaltime}) shape any Kodi video plugin uses to badge
+                # a "continue watching" row - independent of this
+                # addon's own `state.watched` bitfield (lib.library
+                # never touches that; see its module docstring).
+                item.setInfo('video', {
+                    'resumetime': progress['position_ms'] / 1000.0,
+                    'totaltime': progress['duration_ms'] / 1000.0,
+                })
             items.append(item)
         return items
 
+    @staticmethod
+    def _episode_progress(stype, sid, video_id):
+        """Best-effort per-episode `Store.get_progress()` lookup for
+        `watched_percent` - resolving the store itself, or the lookup
+        call, must never break the episode list (a corrupt/unwritable
+        local cache, or a test with no real Kodi profile directory at
+        all): mirrors `lib.ui.player._maybe_resume_offset_ms()`'s own
+        defensive guard around the same call."""
+        from lib.ui.dependencies import get_store
+        try:
+            return get_store().get_progress(stype, sid, video_id)
+        except Exception:
+            return None
+
     def _populate_episode_list(self, videos):
-        """Replace `LIST`'s contents with `videos`' rows and reset the
-        selection to the top - used for the initial populate and for
-        every season switch alike."""
+        """Replace `LIST`'s contents with `videos`' rows, reset the
+        selection to the top, and refresh SEASON_COUNT's 'N EPISODES'
+        readout to match - used for the initial populate and for every
+        season switch alike, so the count always tracks whichever
+        season is actually on screen."""
         control = self.getControl(LIST)
         control.reset()
         control.addItems(self._build_episode_items(videos))
         control.selectItem(0)
+        self._set_season_count(len(videos))
+
+    def _set_season_count(self, count):
+        """SEASON_COUNT/30100's 'N EPISODES' text for the active
+        season - empty (never '0 EPISODES') when there is nothing to
+        show, so its XML `<visible>` guard (keyed off
+        Control.GetLabel(SEASON_COUNT)) collapses it cleanly."""
+        if not count:
+            self.getControl(SEASON_COUNT).setLabel('')
+            return
+        from lib.ui.compat import L
+        label = L(_EPISODE_STRING_ID if count == 1 else _EPISODES_STRING_ID) % count
+        self.getControl(SEASON_COUNT).setLabel(label)
 
     def _build_season_bar(self):
         """Populate `SEASON_BAR` once, in bar order, each item's `season`
@@ -254,7 +420,13 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         background = self.meta.get('background') or self.meta.get('logo') or self.meta.get('poster')
         self.getControl(BACKGROUND).setImage(background or addon_fanart())
         self.getControl(POSTER).setImage(self.meta.get('poster') or '')
-        self.getControl(HEADING).setLabel((self.meta.get('name') or self.meta.get('id') or '').upper())
+        # [B]...[/B] applied here, not in the skin XML, because this
+        # label is always Python-set: any markup baked into the
+        # <label> itself would just be overwritten the moment this
+        # call runs.
+        self.getControl(HEADING).setLabel('[B]%s[/B]' % (self.meta.get('name') or self.meta.get('id') or '').upper())
+        self.getControl(METADATA_LINE).setLabel(_metadata_line(self.meta, _season_count(self.season_groups)))
+        self.getControl(GENRES_LINE).setLabel(_genres_line(self.meta))
 
         self._build_season_bar()
         self._populate_episode_list(self._active_videos())

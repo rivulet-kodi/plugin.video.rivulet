@@ -114,7 +114,7 @@ class SearchWindow(BaseWindow):
         log('searchwindow: opening coverflow (%d results)' % len(metas), xbmc.LOGINFO)
         try:
             from lib.ui.infowindow import open_showcase
-            selected = open_showcase(metas)
+            selected = open_showcase(metas, catalog_title='%s \u00b7 %s' % (L(30001), query))
         except Exception as exc:  # a skin/UI failure must surface, not vanish
             log('searchwindow: coverflow failed to open: %r' % (exc,), xbmc.LOGERROR)
             notify(L(30032))

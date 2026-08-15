@@ -567,3 +567,55 @@ msgstr "الكل"
 msgctxt "#30199"
 msgid "search only"
 msgstr "بحث فقط"
+
+msgctxt "#30200"
+msgid "%d SOURCE"
+msgstr "%d مصدر"
+
+msgctxt "#30201"
+msgid "%d SOURCES"
+msgstr "%d مصادر"
+
+msgctxt "#30202"
+msgid "%d ADDON"
+msgstr "%d إضافة"
+
+msgctxt "#30203"
+msgid "%d ADDONS"
+msgstr "%d إضافات"
+
+msgctxt "#30204"
+msgid "%d SEASON"
+msgstr "%d موسم"
+
+msgctxt "#30205"
+msgid "%d SEASONS"
+msgstr "%d مواسم"
+
+msgctxt "#30206"
+msgid "%d EPISODE"
+msgstr "%d حلقة"
+
+msgctxt "#30207"
+msgid "%d EPISODES"
+msgstr "%d حلقات"
+
+msgctxt "#30208"
+msgid "%d CACHED"
+msgstr "%d مخزّن مؤقتًا"
+
+msgctxt "#30209"
+msgid "select"
+msgstr "تحديد"
+
+msgctxt "#30210"
+msgid "back"
+msgstr "رجوع"
+
+msgctxt "#30211"
+msgid "exit"
+msgstr "خروج"
+
+msgctxt "#30212"
+msgid "%d%% WATCHED"
+msgstr "%d%% شوهد"
