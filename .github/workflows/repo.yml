@@ -1,7 +1,14 @@
 name: Publish repository
 
+# Tag pushes cut a release; main pushes only refresh what gh-pages serves.
+# Without the branch trigger the published site froze at the last tag, so a
+# screenshots-or-copy-only commit landed on main and the gallery kept showing
+# the previous release's UI until someone dispatched this by hand. The job is
+# ~11s and idempotent, and "Create GitHub release" below is gated on refs/tags,
+# so republishing per commit costs nothing and cannot mint a stray release.
 on:
   push:
+    branches: [ main ]
     tags: [ 'v*' ]
   workflow_dispatch:
 
