@@ -107,7 +107,7 @@ def _action_item(label, url, icon=None):
     return (url, li, False)
 
 
-def _fetch_meta(stype, sid):
+def _fetch_meta(stype, sid, store=True, on_miss=None):
     """Aggregate meta across every installed addon supporting it for
     (stype, sid); Stremio addons commonly disagree on coverage, so the
     first addon to return a usable object wins.
@@ -142,19 +142,40 @@ def _fetch_meta(stype, sid):
     each time. `store.data_dir` doubles as the cache's on/off switch: it
     is only set on the real `Store` (test fakes omit it), so tests never
     touch the filesystem.
+
+    `store=False` lets a caller take over the on-disk write itself - e.g.
+    `continuewatching.open_continue_watching()` fans this out over up to
+    `_MAX_ITEMS` candidates and batches all of their results into one
+    `metacache.store_cached_metas()` call instead of triggering one
+    full-file cache rewrite per candidate (see that module's docstring).
+    The cache READ above is unaffected by `store` - a cache hit is always
+    served regardless of whether this call's own miss would be stored.
+
+    `on_miss`, if given, is invoked with no arguments exactly when this
+    call bypasses the cache above and reaches for a fresh addon answer -
+    never on a cache hit. `continuewatching.open_continue_watching()`
+    uses it to tell a genuine cache-miss fetch apart from a value merely
+    served from disk, so its batched `metacache.store_cached_metas()`
+    call only re-stamps entries that were actually just fetched:
+    restamping `ts` for every warm candidate on every reopen would
+    perpetually re-arm each entry's TTL and defeat `metacache.TTL_SECONDS`
+    from ever actually expiring one (Finding 7's adversarial-review fix).
     """
-    store = get_store()
+    data_store = get_store()
     client = get_client()
 
-    cache_dir = getattr(store, 'data_dir', None)
+    cache_dir = getattr(data_store, 'data_dir', None)
     if cache_dir is not None:
         from lib.ui.metacache import load_cached_meta
         cached = load_cached_meta(cache_dir, stype, sid)
         if cached is not None:
             return cached
 
+    if on_miss is not None:
+        on_miss()
+
     targets = [
-        descriptor for descriptor in store.get_addons()
+        descriptor for descriptor in data_store.get_addons()
         if addons_lib.addon_supports(descriptor.get('manifest') or {}, 'meta', stype, sid)
     ]
     if not targets:
@@ -199,7 +220,7 @@ def _fetch_meta(stype, sid):
                 future.cancel()
             pool.shutdown(wait=False)
 
-    if cache_dir is not None and result:
+    if store and cache_dir is not None and result:
         from lib.ui.metacache import store_cached_meta
         store_cached_meta(cache_dir, stype, sid, result)
     return result

@@ -153,3 +153,87 @@ def test_concurrent_stores_from_a_thread_pool_all_survive(tmp_path):
 
     for stype, sid in keys:
         assert metacache.load_cached_meta(data_dir, stype, sid) == {'name': sid}
+
+
+# ---------------------------------------------------------------------------
+# store_cached_metas() - batched writes (Finding 7)
+# ---------------------------------------------------------------------------
+
+
+def test_store_cached_metas_writes_once_for_multiple_entries(tmp_path, monkeypatch):
+    """A batch of N entries must cost exactly one `_atomic_write()` call -
+    the whole point of the batch API is collapsing what used to be one
+    full-file rewrite per `store_cached_meta()` call into one rewrite for
+    the entire batch."""
+    data_dir = _data_dir(tmp_path)
+    write_calls = []
+    real_atomic_write = metacache._atomic_write
+
+    def counting_atomic_write(path, data):
+        write_calls.append(dict(data))
+        real_atomic_write(path, data)
+
+    monkeypatch.setattr(metacache, '_atomic_write', counting_atomic_write)
+
+    entries = [('movie', 'tt%d' % i, {'name': str(i)}) for i in range(5)]
+    metacache.store_cached_metas(data_dir, entries)
+
+    assert len(write_calls) == 1
+    for stype, sid, meta in entries:
+        assert metacache.load_cached_meta(data_dir, stype, sid) == meta
+
+
+def test_store_cached_metas_skips_falsy_entries(tmp_path):
+    data_dir = _data_dir(tmp_path)
+    metacache.store_cached_metas(data_dir, [
+        ('movie', 'tt1', {'name': 'Real'}),
+        ('movie', 'tt2', None),
+        ('movie', 'tt3', {}),
+    ])
+    assert metacache.load_cached_meta(data_dir, 'movie', 'tt1') == {'name': 'Real'}
+    assert metacache.load_cached_meta(data_dir, 'movie', 'tt2') is None
+    assert metacache.load_cached_meta(data_dir, 'movie', 'tt3') is None
+
+
+def test_store_cached_metas_all_falsy_is_a_no_op(tmp_path):
+    data_dir = _data_dir(tmp_path)
+    metacache.store_cached_metas(data_dir, [('movie', 'tt1', None), ('movie', 'tt2', {})])
+    assert not os.path.exists(metacache._path(data_dir))
+
+
+def test_store_cached_metas_empty_list_is_a_no_op(tmp_path):
+    data_dir = _data_dir(tmp_path)
+    metacache.store_cached_metas(data_dir, [])
+    assert not os.path.exists(metacache._path(data_dir))
+
+
+def test_store_cached_metas_applies_eviction_across_the_whole_batch(tmp_path, monkeypatch):
+    data_dir = _data_dir(tmp_path)
+    monkeypatch.setattr(metacache, 'MAX_ENTRIES', 3)
+    entries = [('movie', 'tt%d' % i, {'name': str(i)}) for i in range(5)]
+
+    metacache.store_cached_metas(data_dir, entries)
+
+    with open(metacache._path(data_dir)) as fh:
+        stored = json.load(fh)
+    assert len(stored) == 3
+
+
+def test_store_cached_meta_delegates_through_the_batch_api_single_entry_unchanged(tmp_path, monkeypatch):
+    """`store_cached_meta()` is now `store_cached_metas()` with a
+    single-entry list - its own single-entry contract (round trip, one
+    write) must be unaffected by the refactor."""
+    data_dir = _data_dir(tmp_path)
+    write_calls = []
+    real_atomic_write = metacache._atomic_write
+
+    def counting_atomic_write(path, data):
+        write_calls.append(dict(data))
+        real_atomic_write(path, data)
+
+    monkeypatch.setattr(metacache, '_atomic_write', counting_atomic_write)
+
+    metacache.store_cached_meta(data_dir, 'movie', 'tt1', {'name': 'Solo'})
+
+    assert len(write_calls) == 1
+    assert metacache.load_cached_meta(data_dir, 'movie', 'tt1') == {'name': 'Solo'}

@@ -62,20 +62,59 @@ def has_resumable(store):
 def open_continue_watching():
     """Fetch metas for the current resumable candidates and show them in
     the coverflow overlay. Returns True if the caller (HomeWindow) should
-    also close (playback started somewhere down the open_detail() chain)."""
+    also close (playback started somewhere down the open_detail() chain).
+
+    Each candidate is fetched with `views._fetch_meta(..., store=False)`
+    so a cache-miss result is not written to disk on its own; instead
+    every genuinely fresh result from the whole fan-out is written in a
+    single `metacache.store_cached_metas()` call once the fan-out
+    returns. A cold open can fan out to `_MAX_ITEMS` (15) cache-miss
+    fetches - storing each individually meant up to 15 full-file cache
+    rewrites for one Home row open, where one write holding every entry
+    does the same job (see `metacache.store_cached_metas()`'s docstring
+    for the measured per-write cost this avoids).
+
+    `_fetch_meta(..., on_miss=...)` marks which candidates were genuine
+    cache misses. This distinction matters: a WARM reopen - every
+    candidate already served from the on-disk cache, zero addon calls -
+    must batch-store NOTHING. `store_cached_metas()` unconditionally
+    re-stamps `ts` on everything it is given, so batching cache HITS
+    back into it would re-arm every entry's TTL on every reopen and the
+    cache would never actually re-check the addon as long as the row
+    keeps getting reopened within `metacache.TTL_SECONDS` - an entirely
+    normal usage pattern (adversarial-review finding on the first cut of
+    this fix).
+    """
     import xbmc
 
     from lib.ui import views
     from lib.ui.compat import L, log, notify
     from lib.ui.uicommon import busy_dialog
 
-    candidates = resumable_candidates(get_store().get_progress_entries())
+    store = get_store()
+    candidates = resumable_candidates(store.get_progress_entries())
+
+    def _fetch(candidate):
+        was_fresh = []
+        meta = views._fetch_meta(
+            candidate['type'], candidate['id'], store=False,
+            on_miss=lambda: was_fresh.append(True),
+        )
+        return meta, bool(was_fresh)
 
     with busy_dialog(L(30033)):
-        metas = views._map_addons(
-            lambda candidate: views._fetch_meta(candidate['type'], candidate['id']), candidates,
-        )
-    metas = [meta for meta in metas if meta]
+        fetched = views._map_addons(_fetch, candidates)
+
+    cache_dir = getattr(store, 'data_dir', None)
+    if cache_dir is not None:
+        from lib.ui.metacache import store_cached_metas
+        store_cached_metas(cache_dir, [
+            (candidate['type'], candidate['id'], meta)
+            for candidate, (meta, was_fresh) in zip(candidates, fetched)
+            if meta and was_fresh
+        ])
+
+    metas = [meta for meta, _was_fresh in fetched if meta]
     if not metas:
         notify(L(30030))
         return False
