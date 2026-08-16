@@ -1474,8 +1474,14 @@ def test_paging_worker_appends_each_page_to_the_live_coverflow(load_infowindow):
 
 
 def test_paging_appends_without_disturbing_the_focused_item(load_infowindow):
-    """Appending rather than rebuilding is what keeps a page landing
-    mid-scroll from moving the poster under the user's focus."""
+    """A page landing mid-scroll must not move the cursor.
+
+    Regression: `addItems()` resets a ControlList's selection to 0, so
+    the user scrolling right got snapped back to the first poster every
+    time a background page arrived - the further they had scrolled, the
+    worse it looked. `_apply_pending_pages()` saves and restores the
+    position around the append.
+    """
     ctx = load_infowindow()
     win = _showcase_window(
         ctx, [_make_meta('tt%d' % n, 'M%d' % n) for n in range(20)], focus_index=7,
@@ -1489,6 +1495,42 @@ def test_paging_appends_without_disturbing_the_focused_item(load_infowindow):
     assert select.selected_index == 7
     assert select.items[7] is focused_before
     assert select.items[7].getProperty('position') == '7'
+    # ...and the append still happened; the cursor was restored, not the
+    # whole drain skipped.
+    assert len(select.items) == 40
+
+
+def test_paging_restores_focus_after_each_of_several_pages(load_infowindow):
+    """Several pages land over the life of one scroll - every one of
+    them must leave the cursor alone, not just the first."""
+    ctx = load_infowindow()
+    win = _showcase_window(
+        ctx, [_make_meta('tt%d' % n, 'M%d' % n) for n in range(20)], focus_index=12,
+    )
+    select = win.getControl(ctx.infowindow.SELECT)
+
+    for start in (20, 40, 60):
+        win._paging_worker(iter([[_make_meta('tt%d' % n, 'M%d' % n) for n in range(start, start + 20)]]))
+        _drain_pages(win, ctx)
+        assert select.selected_index == 12
+
+    assert len(select.items) == 80
+
+
+def test_paging_leaves_the_cursor_alone_when_focus_is_on_the_first_item(load_infowindow):
+    """Position 0 needs no restore - and must not be "restored" onto an
+    empty/unfocused list either, which is what the `> 0` guard is for."""
+    ctx = load_infowindow()
+    win = _showcase_window(
+        ctx, [_make_meta('tt%d' % n, 'M%d' % n) for n in range(20)], focus_index=0,
+    )
+    select = win.getControl(ctx.infowindow.SELECT)
+
+    win._paging_worker(iter([[_make_meta('tt%d' % n, 'M%d' % n) for n in range(20, 40)]]))
+    _drain_pages(win, ctx)
+
+    assert select.selected_index == 0
+    assert len(select.items) == 40
 
 
 def test_paging_worker_stops_walking_once_the_window_closed(load_infowindow):
