@@ -1555,6 +1555,138 @@ def test_streamswindow_add_pairs_drain_resorts_and_preserves_focus_by_identity_n
     assert low_stream_1 == low_stream_2  # the equality trap this test guards against
 
 
+# ---------------------------------------------------------------------------
+# StreamsWindow._apply_pending()/_rebuild_list() - the append-only fast
+# path: when a live add_pairs() merge's re-sort leaves every already-
+# rendered row exactly where it was, only the new suffix gets built and
+# control.addItems()-ed (no reset(), no O(N) identity search - see
+# _append_prefix_length()'s own docstring). Otherwise falls back to the
+# full reset()+rebuild the tests above already cover.
+# ---------------------------------------------------------------------------
+
+
+def _spy_control_calls(control):
+    """Wraps `control.reset`/`control.addItems` with recording spies
+    (instance-level monkeypatch - `FakeWindowControl` is a plain object,
+    no call-tracking of its own) and returns `(reset_calls, added_batches)`,
+    each a list appended to on every real call, still forwarding through
+    to the original behaviour."""
+    reset_calls = []
+    original_reset = control.reset
+
+    def spy_reset():
+        reset_calls.append(True)
+        original_reset()
+
+    control.reset = spy_reset
+
+    added_batches = []
+    original_add_items = control.addItems
+
+    def spy_add_items(items):
+        added_batches.append(list(items))
+        original_add_items(items)
+
+    control.addItems = spy_add_items
+    return reset_calls, added_batches
+
+
+def test_apply_pending_batch_sorting_strictly_after_existing_rows_appends_without_reset(
+    load_streamswindow,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    win = _make_window(sw)
+    info_a = {'addon': 'A', 'raw': 'Row A', 'resolution': '1080p'}
+    stream_a = {'url': 'https://a.example/a.mp4'}
+    win.start([(info_a, stream_a)], 'movie', 'tt1')
+    win.onInit()
+
+    control = win.getControl(sw.LIST)
+    reset_calls, added_batches = _spy_control_calls(control)
+
+    # Lower resolution tier than info_a - sort_streams' default 'quality'
+    # key sorts it strictly AFTER the already-rendered row.
+    info_b = {'addon': 'A', 'raw': 'Row B', 'resolution': '720p'}
+    stream_b = {'url': 'https://a.example/b.mp4'}
+    win.add_pairs([(info_b, stream_b)])
+    win.onAction(_FakeBackAction(-1))
+
+    assert reset_calls == []  # append-only fast path never resets
+    assert len(added_batches) == 1
+    assert [item.getProperty('position') for item in added_batches[0]] == ['1']  # ONLY the new row was built
+    assert [s for _i, s in win.pairs] == [stream_a, stream_b]
+    assert len(control.items) == 2
+
+
+def test_apply_pending_batch_interleaving_existing_rows_falls_back_to_full_rebuild(
+    load_streamswindow,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    win = _make_window(sw)
+    info_a = {'addon': 'A', 'raw': 'Row A', 'resolution': '720p'}
+    stream_a = {'url': 'https://a.example/a.mp4'}
+    win.start([(info_a, stream_a)], 'movie', 'tt1')
+    win.onInit()
+    win.getControl(sw.LIST).selected_index = 0  # focus the only row before the merge
+
+    control = win.getControl(sw.LIST)
+    reset_calls, added_batches = _spy_control_calls(control)
+
+    # Higher resolution tier than info_a - sort_streams' default
+    # 'quality' key sorts it BEFORE the already-rendered row, so the old
+    # prefix is no longer a prefix of the re-sorted list.
+    info_b = {'addon': 'B', 'raw': 'Row B', 'resolution': '1080p'}
+    stream_b = {'url': 'https://b.example/b.mp4'}
+    win.add_pairs([(info_b, stream_b)])
+    win.onAction(_FakeBackAction(-1))
+
+    assert reset_calls == [True]  # fallback still does a full reset()+rebuild
+    assert len(added_batches) == 1 and len(added_batches[0]) == 2  # every row rebuilt, not just the new one
+    assert [s for _i, s in win.pairs] == [stream_b, stream_a]  # new row sorted BEFORE the existing one
+    focused = win.getControl(sw.LIST).getSelectedItem()
+    focused_pair = win.pairs[int(focused.getProperty('position'))]
+    assert focused_pair[1] is stream_a  # focus followed the original row to its new position
+
+
+def test_apply_pending_fast_path_and_full_rebuild_produce_identical_final_list_contents(
+    load_streamswindow,
+):
+    """Same two pairs, reached two different ways - `fast_win` renders
+    `info_a` alone, then merges `info_b` in via the append-only fast
+    path; `full_win` renders both at once through the ordinary
+    reset()+rebuild `onInit()` always takes. Both must produce the same
+    rows: the fast path is an optimization, never an alternate render."""
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+
+    info_a = {'addon': 'A', 'raw': 'Row A', 'resolution': '1080p'}
+    stream_a = {'url': 'https://a.example/a.mp4'}
+    info_b = {'addon': 'A', 'raw': 'Row B', 'resolution': '720p'}
+    stream_b = {'url': 'https://a.example/b.mp4'}
+
+    fast_win = _make_window(sw)
+    fast_win.start([(info_a, stream_a)], 'movie', 'tt1')
+    fast_win.onInit()
+    fast_win.add_pairs([(info_b, stream_b)])
+    fast_win.onAction(_FakeBackAction(-1))
+
+    full_win = _make_window(sw)
+    full_win.start([(info_a, stream_a), (info_b, stream_b)], 'movie', 'tt1')
+    full_win.onInit()
+
+    def snapshot(win):
+        items = win.getControl(sw.LIST).items
+        return [
+            (item.getLabel(), item.label2, item.getProperty('position'), item.getProperty('quality'))
+            for item in items
+        ]
+
+    assert snapshot(fast_win) == snapshot(full_win)
+    assert [s for _i, s in fast_win.pairs] == [s for _i, s in full_win.pairs] == [stream_a, stream_b]
+
+
 def test_streamswindow_add_pairs_after_close_is_a_silent_noop(load_streamswindow):
     ctx = load_streamswindow()
     sw = ctx.streamswindow
