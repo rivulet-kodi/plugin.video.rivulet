@@ -53,38 +53,41 @@
                 <left>1100</left><top>104</top><width>680</width><height>48</height><font>font10</font><textcolor>A8EEF3F6</textcolor><align>right</align><aligny>center</aligny>
                 <label></label>
             </control>
-            <!-- 92px rows, not 0.9.1's 120, and sized for EIGHT of them.
-                 Home's maximum is movies/series/anime/other/search/library/
+            <!-- 82px rows, sized for NINE of them now that Continue
+                 watching is a conditional 9th row above Movies. 9x82 = 738:
+                 the list starts at 200 (40 clear of the RIVULET wordmark,
+                 which ends at 160) and ends at 938, with the hint strip at
+                 1000 keeping 62px clear.
+                 History: 0.9.1 used 120px rows. That became 92px sized for
+                 EIGHT rows (movies/series/anime/other/search/library/
                  addons/settings; at 120 that would need 960px and run off a
-                 1080 screen. 8x92 = 736: the list starts at 200 (40 clear of
-                 the RIVULET wordmark, which ends at 160) and ends at 936,
-                 with the hint strip moved down to 1000 to keep 64px between
-                 them. It was 7x92 = 644 at top=248 until the `other` row
-                 arrived and pushed Settings out of view - the list scrolled,
-                 so Settings stayed reachable, but nothing on screen said so.
-                 Internals keep 0.9.1's proportions, re-centred for the
-                 shorter row - 52px icon at top=20, and the 68px
-                 title+subtitle block at top=12. -->
+                 1080 screen). It was 7x92 = 644 at top=248 until the
+                 `other` row arrived and pushed Settings out of view - the
+                 list scrolled, so Settings stayed reachable, but nothing on
+                 screen said so. Continue watching's 9th row then pushed
+                 8x92=736 to 9x82=738; internals keep the same proportions,
+                 re-centred for the shorter row - 52px icon at top=15, and
+                 the 68px title+subtitle block at top=7. -->
             <control type="list" id="30002">
-                <left>120</left><top>200</top><width>900</width><height>736</height>
+                <left>120</left><top>200</top><width>900</width><height>738</height>
                 <onleft>30002</onleft><onright>30002</onright>
-                <itemlayout height="92">
-                    <control type="image"><left>34</left><top>20</top><width>52</width><height>52</height><texture colordiffuse="80FFFFFF">$INFO[ListItem.Icon]</texture><aspectratio>keep</aspectratio></control>
-                    <control type="label"><left>118</left><top>12</top><width>750</width><height>36</height><font>font32</font><textcolor>C7EEF3F6</textcolor><aligny>center</aligny>
+                <itemlayout height="82">
+                    <control type="image"><left>34</left><top>15</top><width>52</width><height>52</height><texture colordiffuse="80FFFFFF">$INFO[ListItem.Icon]</texture><aspectratio>keep</aspectratio></control>
+                    <control type="label"><left>118</left><top>7</top><width>750</width><height>36</height><font>font32</font><textcolor>C7EEF3F6</textcolor><aligny>center</aligny>
                         <label>$INFO[ListItem.Label]</label>
                     </control>
-                    <control type="label"><left>118</left><top>52</top><width>750</width><height>28</height><font>font12</font><textcolor>6BEEF3F6</textcolor><aligny>center</aligny>
+                    <control type="label"><left>118</left><top>47</top><width>750</width><height>28</height><font>font12</font><textcolor>6BEEF3F6</textcolor><aligny>center</aligny>
                         <label>$INFO[ListItem.Property(subtitle)]</label>
                     </control>
                 </itemlayout>
-                <focusedlayout height="92">
-                    <control type="image"><width>900</width><height>92</height><texture colordiffuse="FF1B2126">white.png</texture></control>
-                    <control type="image"><left>0</left><width>6</width><height>92</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
-                    <control type="image"><left>34</left><top>20</top><width>52</width><height>52</height><texture>$INFO[ListItem.Icon]</texture><aspectratio>keep</aspectratio></control>
-                    <control type="label"><left>118</left><top>12</top><width>750</width><height>36</height><font>font32</font><textcolor>FFFFFFFF</textcolor><aligny>center</aligny>
+                <focusedlayout height="82">
+                    <control type="image"><width>900</width><height>82</height><texture colordiffuse="FF1B2126">white.png</texture></control>
+                    <control type="image"><left>0</left><width>6</width><height>82</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                    <control type="image"><left>34</left><top>15</top><width>52</width><height>52</height><texture>$INFO[ListItem.Icon]</texture><aspectratio>keep</aspectratio></control>
+                    <control type="label"><left>118</left><top>7</top><width>750</width><height>36</height><font>font32</font><textcolor>FFFFFFFF</textcolor><aligny>center</aligny>
                         <label>[B]$INFO[ListItem.Label][/B]</label>
                     </control>
-                    <control type="label"><left>118</left><top>52</top><width>750</width><height>28</height><font>font12</font><textcolor>B3EEF3F6</textcolor><aligny>center</aligny>
+                    <control type="label"><left>118</left><top>47</top><width>750</width><height>28</height><font>font12</font><textcolor>B3EEF3F6</textcolor><aligny>center</aligny>
                         <label>$INFO[ListItem.Property(subtitle)]</label>
                     </control>
                 </focusedlayout>

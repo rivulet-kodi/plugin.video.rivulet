@@ -687,3 +687,15 @@ msgstr "Overige tonen"
 msgctxt "#30230"
 msgid "Open Rivulet automatically on Kodi startup"
 msgstr "Rivulet automatisch openen bij het opstarten van Kodi"
+
+msgctxt "#30231"
+msgid "Continue watching"
+msgstr "Verdergaan met kijken"
+
+msgctxt "#30232"
+msgid "Pick up where you left off"
+msgstr "Ga verder waar je gebleven was"
+
+msgctxt "#30233"
+msgid "Show Continue watching"
+msgstr "Verdergaan met kijken tonen"

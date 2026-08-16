@@ -64,6 +64,7 @@ def _remainder_types(available):
 
 #: (localized-string id, action) - the authoritative definition of Home's menu rows.
 _MENU = (
+    (30231, 'continue'),
     (30213, 'movies'),
     (30214, 'series'),
     (30215, 'anime'),
@@ -79,6 +80,7 @@ _MENU = (
 #: label per row - localized via L(), not plain literals, so it follows
 #: Kodi's language setting the same as every other row's main label.
 _SUBTITLES = {
+    'continue': 30232,
     'movies': 30216,
     'series': 30217,
     'anime': 30218,
@@ -122,12 +124,14 @@ def _type_row_enabled(action, available):
     return setting_bool(setting_id, True)
 
 
-def _menu_items(show_library, addons=None):
+def _menu_items(show_library, addons=None, show_continue=False):
     from lib.ui.compat import L, addon_media_path
 
     available = _available_types(addons or [])
     items = []
     for string_id, action in _MENU:
+        if action == 'continue' and not show_continue:
+            continue
         if action == 'library' and not show_library:
             continue
         if action in TYPE_ROW_TYPES and not _type_row_enabled(action, available):
@@ -163,10 +167,16 @@ class HomeWindow(BaseWindow):
     """See module docstring. Built/run via `open_home()`."""
 
     def onInit(self):
-        from lib.ui.compat import addon_fanart
+        from lib.ui.compat import addon_fanart, setting_bool
+        from lib.ui.continuewatching import has_resumable
 
         store = get_store()
         auth = store.get_auth()
+        # Recomputed every onInit(): onInit() re-runs on every resume from
+        # a nested modal (see reset() below), so the row appears/
+        # disappears the moment progress crosses the resumable band or the
+        # setting flips, without restarting the addon.
+        show_continue = setting_bool('home_show_continue', True) and has_resumable(store)
         self.getControl(BACKGROUND).setImage(addon_fanart())
         control = self.getControl(LIST)
         # reset() before addItems(): onInit() runs again when
@@ -177,7 +187,7 @@ class HomeWindow(BaseWindow):
         # an addon that publishes a new type) is reflected on the way back
         # here without restarting the addon.
         control.reset()
-        control.addItems(_menu_items(bool(auth), store.get_addons()))
+        control.addItems(_menu_items(bool(auth), store.get_addons(), show_continue))
         self.getControl(STATUS_LABEL).setLabel(_status_text(auth))
         self.setFocusId(LIST)
 
@@ -190,6 +200,12 @@ class HomeWindow(BaseWindow):
         handler = _ACTIONS.get(focused.getProperty('action'))
         if handler:
             handler(self)
+
+
+def _open_continue(window):
+    from lib.ui.continuewatching import open_continue_watching
+    if open_continue_watching():
+        window.close()
 
 
 def _open_type_row(window, action):
@@ -233,6 +249,7 @@ L_FOR_ACTION = {action: string_id for string_id, action in _MENU}
 
 
 _ACTIONS = {
+    'continue': _open_continue,
     'movies': lambda window: _open_type_row(window, 'movies'),
     'series': lambda window: _open_type_row(window, 'series'),
     'anime': lambda window: _open_type_row(window, 'anime'),

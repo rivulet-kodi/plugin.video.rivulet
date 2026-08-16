@@ -3,6 +3,11 @@
     <section id="plugin.video.rivulet">
         <category id="home" label="30219">
             <group id="1">
+                <setting id="home_show_continue" type="boolean" label="30233">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
                 <setting id="home_show_movies" type="boolean" label="30220">
                     <level>0</level>
                     <default>true</default>

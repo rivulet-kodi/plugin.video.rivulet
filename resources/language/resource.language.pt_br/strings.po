@@ -687,3 +687,15 @@ msgstr "Mostrar Outros"
 msgctxt "#30230"
 msgid "Open Rivulet automatically on Kodi startup"
 msgstr "Abrir o Rivulet automaticamente ao iniciar o Kodi"
+
+msgctxt "#30231"
+msgid "Continue watching"
+msgstr "Continuar assistindo"
+
+msgctxt "#30232"
+msgid "Pick up where you left off"
+msgstr "Continue de onde parou"
+
+msgctxt "#30233"
+msgid "Show Continue watching"
+msgstr "Mostrar Continuar assistindo"

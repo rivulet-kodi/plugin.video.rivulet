@@ -749,3 +749,53 @@ def test_set_progress_retains_just_written_entry_even_when_it_sorts_oldest(tmp_p
     assert store.get_progress("movie", "tt1") is None  # oldest of the REST evicted instead
     raw = json.loads((tmp_path / "addon_data" / "progress.json").read_text())
     assert len(raw) == 3
+
+
+# --- get_progress_entries() (lib.ui.continuewatching feed) -----------------
+
+
+def test_get_progress_entries_empty_store_returns_empty_list(tmp_path):
+    store = make_store(tmp_path)
+    assert store.get_progress_entries() == []
+
+
+def test_get_progress_entries_round_trip(tmp_path):
+    store = make_store(tmp_path)
+    store.set_progress("series", "tt9", "tt9:1:1", 1000, 2000, "2020-01-01T00:00:00Z")
+    assert store.get_progress_entries() == [{
+        "type": "series", "id": "tt9", "video_id": "tt9:1:1",
+        "position_ms": 1000, "duration_ms": 2000, "updated_at": "2020-01-01T00:00:00Z",
+    }]
+
+
+def test_get_progress_entries_movie_has_none_video_id(tmp_path):
+    store = make_store(tmp_path)
+    store.set_progress("movie", "tt1", None, 100, 200, "2020-01-01T00:00:00Z")
+    entries = store.get_progress_entries()
+    assert len(entries) == 1
+    assert entries[0]["video_id"] is None
+    assert entries[0]["type"] == "movie" and entries[0]["id"] == "tt1"
+
+
+def test_get_progress_entries_skips_key_with_wrong_part_count(tmp_path):
+    data_dir = tmp_path / "addon_data"
+    data_dir.mkdir()
+    (data_dir / "progress.json").write_text(json.dumps({
+        "movie\x1ftt1": {"position_ms": 1, "duration_ms": 2, "updated_at": "2020-01-01T00:00:00Z"},
+    }))
+    store = Store(str(data_dir))
+    assert store.get_progress_entries() == []
+
+
+def test_get_progress_entries_skips_malformed_value(tmp_path):
+    data_dir = tmp_path / "addon_data"
+    data_dir.mkdir()
+    (data_dir / "progress.json").write_text(json.dumps({
+        "movie\x1ftt-not-a-dict\x1f": "not-a-dict",
+        "movie\x1ftt-no-duration\x1f": {"position_ms": 1, "updated_at": "2020-01-01T00:00:00Z"},
+        "movie\x1ftt1\x1f": {"position_ms": 5, "duration_ms": 10, "updated_at": "2020-01-01T00:00:00Z"},
+    }))
+    store = Store(str(data_dir))
+    entries = store.get_progress_entries()
+    assert len(entries) == 1
+    assert entries[0]["id"] == "tt1"

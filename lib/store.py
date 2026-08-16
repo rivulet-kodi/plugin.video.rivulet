@@ -1216,3 +1216,48 @@ class Store:
         # playback, machine-only, never hand-inspected.
         _atomic_write(self._progress_path, progress, compact=True)
         self._invalidate_cache(self._progress_path)
+
+    def get_progress_entries(self):
+        """Return every cached local playback-progress entry, flattened
+        to ``{'type', 'id', 'video_id', 'position_ms', 'duration_ms',
+        'updated_at'}`` dicts -- ``video_id`` is ``None`` when the
+        stored key part is ``''`` (a movie, see :meth:`_progress_key`).
+        Feeds ``lib.ui.continuewatching``'s Home "Continue watching"
+        row from the same on-disk cache :meth:`get_progress` reads, so
+        it works fully offline and while logged out too.
+
+        An entry is skipped -- never raised -- if its key doesn't split
+        into exactly the three ``"\\x1f"``-joined parts
+        :meth:`_progress_key` writes, or its value isn't a dict with
+        numeric ``position_ms``/``duration_ms``, the same tolerance
+        :meth:`get_progress` applies to a missing/corrupt file. Served
+        from the per-instance read cache -- see `_cached_read`.
+        """
+        progress = self._cached_read(self._progress_path, None)
+        if not isinstance(progress, dict):
+            return []
+        entries = []
+        for key, value in progress.items():
+            if not isinstance(key, str):
+                continue
+            parts = key.split("\x1f")
+            if len(parts) != 3:
+                continue
+            if not isinstance(value, dict):
+                continue
+            position_ms = value.get("position_ms")
+            duration_ms = value.get("duration_ms")
+            if not isinstance(position_ms, (int, float)) or isinstance(position_ms, bool):
+                continue
+            if not isinstance(duration_ms, (int, float)) or isinstance(duration_ms, bool):
+                continue
+            content_type, content_id, video_id = parts
+            entries.append({
+                "type": content_type,
+                "id": content_id,
+                "video_id": video_id or None,
+                "position_ms": position_ms,
+                "duration_ms": duration_ms,
+                "updated_at": value.get("updated_at"),
+            })
+        return entries
