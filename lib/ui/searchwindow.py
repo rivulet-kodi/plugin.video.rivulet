@@ -231,20 +231,41 @@ def _match_tier(name, needle):
     return _TIER_OTHER
 
 
-def _rank_by_title(metas, query):
-    """Stable-sort `metas` by `_match_tier()`, best tier first.
+def _rank_by_title(metas, query, feed_index=None):
+    """Stable-sort `metas` by `_match_tier()`, best tier first, breaking
+    ties within a tier by `lib.ui.searchfeed`'s popularity/rating boost
+    when `feed_index` is given.
 
-    Stable, so within a tier the addons' own ordering survives untouched
-    - this only ever moves a title relative to titles in a DIFFERENT
-    tier, and never invents an ordering where the addons expressed one.
-    Runs after `_rank_by_credit()` and so reorders its output: a
-    credited title that does not also match by name is still a name
-    miss, and the coverflow should lead with what the user typed.
+    Stable, so titles the feed says nothing about keep the order they
+    already had - this only ever moves a title relative to titles in a
+    DIFFERENT tier, or above one the feed scores lower in the SAME tier,
+    and never invents an ordering where neither the tier nor the feed
+    expressed one. Runs after `_rank_by_credit()` and so reorders its
+    output: a credited title that does not also match by name is still a
+    name miss, and the coverflow should lead with what the user typed.
+
+    The tier always outranks the boost - popularity breaks ties, it does
+    not cross tiers. `stremio-core` folds its boost into the text-match
+    score instead, letting a popular title outrank a better textual
+    match; here the query is typed in full and submitted rather than
+    completed keystroke by keystroke, so a title the user typed exactly
+    must not be displaced by a more popular near-match.
     """
     needle = (query or '').casefold().strip()
     if not needle:
         return metas
-    return sorted(metas, key=lambda meta_obj: _match_tier((meta_obj.get('name') or '').casefold().strip(), needle))
+    if feed_index is None:
+        return sorted(metas, key=lambda meta_obj: _match_tier((meta_obj.get('name') or '').casefold().strip(), needle))
+
+    from lib.ui.searchfeed import boost
+
+    index, max_rating, max_popularity = feed_index
+
+    def _rank(meta_obj):
+        tier = _match_tier((meta_obj.get('name') or '').casefold().strip(), needle)
+        return (tier, -boost(meta_obj, index, max_rating, max_popularity))
+
+    return sorted(metas, key=_rank)
 
 
 def run_query(store, client, query):
@@ -284,7 +305,32 @@ def run_query(store, client, query):
             for meta_obj in results or []:
                 meta_obj['type'] = meta_obj.get('type') or cat.get('type')
                 metas.append(meta_obj)
-    return _rank_by_title(_dedupe(_rank_by_credit(metas, query)), query)
+    return _rank_by_title(_dedupe(_rank_by_credit(metas, query)), query, _feed_index(store, client))
+
+
+def _feed_index(store, client):
+    """The `lib.ui.searchfeed` index for `_rank_by_title()`, or None when
+    the feed is unavailable - a cold fetch that fails, a store with no
+    `data_dir`, or a client with no session to borrow.
+
+    Reuses the `AddonClient`'s own `requests.Session()` rather than
+    opening a second one: the feed is an ordinary HTTPS GET and the
+    session already carries the addon's connection pooling.
+
+    None (rather than an empty index) is deliberate - it routes
+    `_rank_by_title()` down its feedless path, which is exactly the
+    behaviour this module had before the feed existed.
+    """
+    data_dir = getattr(store, 'data_dir', None)
+    session = getattr(client, 'session', None)
+    if data_dir is None or session is None:
+        return None
+    from lib.ui.searchfeed import build_index, load_records
+
+    records = load_records(data_dir, session)
+    if not records:
+        return None
+    return build_index(records)
 
 
 def open_search():
