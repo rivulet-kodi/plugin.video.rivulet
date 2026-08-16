@@ -6,9 +6,12 @@ The module is split in two halves (see its own docstring):
     `probe_listening`, `ServerProcess`, `extra_env_from_settings`) with no
     `xbmc*` imports anywhere at module scope -- importable and testable
     with plain python3, exercised below with NO Kodi stubs at all (real
-    filesystem via `tmp_path`, mocked
-    `subprocess.Popen`/`urllib.request.urlopen`, never a real socket or
-    child process).
+    filesystem via `tmp_path`, mocked `subprocess.Popen`, and -- for
+    `probe_listening()`'s urllib.request-based GET, whose `import
+    urllib.request` is function-local (see its own docstring) but still
+    opens a real socket under the hood -- a real loopback TCP server via
+    the `real_socket` fixture, which lifts tests/conftest.py's autouse
+    network-block guard for just those tests).
   - `main()`, which does all `xbmc*` imports locally and drives an
     `xbmc.Monitor` supervision loop on top of that pure core -- exercised
     below against the shared fake xbmc modules in `tests/kodistubs`, with
@@ -19,9 +22,10 @@ The module is split in two halves (see its own docstring):
 import contextlib
 import datetime
 import os
+import socket
 import subprocess
 import sys
-import urllib.error
+import threading
 
 import pytest
 
@@ -29,6 +33,7 @@ import lib.serverbin as serverbin
 import lib.service_runner as service_runner
 import lib.settings as lib_settings
 from tests.kodistubs import install_kodi_stubs
+
 
 # ===========================================================================
 # http_port_from_url
@@ -137,68 +142,157 @@ def test_resolve_binary_returns_none_when_nothing_found(monkeypatch, tmp_path):
 # ===========================================================================
 
 
-def test_probe_listening_true_on_first_probe_path_success(monkeypatch):
-    calls = []
+@pytest.fixture
+def real_socket(monkeypatch):
+    """Lifts tests/conftest.py's autouse `_block_real_network` guard for
+    tests that legitimately open a real loopback socket. `probe_listening()`
+    speaks real HTTP via `urllib.request` -- exercising its
+    connect/accept/timeout semantics end-to-end (TLS support, scheme-default
+    ports, HTTPError-as-listening, ...) needs a real local TCP peer, not a
+    mock. Both fixtures share the same per-test `monkeypatch` instance, so
+    `undo()` here reverts exactly that guard's two patches and nothing else.
+    """
+    monkeypatch.undo()
 
-    def fake_urlopen(url, timeout=None):
-        calls.append(url)
-        return object()
 
-    monkeypatch.setattr(service_runner.urllib.request, 'urlopen', fake_urlopen)
-    assert service_runner.probe_listening('http://host:1234') is True
-    assert calls == ['http://host:1234' + service_runner.PROBE_PATHS[0]]
+class _FakeHTTPServer:
+    """Minimal real TCP listener on 127.0.0.1, run on a background thread,
+    used to exercise probe_listening()'s urllib.request-based GET end-to-end.
+
+    - `respond_to=_RESPOND_TO_ANY` (default): every accepted connection
+      gets `status_line` written back regardless of which path it asked
+      for.
+    - `respond_to=<path>`: only a request for exactly that path gets
+      `status_line`; any other path is closed with no response at all.
+    - `respond_to=None`: no path ever gets a response -- every connection
+      is closed with no response, so probe_listening() must exhaust all
+      of PROBE_PATHS and report nothing listening.
+    - `hold_open=True`: connections are accepted but never read, written
+      to, or closed until the server itself is closed -- forces a
+      client-side read timeout.
+    """
+
+    _RESPOND_TO_ANY = object()
+
+    def __init__(self, respond_to=_RESPOND_TO_ANY, status_line=b'HTTP/1.1 200 OK\r\n\r\n', hold_open=False):
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._sock.bind(('127.0.0.1', 0))
+        self._sock.listen(8)
+        self.port = self._sock.getsockname()[1]
+        self.requested_paths = []
+        self._conns = []
+        thread = threading.Thread(target=self._serve, args=(respond_to, status_line, hold_open), daemon=True)
+        thread.start()
+
+    def _serve(self, respond_to, status_line, hold_open):
+        while True:
+            try:
+                conn, _addr = self._sock.accept()
+            except OSError:
+                return
+            self._conns.append(conn)
+            if hold_open:
+                continue
+            try:
+                request = conn.recv(4096)
+                path = request.split(b' ')[1].decode('ascii') if request else None
+                if path:
+                    self.requested_paths.append(path)
+                if respond_to is self._RESPOND_TO_ANY or path == respond_to:
+                    conn.sendall(status_line)
+            finally:
+                conn.close()
+
+    def close(self):
+        self._sock.close()
+        for conn in self._conns:
+            try:
+                conn.close()
+            except OSError:
+                pass
+
+
+def _free_local_port():
+    """A port on 127.0.0.1 that is free at the moment of the call -- used
+    to build a "connection refused" target with no server behind it."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(('127.0.0.1', 0))
+        return probe.getsockname()[1]
+
+
+def test_probe_listening_true_on_first_probe_path_success(real_socket):
+    server = _FakeHTTPServer(respond_to=service_runner.PROBE_PATHS[0])
+    try:
+        assert service_runner.probe_listening('http://127.0.0.1:%d' % server.port) is True
+    finally:
+        server.close()
+    assert server.requested_paths == [service_runner.PROBE_PATHS[0]]
 
 
 @pytest.mark.parametrize('responding_path', service_runner.PROBE_PATHS)
-def test_probe_listening_true_when_any_probe_path_responds(monkeypatch, responding_path):
+def test_probe_listening_true_when_any_probe_path_responds(real_socket, responding_path):
     """Every entry in PROBE_PATHS must be tried, in order, until one
     completes -- not just the first."""
-    calls = []
-
-    def fake_urlopen(url, timeout=None):
-        calls.append(url)
-        if url.endswith(responding_path):
-            return object()
-        raise urllib.error.URLError('connection refused')
-
-    monkeypatch.setattr(service_runner.urllib.request, 'urlopen', fake_urlopen)
-    assert service_runner.probe_listening('http://host:1234') is True
-    assert calls[-1] == 'http://host:1234' + responding_path
+    server = _FakeHTTPServer(respond_to=responding_path)
+    try:
+        assert service_runner.probe_listening('http://127.0.0.1:%d' % server.port) is True
+    finally:
+        server.close()
+    assert server.requested_paths[-1] == responding_path
 
 
-def test_probe_listening_true_on_http_error_status(monkeypatch):
+def test_probe_listening_true_on_http_error_status(real_socket):
     """An HTTP-level error status still proves *something* is bound to
     the port -- only connection-level failures mean "nothing listening"."""
+    server = _FakeHTTPServer(status_line=b'HTTP/1.1 404 Not Found\r\n\r\n')
+    try:
+        assert service_runner.probe_listening('http://127.0.0.1:%d' % server.port) is True
+    finally:
+        server.close()
+
+
+def test_probe_listening_false_when_connection_is_refused(real_socket):
+    port = _free_local_port()
+    assert service_runner.probe_listening('http://127.0.0.1:%d' % port, timeout=0.5) is False
+
+
+def test_probe_listening_false_when_every_probe_path_gets_no_response(real_socket):
+    server = _FakeHTTPServer(respond_to=None)
+    try:
+        assert service_runner.probe_listening('http://127.0.0.1:%d' % server.port) is False
+    finally:
+        server.close()
+    assert server.requested_paths == list(service_runner.PROBE_PATHS)
+
+
+def test_probe_listening_false_on_read_timeout(real_socket):
+    server = _FakeHTTPServer(hold_open=True)
+    try:
+        assert service_runner.probe_listening('http://127.0.0.1:%d' % server.port, timeout=0.2) is False
+    finally:
+        server.close()
+
+
+def test_probe_listening_passes_https_url_unmodified_to_urlopen(monkeypatch):
+    """Regression guard for the raw-socket rewrite (since reverted) that
+    silently mishandled both of these: `server_url` is a free-text setting
+    with no scheme/loopback constraint (settings.xml), documented as the
+    way to point at "an already-reachable instance (external or
+    manually-started)" -- including a TLS-fronted one behind a port-less
+    https:// URL. probe_listening() must hand the caller's URL to
+    urllib.request untouched, never re-deriving host/port itself, so TLS
+    and the scheme's real default port (443) apply -- not a hardcoded
+    HTTP-only port fallback for a port-less URL."""
+    seen = []
 
     def fake_urlopen(url, timeout=None):
-        raise urllib.error.HTTPError(url, 404, 'Not Found', {}, None)
-
-    monkeypatch.setattr(service_runner.urllib.request, 'urlopen', fake_urlopen)
-    assert service_runner.probe_listening('http://host:1234') is True
+        seen.append((url, timeout))
+        return contextlib.nullcontext()
 
 
-def test_probe_listening_false_when_every_probe_path_is_refused(monkeypatch):
-    calls = []
-
-    def fake_urlopen(url, timeout=None):
-        calls.append(url)
-        raise urllib.error.URLError('connection refused')
-
-    monkeypatch.setattr(service_runner.urllib.request, 'urlopen', fake_urlopen)
-    assert service_runner.probe_listening('http://host:1234') is False
-    assert calls == ['http://host:1234' + p for p in service_runner.PROBE_PATHS]
-
-
-def test_probe_listening_strips_trailing_slash_from_base_url(monkeypatch):
-    calls = []
-
-    def fake_urlopen(url, timeout=None):
-        calls.append(url)
-        raise urllib.error.URLError('connection refused')
-
-    monkeypatch.setattr(service_runner.urllib.request, 'urlopen', fake_urlopen)
-    service_runner.probe_listening('http://host:1234/')
-    assert calls[0] == 'http://host:1234' + service_runner.PROBE_PATHS[0]
+    monkeypatch.setattr('urllib.request.urlopen', fake_urlopen)
+    assert service_runner.probe_listening('https://example.com', timeout=3.0) is True
+    assert seen == [('https://example.com' + service_runner.PROBE_PATHS[0], 3.0)]
 
 
 def test_probe_listening_forwards_caller_supplied_timeout(monkeypatch):
@@ -206,11 +300,33 @@ def test_probe_listening_forwards_caller_supplied_timeout(monkeypatch):
 
     def fake_urlopen(url, timeout=None):
         seen.append(timeout)
-        return object()
+        return contextlib.nullcontext()
 
-    monkeypatch.setattr(service_runner.urllib.request, 'urlopen', fake_urlopen)
+
+    monkeypatch.setattr('urllib.request.urlopen', fake_urlopen)
     service_runner.probe_listening('http://host', timeout=7.5)
     assert seen == [7.5]
+
+
+def test_import_does_not_pull_in_urllib_request_or_http_client():
+    """Regression guard: `probe_listening()` imports `urllib.request`/
+    `urllib.error` locally (see its own docstring) precisely so a fresh
+    interpreter importing lib.service_runner alone never ends up with
+    urllib.request or http.client in sys.modules -- both pull in `ssl` +
+    `email` purely to support features this module's own import path
+    never uses."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    code = (
+        'import sys\n'
+        'import lib.service_runner\n'
+        'assert "urllib.request" not in sys.modules, sorted(sys.modules)\n'
+        'assert "http.client" not in sys.modules, sorted(sys.modules)\n'
+    )
+    result = subprocess.run(
+        [sys.executable, '-c', code],
+        cwd=repo_root, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 # ===========================================================================
@@ -983,9 +1099,18 @@ def test_main_embedded_enabled_binary_missing_unsupported_platform_notifies_once
     never call install_binary() again on later polls -- unlike a plain
     DownloadError (which retries automatically forever behind a bounded
     backoff), so latching `unsupported_platform` and warning once per
-    session is exactly right."""
-    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
-    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: None)
+    session is exactly right. Once latched, later iterations must still
+    call BOTH probe_listening() and resolve_binary() every tick -- the
+    exception cannot tell Android's permanent exec() ban apart from a
+    transient noexec/EACCES mount condition (see
+    UNSUPPORTED_PLATFORM_POLL_INTERVAL's comment) -- just at the coarse
+    UNSUPPORTED_PLATFORM_POLL_INTERVAL cadence instead of
+    MISSING_BINARY_RECHECK_INTERVAL, and without ever re-attempting
+    install_binary() itself."""
+    probe_calls = []
+    resolve_calls = []
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: probe_calls.append(1) or False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: resolve_calls.append(1) or None)
 
     install_calls = []
 
@@ -1003,10 +1128,20 @@ def test_main_embedded_enabled_binary_missing_unsupported_platform_notifies_once
         service_runner.main()
 
     assert spawned == []
-    assert intervals == [service_runner.MISSING_BINARY_RECHECK_INTERVAL] * 3
+    assert intervals == [
+        service_runner.MISSING_BINARY_RECHECK_INTERVAL,
+        service_runner.UNSUPPORTED_PLATFORM_POLL_INTERVAL,
+        service_runner.UNSUPPORTED_PLATFORM_POLL_INTERVAL,
+    ]
 
     # Attempted exactly once across all 3 iterations, never retried.
     assert install_calls == [os.path.join(str(tmp_path), 'bin')]
+    # probe_listening() and resolve_binary() both run on every iteration
+    # regardless of the latch -- resolve_binary() keeps returning None
+    # throughout this test, so the latch never clears and install_binary()
+    # is never retried.
+    assert len(probe_calls) == 3
+    assert len(resolve_calls) == 3
 
     setup_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30069']
     unsupported_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30091']
@@ -1079,6 +1214,125 @@ def test_main_settings_changed_resets_unsupported_platform_latch_for_retry(monke
     # notified_missing fired once while latched, then was reset by the
     # settings change alongside unsupported_platform.
     assert len(missing_notifications) == 1
+
+
+def test_main_latched_unsupported_platform_rechecks_resolve_binary_at_coarse_cadence(
+    monkeypatch, tmp_path
+):
+    """Once install_binary() latches `unsupported_platform`, later loop
+    iterations must still call probe_listening() every tick -- an
+    external/manually-started server appearing at server_url is exactly
+    what UnsupportedPlatformError's own docstring points users at as "the
+    only remedy" -- and must ALSO keep calling resolve_binary() every
+    tick: the exception that latches this flag cannot tell Android's
+    permanent exec() ban apart from a transient noexec/EACCES mount
+    condition (see UNSUPPORTED_PLATFORM_POLL_INTERVAL's comment), so a
+    binary becoming available while latched must still be found. What the
+    latch actually does is coarsen the cadence from
+    MISSING_BINARY_RECHECK_INTERVAL to UNSUPPORTED_PLATFORM_POLL_INTERVAL
+    and skip re-attempting install_binary() itself -- as long as
+    resolve_binary() keeps returning None here, the latch never clears
+    and no further installs happen."""
+    probe_calls = []
+    resolve_calls = []
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: probe_calls.append(1) or False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: resolve_calls.append(1) or None)
+
+    install_calls = []
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        install_calls.append(dest_dir)
+        raise serverbin.UnsupportedPlatformError('exec() forbidden')
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
+    factory, spawned = _make_process_factory([])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    # iter1: fresh attempt fails -> latches. iter2, iter3, iter4: latched,
+    # but resolve_binary keeps returning None -- probe and resolve both
+    # keep running every iteration, just at the coarse cadence and
+    # without ever calling install_binary() again.
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None, None, None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}) as ctx:
+        service_runner.main()
+
+    assert spawned == []
+    assert install_calls == [os.path.join(str(tmp_path), 'bin')]  # exactly once, never retried
+    assert len(probe_calls) == 4  # every iteration, latched or not
+    assert len(resolve_calls) == 4  # every iteration too -- the latch never skips detection
+    assert intervals == [
+        service_runner.MISSING_BINARY_RECHECK_INTERVAL,
+        service_runner.UNSUPPORTED_PLATFORM_POLL_INTERVAL,
+        service_runner.UNSUPPORTED_PLATFORM_POLL_INTERVAL,
+        service_runner.UNSUPPORTED_PLATFORM_POLL_INTERVAL,
+    ]
+
+    setup_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30069']
+    unsupported_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30091']
+    missing_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30031']
+    assert len(setup_notifications) == 1
+    assert len(unsupported_notifications) == 1
+    assert len(missing_notifications) == 1  # fires once while latched, never re-notified per tick
+
+
+def test_main_latched_unsupported_platform_self_heals_when_resolve_binary_finds_binary(
+    monkeypatch, tmp_path
+):
+    """The transient-cause half of the latch (see
+    UNSUPPORTED_PLATFORM_POLL_INTERVAL's comment): verify_executable()
+    raises the same UnsupportedPlatformError for a noexec/EACCES mount
+    condition that can clear on its own, with install_binary() having
+    already placed a chmod'd binary at the exact path resolve_binary()
+    checks. So once resolve_binary() finds a runnable binary while
+    latched -- with no settings change at all -- main() must clear the
+    latch immediately and start supervising it normally, instead of
+    staying broken until onSettingsChanged() fires."""
+    probe_calls = []
+    resolve_calls = []
+
+    def fake_resolve_binary(explicit_path, addon_data_dir):
+        resolve_calls.append(1)
+        # Nothing usable for the first two calls (pre-latch + one latched
+        # recheck); the noexec/mount condition "clears" starting the third.
+        return None if len(resolve_calls) < 3 else '/opt/bin/stremio-server'
+
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: probe_calls.append(1) or False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', fake_resolve_binary)
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        raise serverbin.UnsupportedPlatformError('exec() forbidden')
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
+    factory, spawned = _make_process_factory([{}])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    # iter1: fresh attempt fails -> latches (resolve call #1, None).
+    # iter2: latched, resolve call #2 still None -> stays latched.
+    # iter3: latched, resolve call #3 now finds a binary -> unlatches and
+    # spawns. iter4: proc is running -> ordinary healthy supervision, no
+    # more probe/resolve calls at all.
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None, None, None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}) as ctx:
+        service_runner.main()
+
+    assert len(spawned) == 1
+    assert spawned[0].binary == '/opt/bin/stremio-server'
+    assert spawned[0].start_calls == 1
+    assert len(resolve_calls) == 3
+    assert len(probe_calls) == 3  # probe/resolve only run while proc is None
+    assert intervals == [
+        service_runner.MISSING_BINARY_RECHECK_INTERVAL,
+        service_runner.UNSUPPORTED_PLATFORM_POLL_INTERVAL,
+        service_runner.HEALTHY_POLL_INTERVAL,
+        service_runner.HEALTHY_POLL_INTERVAL,
+    ]
+
+    unsupported_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30091']
+    missing_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30031']
+    assert len(unsupported_notifications) == 1
+    assert len(missing_notifications) == 1  # fired once during iter2, before the self-heal
 
 
 def test_main_binary_download_aborts_mid_chunk_without_error_notification(monkeypatch, tmp_path):
