@@ -872,8 +872,8 @@ def test_atomic_write_matches_pure_python_json_dump_byte_for_byte(tmp_path):
         os.replace(tmp, path)
 
     for compact in (False, True):
-        expected_path = str(tmp_path / "expected-{}.json".format(compact))
-        actual_path = str(tmp_path / "actual-{}.json".format(compact))
+        expected_path = str(tmp_path / f"expected-{compact}.json")
+        actual_path = str(tmp_path / f"actual-{compact}.json")
         reference_write(expected_path, compact)
         store_module._atomic_write(actual_path, data, compact=compact)
         with open(expected_path, "rb") as fh:

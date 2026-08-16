@@ -34,7 +34,6 @@ import lib.service_runner as service_runner
 import lib.settings as lib_settings
 from tests.kodistubs import install_kodi_stubs
 
-
 # ===========================================================================
 # http_port_from_url
 # ===========================================================================
