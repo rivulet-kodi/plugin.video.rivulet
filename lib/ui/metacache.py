@@ -40,6 +40,7 @@ never break the caller's real fetch - it is treated as a cache miss.
 import json
 import os
 import tempfile
+import threading
 import time
 
 FILENAME = 'meta_cache.json'
@@ -62,6 +63,23 @@ MAX_BYTES = 256 * 1024
 #: Belt-and-braces cap on entry count, so a pathological run of tiny
 #: metas cannot grow the index unboundedly under the byte budget.
 MAX_ENTRIES = 64
+
+#: Guards the read-evict-write sequence in `store_cached_meta()`. This
+#: cache's only in-process writers are `views._map_addons()`'s cache-miss
+#: fetches, fanned out over a `ThreadPoolExecutor(max_workers=8)`; without
+#: serialising them, concurrent stores each read the same on-disk snapshot,
+#: add their own entry to their own copy, and `_atomic_write` whichever
+#: copy lands last - every other thread's entry silently vanishes.
+#: Measured: 15 concurrent stores through the pool left only 4 entries on
+#: disk. The lock only covers threads sharing this Python process/GIL; it
+#: does nothing for two separate `plugin://` invocations (Kodi's
+#: fresh-sub-interpreter-per-call model, see module docstring) storing at
+#: the same instant, so cross-process last-writer-wins is still possible.
+#: That residual race is accepted: this is a best-effort cache where the
+#: worst outcome is one dropped entry (forcing a refetch), never a
+#: corrupt file - `_atomic_write`'s `os.replace` already guarantees the
+#: file on disk is always one complete write or the other.
+_store_lock = threading.Lock()
 
 
 def _key(stype, sid):
@@ -124,7 +142,14 @@ def _atomic_write(path, data):
 
 def load_cached_meta(data_dir, stype, sid):
     """Return the cached meta object for (stype, sid), or None on a miss
-    (absent, expired, or any I/O/parse failure)."""
+    (absent, expired, or any I/O/parse failure).
+
+    Deliberately lock-free: `_atomic_write()` finishes with `os.replace()`,
+    which POSIX guarantees is atomic, so a concurrent store can only ever
+    leave this read seeing the whole old file or the whole new one - never
+    a torn/partial one. Serialising reads against `store_cached_meta()`'s
+    lock would buy nothing but contention.
+    """
     try:
         entry = _read_entries(data_dir).get(_key(stype, sid))
         if not entry or time.time() - entry.get('ts', 0) > TTL_SECONDS:
@@ -138,13 +163,19 @@ def store_cached_meta(data_dir, stype, sid, meta):
     """Cache a *successful* meta object for (stype, sid). `meta` must
     already be known-usable - callers must not pass None/empty results,
     so a failed or empty upstream answer is never cached as if it were
-    a real one."""
+    a real one.
+
+    The read-evict-write sequence runs under `_store_lock` so concurrent
+    stores from the same process's worker threads don't clobber each
+    other - see the lock's docstring for the measured 4-of-15 race this
+    closes."""
     if not meta:
         return
     try:
-        entries = _read_entries(data_dir)
-        entries[_key(stype, sid)] = {'ts': time.time(), 'meta': meta}
-        entries = _evict(entries)
-        _atomic_write(_path(data_dir), entries)
+        with _store_lock:
+            entries = _read_entries(data_dir)
+            entries[_key(stype, sid)] = {'ts': time.time(), 'meta': meta}
+            entries = _evict(entries)
+            _atomic_write(_path(data_dir), entries)
     except OSError:
         pass
