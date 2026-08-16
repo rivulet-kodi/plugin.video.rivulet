@@ -1,6 +1,7 @@
 """Tests for lib.ui.metacache: the short-TTL disk cache _fetch_meta()
 sits behind. Pure filesystem tests, no Kodi stubs needed - the module
 has no xbmc dependency."""
+import concurrent.futures
 import json
 import os
 
@@ -129,3 +130,26 @@ def test_unwritable_dir_is_a_silent_no_op(tmp_path):
     data_dir = str(tmp_path / 'missing' / 'nested')
     metacache.store_cached_meta(data_dir, 'movie', 'tt1', {'name': 'X'})  # must not raise
     assert metacache.load_cached_meta(data_dir, 'movie', 'tt1') is None
+
+
+def test_concurrent_stores_from_a_thread_pool_all_survive(tmp_path):
+    """Reproduces the measured race: `views._map_addons()` fans
+    `_fetch_meta()` cache-miss stores out over a
+    `ThreadPoolExecutor(max_workers=8)`. Before `_store_lock` serialised
+    the read-evict-write sequence, 15 concurrent stores through such a
+    pool left only 4 of 15 entries on disk - every thread that read the
+    on-disk snapshot before a sibling's write landed clobbered that
+    sibling's entry on its own write. All 15 distinct keys must survive.
+    """
+    data_dir = _data_dir(tmp_path)
+    keys = [('movie', 'tt%d' % i) for i in range(15)]
+
+    def store(key):
+        stype, sid = key
+        metacache.store_cached_meta(data_dir, stype, sid, {'name': sid})
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(store, keys))
+
+    for stype, sid in keys:
+        assert metacache.load_cached_meta(data_dir, stype, sid) == {'name': sid}
