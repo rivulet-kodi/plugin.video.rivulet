@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="repository.rivulet" name="Rivulet Repository" version="1.0.1" provider-name="M0Rf30">
+<addon id="repository.rivulet" name="Rivulet Repository" version="1.0.2" provider-name="M0Rf30">
   <extension point="xbmc.addon.repository" name="Rivulet Repository">
     <dir>
       <info compressed="false">https://rivulet-kodi.github.io/plugin.video.rivulet/addons.xml</info>
@@ -10,6 +10,8 @@
   <extension point="xbmc.addon.metadata">
     <summary lang="en_GB">Rivulet Repository</summary>
     <description lang="en_GB">Add this repository to Kodi to install Rivulet and receive automatic updates.</description>
+    <news>v1.0.2:
+- Changed: the new Rivulet ripple logo. The artwork shipped with 0.16.0's rebrand, but a repository addon only refetches its icon when its own version changes - this release exists to carry that change to installed copies.</news>
     <platform>all</platform>
     <license>MIT</license>
     <website>https://github.com/rivulet-kodi/plugin.video.rivulet</website>
