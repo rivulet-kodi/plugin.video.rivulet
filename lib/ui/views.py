@@ -22,7 +22,6 @@ import xbmc
 import xbmcgui
 import xbmcplugin
 
-from lib.store import ConcurrentUpdateError
 from lib.stremio import addons as addons_lib
 from lib.stremio.addons import AddonError, safe_url_for_log, validate_transport_url
 from lib.stremio.api import ApiError, StremioAPI
@@ -558,6 +557,8 @@ def login():
                     merged.append(dict(descriptor, transportUrl=normalized_url))
                     seen.add(normalized_url)
             return merged
+
+        from lib.store import ConcurrentUpdateError
 
         try:
             store.update_addons(_merge_with_remote)
