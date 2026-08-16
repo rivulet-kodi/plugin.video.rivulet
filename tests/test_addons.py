@@ -9,6 +9,7 @@ import pytest
 from lib.stremio.addons import (
     AddonClient,
     AddonError,
+    _base_type,
     _catalog_extra_names,
     addon_supports,
     build_resource_url,
@@ -325,6 +326,17 @@ def test_iter_catalogs_type_filter_combines_with_extra_required():
     results = list(iter_catalogs(addons, extra_required="search", types={"movie"}))
 
     assert [(c["type"], c["name"]) for _, _, c in results] == [("movie", "Searchable")]
+
+
+# --- _base_type ----------------------------------------------------------
+
+
+def test_base_type_reduces_dotted_subtype_and_lowercases():
+    assert _base_type("anime.movie") == "anime"
+    assert _base_type("anime.series") == "anime"
+    assert _base_type("TV") == "tv"
+    assert _base_type("movie") == "movie"
+    assert _base_type(None) == ""
 
 
 # --- catalog_extra_options ----------------------------------------------
