@@ -38,7 +38,17 @@
             <control type="image"><left>845</left><width>1075</width><height>1080</height><texture colordiffuse="FF0A0C0E">fade_h.png</texture></control>
             <control type="image"><left>120</left><top>96</top><width>64</width><height>64</height><texture>logo.png</texture><aspectratio>keep</aspectratio></control>
             <control type="label"><left>204</left><top>96</top><width>400</width><height>64</height><font>font32</font><textcolor>FFEEF3F6</textcolor><aligny>center</aligny><label>[B]RIVULET[/B]</label></control>
-            <control type="image"><left>1080</left><top>104</top><width>720</width><height>48</height><texture colordiffuse="1AFFFFFF">white.png</texture></control>
+            <!-- No plate behind the status line. 1AFFFFFF is the skin's
+                 hairline colour - every other use of it (BusyDialog,
+                 ConfirmDialog, OptionListDialog, CountdownDialog,
+                 ProgressDialog, ShowcaseWindow, StreamsWindow) is a 1px
+                 rule, and a 720x48 fill of it was the one place the skin
+                 used it as a plate. The status is carried by the label's
+                 own `[COLOR]`-tinted dot (see `_status_text()`): accent
+                 blue when logged in, dim when not. The backdrop here is
+                 the addon's own bundled fanart.jpg, never per-title art,
+                 so the text has a known dark field behind it and needs
+                 no plate of its own for legibility. -->
             <control type="label" id="30005">
                 <left>1100</left><top>104</top><width>680</width><height>48</height><font>font10</font><textcolor>A8EEF3F6</textcolor><align>right</align><aligny>center</aligny>
                 <label></label>
