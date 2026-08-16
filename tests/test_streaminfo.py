@@ -4,12 +4,21 @@ No network access; these functions are pure string/dict transforms over
 Stream protocol objects (stremio-protocol-spec.md #3) and AIOStreams-style
 addon output (multi-line, emoji-decorated name/title/description).
 """
+import re
 import time
 
 import pytest
 
 from lib.stremio.streaminfo import (
+    _LANGUAGE_SEGMENT_RES,
+    _LETTER_RE,
     _MAX_TEXT_LEN,
+    _MULTI_GLOBE_MARKER,
+    _decode_flag_pair,
+    _language_patterns,
+    _language_tag_patterns,
+    _scan_languages,
+    _segment_after,
     clean_text,
     format_details,
     format_label,
@@ -567,6 +576,105 @@ def test_parse_stream_languages_bare_abbreviations_are_not_full_names():
     stream = {"name": "x", "title": "", "description": "en / fr", "behaviorHints": {}}
     info = parse_stream(stream)
     assert info["languages"] == []
+
+
+# --- _scan_languages: finding 9b letter-gate ------------------------------
+
+
+def _ungated_scan_languages(pre_clean):
+    """Reference copy of `_scan_languages` as it stood before finding 9b:
+    always runs the full `_language_patterns()` sweep against a matched
+    segment, with no letter pre-check. Used to pin that the gated version
+    is byte-identical, never just "close enough".
+    """
+    matches = []
+    for marker in _LANGUAGE_SEGMENT_RES:
+        offset, segment = _segment_after(pre_clean, marker)
+        if not segment:
+            continue
+        for code, pattern in _language_patterns():
+            match = pattern.search(segment)
+            if match:
+                matches.append((offset + match.start(), code))
+        if marker is _MULTI_GLOBE_MARKER and not _LETTER_RE.search(segment):
+            matches.append((offset, "MULTI"))
+    for match in re.finditer("[\U0001F1E6-\U0001F1FF]{2}", pre_clean):
+        matches.append((match.start(), _decode_flag_pair(match.group(0))))
+    for code, pattern in _language_tag_patterns():
+        match = pattern.search(pre_clean)
+        if match:
+            matches.append((match.start(), code))
+    matches.sort(key=lambda item: item[0])
+    seen = set()
+    result = []
+    for _, code in matches:
+        if code in seen:
+            continue
+        seen.add(code)
+        result.append(code)
+        if len(result) >= 6:
+            break
+    return result
+
+
+def _synthetic_language_corpus(n=400):
+    """400 rows mixing the documented segment-marker shapes (see
+    `_LANGUAGE_SEGMENT_RES`'s docstring) with real language names, plus
+    plenty of rows with no language content at all -- the same shapes
+    finding 9b's audit was measured against.
+    """
+    name_sets = [
+        ["English", "Russian"], ["Italian", "German", "French"],
+        ["Spanish", "Portuguese"], ["Japanese", "Korean"], ["Turkish"],
+    ]
+    markers = ["\U0001F30E", "\U0001F310", "\U0001F5E3\uFE0F", "\U0001F399\uFE0F", "Languages:"]
+    rows = []
+    for i in range(n):
+        bucket = i % 20
+        names = ", ".join(name_sets[i % len(name_sets)])
+        if bucket < 8:  # no language content at all
+            rows.append("Movie.Title.%d.2160p.WEB-DL.HEVC-GROUP" % i)
+        elif bucket < 9:  # documented letterless "Multi" edge case
+            rows.append("\U0001F30E / \U0001F1EC\U0001F1E7 / \U0001F1EE\U0001F1F3")
+        elif bucket < 10:  # flags only, no segment marker at all
+            rows.append("Dual Audio / \U0001F1EC\U0001F1E7 / \U0001F1EE\U0001F1F3")
+        else:  # a real marker followed by real names, per each addon format
+            rows.append("%s %s" % (markers[i % len(markers)], names))
+    return rows
+
+
+def test_scan_languages_matches_reference_sweep_on_synthetic_corpus():
+    for pre_clean in _synthetic_language_corpus():
+        assert _scan_languages(pre_clean) == _ungated_scan_languages(pre_clean)
+
+
+def test_scan_languages_skips_pattern_sweep_for_letterless_segment():
+    # The documented Multi case: a globe marker whose segment is only
+    # flag emoji carries no Latin letter, so none of the 48 patterns
+    # could ever match it -- the gate must skip the sweep entirely.
+    calls = []
+    real_patterns = _language_patterns()
+
+    class _CountingPattern:
+        def __init__(self, pattern):
+            self._pattern = pattern
+
+        def search(self, text):
+            calls.append(text)
+            return self._pattern.search(text)
+
+    import lib.stremio.streaminfo as streaminfo_module
+    patched = [(code, _CountingPattern(pattern)) for code, pattern in real_patterns]
+    original_cache = streaminfo_module._LANGUAGE_PATTERNS_CACHE
+    streaminfo_module._LANGUAGE_PATTERNS_CACHE = patched
+    try:
+        result = _scan_languages("\U0001F30E / \U0001F1EC\U0001F1E7 / \U0001F1EE\U0001F1F3")
+    finally:
+        streaminfo_module._LANGUAGE_PATTERNS_CACHE = original_cache
+    # The flag pairs still decode via the separate, unconditional
+    # flag-pair loop -- only the 48-pattern name sweep is gated.
+    assert result == ["MULTI", "EN", "HI"]
+    assert calls == []
 
 
 # --- parse_stream: tracker / release group ---------------------------------

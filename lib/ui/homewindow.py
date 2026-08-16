@@ -94,7 +94,7 @@ _SUBTITLES = {
 
 def _available_types(addons):
     """Return the set of base catalog types `addons` actually publish,
-    reduced via `lib.ui.catalogpicker._base_type()` - the same rule the
+    reduced via `lib.stremio.addons._base_type()` - the same rule the
     picker's own `types=` filter applies - so a dotted subtype like
     `anime.movie` is counted under `anime` and a stray `TV` under `tv`.
 
@@ -102,8 +102,7 @@ def _available_types(addons):
     types nothing installed publishes would open an empty picker, so it
     is left out entirely rather than offered and then disappointing.
     """
-    from lib.stremio.addons import iter_catalogs
-    from lib.ui.catalogpicker import _base_type
+    from lib.stremio.addons import _base_type, iter_catalogs
 
     return {_base_type(catalog.get('type')) for _, _, catalog in iter_catalogs(addons)}
 

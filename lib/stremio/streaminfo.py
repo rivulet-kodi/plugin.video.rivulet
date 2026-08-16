@@ -502,16 +502,38 @@ def _decode_flag_pair(pair):
 
 
 def _scan_languages(pre_clean):
+    """Audit finding 9b: with all 48 `_LANGUAGE_NAMES` patterns run against
+    every matched segment, this was measured at ~10.6 searches/row (48
+    patterns whenever a marker's segment was non-empty, whether or not it
+    could possibly contain a name). Every entry in `_LANGUAGE_NAMES` is
+    pure Latin letters (plus a space/parens for "Portuguese (Brazil)"), so
+    a segment with no Latin letter at all -- the documented
+    globe-emoji-plus-flags-only "Multi" case, or any other marker whose
+    segment is punctuation/emoji -- can never match any of them: gating
+    the sweep on the already-computed `_LETTER_RE` check (previously only
+    consulted for the Multi special case) is a free, provably-conservative
+    skip. Measured on a 400-row synthetic corpus mixing the documented
+    marker shapes (globe/satellite/prism/subs/"Languages:" -- see
+    `_LANGUAGE_SEGMENT_RES`) with real language names, the win rounds to
+    0% of total `parse_stream` time: real emitters that bother writing a
+    marker overwhelmingly follow it with an actual name, so the gate
+    rarely fires and the one extra `_LETTER_RE` check it costs on the
+    matching path is noise. Kept anyway -- it removes genuinely wasted
+    work on the letterless case with no added complexity (reuses
+    `_LETTER_RE`, no new compiled pattern or cache) and no regression on
+    the common path.
+    """
     matches = []
     for marker in _LANGUAGE_SEGMENT_RES:
         offset, segment = _segment_after(pre_clean, marker)
         if not segment:
             continue
-        for code, pattern in _language_patterns():
-            match = pattern.search(segment)
-            if match:
-                matches.append((offset + match.start(), code))
-        if marker is _MULTI_GLOBE_MARKER and not _LETTER_RE.search(segment):
+        if _LETTER_RE.search(segment):
+            for code, pattern in _language_patterns():
+                match = pattern.search(segment)
+                if match:
+                    matches.append((offset + match.start(), code))
+        elif marker is _MULTI_GLOBE_MARKER:
             matches.append((offset, 'MULTI'))
     # Flag pairs and audio-track tags need no marker: neither a
     # regional-indicator pair nor "Dual Audio" belongs to a real title,

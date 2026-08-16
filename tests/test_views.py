@@ -497,6 +497,88 @@ def test_fetch_meta_does_not_cache_a_failed_lookup(load_views, tmp_path):
     assert client.meta_calls == ['t1', 't1']  # every call re-tried the addon, none was cached
 
 
+def test_fetch_meta_store_false_skips_the_write_but_still_returns_a_fresh_fetch(load_views, tmp_path):
+    """`store=False` (continuewatching.open_continue_watching()'s batching
+    path, Finding 7) must not touch the on-disk cache on a fresh fetch -
+    the caller takes over persisting the result itself via
+    `metacache.store_cached_metas()`."""
+    ctx = load_views()
+    views = ctx.views
+    transport = 't1'
+    descriptor = {
+        'transportUrl': transport,
+        'manifest': {'id': 'org.a', 'resources': ['meta'], 'types': ['movie'], 'idPrefixes': ['tt']},
+    }
+    client = FakeAddonClient(meta_results={transport: {'id': 'tt1', 'name': 'Fresh', 'type': 'movie'}})
+    _wire_data_layer(views, FakeStore(addons=[descriptor], data_dir=str(tmp_path)), client)
+
+    result = views._fetch_meta('movie', 'tt1', store=False)
+
+    assert result == {'id': 'tt1', 'name': 'Fresh', 'type': 'movie'}
+    from lib.ui import metacache
+    assert metacache.load_cached_meta(str(tmp_path), 'movie', 'tt1') is None  # never written to disk
+
+
+def test_fetch_meta_store_false_still_serves_an_existing_cache_hit(load_views, tmp_path):
+    """The cache READ is unaffected by `store` - only the write is gated."""
+    ctx = load_views()
+    views = ctx.views
+    transport = 't1'
+    descriptor = {
+        'transportUrl': transport,
+        'manifest': {'id': 'org.a', 'resources': ['meta'], 'types': ['movie'], 'idPrefixes': ['tt']},
+    }
+    client = FakeAddonClient(meta_results={transport: {'id': 'tt1', 'name': 'X', 'type': 'movie'}})
+    _wire_data_layer(views, FakeStore(addons=[descriptor], data_dir=str(tmp_path)), client)
+    views._fetch_meta('movie', 'tt1')  # default store=True primes the cache
+
+    result = views._fetch_meta('movie', 'tt1', store=False)
+
+    assert result == {'id': 'tt1', 'name': 'X', 'type': 'movie'}
+    assert client.meta_calls == [transport]  # second call, with store=False, still hit the cache
+
+
+def test_fetch_meta_on_miss_is_called_for_a_fresh_fetch(load_views, tmp_path):
+    """`on_miss` (continuewatching.open_continue_watching()'s warm-reopen
+    fix) must fire exactly when this call bypasses the cache and reaches
+    for a fresh addon answer, regardless of `store`."""
+    ctx = load_views()
+    views = ctx.views
+    transport = 't1'
+    descriptor = {
+        'transportUrl': transport,
+        'manifest': {'id': 'org.a', 'resources': ['meta'], 'types': ['movie'], 'idPrefixes': ['tt']},
+    }
+    client = FakeAddonClient(meta_results={transport: {'id': 'tt1', 'name': 'Fresh', 'type': 'movie'}})
+    _wire_data_layer(views, FakeStore(addons=[descriptor], data_dir=str(tmp_path)), client)
+    misses = []
+
+    result = views._fetch_meta('movie', 'tt1', store=False, on_miss=lambda: misses.append(True))
+
+    assert result == {'id': 'tt1', 'name': 'Fresh', 'type': 'movie'}
+    assert misses == [True]
+
+
+def test_fetch_meta_on_miss_is_not_called_for_a_cache_hit(load_views, tmp_path):
+    ctx = load_views()
+    views = ctx.views
+    transport = 't1'
+    descriptor = {
+        'transportUrl': transport,
+        'manifest': {'id': 'org.a', 'resources': ['meta'], 'types': ['movie'], 'idPrefixes': ['tt']},
+    }
+    client = FakeAddonClient(meta_results={transport: {'id': 'tt1', 'name': 'X', 'type': 'movie'}})
+    _wire_data_layer(views, FakeStore(addons=[descriptor], data_dir=str(tmp_path)), client)
+    views._fetch_meta('movie', 'tt1')  # primes the cache; on_miss omitted here on purpose
+    misses = []
+
+    result = views._fetch_meta('movie', 'tt1', store=False, on_miss=lambda: misses.append(True))
+
+    assert result == {'id': 'tt1', 'name': 'X', 'type': 'movie'}
+    assert client.meta_calls == [transport]  # served from cache, addon never called again
+    assert misses == []                      # ... so on_miss must not fire either
+
+
 # ---------------------------------------------------------------------------
 # fetch_catalog_pages()
 # ---------------------------------------------------------------------------

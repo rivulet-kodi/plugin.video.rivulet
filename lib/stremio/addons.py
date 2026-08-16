@@ -444,3 +444,13 @@ def iter_catalogs(addons, extra_required=None, types=None):
             if wanted is not None and catalog.get('type') not in wanted:
                 continue
             yield transport_url, manifest, catalog
+
+
+def _base_type(catalog_type):
+    """Reduce a Stremio catalog type to the key `lib.ui.homewindow`'s type
+    rows match on: everything before the first '.', lowercased. Addons
+    follow the convention of a dotted subtype (e.g. `anime.movie`/
+    `anime.series`) to specialize a base type, and type strings are
+    otherwise free-form and mixed-case - this is what lets `anime.movie`
+    join the Anime row and a stray `TV` join Series alongside `tv`."""
+    return (catalog_type or '').split('.', 1)[0].lower()

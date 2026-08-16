@@ -64,7 +64,9 @@ MAX_BYTES = 256 * 1024
 #: metas cannot grow the index unboundedly under the byte budget.
 MAX_ENTRIES = 64
 
-#: Guards the read-evict-write sequence in `store_cached_meta()`. This
+#: Guards the read-evict-write sequence in `store_cached_meta()` and
+#: `store_cached_metas()` (the former delegates to the latter with a
+#: single-entry list, so there is exactly one lock/read/write path). This
 #: cache's only in-process writers are `views._map_addons()`'s cache-miss
 #: fetches, fanned out over a `ThreadPoolExecutor(max_workers=8)`; without
 #: serialising them, concurrent stores each read the same on-disk snapshot,
@@ -159,23 +161,47 @@ def load_cached_meta(data_dir, stype, sid):
         return None
 
 
+def store_cached_metas(data_dir, entries):
+    """Cache every *successful* (stype, sid, meta) triple in `entries` in
+    one read-evict-write cycle, instead of one per meta.
+
+    Exists for fan-outs like `continuewatching.open_continue_watching()`,
+    which can trigger up to 15 cache-miss fetches in a single Home
+    "Continue watching" open (`views._map_addons()`'s pool width): calling
+    `store_cached_meta()` once per fetch meant up to 15 full-file
+    read-evict-writes of the same cache (measured 3.46ms CPU each on an
+    i7-13700H at budget saturation; 15-35ms on a Pi, plus real flash
+    latency/wear per write) where one write, holding every entry, does
+    the same job. `store_cached_meta()` is now just this function called
+    with a single-entry list - one lock/read/write path either way.
+
+    Entries with a falsy `meta` are skipped, exactly like
+    `store_cached_meta()` - callers must not pass None/empty results, so
+    a failed or empty upstream answer is never cached as if it were real.
+    A batch that ends up with nothing usable is a no-op: no lock taken,
+    no file touched.
+    """
+    usable = [(stype, sid, meta) for stype, sid, meta in entries if meta]
+    if not usable:
+        return
+    try:
+        with _store_lock:
+            stored = _read_entries(data_dir)
+            now = time.time()
+            for stype, sid, meta in usable:
+                stored[_key(stype, sid)] = {'ts': now, 'meta': meta}
+            stored = _evict(stored)
+            _atomic_write(_path(data_dir), stored)
+    except OSError:
+        pass
+
+
 def store_cached_meta(data_dir, stype, sid, meta):
     """Cache a *successful* meta object for (stype, sid). `meta` must
     already be known-usable - callers must not pass None/empty results,
     so a failed or empty upstream answer is never cached as if it were
     a real one.
 
-    The read-evict-write sequence runs under `_store_lock` so concurrent
-    stores from the same process's worker threads don't clobber each
-    other - see the lock's docstring for the measured 4-of-15 race this
-    closes."""
-    if not meta:
-        return
-    try:
-        with _store_lock:
-            entries = _read_entries(data_dir)
-            entries[_key(stype, sid)] = {'ts': time.time(), 'meta': meta}
-            entries = _evict(entries)
-            _atomic_write(_path(data_dir), entries)
-    except OSError:
-        pass
+    Delegates to `store_cached_metas()` with a single-entry list - see
+    its docstring for the read-evict-write/lock contract this shares."""
+    store_cached_metas(data_dir, [(stype, sid, meta)])
