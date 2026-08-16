@@ -31,8 +31,6 @@ import os
 import shutil
 import subprocess
 import time
-import urllib.error
-import urllib.request
 from urllib.parse import urlparse
 
 from lib import library
@@ -82,6 +80,37 @@ MISSING_BINARY_RECHECK_INTERVAL = 5.0
 # freshly-installed binary is picked up on the very next loop iteration
 # instead of waiting out a full missing-binary recheck cycle.
 POST_DOWNLOAD_RECHECK_INTERVAL = 0.5
+
+# Once install_binary() raises UnsupportedPlatformError, `unsupported_platform`
+# latches True for the rest of the session (see main()'s ServiceMonitor loop,
+# next to that flag's declaration, for the latch invariant). That single
+# exception cannot tell apart serverbin's two raise sites: the early
+# `_is_android()` check (serverbin.py), a genuinely permanent-for-the-session
+# platform property, from verify_executable() re-raising it for ANY OSError
+# out of the exec attempt -- its own docstring names "EACCES from a
+# noexec-mounted addon_data" as an intended trigger, an environment/mount
+# condition that can clear on its own, not necessarily permanent. So the
+# latch must NOT disable detection: a latched iteration keeps calling both
+# probe_listening() (an external/manually-started server appearing at
+# server_url, the "only remedy" UnsupportedPlatformError's own docstring
+# points users at) and resolve_binary() (a binary appearing, or a noexec
+# mount clearing -- install_binary() already places a chmod'd binary at the
+# exact bundled path resolve_binary() checks BEFORE calling
+# verify_executable(), so a valid executable can already be sitting there
+# when this exception fires). What the latch does is coarsen the recheck
+# cadence from MISSING_BINARY_RECHECK_INTERVAL's 5s to this interval instead
+# -- still frequent enough to notice either kind of recovery within 5
+# minutes, far short of the 17,280 wakeups/day the old un-coarsened 5s
+# cadence would cost re-running the same stat/access + PATH scan on every
+# Android TV box where `server_enable` defaults on and the embedded server
+# can never run there. resolve_binary() finding a binary while latched
+# clears the latch immediately (see the branch below); if install work is
+# ever retried at that point and the raise site actually was the permanent
+# Android one, it just re-latches -- misclassifying the transient cause
+# only costs a 5s -> 300s slower rediscovery, never a stuck session.
+# Deliberately coarser than EXTERNAL_RECHECK_INTERVAL since finding nothing
+# via either check is the common, unremarkable case while latched.
+UNSUPPORTED_PLATFORM_POLL_INTERVAL = 300.0
 
 # --- startup autoload -------------------------------------------------------
 #
@@ -234,13 +263,37 @@ def probe_listening(server_url, timeout=PROBE_TIMEOUT):
     Any completed HTTP exchange (including an HTTP error status) means a
     server is bound to that port -- only connection-level failures (refused,
     timed out, unresolvable) count as "nothing listening".
+
+    `urllib.request`/`urllib.error` are imported here rather than at module
+    scope: they pull in `http.client`, which unconditionally imports `ssl`
+    + `email`, costing 10.7ms of this module's 18.3ms import time on
+    desktop (an estimated 50-110ms during a Raspberry Pi boot storm), paid
+    on every service startup even on iterations that never call this
+    function (e.g. an embedded server already running healthily, or
+    embedded mode disabled). Deferring the import to first call moves that
+    cost off the module-import path without touching *what* gets probed:
+    `server_url` is a free-text setting with no scheme/loopback constraint
+    (settings.xml) and is documented as the way to point at "an
+    already-reachable instance (external or manually-started)", including
+    a TLS-fronted one -- so this goes through urllib.request (real
+    scheme-default ports, TLS, the same broad exception handling as
+    before) rather than a raw socket, which would silently mishandle
+    https:// URLs, non-default ports, and non-ASCII hosts.
     """
+    import urllib.error
+    import urllib.request
+
     base = server_url.rstrip("/")
     for path in PROBE_PATHS:
         try:
-            urllib.request.urlopen(base + path, timeout=timeout)
+            with urllib.request.urlopen(base + path, timeout=timeout):
+                pass
             return True
-        except urllib.error.HTTPError:
+        except urllib.error.HTTPError as exc:
+            # An HTTP error status still proves a server is listening. Close
+            # the response HTTPError carries: leaking its socket raises
+            # ResourceWarning, which the test suite promotes to a failure.
+            exc.close()
             return True
         except Exception:
             continue
@@ -726,10 +779,48 @@ def main():
             return False
         return True
 
+    def _start_embedded_server(binary):
+        """Spawn `binary` as the embedded server. Returns `(new_proc,
+        new_interval)`: `(candidate, HEALTHY_POLL_INTERVAL)` on a
+        successful start, or `(None, <backoff interval>)` on a failed
+        spawn (advancing the enclosing `backoff_idx`).
+
+        Shared by both places that can discover a runnable binary --
+        the normal missing-binary flow and the unsupported_platform
+        latch's own resolve_binary() self-heal check just below -- so a
+        successful spawn behaves identically regardless of which one
+        found it.
+        """
+        nonlocal backoff_idx
+        log(xbmc.LOGINFO, f"starting embedded server: {binary}")
+        candidate = ServerProcess(
+            binary, monitor.server_url, app_path, log_path, extra_env=monitor.extra_env,
+        )
+        try:
+            candidate.start()
+        except Exception as exc:  # noqa: BLE001 - a failed spawn must never crash the supervision loop
+            log(xbmc.LOGERROR, f"failed to start embedded server: {exc}")
+            next_interval = RESTART_BACKOFF[min(backoff_idx, len(RESTART_BACKOFF) - 1)]
+            backoff_idx = min(backoff_idx + 1, len(RESTART_BACKOFF) - 1)
+            return None, next_interval
+        return candidate, HEALTHY_POLL_INTERVAL
+
     monitor = ServiceMonitor()
     proc = None
     backoff_idx = 0
     notified_missing = False
+    # Coarse-cadence latch, NOT a "stop detecting" latch: once
+    # install_binary() raises UnsupportedPlatformError below, this stays
+    # True and the nothing-of-ours-running branch further down polls at
+    # UNSUPPORTED_PLATFORM_POLL_INTERVAL (300s) instead of
+    # MISSING_BINARY_RECHECK_INTERVAL (5s) -- but it keeps calling BOTH
+    # probe_listening() and resolve_binary() every latched iteration (see
+    # UNSUPPORTED_PLATFORM_POLL_INTERVAL's comment for why the exception
+    # cannot tell a permanent cause from a transient one), only skipping
+    # the install/download attempt itself. It clears either when
+    # resolve_binary() finds a runnable binary while latched (self-heal,
+    # handled right where that call happens) or via onSettingsChanged()
+    # -> restart_requested just below.
     unsupported_platform = False
     download_backoff_idx = 0
     next_download_at = None
@@ -777,29 +868,46 @@ def main():
                     proc = None
         else:
             # Nothing of ours running: prefer an already-reachable instance
-            # (external or manually-started) over spawning a duplicate.
+            # (external or manually-started) over spawning a duplicate --
+            # this probe runs every iteration regardless of the
+            # unsupported_platform latch below, because "point Server URL
+            # at a server running elsewhere" is the documented remedy for
+            # that latch (see UnsupportedPlatformError's docstring), and
+            # detecting that is exactly what probe_listening() is for.
             if probe_listening(monitor.server_url):
                 notified_missing = False
                 interval = EXTERNAL_RECHECK_INTERVAL
+            elif unsupported_platform:
+                # The exception that latched this flag cannot tell a
+                # permanent platform ban from a transient environment
+                # condition (see UNSUPPORTED_PLATFORM_POLL_INTERVAL's
+                # comment), so this branch still does the SAME detection
+                # work as the branch below -- just resolve_binary(), not
+                # a fresh install attempt -- only at this coarser cadence.
+                interval = UNSUPPORTED_PLATFORM_POLL_INTERVAL
+                binary = resolve_binary(monitor.binary_setting, profile_dir)
+                if binary is None:
+                    if not notified_missing:
+                        xbmcgui.Dialog().notification(
+                            addon.getAddonInfo("name"),
+                            addon.getLocalizedString(30031),
+                            xbmcgui.NOTIFICATION_ERROR,
+                        )
+                        log(xbmc.LOGERROR, "stremio-server binary not found")
+                        notified_missing = True
+                else:
+                    # Self-heal: a runnable binary appeared (or a
+                    # noexec/EACCES mount condition cleared) without any
+                    # Kodi setting changing -- unlatch immediately instead
+                    # of waiting on onSettingsChanged() -> restart_requested.
+                    notified_missing = False
+                    unsupported_platform = False
+                    proc, interval = _start_embedded_server(binary)
             else:
                 binary = resolve_binary(monitor.binary_setting, profile_dir)
                 if binary is None:
                     interval = MISSING_BINARY_RECHECK_INTERVAL
-                    if unsupported_platform:
-                        # This platform can never execute a downloaded
-                        # binary (e.g. Android 10+'s W^X ban on exec()
-                        # inside the app's writable storage) -- no retry
-                        # would ever succeed, so stay latched and warn
-                        # once per session instead of retrying.
-                        if not notified_missing:
-                            xbmcgui.Dialog().notification(
-                                addon.getAddonInfo("name"),
-                                addon.getLocalizedString(30031),
-                                xbmcgui.NOTIFICATION_ERROR,
-                            )
-                            log(xbmc.LOGERROR, "stremio-server binary not found")
-                            notified_missing = True
-                    elif next_download_at is not None and time.monotonic() < next_download_at:
+                    if next_download_at is not None and time.monotonic() < next_download_at:
                         # Still cooling down from the last failed attempt --
                         # gated on a monotonic deadline (not just this
                         # iteration's sleep) so no combination of other
@@ -885,19 +993,7 @@ def main():
                     next_download_at = None
                     download_attempt_notified = False
                     download_failure_notified = False
-                    log(xbmc.LOGINFO, f"starting embedded server: {binary}")
-                    candidate = ServerProcess(
-                        binary, monitor.server_url, app_path, log_path, extra_env=monitor.extra_env,
-                    )
-                    try:
-                        candidate.start()
-                    except Exception as exc:  # noqa: BLE001 - a failed spawn must never crash the supervision loop
-                        log(xbmc.LOGERROR, f"failed to start embedded server: {exc}")
-                        interval = RESTART_BACKOFF[min(backoff_idx, len(RESTART_BACKOFF) - 1)]
-                        backoff_idx = min(backoff_idx + 1, len(RESTART_BACKOFF) - 1)
-                    else:
-                        proc = candidate
-                        interval = HEALTHY_POLL_INTERVAL
+                    proc, interval = _start_embedded_server(binary)
 
         # Autoload last, so it sees this iteration's computed `interval`
         # and can shorten it: the supervision branches above may have
