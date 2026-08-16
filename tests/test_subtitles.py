@@ -5,6 +5,8 @@ collect_subtitles() is driven entirely through the injected `client` seam
 suite needs no HTTP fakery from conftest - FakeSubtitleClient below plays
 that role and records every call for assertions.
 """
+import threading
+
 from lib.stremio.addons import AddonError
 from lib.stremio.subtitles import collect_subtitles, filter_subtitles
 
@@ -84,6 +86,87 @@ def test_collect_subtitles_skips_addon_missing_transport_url():
 
 def test_collect_subtitles_no_addons_returns_empty_list():
     assert collect_subtitles(FakeSubtitleClient(), [], "movie", "tt1234567") == []
+
+
+# --- collect_subtitles: concurrency ---------------------------------------
+
+
+def test_collect_subtitles_queries_multiple_addons_concurrently():
+    """Two addons each block on a shared `threading.Barrier(2)` inside
+    their own `subtitles()` call - a barrier only releases once BOTH
+    parties have reached it. If `collect_subtitles()` still queried
+    addons one at a time (the old serial loop), the first addon would
+    wait forever for a second party that can't arrive until the first
+    one has already returned: a deadlock. `barrier.wait()`'s own timeout
+    turns a regression into a fast, deterministic test failure instead
+    of hanging the whole suite.
+    """
+    barrier = threading.Barrier(2, timeout=5.0)
+
+    class BarrierClient:
+        def subtitles(self, base, rtype, sid, extra=None):
+            barrier.wait()
+            return [{"id": base, "lang": "en", "url": "https://%s/1.srt" % base}]
+
+    addon_a = _descriptor(MANIFEST_URL_A, _manifest(["subtitles"]))
+    addon_b = _descriptor(MANIFEST_URL_B, _manifest(["subtitles"]))
+
+    result = collect_subtitles(BarrierClient(), [addon_a, addon_b], "movie", "tt1234567")
+
+    assert [s["id"] for s in result] == [MANIFEST_URL_A, MANIFEST_URL_B]
+
+
+def test_collect_subtitles_preserves_addon_order_regardless_of_answer_order():
+    """addon A (listed FIRST) is gated to only return once addon B
+    (listed second) has already answered - proven via a shared Event
+    only addon B sets - yet the merged result must still list addon A's
+    subtitle FIRST: collect_subtitles() merges in `addons` order, not
+    completion order. This only works if both addons are genuinely
+    in-flight at once; a serial loop would deadlock here since addon B
+    would never even start until addon A had already returned.
+    """
+    b_answered = threading.Event()
+
+    class OrderedClient:
+        def subtitles(self, base, rtype, sid, extra=None):
+            if base == MANIFEST_URL_A:
+                assert b_answered.wait(timeout=5.0), "addon A answered before addon B - not gated"
+                return [{"id": "from-a", "lang": "en", "url": "https://a.example/1.srt"}]
+            b_answered.set()
+            return [{"id": "from-b", "lang": "en", "url": "https://b.example/1.srt"}]
+
+    addon_a = _descriptor(MANIFEST_URL_A, _manifest(["subtitles"]))
+    addon_b = _descriptor(MANIFEST_URL_B, _manifest(["subtitles"]))
+
+    result = collect_subtitles(OrderedClient(), [addon_a, addon_b], "movie", "tt1234567")
+
+    assert [s["id"] for s in result] == ["from-a", "from-b"]
+
+
+def test_collect_subtitles_failing_addon_does_not_block_or_lose_a_concurrent_sibling():
+    """addon A (listed FIRST) raises only after addon B (listed second)
+    has already answered - proven via a shared Event only addon B sets -
+    showing addon A's failure neither blocks addon B's still-in-flight
+    call nor loses its result from the merge. Like the order test above,
+    this deadlocks under a serial loop: addon B never starts until addon
+    A returns, but addon A is waiting on addon B.
+    """
+    b_answered = threading.Event()
+
+    class GatedClient:
+        def subtitles(self, base, rtype, sid, extra=None):
+            if base == MANIFEST_URL_A:
+                assert b_answered.wait(timeout=5.0), "addon A raised before addon B answered - not gated"
+                raise AddonError("boom")
+            b_answered.set()
+            return [{"id": "from-b", "lang": "en", "url": "https://b.example/1.srt"}]
+
+    addon_a = _descriptor(MANIFEST_URL_A, _manifest(["subtitles"]))
+    addon_b = _descriptor(MANIFEST_URL_B, _manifest(["subtitles"]))
+
+    result = collect_subtitles(GatedClient(), [addon_a, addon_b], "movie", "tt1234567")
+
+    assert result == [{"id": "from-b", "lang": "en", "url": "https://b.example/1.srt"}]
 
 
 # --- collect_subtitles: fault tolerance ----------------------------------

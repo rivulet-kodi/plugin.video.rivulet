@@ -89,6 +89,46 @@ def _sanitize_label(label):
     return text or None
 
 
+#: Cap on concurrent addon HTTP calls `collect_subtitles()` opens at once -
+#: mirrors `lib.ui.views._MAX_ADDON_WORKERS`'s bounded-pool convention as
+#: its own local constant (this module deliberately carries no
+#: `lib.ui`/`xbmc*` imports, so it can't just import that one - see the
+#: module docstring). Each `AddonClient.subtitles()` call still carries
+#: its own 15s timeout (`AddonClient`'s default, addons.py); this runs on
+#: every playback start, before `xbmc.Player().play()`, so querying
+#: subtitle addons one at a time paid that timeout N times over first -
+#: measured +0.4-1.5s per play typical, +15s per addon worst case.
+#: Fanning out turns that sum() into a max().
+_MAX_SUBTITLE_ADDON_WORKERS = 8
+
+
+def _query_addons(client, transport_urls, rtype, rid, extra):
+    """Call `client.subtitles()` once per URL in `transport_urls`, fanned
+    out across a small bounded thread pool (see
+    `_MAX_SUBTITLE_ADDON_WORKERS`) instead of one call at a time, and
+    return the raw per-addon results in the SAME ORDER as
+    `transport_urls`, regardless of which addon answers first -
+    `collect_subtitles()`'s merge below relies on that order for its
+    "first occurrence wins" dedup. A per-addon request failure is
+    swallowed here (that slot's result is `None`), so one broken addon -
+    whichever worker thread happens to hit it - can never sink the
+    others.
+    """
+    def _one(transport_url):
+        try:
+            return client.subtitles(transport_url, rtype, rid, extra=extra)
+        except Exception:  # noqa: BLE001 - one addon's failure must not sink the rest
+            return None
+
+    if not transport_urls:
+        return []
+    if len(transport_urls) == 1:
+        return [_one(transport_urls[0])]
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(len(transport_urls), _MAX_SUBTITLE_ADDON_WORKERS)) as pool:
+        return list(pool.map(_one, transport_urls))
+
+
 def collect_subtitles(client, addons, rtype, rid, extra=None):
     """Query every addon in `addons` (Store descriptors, as returned by
     `Store.get_addons()`) that declares subtitle support for `rtype`/`rid`,
@@ -96,13 +136,20 @@ def collect_subtitles(client, addons, rtype, rid, extra=None):
     each with an optional `label` key (see `_sanitize_label`) when the
     addon supplied a usable one.
 
+    Subtitle-capable addons are queried CONCURRENTLY, not one at a time
+    (see `_MAX_SUBTITLE_ADDON_WORKERS`/`_query_addons`) - this runs on
+    every playback start, before `xbmc.Player().play()`, so a serial loop
+    paid every addon's full request latency in sequence. The merge below
+    still walks addons in their original `addons` order, so output order
+    and the "first occurrence wins" dedup are unaffected by which addon
+    happens to answer first.
+
     A per-addon request failure (network error, malformed JSON, whatever)
     is swallowed so one broken addon never hides subtitles from the rest.
     Entries without a usable `url` are dropped; duplicate URLs (across or
     within addons) keep only the first occurrence.
     """
-    seen_urls = set()
-    subs = []
+    transport_urls = []
     for descriptor in addons or []:
         manifest = descriptor.get('manifest') or {}
         if not addon_supports(manifest, 'subtitles', rtype, rid):
@@ -110,10 +157,11 @@ def collect_subtitles(client, addons, rtype, rid, extra=None):
         transport_url = descriptor.get('transportUrl')
         if not transport_url:
             continue
-        try:
-            raw = client.subtitles(transport_url, rtype, rid, extra=extra)
-        except Exception:  # noqa: BLE001 - one addon's failure must not sink the rest
-            continue
+        transport_urls.append(transport_url)
+
+    seen_urls = set()
+    subs = []
+    for raw in _query_addons(client, transport_urls, rtype, rid, extra):
         for item in raw or []:
             if not isinstance(item, dict):
                 continue
