@@ -41,6 +41,22 @@ def encode_stream(stream):
     takes a Torrentio-shaped stream from ~1035 to ~574 characters, which
     is ~230KB less held in memory AND less written to the directory cache
     on flash for a 500-stream title.
+
+    No production code calls this any more: it built the `stream=`
+    querystring param for the classical (pre-0.8.0) directory listings'
+    play URL, and 675407b ("views: delete the classical directory
+    listings") deleted that last call site along with the rest of the
+    dual UI. The current picker (streamswindow.py) hands a stream straight
+    to player.play_direct() in-process and never round-trips it through a
+    plugin:// URL. It stays here anyway as the token generator
+    decode_stream()'s own tests (and the do_play() dispatch tests in
+    tests/test_router.py) build fixtures with, since a saved favourite/
+    .strm/skin-widget URL encoded before 0.8.0 can still reach
+    router.do_play() and must keep decoding - see decode_stream() and the
+    addon.xml 0.8.0 note ("Playing a saved stream link still works").
+    Hand-rolling this compress+encode step again inside the test file
+    would just duplicate it under a different name, so it is kept as the
+    real implementation instead.
     """
     payload = json.dumps(stream or {}, separators=(',', ':')).encode('utf-8')
     return base64.urlsafe_b64encode(
