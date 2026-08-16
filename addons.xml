@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.14.0" provider-name="M0RF30">
+<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.15.0" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0" />
     <import addon="script.module.requests" version="2.22.0" />
@@ -12,7 +12,10 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse and search catalogs by type, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote stremio-server-go streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.14.0:
+    <news>v0.15.0:
+- New: a "Continue watching" row at the top of Home. Rivulet has recorded where you stopped in every title since 0.5.0 - it is what drives the resume prompt - but there was no way to see what you were in the middle of, so getting back into a half-watched series meant remembering what it was and going looking for it. The new row lists the titles you are partway through, most recent first, one entry per series however many episodes you have started. It appears only when there is actually something to resume, and can be switched off in Settings - Home screen. Picking a title works exactly like picking it anywhere else, resume prompt included. To make room for a ninth row, Home's menu rows are slightly more compact.
+- Improved: the grey plate behind Home's account status line is gone. It was the one place a hairline colour was used as a 720x48 fill, and it read as a grey slab - most obviously when logged out, where the short "Not logged in" left most of it empty. The coloured status dot and the dark backdrop already carry the information, so nothing is lost.
+v0.14.0:
 - New: Rivulet can open itself when Kodi starts. On a box that exists to run Rivulet, every boot ended with the same walk into Videos to launch the addon; the new "Open Rivulet automatically on Kodi startup" switch in Settings - Home screen does that walk for you. Off by default, and it waits for the skin to finish coming up before launching, so it cannot open into a half-drawn screen.
 - Fix: scrolling through a catalog that was still loading in the background threw the selection back to the first poster every time a page arrived, and the further you had scrolled the more violent the jump. The cursor now stays on the poster you were looking at while the rest of the list fills in behind it.
 v0.13.0:
