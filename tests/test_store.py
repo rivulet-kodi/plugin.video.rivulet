@@ -5,6 +5,9 @@ Reference: DEFAULT_ADDONS should mirror stremio-core's OFFICIAL_ADDONS baseline
 shape ({"official":bool,"protected":bool}).
 """
 import json
+import os
+import tempfile
+import time
 
 import pytest
 
@@ -702,6 +705,10 @@ def test_set_progress_prunes_entry_with_malformed_updated_at(tmp_path):
 def test_set_progress_prunes_entry_older_than_max_age(tmp_path):
     store = make_store(tmp_path)
     store.set_progress("movie", "tt-old", None, 1, 2, "2020-01-01T00:00:00Z")
+    # The full age sweep only runs once a day (see
+    # `PROGRESS_SWEEP_INTERVAL_SECONDS`) or when over cap; force it here
+    # so this second call's sweep isn't skipped by the daily marker.
+    store._last_progress_sweep_monotonic = None
     store.set_progress("movie", "tt-new", None, 3, 4, "2021-06-01T00:00:00Z")  # >180d later
     assert store.get_progress("movie", "tt-old") is None
     assert store.get_progress("movie", "tt-new") == {
@@ -799,3 +806,78 @@ def test_get_progress_entries_skips_malformed_value(tmp_path):
     entries = store.get_progress_entries()
     assert len(entries) == 1
     assert entries[0]["id"] == "tt1"
+
+
+# --- _prune_progress sweep gating / _atomic_write internals ----------------
+
+
+def test_set_progress_over_cap_evicts_even_when_daily_sweep_not_due(tmp_path, monkeypatch):
+    """Cap eviction must fire purely from the entry count exceeding
+    MAX_PROGRESS_ENTRIES, even right after a sweep -- when the once-a-day
+    marker alone would skip the next one -- and the entry `set_progress`
+    just wrote must always survive it."""
+    monkeypatch.setattr(store_module, "MAX_PROGRESS_ENTRIES", 3)
+    store = make_store(tmp_path)
+    store.set_progress("movie", "tt1", None, 1, 2, "2020-01-01T00:00:01Z")
+    store._last_progress_sweep_monotonic = time.monotonic()  # sweep "just happened"
+    store.set_progress("movie", "tt2", None, 1, 2, "2020-01-01T00:00:02Z")
+    store.set_progress("movie", "tt3", None, 1, 2, "2020-01-01T00:00:03Z")
+    store.set_progress("movie", "tt4", None, 1, 2, "2020-01-01T00:00:04Z")
+    assert store.get_progress("movie", "tt1") is None  # oldest evicted despite recent sweep
+    for content_id in ("tt2", "tt3", "tt4"):
+        assert store.get_progress("movie", content_id) is not None
+    raw = json.loads((tmp_path / "addon_data" / "progress.json").read_text())
+    assert len(raw) == 3
+
+
+def test_set_progress_skips_timestamp_parsing_when_under_cap_and_sweep_recent(tmp_path, monkeypatch):
+    """Under the entry cap with a recent sweep, `set_progress` must not
+    parse any `updated_at` timestamp at all -- that per-entry
+    `datetime.strptime` sweep is the whole point of the fix (measured
+    1.535ms @500 entries, 62% of the call) and must only pay for itself
+    when actually needed."""
+    store = make_store(tmp_path)
+    store.set_progress("movie", "tt1", None, 1, 2, "2020-01-01T00:00:01Z")  # first call always sweeps
+
+    calls = []
+    real_parse = store_module._parse_progress_timestamp
+
+    def counting_parse(value):
+        calls.append(value)
+        return real_parse(value)
+
+    monkeypatch.setattr(store_module, "_parse_progress_timestamp", counting_parse)
+
+    store.set_progress("movie", "tt2", None, 3, 4, "2020-01-01T00:00:02Z")
+
+    assert calls == []
+    assert store.get_progress("movie", "tt1") is not None
+    assert store.get_progress("movie", "tt2") is not None
+
+
+def test_atomic_write_matches_pure_python_json_dump_byte_for_byte(tmp_path):
+    """`_atomic_write` now writes via `fh.write(json.dumps(...))` (the C
+    one-shot encoder) instead of `json.dump(data, fh, ...)` (pure-Python
+    `iterencode`) for a 4.35x speedup @500 entries -- output must stay
+    byte-identical for both the pretty-printed and compact modes."""
+    data = {"b": [1, 2, {"nested": True, "z": None, "unicode": "caf\u00e9"}], "a": "value", "n": 3.5}
+
+    def reference_write(path, compact):
+        fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=os.path.dirname(path) or ".")
+        with os.fdopen(fd, "w") as fh:
+            if compact:
+                json.dump(data, fh, separators=(',', ':'))
+            else:
+                json.dump(data, fh, indent=2, sort_keys=False)
+        os.replace(tmp, path)
+
+    for compact in (False, True):
+        expected_path = str(tmp_path / "expected-{}.json".format(compact))
+        actual_path = str(tmp_path / "actual-{}.json".format(compact))
+        reference_write(expected_path, compact)
+        store_module._atomic_write(actual_path, data, compact=compact)
+        with open(expected_path, "rb") as fh:
+            expected_bytes = fh.read()
+        with open(actual_path, "rb") as fh:
+            actual_bytes = fh.read()
+        assert actual_bytes == expected_bytes
