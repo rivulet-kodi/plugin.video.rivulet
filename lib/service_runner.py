@@ -71,6 +71,16 @@ MIN_STABLE_UPTIME = 60.0
 
 LOG_FILENAME = "server.log"
 LOG_ROTATE_BYTES = 5 * 1024 * 1024
+# main()'s HEALTHY branch calls ServerProcess.maybe_rotate_log() every tick
+# (HEALTHY_POLL_INTERVAL, 2s), but a live child's log is only ever worth
+# re-checking this coarsely: start()'s own _rotate_log() already handles the
+# common case (rotate right before spawning), so the periodic check exists
+# only to bound growth across a crash-free multi-day session -- a real risk
+# on a near-full SD/eMMC box with a chatty stremio-server binary. Gating the
+# stat() to once per this many seconds keeps the idle-loop no-disk-touch
+# property intact for every tick except one: 288 stats/day instead of 43200
+# (one per 2s tick) for the exact same detection latency that matters here.
+LOG_ROTATE_CHECK_INTERVAL = 300.0
 
 IDLE_POLL_INTERVAL = 2.0
 HEALTHY_POLL_INTERVAL = 2.0
@@ -315,6 +325,7 @@ class ServerProcess:
         self._proc = None
         self._log_fh = None
         self._started_at = None
+        self._last_rotate_check = None
 
     @property
     def running(self):
@@ -327,13 +338,23 @@ class ServerProcess:
         env.update(self.extra_env)
         return env
 
+    def _rename_to_backup(self):
+        """Rename `log_path` -> `log_path + ".1"`, replacing any existing
+        backup. No size check here -- callers that already know the file
+        is oversized (both `_rotate_log()` and `maybe_rotate_log()`) call
+        this directly so the check itself is never duplicated."""
+        try:
+            backup = self.log_path + ".1"
+            if os.path.exists(backup):
+                os.remove(backup)
+            os.rename(self.log_path, backup)
+        except OSError:
+            pass
+
     def _rotate_log(self):
         try:
             if os.path.getsize(self.log_path) > LOG_ROTATE_BYTES:
-                backup = self.log_path + ".1"
-                if os.path.exists(backup):
-                    os.remove(backup)
-                os.rename(self.log_path, backup)
+                self._rename_to_backup()
         except OSError:
             pass
 
@@ -358,6 +379,91 @@ class ServerProcess:
             self._log_fh = None
             raise
         self._started_at = time.monotonic()
+        self._last_rotate_check = self._started_at
+
+    def _truncate_live_log(self):
+        """Reset the log file `self._log_fh` is *currently* writing to back
+        to zero bytes without disturbing the open fd. Called by
+        `maybe_rotate_log()` once a live rotation has already happened this
+        run (log_path renamed away, see its docstring) and the file the
+        child is now appending to (`.1`) has grown past LOG_ROTATE_BYTES
+        again -- there is no third name left to rotate `.1` into, and
+        nothing recreates log_path until the next start(), so renaming
+        again is not an option. open()'s "a" mode sets O_APPEND on the fd
+        (POSIX): ftruncate() shrinking the file to zero does not race the
+        writer, every subsequent write still lands at the new (zero) end
+        of file. This loses the current file's history instead of
+        renaming it aside -- an accepted tradeoff for bounding disk usage
+        without restarting the child (see maybe_rotate_log()'s docstring).
+        """
+        if self._log_fh is None:
+            return
+        try:
+            os.ftruncate(self._log_fh.fileno(), 0)
+        except OSError:
+            pass
+
+    def maybe_rotate_log(self):
+        """Periodic size check for a LIVE process's log, called by main()'s
+        HEALTHY branch on every poll tick. Gated on LOG_ROTATE_CHECK_INTERVAL
+        (a coarse monotonic timestamp, not a per-tick stat()): start()'s own
+        `_rotate_log()` call only ever runs once, right before spawning, so
+        without this a chatty binary's log grows unbounded across a crash-
+        free multi-day session -- a real risk on a near-full SD/eMMC box.
+
+        The child's stdout fd (`self._log_fh`, wired in start() via
+        `Popen(stdout=self._log_fh)`) was opened against log_path's INODE,
+        not its path -- `os.rename()` only relabels a path, it never
+        touches an already-open fd. So the FIRST time this fires against
+        an oversized live log, it rotates exactly like `_rotate_log()`
+        (rename log_path -> `.1`): the child keeps appending to the same
+        inode, now reachable only at `.1`, and log_path does not exist
+        again until the next start() creates a fresh one.
+
+        EVERY firing after that must therefore watch `.1`, not log_path
+        (which stays missing for the rest of this run) -- and since there
+        is no third name to rotate `.1` into, the only way left to cap its
+        growth without restarting the child is to ftruncate the same open
+        fd back to zero once `.1` itself crosses LOG_ROTATE_BYTES again
+        (`_truncate_live_log()`). That loses the oldest lines of the
+        current run rather than the whole file -- an accepted tradeoff: a
+        bounded log that forgets its history beats an unbounded one
+        filling up a near-full SD/eMMC box.
+
+        Windows caveat: os.rename() of a file the child (and self._log_fh)
+        holds open fails there with PermissionError (CPython never requests
+        FILE_SHARE_DELETE, bpo-15244), which _rename_to_backup() swallows.
+        So after attempting the rename, this re-checks whether log_path is
+        actually gone and falls back to truncating the live fd -- the same
+        bounded-but-history-losing tradeoff as the `.1` case, so the
+        invariant below holds on every platform instead of silently
+        degrading to unbounded growth on Windows.
+
+        Net invariant, true at any point across an arbitrarily long
+        healthy session: total on-disk log bytes (log_path plus `.1`)
+        never exceed roughly 2x LOG_ROTATE_BYTES: the threshold itself
+        plus at most one check interval's worth of growth before the next
+        gate catches it.
+        """
+        now = time.monotonic()
+        if self._last_rotate_check is not None and now - self._last_rotate_check < LOG_ROTATE_CHECK_INTERVAL:
+            return
+        self._last_rotate_check = now
+        live_path = self.log_path if os.path.exists(self.log_path) else self.log_path + ".1"
+        try:
+            oversized = os.path.getsize(live_path) > LOG_ROTATE_BYTES
+        except OSError:
+            return
+        if not oversized:
+            return
+        if live_path == self.log_path:
+            self._rename_to_backup()
+            if os.path.exists(self.log_path):
+                # Rename failed (Windows: open file, WinError 32) --
+                # bound growth anyway by resetting the live fd.
+                self._truncate_live_log()
+        else:
+            self._truncate_live_log()
 
     def poll(self):
         """Return the exit code if the child has died, else None."""
@@ -858,6 +964,7 @@ def main():
             code = proc.poll()
             if code is None:
                 interval = HEALTHY_POLL_INTERVAL
+                proc.maybe_rotate_log()
             else:
                 if (proc.uptime() or 0) >= MIN_STABLE_UPTIME:
                     backoff_idx = 0
