@@ -40,6 +40,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _RELOAD_MODULE_NAMES = (
     'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.router', 'lib.ui.homewindow',
     'lib.ui.catalogpicker', 'lib.ui.searchwindow', 'lib.ui.librarywindow', 'lib.ui.addonswindow',
+    'lib.ui.continuewatching',
 )
 
 
@@ -52,20 +53,27 @@ _ALL_TYPE_ADDONS = [{'transportUrl': 'https://a/manifest.json', 'manifest': {'ca
 
 class _FakeStore:
     """Fake `lib.store.Store` for HomeWindow.onInit(): `get_auth()`'s
-    truthiness decides whether the Library row is shown, and
-    `get_addons()` supplies the catalogs the type rows auto-hide
-    against (defaulting to one of every type, so a test that only cares
-    about Library still gets all three rows)."""
+    truthiness decides whether the Library row is shown, `get_addons()`
+    supplies the catalogs the type rows auto-hide against (defaulting to
+    one of every type, so a test that only cares about Library still
+    gets all three rows), and `get_progress_entries()` (defaulting to
+    none cached) is what the real `lib.ui.continuewatching.has_resumable()`
+    reads - tests that care about the Continue-watching row's gating
+    monkeypatch `has_resumable()` itself instead of populating this."""
 
-    def __init__(self, auth=None, addons=None):
+    def __init__(self, auth=None, addons=None, progress_entries=None):
         self._auth = auth
         self._addons = _ALL_TYPE_ADDONS if addons is None else addons
+        self._progress_entries = [] if progress_entries is None else progress_entries
 
     def get_auth(self):
         return self._auth
 
     def get_addons(self):
         return self._addons
+
+    def get_progress_entries(self):
+        return self._progress_entries
 
 
 class _FakeVersionStore:
@@ -704,3 +712,97 @@ def test_every_menu_row_has_an_icon_shipped_for_it(load_homewindow):
         if name.endswith('.png') and name[:-len('.png')] not in actions
     )
     assert not unused, 'icons in resources/media nothing on Home draws: %s' % unused
+
+
+# ---------------------------------------------------------------------------
+# _menu_items() - "Continue watching" row
+# ---------------------------------------------------------------------------
+
+
+def test_menu_items_shows_continue_row_first_when_show_continue_true(load_homewindow):
+    ctx = load_homewindow()
+
+    items = ctx.homewindow._menu_items(True, _ALL_TYPE_ADDONS, show_continue=True)
+
+    assert [item.getProperty('action') for item in items] == [
+        'continue', 'movies', 'series', 'anime', 'search', 'library', 'addons', 'settings',
+    ]
+    assert items[0].getLabel() == 'STR30231'
+    assert items[0].art['icon'] == ctx.compat.addon_media_path('continue.png')
+    assert items[0].getProperty('subtitle') == 'STR30232'
+
+
+def test_menu_items_omits_continue_row_by_default(load_homewindow):
+    ctx = load_homewindow()
+
+    items = ctx.homewindow._menu_items(True, _ALL_TYPE_ADDONS)
+
+    assert [item.getProperty('action') for item in items] == [
+        'movies', 'series', 'anime', 'search', 'library', 'addons', 'settings',
+    ]
+
+
+# ---------------------------------------------------------------------------
+# HomeWindow.onInit() - "Continue watching" row gating
+# ---------------------------------------------------------------------------
+
+
+def test_oninit_shows_continue_row_when_setting_on_and_resumable(load_homewindow, monkeypatch):
+    ctx = load_homewindow()
+    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore())
+    monkeypatch.setattr(ctx.continuewatching, 'has_resumable', lambda store: True)
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
+
+    win.onInit()
+
+    actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
+    assert actions[0] == 'continue'
+
+
+def test_oninit_hides_continue_row_when_setting_off(load_homewindow, monkeypatch):
+    ctx = load_homewindow(settings={'home_show_continue': 'false'})
+    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore())
+    monkeypatch.setattr(ctx.continuewatching, 'has_resumable', lambda store: True)
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
+
+    win.onInit()
+
+    actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
+    assert 'continue' not in actions
+
+
+def test_oninit_hides_continue_row_when_nothing_resumable(load_homewindow, monkeypatch):
+    ctx = load_homewindow()
+    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore())
+    monkeypatch.setattr(ctx.continuewatching, 'has_resumable', lambda store: False)
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
+
+    win.onInit()
+
+    actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
+    assert 'continue' not in actions
+
+
+# ---------------------------------------------------------------------------
+# HomeWindow.onClick() - "Continue watching" row
+# ---------------------------------------------------------------------------
+
+
+def test_onclick_continue_closes_when_open_continue_watching_returns_true(load_homewindow, monkeypatch):
+    ctx = load_homewindow()
+    monkeypatch.setattr(ctx.continuewatching, 'open_continue_watching', lambda: True)
+    win = _window_with_focused_action(ctx.homewindow, 'continue')
+
+    win.onClick(ctx.homewindow.LIST)
+
+    assert win.closed is True
+
+
+def test_onclick_continue_stays_open_when_open_continue_watching_returns_false(load_homewindow, monkeypatch):
+    ctx = load_homewindow()
+    monkeypatch.setattr(ctx.continuewatching, 'open_continue_watching', lambda: False)
+    win = _window_with_focused_action(ctx.homewindow, 'continue')
+
+    win.onClick(ctx.homewindow.LIST)
+
+    assert win.closed is False

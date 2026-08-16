@@ -251,7 +251,9 @@ def _home_rows():
     Assumes every row is present, which holds on the capture machine: it
     is logged in (Library) and has addons publishing types outside the
     three curated rows (Other). A machine missing either would shift the
-    rows below it.
+    rows below it. `continue` is conditional the same way - it needs the
+    setting on and an in-band local playback-progress entry - and is
+    absent on a fresh capture machine, shifting every row after it.
     """
     import ast
 
