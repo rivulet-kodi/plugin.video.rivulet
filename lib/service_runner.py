@@ -83,6 +83,32 @@ MISSING_BINARY_RECHECK_INTERVAL = 5.0
 # instead of waiting out a full missing-binary recheck cycle.
 POST_DOWNLOAD_RECHECK_INTERVAL = 0.5
 
+# --- startup autoload -------------------------------------------------------
+#
+# With `startup_autoload` on, the service opens Rivulet's own UI once per
+# Kodi session, so a dedicated media box boots straight into the addon
+# instead of Kodi's home screen.
+#
+# `RunAddon(plugin.video.rivulet)` is the builtin to use, NOT
+# `ActivateWindow(Videos, plugin://...)`: a bare invocation of this addon
+# opens the custom HomeWindow (see default.py), which is a modal
+# WindowXMLDialog rather than a directory listing, and RunAddon is the
+# standard "launch this addon as the user would" entry point. The user can
+# still back out of it to Kodi's home screen normally.
+AUTOLOAD_BUILTIN = "RunAddon(%s)" % ADDON_ID
+
+# Kodi starts add-on services well before the GUI has finished coming up;
+# firing the builtin into a skin that is still loading has been observed to
+# do nothing at all (the window opens behind the splash, or the command is
+# dropped). Wait for Kodi to report the home window as ready, then wait a
+# further settling delay before launching.
+AUTOLOAD_READY_POLL_INTERVAL = 1.0
+AUTOLOAD_SETTLE_DELAY = 5.0
+# Give up waiting for a "ready" GUI after this long and launch anyway --
+# an unusual skin that never reports ready must not silently disable the
+# feature for the whole session.
+AUTOLOAD_READY_TIMEOUT = 60.0
+
 # Every env var stremio-server-go's main() reads besides APP_PATH/HTTP_PORT
 # (which stay pinned in ServerProcess.build_env()), one row per Kodi setting:
 # (kodi_setting_id, env_var, kind). `kind` drives both how ServiceMonitor
@@ -330,6 +356,63 @@ class _AbortRequested(Exception):
     """
 
 
+class AutoloadTrigger:
+    """One-shot "open Rivulet's UI once the GUI is up" decision, kept out
+    of `main()`'s loop body so it can be unit-tested without Kodi.
+
+    `main()` calls `poll(now)` once per supervision-loop iteration and
+    gets back either `None` (nothing to do this iteration) or the number
+    of seconds it should cap its own sleep at, so the launch is not
+    delayed by a long idle interval. The trigger latches after firing:
+    it launches at most once per Kodi session, no matter how many times
+    `poll()` is called or how the setting changes afterwards.
+
+    Both collaborators are plain callables so this stays Kodi-free:
+      - `gui_ready_fn() -> bool`: is Kodi's GUI up? (`main()` passes an
+        `xbmc.getCondVisibility('Window.IsVisible(home)')` probe.)
+      - `launch_fn()`: actually run the builtin.
+    `disabled` short-circuits everything -- the setting is read once, at
+    construction, precisely because a mid-session toggle should take
+    effect at the NEXT Kodi startup rather than popping the UI open over
+    whatever the user is doing right now.
+    """
+
+    def __init__(
+        self, gui_ready_fn, launch_fn, started_at, disabled=False,
+        settle_delay=AUTOLOAD_SETTLE_DELAY, ready_timeout=AUTOLOAD_READY_TIMEOUT,
+        poll_interval=AUTOLOAD_READY_POLL_INTERVAL,
+    ):
+        self._gui_ready = gui_ready_fn
+        self._launch = launch_fn
+        self._started_at = started_at
+        self._settle_delay = settle_delay
+        self._ready_timeout = ready_timeout
+        self._poll_interval = poll_interval
+        self.fired = disabled  # a disabled trigger is "already done"
+        self._launch_at = None
+
+    def poll(self, now):
+        """Advance the state machine. Returns a suggested maximum sleep
+        (seconds) for this loop iteration, or None when the trigger has
+        nothing left to ask for."""
+        if self.fired:
+            return None
+
+        if self._launch_at is None:
+            waited = now - self._started_at
+            if not self._gui_ready() and waited < self._ready_timeout:
+                return self._poll_interval
+            self._launch_at = now + self._settle_delay
+
+        remaining = self._launch_at - now
+        if remaining > 0:
+            return min(remaining, self._poll_interval)
+
+        self.fired = True
+        self._launch()
+        return None
+
+
 def should_push_now(last_pushed_at, now, final, interval=LIBRARY_PUSH_INTERVAL_SECONDS):
     """True if a `datastorePut` push should happen now: always on the
     FINAL sample of a session (the last chance to sync before playback
@@ -572,6 +655,20 @@ def main():
     def log(level, message):
         xbmc.log(f"[{ADDON_ID}] {message}", level)
 
+    def _launch_addon_ui():
+        log(xbmc.LOGINFO, "startup autoload: opening Rivulet")
+        try:
+            xbmc.executebuiltin(AUTOLOAD_BUILTIN)
+        except Exception as exc:  # noqa: BLE001 - a failed launch must never crash the supervision loop
+            log(xbmc.LOGERROR, f"startup autoload failed: {exc}")
+
+    autoload = AutoloadTrigger(
+        gui_ready_fn=lambda: bool(xbmc.getCondVisibility("Window.IsVisible(home)")),
+        launch_fn=_launch_addon_ui,
+        started_at=time.monotonic(),
+        disabled=not _settings.setting_bool(addon, "startup_autoload", False),
+    )
+
     store = Store(profile_dir)
     progress_player = build_progress_player(
         xbmc, store, StremioAPI(), log, lambda: _settings.setting_bool(addon, "sync_progress", True),
@@ -801,6 +898,19 @@ def main():
                     else:
                         proc = candidate
                         interval = HEALTHY_POLL_INTERVAL
+
+        # Autoload last, so it sees this iteration's computed `interval`
+        # and can shorten it: the supervision branches above may have
+        # picked a sleep far longer than the launch is meant to wait.
+        if not autoload.fired:
+            try:
+                autoload_interval = autoload.poll(time.monotonic())
+            except Exception as exc:  # noqa: BLE001 - autoload must never crash the supervision loop
+                log(xbmc.LOGERROR, "startup autoload failed: %r" % (exc,))
+                autoload.fired = True  # latch off; never retry for the rest of the session
+            else:
+                if autoload_interval is not None:
+                    interval = min(interval, autoload_interval)
 
         if monitor.waitForAbort(interval):
             break

@@ -741,12 +741,16 @@ def _scripted_wait(intervals, steps):
 
 
 @contextlib.contextmanager
-def _main_env(tmp_path, waitforabort, settings=None):
+def _main_env(tmp_path, waitforabort, settings=None, cond_visibility=True):
     """Installs the shared kodistubs for one `main()` run, patching the
     two Monitor/xbmcgui gaps described above and redirecting
     `xbmcvfs.translatePath` to a real pytest `tmp_path` so `main()`'s
     `os.makedirs(profile_dir, exist_ok=True)` writes somewhere hermetic
     instead of the shared fake's literal `/fake-kodi-home/...` path.
+
+    `xbmc.getCondVisibility` is a third such gap, needed only by
+    `main()`'s startup-autoload GUI-ready probe: pass a bool (every
+    query answers it) or a callable taking the condition string.
     """
     with install_kodi_stubs(reload=(), settings=settings) as ctx:
         xbmc_mod = sys.modules['xbmc']
@@ -757,6 +761,9 @@ def _main_env(tmp_path, waitforabort, settings=None):
         xbmcvfs_mod.translatePath = lambda path: str(tmp_path)
         xbmc_mod.Monitor.abortRequested = lambda self: False
         xbmc_mod.Monitor.waitForAbort = waitforabort
+        xbmc_mod.getCondVisibility = (
+            cond_visibility if callable(cond_visibility) else (lambda cond: cond_visibility)
+        )
 
         ctx.xbmc = xbmc_mod
         ctx.xbmcgui = xbmcgui_mod
@@ -1498,6 +1505,234 @@ def test_main_onsettingschanged_extra_env_resave_without_change_does_not_restart
     assert len(spawned) == 1  # never restarted -> never respawned
     assert spawned[0].stop_calls == 1  # only the final shutdown-path stop
     assert not any('settings changed, restarting' in msg for msg, _level in ctx.env.log_calls)
+
+
+# ===========================================================================
+# AutoloadTrigger: open Rivulet's UI once per Kodi session (pure half)
+# ===========================================================================
+
+
+def _trigger(gui_ready=True, started_at=0.0, **kwargs):
+    """An `AutoloadTrigger` with recording collaborators. Returns
+    `(trigger, launches)`; `gui_ready` is a bool or a zero-arg callable."""
+    launches = []
+    ready = gui_ready if callable(gui_ready) else (lambda: gui_ready)
+    trigger = service_runner.AutoloadTrigger(
+        gui_ready_fn=ready, launch_fn=lambda: launches.append(True),
+        started_at=started_at, **kwargs
+    )
+    return trigger, launches
+
+
+def test_autoload_disabled_never_launches_and_asks_for_no_wakeups():
+    """The default (setting off): `poll()` must be a pure no-op, never
+    shortening `main()`'s supervision interval."""
+    trigger, launches = _trigger(disabled=True)
+
+    assert [trigger.poll(t) for t in (0.0, 100.0, 10000.0)] == [None, None, None]
+    assert launches == []
+
+
+def test_autoload_waits_for_the_gui_before_arming_the_settle_delay():
+    """A service that starts before the skin is up must not fire into a
+    still-loading GUI -- it polls until `Window.IsVisible(home)`."""
+    ready = {'value': False}
+    trigger, launches = _trigger(gui_ready=lambda: ready['value'])
+
+    assert trigger.poll(0.0) == service_runner.AUTOLOAD_READY_POLL_INTERVAL
+    assert trigger.poll(30.0) == service_runner.AUTOLOAD_READY_POLL_INTERVAL
+    assert launches == []
+
+    ready['value'] = True
+    trigger.poll(30.0)
+    assert launches == []  # GUI is up, but the settle delay has not elapsed yet
+
+
+def test_autoload_launches_once_after_the_settle_delay():
+    trigger, launches = _trigger(settle_delay=5.0)
+
+    assert trigger.poll(0.0) is not None      # GUI ready -> settle delay armed
+    assert launches == []
+    assert trigger.poll(4.9) is not None      # still settling
+    assert launches == []
+    assert trigger.poll(5.0) is None          # deadline reached -> fire
+    assert launches == [True]
+    assert trigger.fired is True
+
+
+def test_autoload_latches_after_firing_and_never_launches_twice():
+    """One launch per Kodi session: `main()` polls this every loop
+    iteration for the rest of the session."""
+    trigger, launches = _trigger(settle_delay=0.0)
+
+    for t in (0.0, 1.0, 2.0, 600.0):
+        trigger.poll(t)
+
+    assert launches == [True]
+
+
+def test_autoload_launches_anyway_once_the_ready_timeout_expires():
+    """An unusual skin that never reports `Window.IsVisible(home)` must
+    not silently disable the feature for the whole session."""
+    trigger, launches = _trigger(
+        gui_ready=False, ready_timeout=60.0, settle_delay=5.0,
+    )
+
+    assert trigger.poll(59.0) == service_runner.AUTOLOAD_READY_POLL_INTERVAL
+    assert launches == []
+    trigger.poll(60.0)          # timeout expired -> arm the settle delay anyway
+    assert launches == []
+    trigger.poll(65.0)
+    assert launches == [True]
+
+
+def test_autoload_never_asks_main_to_sleep_past_its_own_launch_deadline():
+    """The returned interval is what `main()` caps its sleep at, so it
+    must never overshoot the remaining settle time."""
+    trigger, _launches = _trigger(settle_delay=10.0, poll_interval=1.0)
+
+    trigger.poll(0.0)
+    assert trigger.poll(9.5) == pytest.approx(0.5)
+
+
+# ===========================================================================
+# startup autoload wired into main()
+# ===========================================================================
+
+
+def _autoload_main_env(tmp_path, monkeypatch, wait, settings, cond_visibility=True, tick=1.0):
+    """`main()` with an external server already answering, so the
+    supervision half is inert and only the autoload behaviour varies.
+
+    `main()`'s autoload clock is driven off `time.monotonic()`, which
+    barely advances across a scripted loop that runs in microseconds --
+    so it is replaced here by a fake advancing `tick` seconds per read,
+    making the settle delay elapse deterministically instead of
+    depending on how fast the test host happens to be.
+    """
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda url, **kw: True)
+    factory, _spawned = _make_process_factory([])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    clock = {'now': 0.0}
+
+    def fake_monotonic():
+        now = clock['now']
+        clock['now'] += tick
+        return now
+
+    monkeypatch.setattr(service_runner.time, 'monotonic', fake_monotonic)
+    return _main_env(tmp_path, wait, settings=settings, cond_visibility=cond_visibility)
+
+
+def test_main_does_not_autoload_when_the_setting_is_off(monkeypatch, tmp_path):
+    """Default-off: a stock install must never pop the UI open by itself."""
+    intervals = []
+    wait = _scripted_wait(intervals, [None] * 3)
+    settings = {'server_enable': True, 'startup_autoload': False}
+    with _autoload_main_env(tmp_path, monkeypatch, wait, settings) as ctx:
+        service_runner.main()
+
+    assert ctx.env.executed_builtins == []
+    # An inert trigger must not shorten the external-server recheck either.
+    assert intervals == [service_runner.EXTERNAL_RECHECK_INTERVAL] * 3
+
+
+def test_main_autoloads_the_addon_ui_when_the_setting_is_on(monkeypatch, tmp_path):
+    intervals = []
+    wait = _scripted_wait(intervals, [None] * 20)
+    settings = {'server_enable': True, 'startup_autoload': True}
+    with _autoload_main_env(tmp_path, monkeypatch, wait, settings) as ctx:
+        service_runner.main()
+
+    assert ctx.env.executed_builtins == [service_runner.AUTOLOAD_BUILTIN]
+    assert service_runner.AUTOLOAD_BUILTIN == 'RunAddon(plugin.video.rivulet)'
+    assert any('startup autoload' in msg for msg, _level in ctx.env.log_calls)
+
+
+def test_main_autoload_shortens_the_supervision_interval_while_it_waits(monkeypatch, tmp_path):
+    """The external-server branch would otherwise sleep 10s per
+    iteration, delaying the launch well past the settle delay."""
+    intervals = []
+    wait = _scripted_wait(intervals, [None] * 3)
+    settings = {'server_enable': True, 'startup_autoload': True}
+    with _autoload_main_env(tmp_path, monkeypatch, wait, settings):
+        service_runner.main()
+
+    assert intervals[0] < service_runner.EXTERNAL_RECHECK_INTERVAL
+    assert intervals[0] <= service_runner.AUTOLOAD_READY_POLL_INTERVAL
+
+
+def test_main_autoload_launch_failure_never_crashes_the_service(monkeypatch, tmp_path):
+    """`executebuiltin` raising must be contained: the supervision loop
+    is the whole point of the service, the autoload is a convenience."""
+    intervals = []
+    wait = _scripted_wait(intervals, [None] * 20)
+    settings = {'server_enable': True, 'startup_autoload': True}
+    with _autoload_main_env(tmp_path, monkeypatch, wait, settings) as ctx:
+        def boom(function, wait=False):
+            raise RuntimeError('no GUI')
+
+        sys.modules['xbmc'].executebuiltin = boom
+        service_runner.main()
+
+    assert len(intervals) == 20  # the loop ran to completion regardless
+    assert any('startup autoload failed' in msg for msg, _level in ctx.env.log_calls)
+
+
+def test_main_autoload_poll_failure_is_contained_and_latched_off(monkeypatch, tmp_path):
+    """The outer guard around `AutoloadTrigger.poll()` itself (as
+    opposed to the launch): a trigger that raises is latched off rather
+    than raising once per loop iteration for the rest of the session."""
+    class Exploding:
+        def __init__(self):
+            self.polls = 0
+            self.fired = False
+
+        def poll(self, now):
+            self.polls += 1
+            raise RuntimeError('boom')
+
+    exploding = Exploding()
+    monkeypatch.setattr(service_runner, 'AutoloadTrigger', lambda **kw: exploding)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None] * 4)
+    settings = {'server_enable': True, 'startup_autoload': True}
+    with _autoload_main_env(tmp_path, monkeypatch, wait, settings) as ctx:
+        service_runner.main()
+
+    assert exploding.polls == 1  # latched off after the first failure
+    assert len(intervals) == 4   # ... and the supervision loop carried on
+    assert any('startup autoload failed' in msg for msg, _level in ctx.env.log_calls)
+
+
+def test_main_autoload_does_not_fire_while_the_gui_is_still_loading(monkeypatch, tmp_path):
+    intervals = []
+    wait = _scripted_wait(intervals, [None] * 3)
+    settings = {'server_enable': True, 'startup_autoload': True}
+    with _autoload_main_env(
+        tmp_path, monkeypatch, wait, settings, cond_visibility=lambda cond: False,
+    ) as ctx:
+        service_runner.main()
+
+    assert ctx.env.executed_builtins == []
+
+
+def test_main_autoload_probes_kodis_home_window_for_gui_readiness(monkeypatch, tmp_path):
+    conditions = []
+
+    def record(cond):
+        conditions.append(cond)
+        return True
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None] * 20)
+    settings = {'server_enable': True, 'startup_autoload': True}
+    with _autoload_main_env(tmp_path, monkeypatch, wait, settings, cond_visibility=record):
+        service_runner.main()
+
+    assert conditions and all(c == 'Window.IsVisible(home)' for c in conditions)
 
 
 # ===========================================================================

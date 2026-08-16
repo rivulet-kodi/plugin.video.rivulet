@@ -683,3 +683,7 @@ msgstr "Bladeren door catalogi die geen films, series of anime zijn"
 msgctxt "#30229"
 msgid "Show Other"
 msgstr "Overige tonen"
+
+msgctxt "#30230"
+msgid "Open Rivulet automatically on Kodi startup"
+msgstr "Rivulet automatisch openen bij het opstarten van Kodi"
