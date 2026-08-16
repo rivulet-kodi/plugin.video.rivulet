@@ -25,6 +25,7 @@ import base64
 import contextlib
 import json
 import os
+import subprocess
 import sys
 import types
 from urllib.parse import parse_qsl, urlencode, urlparse
@@ -765,3 +766,55 @@ def test_advancedsettings_install_unwrapped_oserror_is_not_swallowed(load_router
         level == xbmc_mod.LOGERROR and 'action "advancedsettings_install" failed' in msg
         for msg, level in ctx.env.log_calls
     )
+
+
+# ---------------------------------------------------------------------------
+# Fresh-process import surface (finding 5b): every plugin:// call is a NEW
+# Python process (native library resume, favourites, widgets, Settings
+# RunPlugin buttons), so router.py must only import player.py/views.py
+# from inside the specific dispatch closures that need them - never at
+# module scope, and never for actions that don't use them.
+# ---------------------------------------------------------------------------
+
+
+def test_importing_router_alone_never_pulls_in_player_views_or_store():
+    """A bare `import lib.ui.router` - what happens before ANY action is
+    even dispatched - must never import lib.ui.player, lib.ui.views, or
+    lib.store: those are pulled in by run()'s dispatch closures (do_play /
+    _view_action()) only once the dispatched action actually needs them.
+    Run in a fresh subprocess interpreter, not via load_router() - that
+    fixture pre-fakes lib.ui.views/lib.ui.player in sys.modules for its own
+    purposes (see its docstring) and would mask a regression here."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    code = (
+        'import sys\n'
+        'import lib.ui.router\n'
+        'assert "lib.ui.player" not in sys.modules, "lib.ui.player"\n'
+        'assert "lib.ui.views" not in sys.modules, "lib.ui.views"\n'
+        'assert "lib.store" not in sys.modules, "lib.store"\n'
+    )
+    result = subprocess.run(
+        [sys.executable, '-c', code],
+        cwd=repo_root, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_run_dispatching_views_action_never_imports_player(load_router, monkeypatch):
+    """Dispatching a views-backed action (e.g. 'home') must never import
+    lib.ui.player - only do_play('play') does. load_router() pre-fakes
+    both lib.ui.views and lib.ui.player in sys.modules (see module
+    docstring) so a real import would normally be masked by the fake
+    already sitting there; undo the player fake here so an accidental
+    real import becomes observable again."""
+    ctx = load_router()
+    import lib.ui as ui_pkg
+    sys.modules.pop('lib.ui.player', None)
+    if hasattr(ui_pkg, 'player'):
+        del ui_pkg.player
+    monkeypatch.setattr(sys, 'argv', ['plugin://plugin.video.rivulet/', '7', '?action=home'])
+
+    ctx.router.run()
+
+    assert 'lib.ui.player' not in sys.modules
+    assert ctx.views.calls == [('home', (), {})]
