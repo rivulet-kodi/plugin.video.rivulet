@@ -185,6 +185,20 @@ class StreamsWindow(BaseWindow):
         #: outstanding - renders `_LOADING_STRING_ID`'s status line onto
         #: INFO_PANEL until the last one answers (`set_loading(False)`).
         self._loading = False
+        #: The prefix of `self.pairs` (by OBJECT IDENTITY, oldest-first)
+        #: LIST currently holds - set by `_rebuild_list()` every time it
+        #: runs. `_append_prefix_length()` compares this against a fresh
+        #: `self.pairs` to decide whether `_apply_pending()` can append
+        #: just the new suffix instead of a full reset()+rebuild - see
+        #: both methods.
+        self._rendered_pairs = []
+        #: The `single_provider` value `_rebuild_list()` used to build
+        #: `self._rendered_pairs` above - a second addon's batch turning
+        #: a single-provider list into a multi-provider one changes line
+        #: 1 of every ALREADY-rendered row (the addon-name dedupe), so
+        #: `_append_prefix_length()` must catch that even when every
+        #: pair's own identity is unchanged.
+        self._rendered_single_provider = None
 
     def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
         """doModal() showing `pairs` (a list of `(info, stream)` as
@@ -281,13 +295,24 @@ class StreamsWindow(BaseWindow):
 
     def _apply_pending(self):
         """`onAction()`'s live-merge drain - GUI thread only. Rebuilds
-        LIST/INFO_PANEL exactly like `onInit()` when `_merge_pending()`
-        finds something new, preserving the focused row by OBJECT
-        IDENTITY (`is`, not `==` - two different streams can compare
-        equal as `(info, stream)` tuples) so a re-sort never yanks the
-        cursor out from under a user about to click. Falls back to the
-        same numeric position (clamped to the new length) when the
-        previously-focused pair is no longer in the list at all."""
+        LIST/INFO_PANEL when `_merge_pending()` finds something new.
+        `_rebuild_list()` takes an append-only fast path (see
+        `_append_prefix_length()`) whenever the previously-rendered rows
+        are still an untouched PREFIX of the freshly re-sorted
+        `self.pairs` - the common case, since a fast addon landing after
+        a slow one usually sorts after what is already on screen. That
+        path never moves the focused row (nothing before `start` moved),
+        so it goes straight to the same numeric-position restore the
+        full-rebuild path below falls back to. Otherwise (a re-sort
+        interleaved a new row somewhere inside the already-rendered
+        range, or flipped the single-provider addon-name dedupe - see
+        `_rebuild_list()`) falls back to the old full reset()+rebuild,
+        re-finding the focused row by OBJECT IDENTITY (`is`, not `==` -
+        two different streams can compare equal as `(info, stream)`
+        tuples) so a re-sort never yanks the cursor out from under a
+        user about to click. Falls back to the same numeric position
+        (clamped to the new length) when the previously-focused pair is
+        no longer in the list at all."""
         control = self.getControl(LIST)
         focused = control.getSelectedItem()
         focus_index = control.getSelectedPosition()
@@ -303,23 +328,66 @@ class StreamsWindow(BaseWindow):
         if not self._merge_pending():
             return
 
-        self._rebuild_list()
+        start = self._append_prefix_length()
+        self._rebuild_list(0 if start is None else start)
         if not self.pairs:
             return
-        if focus_pair is not None:
+        if start is None and focus_pair is not None:
             for index, pair in enumerate(self.pairs):
                 if pair is focus_pair:
                     control.selectItem(index)
                     return
         control.selectItem(min(max(focus_index, 0), len(self.pairs) - 1))
 
-    def _rebuild_list(self):
-        """Build LIST's rows from `self.pairs`, INFO_PANEL's text and the
-        SOURCES_COUNT/ADDONS_COUNT/CACHED_COUNT summary labels from
-        `self.meta`/`self.pairs` - shared by `onInit()` and
+    def _append_prefix_length(self):
+        """Returns how many of `self.pairs`, counted from the front, are
+        the SAME already-rendered run `_rebuild_list()` last built into
+        LIST - safe for `_apply_pending()` to leave untouched and only
+        append past - or `None` if a full reset()+rebuild is required.
+        Two things invalidate the prefix: (1) the re-sort moved one of
+        those pairs (checked by OBJECT IDENTITY, `is` - pairs are reused
+        across a merge, never rebuilt, see `_merge_pending()`, so an
+        unmoved row is still the exact same tuple at the exact same
+        index), or (2) the single-provider addon-name dedupe
+        (`_rebuild_list()`'s `single_provider`) flipped - that changes
+        line 1 of every ALREADY-rendered row too, e.g. the picker
+        opening on one addon's own results (no addon segment shown) and
+        a second addon's batch then arriving (now shown on every row,
+        including the ones already on screen)."""
+        prev = self._rendered_pairs
+        if not prev or len(prev) > len(self.pairs):
+            return None
+        for old, new in zip(prev, self.pairs):
+            if old is not new:
+                return None
+        providers = {info.get('addon') for info, _stream in self.pairs if info.get('addon')}
+        single_provider = next(iter(providers)) if len(providers) == 1 else None
+        if single_provider != self._rendered_single_provider:
+            return None
+        return len(prev)
+
+    def _rebuild_list(self, start=0):
+        """Build LIST's rows from `self.pairs[start:]`, INFO_PANEL's text
+        and the SOURCES_COUNT/ADDONS_COUNT/CACHED_COUNT summary labels
+        from `self.meta`/`self.pairs` - shared by `onInit()` and
         `_apply_pending()`'s live merge so both build rows identically
         (single-provider dedupe included) instead of duplicating this
-        logic. Each row's ListItem carries both the packed Label/Label2
+        logic. `start=0` (the default - `onInit()`'s first build, and
+        `_apply_pending()`'s full-rebuild fallback) rebuilds every row
+        via reset()+addItems(); `start` > 0 is `_apply_pending()`'s
+        append-only fast path (see `_append_prefix_length()`) - only
+        `self.pairs[start:]`'s rows get built and appended
+        (`control.addItems()`, no `reset()`), instead of reconstructing
+        Label/properties Kodi already has on screen for rows that never
+        changed. Measured: a 400-stream, 20-addon-batch progressive
+        fetch built 4200 rows total the old reset()+rebuild-everything-
+        per-batch way (N*(M+1)/2), 400 with this path taken every time -
+        it also removes the mid-scroll reset()/redraw that motivated
+        `_apply_pending()`'s own focus-preservation workaround in the
+        first place. INFO_PANEL and the summary counts below are always
+        recomputed in full either way - they're label text, not per-row
+        ListItem churn, so there is nothing to save there. Each row's
+        ListItem carries both the packed Label/Label2
         (format_label()/format_details()) AND the discrete
         `streaminfo.stream_fields()` properties StreamsWindow.xml's row
         layout reads column-by-column; the packed pair is the skin's own
@@ -330,7 +398,8 @@ class StreamsWindow(BaseWindow):
         single_provider = next(iter(providers)) if len(providers) == 1 else None
 
         items = []
-        for index, (info, _stream) in enumerate(self.pairs):
+        for index in range(start, len(self.pairs)):
+            info, _stream = self.pairs[index]
             # Multi-provider rows show the addon as a gray tail segment on
             # line 1 (format_label's own include_addon=True rendering);
             # once every pair is the SAME addon it's redundant there and
@@ -354,11 +423,17 @@ class StreamsWindow(BaseWindow):
             item.setProperties(properties)
             items.append(item)
         control = self.getControl(LIST)
-        # reset() before addItems(): a rebuild - onInit() reopening a
-        # screen force-closed for playback, or a live add_pairs() merge -
-        # onto a retained list would double every item.
-        control.reset()
+        if start == 0:
+            # reset() before addItems(): a full rebuild - onInit()
+            # reopening a screen force-closed for playback, or a live
+            # add_pairs() merge whose re-sort touched the already-
+            # rendered prefix - onto a retained list would double every
+            # item. The append-only path above (start > 0) skips this:
+            # its rows are new, past the end of what LIST already has.
+            control.reset()
         control.addItems(items)
+        self._rendered_pairs = list(self.pairs)
+        self._rendered_single_provider = single_provider
 
         from lib.ui.compat import L
 
