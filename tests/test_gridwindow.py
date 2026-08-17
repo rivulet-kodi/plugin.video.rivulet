@@ -528,34 +528,43 @@ def test_cell_is_tall_enough_for_everything_it_draws():
         % (cell_h, max(bottoms)))
 
 
-def test_bands_are_separated_by_real_whitespace():
-    """One band's badges and the next band's header need room between them:
-    at a 10px itemgap there were 18px, which read as cramped on a device,
-    where the reference TV apps leave roughly half a poster width.
+def test_a_focused_band_row_fits_inside_the_frame():
+    """Whichever band has focus must show its header, posters, title AND
+    badge without running off the bottom of the screen.
 
-    The space is the grouplist's `itemgap` rather than a taller header box.
-    A 96px header with `aligny=bottom` was tried first and Kodi centred the
-    text in it anyway, which put the air UNDER the header - between a title
-    and its own posters - exactly the wrong place."""
+    At a +56 itemgap a row was 570px, two rows needed 1140, and the
+    viewport is 964 - so focusing the second band left its badge line
+    128px below the fold and "S1E3" was visibly clipped. The fix is a
+    NEGATIVE itemgap (Estuary's home grouplist uses -160 for the same
+    reason): rows overlap into the dead space under each cell, so a row
+    further down the stack still fits."""
     import re
 
     xml = _grid_xml()
-    gap = re.search(r'<itemgap>(\d+)</itemgap>', xml)
-    assert gap, 'no itemgap on the grouplist'
-    assert int(gap.group(1)) >= 40, (
-        'itemgap %s leaves the bands crowded together' % gap.group(1))
+    geom = re.search(
+        r'<control type="grouplist" id="30001">\s*<left>\d+</left><top>(\d+)</top>'
+        r'<width>\d+</width><height>(\d+)</height>', xml)
+    assert geom, 'grouplist geometry not found'
+    top = int(geom.group(1))
 
-    headers = re.findall(
-        r'<control type="label" id="\d+"><left>\d+</left><top>\d+</top>'
-        r'<width>\d+</width><height>(\d+)</height><font>\w+</font>',
-        xml,
-    )
-    assert headers, 'no band headers found'
-    for height in headers:
-        # A header much taller than its text re-creates the same bug from
-        # the other side, padding it away from the row it labels.
-        assert int(height) <= 60, (
-            'header box %spx pads the title away from its own posters' % height)
+    gap = int(re.search(r'<itemgap>(-?\d+)</itemgap>', xml).group(1))
+    header = int(re.search(r'<width>1500</width><height>(\d+)</height>', xml).group(1))
+    cell = int(re.search(r'<itemlayout width="\d+" height="(\d+)">', xml).group(1))
+
+    # The lowest thing a cell draws - the badge line - is what gets clipped.
+    badge = re.search(
+        r'<control type="label"><top>(\d+)</top><left>\d+</left><width>\d+</width>'
+        r'<height>(\d+)</height><font>\w+</font>\s*<label>\$INFO\[ListItem.Property\(badge\)\]',
+        xml)
+    assert badge, 'no badge line found in the cell layout'
+    badge_end = int(badge.group(1)) + int(badge.group(2))
+
+    row = header + cell + gap
+    needed = header + badge_end          # what a focused row must show in full
+    second_row_bottom = top + row + needed
+    assert second_row_bottom <= 1080, (
+        'a focused second band row ends at %d, past the 1080 frame - its badge '
+        'will be clipped' % second_row_bottom)
 
 
 def test_focus_zoom_is_anchored_to_the_poster_left_edge():
