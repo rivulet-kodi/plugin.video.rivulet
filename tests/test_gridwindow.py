@@ -530,43 +530,51 @@ def test_cell_is_tall_enough_for_everything_it_draws():
         % (cell_h, max(bottoms)))
 
 
-def test_a_focused_band_row_fits_inside_the_frame():
-    """Whichever band has focus must show its header, posters, title AND
-    badge without running off the bottom of the screen.
-
-    At a +56 itemgap a row was 570px, two rows needed 1140, and the
-    viewport is 964 - so focusing the second band left its badge line
-    128px below the fold and "S1E3" was visibly clipped. The fix is a
-    NEGATIVE itemgap (Estuary's home grouplist uses -160 for the same
-    reason): rows overlap into the dead space under each cell, so a row
-    further down the stack still fits."""
+def test_the_first_band_fits_and_the_next_one_peeks():
+    """Exactly one band needs to be wholly on screen. The next must show
+    enough of itself - its header, and a slice of its posters - that it is
+    obviously there to scroll to, without being so nearly complete that it
+    reads as a clipped row instead of a deliberate peek."""
     import re
 
     xml = _grid_xml()
     geom = re.search(
-        r'<control type="grouplist" id="30001">\s*<left>\d+</left><top>(\d+)</top>'
-        r'<width>\d+</width><height>(\d+)</height>', xml)
+        r'<control type="grouplist" id="30001">\s*<left>\d+</left><top>(\d+)</top>', xml)
     assert geom, 'grouplist geometry not found'
     top = int(geom.group(1))
-
-    gap = int(re.search(r'<itemgap>(-?\d+)</itemgap>', xml).group(1))
     header = int(re.search(r'<width>1500</width><height>(\d+)</height>', xml).group(1))
     cell = int(re.search(r'<itemlayout width="\d+" height="(\d+)">', xml).group(1))
 
-    # The lowest thing a cell draws - the badge line - is what gets clipped.
     badge = re.search(
         r'<control type="label"><top>(\d+)</top><left>\d+</left><width>\d+</width>'
         r'<height>(\d+)</height><font>\w+</font>\s*<label>\$INFO\[ListItem.Property\(badge\)\]',
         xml)
-    assert badge, 'no badge line found in the cell layout'
+    assert badge, 'no badge line in the cell layout'
     badge_end = int(badge.group(1)) + int(badge.group(2))
 
-    row = header + cell + gap
-    needed = header + badge_end          # what a focused row must show in full
-    second_row_bottom = top + row + needed
-    assert second_row_bottom <= 1080, (
-        'a focused second band row ends at %d, past the 1080 frame - its badge '
-        'will be clipped' % second_row_bottom)
+    poster = re.search(
+        r'<top>0</top><left>\d+</left><width>\d+</width><height>(\d+)</height>\s*'
+        r'<texture[^>]*background="true">', xml)
+    assert poster, 'no poster box found'
+    poster_h = int(poster.group(1))
+
+    # Band 1 must end on screen, with room to spare.
+    band1_end = top + header + badge_end
+    assert band1_end <= 1040, (
+        'the first band ends at %d, too close to the 1080 frame' % band1_end)
+
+    # Band 2 must show its header and a real, but partial, slice.
+    row = header + cell
+    band2_header_end = top + row + header
+    assert band2_header_end < 1080, (
+        'the second band\'s header is off screen, so there is no sign it exists')
+    slice_seen = 1080 - band2_header_end
+    assert slice_seen >= 80, (
+        'only %dpx of the second band shows - too little to read as more content'
+        % slice_seen)
+    assert slice_seen <= poster_h * 0.8, (
+        '%dpx of a %dpx poster shows - that reads as a clipped row, not a peek'
+        % (slice_seen, poster_h))
 
 
 def test_focus_is_marked_without_scaling_the_cell():
