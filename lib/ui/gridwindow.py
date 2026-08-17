@@ -1,54 +1,74 @@
-"""GridWindow: a fullscreen wrapping poster grid, opened via
-`open_grid()`. Built for `lib.ui.mystuff`'s merged "My Stuff" screen,
-which routinely holds the whole Stremio library plus every played title -
-past what `lib.ui.infowindow`'s single-row coverflow is browsable at.
+"""GridWindow: the merged "Continue" screen, opened via `open_grid()` -
+one labelled, horizontally-scrolling poster row per band of
+`lib.ui.mystuff`'s merge, stacked vertically in `GridWindow.xml`'s
+`grouplist` so several bands are on screen at once.
 
-The grid itself is `GridWindow.xml`'s `panel` control (id 30002); this
-module only projects merged items onto `xbmcgui.ListItem`s and returns
-the one picked. Each cell carries three runtime properties the skin
-draws (Kodi's skin engine can neither compute nor format, so all three
-are prepared here):
+This module fills those rows and returns the title picked. Each cell
+carries four runtime properties the skin draws (Kodi's skin engine can
+neither compute nor format, so all four are prepared here):
 
     thumbnail       poster URL
-    badge           the short band caption under the title ("62%",
-                    "NEXT UP", "WATCHED")
-    progress_width  the filled width, in skin pixels, of the 240px
-                    progress track - empty string for a title with no
-                    meaningful progress, which is also what the skin's
+    badge           the short band caption under the title - the percent
+                    watched, the next episode ("S1E3"), or "WATCHED",
+                    tinted per band (see `_BAND_COLOURS`)
+    progress_width  the filled width, in skin pixels, of the progress
+                    track - empty string for a title with no meaningful
+                    progress, which is also what the skin's
                     `String.IsEmpty` visibility test keys off, so the
-                    whole bar disappears rather than rendering at zero.
+                    whole bar disappears rather than rendering at zero
+    watched         non-empty on a finished title, which the skin draws
+                    dimmed so the eye skips past it
 
-Control ids mirror the other list screens (`CatalogPickerWindow`,
-`AddonsWindow`) rather than the coverflow's, since this is a plain
-list-shaped screen:
+Each band owns a (list, header-label) control-id pair - see `BAND_ROWS`.
+A band with no titles is not drawn at all: the skin hides both controls
+on the list's own `NumItems`, so an empty band leaves no stray heading
+behind, and `usecontrolcoords` closes the gap it would have taken.
+
+Control ids:
     BACKGROUND = 30000  fanart of the focused item
-    LIST       = 30002  the panel/grid
-    HEADING    = 30006  "RIVULET / MY STUFF" breadcrumb
+    ROWS       = 30001  the vertical grouplist holding every band row
+    HEADING    = 30006  "RIVULET / CONTINUE" breadcrumb
+    300x2/301x7        per-band list and header label (see `BAND_ROWS`)
 
-Like every other Rivulet screen, the grid's actual rendering is
+Like every other Rivulet screen, the actual rendering is
 Kodi-skin-engine-only and cannot be exercised by this test suite - see
-tests/test_gridwindow.py for what is covered here (the pure projection)
-and what a real device must confirm.
+tests/test_gridwindow.py for what is covered here (the pure projection
+and the control wiring) and what a real device must confirm.
 """
 import xbmcgui
 
 from lib.ui.uicommon import BaseWindow, open_window
 
 BACKGROUND = 30000
-LIST = 30002
+ROWS = 30001
 HEADING = 30006
 
+#: band -> (list control id, header label control id), in the order the
+#: skin stacks them. Must match `GridWindow.xml` exactly: the skin hard-
+#: codes these ids in each row's `visible` condition, since a Kodi skin
+#: cannot be told its control ids at runtime.
+BAND_ROWS = {
+    'resume': (30002, 30107),
+    'next_up': (30012, 30117),
+    'recent': (30022, 30127),
+    'library': (30032, 30137),
+}
+
+#: The band whose row is focused when the screen opens - the first one
+#: with anything in it, in `mystuff.BAND_ORDER`.
+LIST = BAND_ROWS['resume'][0]
+
 #: Width, in skin pixels, of a cell's progress track - must match the
-#: 216px bar in `GridWindow.xml`'s item layouts, since `_progress_width()`
+#: 208px bar in `GridWindow.xml`'s cell layouts, since `_progress_width()`
 #: scales into it.
 #:
-#: 216 is the poster's REAL rendered width, not merely its layout box: the
-#: artwork is drawn `aspectratio=keep` into a 216x324 box, a true 2:3, so
+#: 208 is the poster's REAL rendered width, not merely its layout box: the
+#: artwork is drawn `aspectratio=keep` into a 208x312 box, a true 2:3, so
 #: a standard poster fills it edge to edge. The two must stay equal - at
-#: an earlier 240 track against that same 216-wide rendered poster the bar
+#: an earlier 240 track against a 216-wide rendered poster the bar
 #: overhung the artwork by 12px each side, plainly visible on a real
-#: device against the focused cell's outline.
-PROGRESS_TRACK_WIDTH = 216
+#: device against the focused cell's outline. A test pins them together.
+PROGRESS_TRACK_WIDTH = 208
 
 #: Floor on a rendered progress bar, in skin pixels. A title watched 1-2%
 #: scales to a sub-pixel sliver that renders as nothing at all, which
@@ -176,51 +196,73 @@ class GridWindow(BaseWindow):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.items = []
+        self.bands = []
         self.heading = ''
         self.selected = None
 
-    def start(self, items, heading=''):
-        """doModal() with `items` (merged `lib.ui.mystuff` dicts) as the
-        grid's cells, under `heading`. Returns the item picked, or None
-        if the user backed out without picking one."""
-        self.items = list(items or [])
+    def start(self, bands, heading=''):
+        """doModal() with `bands` (a `[(band, [item, ...]), ...]` list, as
+        `mystuff.group_by_band()` returns) filling one row each. Returns
+        the item picked, or None if the user backed out without picking
+        one."""
+        self.bands = [(band, list(items)) for band, items in bands or [] if items]
         self.heading = heading or ''
         self.selected = None
-        if not self.items:
+        if not self.bands:
             return None
         self.doModal()
         return self.selected
 
     def onInit(self):
         from lib.ui.compat import L
+        from lib.ui.mystuff import BAND_HEADINGS
 
-        control = self.getControl(LIST)
-        # reset() before addItems(): onInit() runs again when
-        # uicommon.ModalStackWindow reopens a screen force-closed for
-        # playback, and re-adding onto a retained list would double every
-        # cell.
-        control.reset()
-        control.addItems([make_list_item(item) for item in self.items])
-        self.getControl(HEADING).setLabel('RIVULET / %s' % ((self.heading or L(30241)).upper(),))
-        self.setFocusId(LIST)
+        self.getControl(HEADING).setLabel(
+            'RIVULET / %s' % ((self.heading or L(30241)).upper(),))
+
+        # Every row is reset first, not just the ones being filled: onInit()
+        # re-runs when uicommon.ModalStackWindow reopens a screen
+        # force-closed for playback, and a row left populated from the
+        # previous pass would both double its items and keep a band on
+        # screen that the merge no longer produces.
+        filled = dict(self.bands)
+        for band, (list_id, label_id) in BAND_ROWS.items():
+            control = self.getControl(list_id)
+            control.reset()
+            items = filled.get(band) or []
+            if items:
+                control.addItems([make_list_item(item) for item in items])
+            # The skin hides an empty row on its NumItems, so the label
+            # only has to be right for a row that has content.
+            self.getControl(label_id).setLabel(L(BAND_HEADINGS[band]).upper() if items else '')
+
+        self.setFocusId(BAND_ROWS[self.bands[0][0]][0])
         self._update_background()
 
     def _focused_item(self):
-        """The merged item under the grid's current selection, or None.
+        """The merged item under the focused row's selection, or None.
 
-        Indexes `self.items` by the control's own position rather than
-        carrying an index property per cell: the grid never reorders or
-        filters after `onInit()`, so position and list index stay in
-        lockstep. Bounds-checked anyway - `getSelectedPosition()` returns
-        -1 for an empty container."""
+        Resolves the focused CONTROL first, since the four band rows are
+        separate lists and only one of them holds the cursor. Indexes that
+        band's items by the control's own position: a row is never
+        reordered or filtered after `onInit()`, so position and list index
+        stay in lockstep."""
         try:
-            position = self.getControl(LIST).getSelectedPosition()
+            focus_id = self.getFocusId()
         except Exception:
             return None
-        if position is None or position < 0 or position >= len(self.items):
-            return None
-        return self.items[position]
+        for band, items in self.bands:
+            list_id, _label_id = BAND_ROWS[band]
+            if list_id != focus_id:
+                continue
+            try:
+                position = self.getControl(list_id).getSelectedPosition()
+            except Exception:
+                return None
+            if position is None or position < 0 or position >= len(items):
+                return None
+            return items[position]
+        return None
 
     def _update_background(self):
         """Swap the fanart to the focused item's own background. Silently
@@ -239,14 +281,13 @@ class GridWindow(BaseWindow):
         if action.getId() in BACK_ACTIONS:
             self.close()
             return
-        # Any non-back action may have moved the focus; the background
-        # follows it. Cheap - a property read plus a setImage() - so it
-        # does not need the coverflow's settle-timer treatment (that one
-        # debounces a network meta fetch, not an image swap).
+        # Any non-back action may have moved the focus - including up/down
+        # between band rows, which the grouplist handles itself. Cheap (a
+        # property read plus a setImage()), so it needs no settle timer.
         self._update_background()
 
     def onClick(self, control_id):
-        if control_id != LIST:
+        if control_id not in {list_id for list_id, _label in BAND_ROWS.values()}:
             return
         item = self._focused_item()
         if item is None:
@@ -255,10 +296,11 @@ class GridWindow(BaseWindow):
         self.close()
 
 
-def open_grid(items, heading=''):
-    """Build and run a GridWindow over `items`; returns the selected item
-    dict, or None if the user closed it without picking one (or `items`
-    was empty).
+def open_grid(bands, heading=''):
+    """Build and run a GridWindow over `bands` (as
+    `mystuff.group_by_band()` returns); returns the selected item dict, or
+    None if the user closed it without picking one (or `bands` was
+    empty).
 
     The caller (`lib.ui.mystuff.open_my_stuff()`) wraps this in its own
     try/except and logs+notifies on failure, so an exception from
@@ -267,7 +309,7 @@ def open_grid(items, heading=''):
     e.g. if onInit() or a mid-modal callback raised)."""
     win = open_window(GridWindow, 'GridWindow.xml')
     try:
-        return win.start(items, heading=heading)
+        return win.start(bands, heading=heading)
     finally:
         try:
             win.close()

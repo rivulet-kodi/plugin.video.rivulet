@@ -190,52 +190,101 @@ def test_make_list_item_tolerates_a_title_with_no_name_or_poster(ctx):
 # ---------------------------------------------------------------------------
 
 
-def _window(ctx, items):
+def _window(ctx, items=None, bands=None):
+    """A GridWindow loaded with `bands` (as `mystuff.group_by_band()`
+    returns), or with `items` as a single resume band for the tests that
+    do not care which band they are in. Focus starts on the first band's
+    row, as onInit() leaves it."""
     win = ctx.gridwindow.GridWindow('GridWindow.xml', '/addon/path', 'Default', '1080i')
-    win.items = list(items)
-    win.heading = 'MY STUFF'
+    if bands is None:
+        bands = [(ctx.mystuff.BAND_RESUME, list(items or []))]
+    win.bands = [(band, list(members)) for band, members in bands if members]
+    win.heading = 'CONTINUE'
     win.selected = None
     return win
 
 
-def test_oninit_populates_the_grid_and_focuses_it(ctx):
-    win = _window(ctx, [_item(ctx.mystuff.BAND_RESUME, percent=50.0, name='A'),
-                        _item(ctx.mystuff.BAND_LIBRARY, id='tt2', name='B')])
+def _row(ctx, band):
+    """The (list id, header label id) pair the skin gives `band`."""
+    return ctx.gridwindow.BAND_ROWS[band]
+
+
+def test_oninit_fills_each_band_row_and_labels_it(ctx):
+    win = _window(ctx, bands=[
+        (ctx.mystuff.BAND_RESUME, [_item(ctx.mystuff.BAND_RESUME, id='r', name='R', percent=50.0)]),
+        (ctx.mystuff.BAND_RECENT, [_item(ctx.mystuff.BAND_RECENT, id='w', name='W')]),
+    ])
 
     win.onInit()
 
-    control = win.getControl(ctx.gridwindow.LIST)
-    assert [i.getLabel() for i in control.items] == ['A', 'B']
-    assert win.getFocusId() == ctx.gridwindow.LIST
-    assert win.getControl(ctx.gridwindow.HEADING).label == 'RIVULET / MY STUFF'
+    resume_list, resume_label = _row(ctx, ctx.mystuff.BAND_RESUME)
+    recent_list, recent_label = _row(ctx, ctx.mystuff.BAND_RECENT)
+    assert [i.getLabel() for i in win.getControl(resume_list).items] == ['R']
+    assert [i.getLabel() for i in win.getControl(recent_list).items] == ['W']
+    assert win.getControl(resume_label).label == 'STR30245'
+    assert win.getControl(recent_label).label == 'STR30246'
+    assert win.getControl(ctx.gridwindow.HEADING).label == 'RIVULET / CONTINUE'
 
 
-def test_oninit_resets_before_adding_so_a_playback_reopen_does_not_double_cells(ctx):
+def test_oninit_leaves_an_absent_band_empty_and_unlabelled(ctx):
+    """The skin hides a row on its own NumItems, so an empty band must
+    contribute no items AND no heading - a stray "NEXT UP" over nothing
+    is exactly what the per-band rows exist to avoid."""
+    win = _window(ctx, items=[_item(ctx.mystuff.BAND_RESUME, name='R', percent=50.0)])
+
+    win.onInit()
+
+    for band in (ctx.mystuff.BAND_NEXT_UP, ctx.mystuff.BAND_RECENT, ctx.mystuff.BAND_LIBRARY):
+        list_id, label_id = _row(ctx, band)
+        assert win.getControl(list_id).items == []
+        assert win.getControl(label_id).label == ''
+
+
+def test_oninit_focuses_the_first_band_that_has_items(ctx):
+    win = _window(ctx, bands=[
+        (ctx.mystuff.BAND_RECENT, [_item(ctx.mystuff.BAND_RECENT, name='W')]),
+        (ctx.mystuff.BAND_LIBRARY, [_item(ctx.mystuff.BAND_LIBRARY, name='L')]),
+    ])
+
+    win.onInit()
+
+    assert win.getFocusId() == _row(ctx, ctx.mystuff.BAND_RECENT)[0]
+
+
+def test_oninit_resets_every_row_so_a_playback_reopen_does_not_double_cells(ctx):
     """ModalStackWindow reopens a screen force-closed for playback, which
-    re-runs onInit() on a list that still holds the old cells."""
-    win = _window(ctx, [_item(ctx.mystuff.BAND_LIBRARY, name='A')])
+    re-runs onInit() over rows that still hold the previous pass's items."""
+    win = _window(ctx, items=[_item(ctx.mystuff.BAND_RESUME, name='A')])
 
     win.onInit()
     win.onInit()
 
-    assert len(win.getControl(ctx.gridwindow.LIST).items) == 1
+    assert len(win.getControl(_row(ctx, ctx.mystuff.BAND_RESUME)[0]).items) == 1
 
 
-def test_onclick_selects_the_focused_item_and_closes(ctx):
-    items = [_item(ctx.mystuff.BAND_RESUME, id='tt1', name='A'),
-             _item(ctx.mystuff.BAND_LIBRARY, id='tt2', name='B')]
-    win = _window(ctx, items)
+def test_onclick_selects_from_the_focused_band_row(ctx):
+    """Two rows hold different titles at the same position, so the click
+    must read the FOCUSED row - not just position 0 of the first band."""
+    win = _window(ctx, bands=[
+        (ctx.mystuff.BAND_RESUME, [_item(ctx.mystuff.BAND_RESUME, id='r1', name='R1')]),
+        (ctx.mystuff.BAND_LIBRARY, [
+            _item(ctx.mystuff.BAND_LIBRARY, id='l1', name='L1'),
+            _item(ctx.mystuff.BAND_LIBRARY, id='l2', name='L2'),
+        ]),
+    ])
     win.onInit()
-    win.getControl(ctx.gridwindow.LIST).selected_index = 1
+    library_list, _label = _row(ctx, ctx.mystuff.BAND_LIBRARY)
+    win.setFocusId(library_list)
+    win.getControl(library_list).selected_index = 1
 
-    win.onClick(ctx.gridwindow.LIST)
+    win.onClick(library_list)
 
-    assert win.selected['id'] == 'tt2'
+    assert win.selected['id'] == 'l2'
     assert win.closed is True
 
 
-def test_onclick_ignores_a_control_that_is_not_the_grid(ctx):
-    win = _window(ctx, [_item(ctx.mystuff.BAND_LIBRARY)])
+def test_onclick_ignores_a_control_that_is_not_a_band_row(ctx):
+    win = _window(ctx, items=[_item(ctx.mystuff.BAND_RESUME, name='A')])
     win.onInit()
 
     win.onClick(ctx.gridwindow.HEADING)
@@ -245,35 +294,44 @@ def test_onclick_ignores_a_control_that_is_not_the_grid(ctx):
 
 
 def test_onaction_back_closes_without_selecting(ctx):
-    win = _window(ctx, [_item(ctx.mystuff.BAND_LIBRARY)])
+    import xbmcgui
+    win = _window(ctx, items=[_item(ctx.mystuff.BAND_RESUME, name='A')])
     win.onInit()
 
-    import xbmcgui
     win.onAction(xbmcgui.Action(10))  # PreviousMenu/Esc
 
     assert win.closed is True
     assert win.selected is None
 
 
-def test_onaction_updates_the_background_to_the_focused_item(ctx):
-    items = [_item(ctx.mystuff.BAND_RESUME, id='tt1', background='one.jpg'),
-             _item(ctx.mystuff.BAND_LIBRARY, id='tt2', background='two.jpg')]
-    win = _window(ctx, items)
-    win.onInit()
-    win.getControl(ctx.gridwindow.LIST).selected_index = 1
-
+def test_onaction_updates_the_background_from_the_focused_row(ctx):
     import xbmcgui
+    win = _window(ctx, bands=[
+        (ctx.mystuff.BAND_RESUME, [_item(ctx.mystuff.BAND_RESUME, id='r', background='one.jpg')]),
+        (ctx.mystuff.BAND_LIBRARY, [_item(ctx.mystuff.BAND_LIBRARY, id='l', background='two.jpg')]),
+    ])
+    win.onInit()
+    win.setFocusId(_row(ctx, ctx.mystuff.BAND_LIBRARY)[0])
+
     win.onAction(xbmcgui.Action(4))  # a plain move, not a back action
 
     assert win.getControl(ctx.gridwindow.BACKGROUND).image == 'two.jpg'
 
 
-def test_start_returns_none_for_an_empty_grid_without_opening_it(ctx):
-    """An empty merged screen must never open a blank window - open_my_stuff()
-    notifies instead."""
+def test_start_returns_none_for_an_empty_screen_without_opening_it(ctx):
+    """A merge that produced nothing must never open a blank window -
+    open_my_stuff() notifies instead."""
     win = ctx.gridwindow.GridWindow('GridWindow.xml', '/addon/path', 'Default', '1080i')
 
     assert win.start([]) is None
+    assert win.modal_calls == 0
+
+
+def test_start_drops_bands_that_have_no_items(ctx):
+    win = ctx.gridwindow.GridWindow('GridWindow.xml', '/addon/path', 'Default', '1080i')
+
+    assert win.start([(ctx.mystuff.BAND_RESUME, []), (ctx.mystuff.BAND_LIBRARY, [])]) is None
+    assert win.bands == []
     assert win.modal_calls == 0
 
 
@@ -306,7 +364,13 @@ def test_progress_track_sits_on_the_poster_edges(ctx):
         r'<height>6</height><texture colordiffuse="59FFFFFF">',
         xml,
     )
-    assert len(tracks) == 2, 'expected one progress track per layout, found %d' % len(tracks)
+    # Two per band row (item + focused layout), one row per band. The skin
+    # has no Includes.xml to share a cell layout through, so the copies are
+    # generated - this asserts they really are all the same.
+    expected = 2 * len(ctx.gridwindow.BAND_ROWS)
+    assert len(tracks) == expected, (
+        'expected %d progress tracks (2 per band row), found %d' % (expected, len(tracks)))
+    assert len(set(tracks)) == 1, 'band rows disagree on the progress track: %s' % sorted(set(tracks))
     for _left, width in tracks:
         assert int(width) == ctx.gridwindow.PROGRESS_TRACK_WIDTH
 
@@ -372,3 +436,38 @@ def test_panel_fits_inside_the_frame():
         r'<left>\d+</left><top>(\d+)</top><width>\d+</width><height>(\d+)</height>', block)
     assert geom, 'panel 30002 geometry not found'
     assert int(geom.group(1)) + int(geom.group(2)) <= 1080
+
+
+def test_band_rows_match_the_control_ids_the_skin_declares(ctx):
+    """`BAND_ROWS` is the contract between this module and the skin: the
+    Python fills these controls by id and the skin hard-codes the same ids
+    in each row's `visible` condition, so a typo either side would leave a
+    band silently undrawn (and `getControl` raising on a real device)."""
+    import re
+
+    xml = _grid_xml()
+    declared = {int(i) for i in re.findall(r'<control type="(?:panel|label)" id="(\d+)"', xml)}
+    for band, (list_id, label_id) in ctx.gridwindow.BAND_ROWS.items():
+        assert list_id in declared, '%s: list %d not declared in the skin' % (band, list_id)
+        assert label_id in declared, '%s: header %d not declared in the skin' % (band, label_id)
+
+
+def test_every_band_has_a_row(ctx):
+    """A band with no row would be merged, ordered, and then never drawn."""
+    for band in ctx.mystuff.BAND_ORDER:
+        assert band in ctx.gridwindow.BAND_ROWS
+
+
+def test_each_band_row_hides_itself_when_empty(ctx):
+    """Both the poster row AND its header are gated on the list's own
+    NumItems, so an empty band collapses instead of leaving a heading over
+    nothing - the whole reason the rows are separate controls."""
+    import re
+
+    xml = _grid_xml()
+    for band, (list_id, label_id) in ctx.gridwindow.BAND_ROWS.items():
+        condition = 'Integer.IsGreater(Container(%d).NumItems,0)' % list_id
+        # Once for the header label, once for the panel.
+        assert xml.count('<visible>%s</visible>' % condition) == 2, (
+            '%s: expected both its header and its panel gated on %s' % (band, condition))
+        assert re.search(r'<control type="label" id="%d"' % label_id, xml)

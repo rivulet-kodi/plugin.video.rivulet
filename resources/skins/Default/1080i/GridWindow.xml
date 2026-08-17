@@ -1,39 +1,50 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
-<!-- GridWindow: the merged "My Stuff" poster grid (lib/ui/gridwindow.py).
+<!-- GridWindow: the merged "Continue" screen (lib/ui/gridwindow.py).
 
-     Unlike ShowcaseWindow's single-row coverflow, this is a `panel`
-     control - a wrapping grid - because My Stuff merges the whole
-     library with the played bands and routinely runs to 50+ titles,
-     which is past what a horizontal strip is browsable at.
+     ONE ROW PER BAND, ALL ON ONE SCREEN. Each band (resume / next up /
+     watched / library) has its own labelled header and its own horizontal
+     poster row, and the four rows are stacked in a vertical `grouplist`
+     (30001) that scrolls as a unit - so two bands are visible at once and
+     the rest are one nudge away. This is Kodi's own idiom for sectioned
+     content: skin.estuary's Home builds its widget rows exactly this way
+     (`WidgetListPoster` inside `WidgetGroupListCommon`, each preceded by
+     a `CategoryLabel`).
 
-     Geometry: 6 columns x 276 = 1656, inside the skin's standard 96px
-     left margin (96 + 1656 = 1752, leaving a 168px right gutter for the
-     scrollbar at 1839). Each cell is 276x400 - a 216x324 poster, the
-     progress track, then the title and badge lines - so the 800px panel
-     shows exactly TWO full rows (2 x 400). The cell height and the panel
-     height must stay in that exact multiple: a panel taller than a whole
-     number of rows clips the bottom row's labels while still drawing its
-     posters, which reads as a rendering fault (confirmed on a real
-     device at an earlier 468px cell in an 820px panel).
+     It replaces two rejected attempts, recorded here so they are not
+     retried:
+       - Header rows interleaved into ONE wrapping `panel`. A panel gives
+         every row the item layout's full height, so each header cost a
+         whole poster row of screen.
+       - One band at a time behind a tab strip. It hid three quarters of
+         the screen to label four groups, and read worse than the flat
+         grid it replaced.
 
-     The poster box is a true 2:3 (216x324), so `aspectratio=keep` draws a
-     standard poster edge to edge inside it. That is what lets the 216px
-     progress track and the labels line up with the ARTWORK rather than
-     with a wider layout box - at an earlier 240 box the rendered poster
-     was only 216 wide and the bar overhung it by 12px each side, plainly
-     visible against the focused cell's outline.
-     `gridwindow.PROGRESS_TRACK_WIDTH` must equal that 216.
+     `usecontrolcoords` is what makes the stack work: each control is laid
+     out directly under the previous one, so a row whose list is empty
+     collapses entirely - both its header and its panel are `visible` on
+     that list's own NumItems. A viewer with nothing finished sees no
+     "Recently watched" heading at all, rather than an empty band.
 
-     The bands (resume / next up / watched / library) share this one flat
-     grid rather than being split across screens or section headers: the
-     per-card badge is colour-coded per band (gridwindow._BAND_COLOURS)
-     and finished titles are drawn dimmed, which distinguishes them
-     without spending a poster row on a heading or hiding three quarters
-     of the screen behind a tab.
+     Every row shares one cell design: a 208x312 poster, its progress
+     track, then the title and badge lines, 396 tall in a 268-wide cell.
+     A row is 42 (header) + 396 + 10 (gap) = 448, so TWO whole rows fit
+     between the stack's top at 146 and the bottom margin - a third row
+     peeks in, which is what shows there is more below. THE CELL LAYOUTS
+     ARE GENERATED: all four rows carry a byte-identical copy, because
+     this skin has no Includes.xml to share one through. Keep them in
+     sync - tests/test_gridwindow.py asserts they are identical.
 
-     The focused cell swaps to a 4px accent outline hugging that same
-     216x324 poster, matching ShowcaseWindow's focused poster treatment
-     rather than inventing a second focus idiom. -->
+     The poster box is a true 2:3, so `aspectratio=keep` draws a standard
+     poster edge to edge inside it. That is what lets the 208px progress
+     track and the labels line up with the ARTWORK rather than with a
+     wider box - at an earlier 240 box the rendered poster was only 216
+     wide and the bar overhung it by 12px a side.
+     `gridwindow.PROGRESS_TRACK_WIDTH` must equal that 208.
+
+     Band identity is carried by colour as well as by the headers - the
+     badge is tinted per band (gridwindow._BAND_COLOURS), the header takes
+     the same tint, and finished titles are drawn dimmed - so a card still
+     says which band it belongs to once its header has scrolled off. -->
 <window>
     <depth>0.52</depth>
     <coordinates><left>0</left><top>0</top></coordinates>
@@ -48,110 +59,324 @@
                 <effect type="fade" start="100" end="0" time="160" />
             </animation>
 
-            <!-- Fanart of the focused title, dimmed hard so the grid
-                 stays legible over it (the coverflow can afford a
-                 brighter background; a grid has content everywhere). -->
+            <!-- Fanart of the focused title, dimmed hard so the rows stay
+                 legible over it. -->
             <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="FF0A0C0E">white.png</texture></control>
             <control type="image" id="30000"><width>1920</width><height>1080</height><texture colordiffuse="26FFFFFF"></texture><aspectratio>scale</aspectratio></control>
             <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="D90A0C0E">white.png</texture></control>
 
-            <control type="image"><left>96</left><top>60</top><width>34</width><height>34</height><texture>logo.png</texture><aspectratio>keep</aspectratio></control>
-            <!-- Set at runtime by GridWindow.onInit(): "RIVULET / MY STUFF". -->
-            <control type="label" id="30006"><left>150</left><top>60</top><width>700</width><height>34</height><font>font10</font><textcolor>4DEEF3F6</textcolor>
+                        <!-- Set at runtime by GridWindow: "RIVULET / CONTINUE". -->
+            <control type="label" id="30006"><right>96</right><top>60</top><width>700</width><height>34</height><align>right</align><font>font10</font><textcolor>4DEEF3F6</textcolor>
                 <label></label>
             </control>
-            <control type="label"><right>96</right><top>60</top><width>450</width><height>34</height><font>font10</font><textcolor>80EEF3F6</textcolor><align>right</align>
-                <label>$INFO[Container(30002).CurrentItem]/$INFO[Container(30002).NumItems]</label>
-            </control>
 
-            <!-- Focused title + band caption, above the grid: a cell's own
-                 label is truncated to its 276px column, so the full title
-                 needs somewhere to render in full. -->
-            <control type="label"><left>96</left><top>110</top><width>1400</width><height>46</height><font>font27</font><textcolor>FFFFFFFF</textcolor>
+            <!-- Focused title + caption: a cell's own label is truncated to
+                 its column, so the full title renders here. -->
+            <control type="label"><left>96</left><top>58</top><width>1200</width><height>44</height><font>font27</font><textcolor>FFFFFFFF</textcolor>
                 <label>$INFO[ListItem.Label]</label>
             </control>
-            <control type="label"><left>96</left><top>164</top><width>1400</width><height>28</height><font>font10</font><textcolor>80EEF3F6</textcolor>
+            <control type="label"><left>96</left><top>104</top><width>1200</width><height>26</height><font>font10</font><textcolor>80EEF3F6</textcolor>
                 <label>$INFO[ListItem.Property(caption)]</label>
             </control>
 
-            <control type="panel" id="30002">
-                <left>96</left><top>232</top><width>1680</width><height>800</height>
-                <onleft>30002</onleft><onright>30002</onright>
-                <pagecontrol>30010</pagecontrol>
-                <scrolltime tween="cubic" easing="out">240</scrolltime>
-                <itemlayout width="276" height="400">
-                    <control type="image">
-                        <top>0</top><left>30</left><width>216</width><height>324</height>
-                        <texture colordiffuse="8CFFFFFF" background="true">$INFO[ListItem.Property(thumbnail)]</texture>
-                        <aspectratio align="center" aligny="center">keep</aspectratio>
-                        <visible>String.IsEmpty(ListItem.Property(watched))</visible>
-                    </control>
-                    <!-- A finished title is dimmed so the eye skips past
-                         it, the way a watched episode greys out in most
-                         apps - the badge colour says the same thing, this
-                         makes it readable without reading. -->
-                    <control type="image">
-                        <top>0</top><left>30</left><width>216</width><height>324</height>
-                        <texture colordiffuse="47FFFFFF" background="true">$INFO[ListItem.Property(thumbnail)]</texture>
-                        <aspectratio align="center" aligny="center">keep</aspectratio>
-                        <visible>!String.IsEmpty(ListItem.Property(watched))</visible>
-                    </control>
-                    <!-- Progress bar, drawn only for a part-watched title:
-                         a 240-wide track with the watched fraction filled.
-                         `progress_width` is precomputed in Python (Kodi's
-                         skin engine has no arithmetic). -->
-                    <!-- 6px, and a track light enough to read as an empty
-                         bar against the near-black plate: at 4px/40FFFFFF
-                         the whole widget vanished on a real 1080p panel
-                         (device check), which reads as "no progress" -
-                         the one state the bar exists to show. -->
-                    <control type="image"><top>334</top><left>30</left><width>216</width><height>6</height><texture colordiffuse="59FFFFFF">white.png</texture>
-                        <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
-                    </control>
-                    <control type="image"><top>334</top><left>30</left><height>6</height><texture colordiffuse="FF38BDF8">white.png</texture>
-                        <width>$INFO[ListItem.Property(progress_width)]</width>
-                        <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
-                    </control>
-                    <control type="label"><top>350</top><left>30</left><width>216</width><height>28</height><font>font10</font><textcolor>A6EEF3F6</textcolor>
-                        <label>$INFO[ListItem.Label]</label>
-                    </control>
-                    <control type="label"><top>376</top><left>30</left><width>216</width><height>24</height><font>font10</font><textcolor>66EEF3F6</textcolor>
-                        <label>$INFO[ListItem.Property(badge)]</label>
-                    </control>
-                </itemlayout>
-                <focusedlayout width="276" height="400">
-                    <control type="image"><top>-4</top><left>26</left><width>224</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
-                    <control type="image"><top>324</top><left>26</left><width>224</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
-                    <control type="image"><top>-4</top><left>26</left><width>4</width><height>332</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
-                    <control type="image"><top>-4</top><left>246</left><width>4</width><height>332</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
-                    <control type="image">
-                        <top>0</top><left>30</left><width>216</width><height>324</height>
-                        <texture background="true">$INFO[ListItem.Property(thumbnail)]</texture>
-                        <aspectratio align="center" aligny="center">keep</aspectratio>
-                    </control>
-                    <control type="image"><top>334</top><left>30</left><width>216</width><height>6</height><texture colordiffuse="59FFFFFF">white.png</texture>
-                        <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
-                    </control>
-                    <control type="image"><top>334</top><left>30</left><height>6</height><texture colordiffuse="FF38BDF8">white.png</texture>
-                        <width>$INFO[ListItem.Property(progress_width)]</width>
-                        <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
-                    </control>
-                    <control type="label"><top>350</top><left>30</left><width>216</width><height>28</height><font>font10</font><textcolor>FFFFFFFF</textcolor>
-                        <label>[B]$INFO[ListItem.Label][/B]</label>
-                    </control>
-                    <control type="label"><top>376</top><left>30</left><width>216</width><height>24</height><font>font10</font><textcolor>FF38BDF8</textcolor>
-                        <label>$INFO[ListItem.Property(badge)]</label>
-                    </control>
-                </focusedlayout>
-            </control>
-
-            <control type="scrollbar" id="30010">
-                <left>1839</left><top>232</top><width>21</width><height>800</height>
-                <texturesliderbar colordiffuse="33FFFFFF">white.png</texturesliderbar>
-                <textureslidernib colordiffuse="FF38BDF8">white.png</textureslidernib>
-                <textureslidernibfocus colordiffuse="FF38BDF8">white.png</textureslidernibfocus>
-                <showonepage>false</showonepage>
+            <control type="grouplist" id="30001">
+                <left>96</left><top>146</top><width>1760</width><height>900</height>
                 <orientation>vertical</orientation>
+                <itemgap>10</itemgap>
+                <usecontrolcoords>true</usecontrolcoords>
+                <scrolltime tween="cubic" easing="out">300</scrolltime>
+
+                <!-- resume -->
+                <control type="label" id="30107"><left>0</left><top>0</top><width>1500</width><height>42</height><font>font13</font><textcolor>FF38BDF8</textcolor><aligny>center</aligny>
+                    <label></label>
+                    <visible>Integer.IsGreater(Container(30002).NumItems,0)</visible>
+                </control>
+                <control type="panel" id="30002">
+                    <left>0</left><top>0</top><width>1720</width><height>396</height>
+                    <orientation>horizontal</orientation>
+                    <onleft>30002</onleft><onright>30002</onright>
+                    <scrolltime tween="cubic" easing="out">240</scrolltime>
+                    <visible>Integer.IsGreater(Container(30002).NumItems,0)</visible>
+                    <itemlayout width="268" height="396">
+                        <control type="image">
+                            <top>0</top><left>30</left><width>208</width><height>312</height>
+                            <texture colordiffuse="8CFFFFFF" background="true">$INFO[ListItem.Property(thumbnail)]</texture>
+                            <aspectratio align="center" aligny="center">keep</aspectratio>
+                            <visible>String.IsEmpty(ListItem.Property(watched))</visible>
+                        </control>
+                        <!-- A finished title is dimmed so the eye skips past it. -->
+                        <control type="image">
+                            <top>0</top><left>30</left><width>208</width><height>312</height>
+                            <texture colordiffuse="47FFFFFF" background="true">$INFO[ListItem.Property(thumbnail)]</texture>
+                            <aspectratio align="center" aligny="center">keep</aspectratio>
+                            <visible>!String.IsEmpty(ListItem.Property(watched))</visible>
+                        </control>
+                        <!-- Progress track: 6px over a 59FFFFFF track. At
+                             4px/40FFFFFF the whole widget vanished on a real
+                             1080p panel, which reads as "no progress" - the
+                             one state the bar exists to show. -->
+                        <control type="image"><top>322</top><left>30</left><width>208</width><height>6</height><texture colordiffuse="59FFFFFF">white.png</texture>
+                            <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
+                        </control>
+                        <control type="image"><top>322</top><left>30</left><height>6</height><texture colordiffuse="FF38BDF8">white.png</texture>
+                            <width>$INFO[ListItem.Property(progress_width)]</width>
+                            <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
+                        </control>
+                        <control type="label"><top>336</top><left>30</left><width>208</width><height>28</height><font>font10</font><textcolor>A6EEF3F6</textcolor>
+                            <label>$INFO[ListItem.Label]</label>
+                        </control>
+                        <control type="label"><top>364</top><left>30</left><width>208</width><height>24</height><font>font10</font>
+                            <label>$INFO[ListItem.Property(badge)]</label>
+                        </control>
+                    </itemlayout>
+                    <focusedlayout width="268" height="396">
+                        <control type="image"><top>-4</top><left>26</left><width>216</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image"><top>312</top><left>26</left><width>216</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image"><top>-4</top><left>26</left><width>4</width><height>320</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image"><top>-4</top><left>238</left><width>4</width><height>320</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image">
+                            <top>0</top><left>30</left><width>208</width><height>312</height>
+                            <texture background="true">$INFO[ListItem.Property(thumbnail)]</texture>
+                            <aspectratio align="center" aligny="center">keep</aspectratio>
+                        </control>
+                        <!-- Progress track: 6px over a 59FFFFFF track. At
+                             4px/40FFFFFF the whole widget vanished on a real
+                             1080p panel, which reads as "no progress" - the
+                             one state the bar exists to show. -->
+                        <control type="image"><top>322</top><left>30</left><width>208</width><height>6</height><texture colordiffuse="59FFFFFF">white.png</texture>
+                            <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
+                        </control>
+                        <control type="image"><top>322</top><left>30</left><height>6</height><texture colordiffuse="FF38BDF8">white.png</texture>
+                            <width>$INFO[ListItem.Property(progress_width)]</width>
+                            <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
+                        </control>
+                        <control type="label"><top>336</top><left>30</left><width>208</width><height>28</height><font>font10</font><textcolor>FFFFFFFF</textcolor>
+                            <label>[B]$INFO[ListItem.Label][/B]</label>
+                        </control>
+                        <control type="label"><top>364</top><left>30</left><width>208</width><height>24</height><font>font10</font>
+                            <label>$INFO[ListItem.Property(badge)]</label>
+                        </control>
+                    </focusedlayout>
+                </control>
+
+                <!-- next_up -->
+                <control type="label" id="30117"><left>0</left><top>0</top><width>1500</width><height>42</height><font>font13</font><textcolor>FFFBBF24</textcolor><aligny>center</aligny>
+                    <label></label>
+                    <visible>Integer.IsGreater(Container(30012).NumItems,0)</visible>
+                </control>
+                <control type="panel" id="30012">
+                    <left>0</left><top>0</top><width>1720</width><height>396</height>
+                    <orientation>horizontal</orientation>
+                    <onleft>30012</onleft><onright>30012</onright>
+                    <scrolltime tween="cubic" easing="out">240</scrolltime>
+                    <visible>Integer.IsGreater(Container(30012).NumItems,0)</visible>
+                    <itemlayout width="268" height="396">
+                        <control type="image">
+                            <top>0</top><left>30</left><width>208</width><height>312</height>
+                            <texture colordiffuse="8CFFFFFF" background="true">$INFO[ListItem.Property(thumbnail)]</texture>
+                            <aspectratio align="center" aligny="center">keep</aspectratio>
+                            <visible>String.IsEmpty(ListItem.Property(watched))</visible>
+                        </control>
+                        <!-- A finished title is dimmed so the eye skips past it. -->
+                        <control type="image">
+                            <top>0</top><left>30</left><width>208</width><height>312</height>
+                            <texture colordiffuse="47FFFFFF" background="true">$INFO[ListItem.Property(thumbnail)]</texture>
+                            <aspectratio align="center" aligny="center">keep</aspectratio>
+                            <visible>!String.IsEmpty(ListItem.Property(watched))</visible>
+                        </control>
+                        <!-- Progress track: 6px over a 59FFFFFF track. At
+                             4px/40FFFFFF the whole widget vanished on a real
+                             1080p panel, which reads as "no progress" - the
+                             one state the bar exists to show. -->
+                        <control type="image"><top>322</top><left>30</left><width>208</width><height>6</height><texture colordiffuse="59FFFFFF">white.png</texture>
+                            <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
+                        </control>
+                        <control type="image"><top>322</top><left>30</left><height>6</height><texture colordiffuse="FF38BDF8">white.png</texture>
+                            <width>$INFO[ListItem.Property(progress_width)]</width>
+                            <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
+                        </control>
+                        <control type="label"><top>336</top><left>30</left><width>208</width><height>28</height><font>font10</font><textcolor>A6EEF3F6</textcolor>
+                            <label>$INFO[ListItem.Label]</label>
+                        </control>
+                        <control type="label"><top>364</top><left>30</left><width>208</width><height>24</height><font>font10</font>
+                            <label>$INFO[ListItem.Property(badge)]</label>
+                        </control>
+                    </itemlayout>
+                    <focusedlayout width="268" height="396">
+                        <control type="image"><top>-4</top><left>26</left><width>216</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image"><top>312</top><left>26</left><width>216</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image"><top>-4</top><left>26</left><width>4</width><height>320</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image"><top>-4</top><left>238</left><width>4</width><height>320</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image">
+                            <top>0</top><left>30</left><width>208</width><height>312</height>
+                            <texture background="true">$INFO[ListItem.Property(thumbnail)]</texture>
+                            <aspectratio align="center" aligny="center">keep</aspectratio>
+                        </control>
+                        <!-- Progress track: 6px over a 59FFFFFF track. At
+                             4px/40FFFFFF the whole widget vanished on a real
+                             1080p panel, which reads as "no progress" - the
+                             one state the bar exists to show. -->
+                        <control type="image"><top>322</top><left>30</left><width>208</width><height>6</height><texture colordiffuse="59FFFFFF">white.png</texture>
+                            <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
+                        </control>
+                        <control type="image"><top>322</top><left>30</left><height>6</height><texture colordiffuse="FF38BDF8">white.png</texture>
+                            <width>$INFO[ListItem.Property(progress_width)]</width>
+                            <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
+                        </control>
+                        <control type="label"><top>336</top><left>30</left><width>208</width><height>28</height><font>font10</font><textcolor>FFFFFFFF</textcolor>
+                            <label>[B]$INFO[ListItem.Label][/B]</label>
+                        </control>
+                        <control type="label"><top>364</top><left>30</left><width>208</width><height>24</height><font>font10</font>
+                            <label>$INFO[ListItem.Property(badge)]</label>
+                        </control>
+                    </focusedlayout>
+                </control>
+
+                <!-- recent -->
+                <control type="label" id="30127"><left>0</left><top>0</top><width>1500</width><height>42</height><font>font13</font><textcolor>8CEEF3F6</textcolor><aligny>center</aligny>
+                    <label></label>
+                    <visible>Integer.IsGreater(Container(30022).NumItems,0)</visible>
+                </control>
+                <control type="panel" id="30022">
+                    <left>0</left><top>0</top><width>1720</width><height>396</height>
+                    <orientation>horizontal</orientation>
+                    <onleft>30022</onleft><onright>30022</onright>
+                    <scrolltime tween="cubic" easing="out">240</scrolltime>
+                    <visible>Integer.IsGreater(Container(30022).NumItems,0)</visible>
+                    <itemlayout width="268" height="396">
+                        <control type="image">
+                            <top>0</top><left>30</left><width>208</width><height>312</height>
+                            <texture colordiffuse="8CFFFFFF" background="true">$INFO[ListItem.Property(thumbnail)]</texture>
+                            <aspectratio align="center" aligny="center">keep</aspectratio>
+                            <visible>String.IsEmpty(ListItem.Property(watched))</visible>
+                        </control>
+                        <!-- A finished title is dimmed so the eye skips past it. -->
+                        <control type="image">
+                            <top>0</top><left>30</left><width>208</width><height>312</height>
+                            <texture colordiffuse="47FFFFFF" background="true">$INFO[ListItem.Property(thumbnail)]</texture>
+                            <aspectratio align="center" aligny="center">keep</aspectratio>
+                            <visible>!String.IsEmpty(ListItem.Property(watched))</visible>
+                        </control>
+                        <!-- Progress track: 6px over a 59FFFFFF track. At
+                             4px/40FFFFFF the whole widget vanished on a real
+                             1080p panel, which reads as "no progress" - the
+                             one state the bar exists to show. -->
+                        <control type="image"><top>322</top><left>30</left><width>208</width><height>6</height><texture colordiffuse="59FFFFFF">white.png</texture>
+                            <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
+                        </control>
+                        <control type="image"><top>322</top><left>30</left><height>6</height><texture colordiffuse="FF38BDF8">white.png</texture>
+                            <width>$INFO[ListItem.Property(progress_width)]</width>
+                            <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
+                        </control>
+                        <control type="label"><top>336</top><left>30</left><width>208</width><height>28</height><font>font10</font><textcolor>A6EEF3F6</textcolor>
+                            <label>$INFO[ListItem.Label]</label>
+                        </control>
+                        <control type="label"><top>364</top><left>30</left><width>208</width><height>24</height><font>font10</font>
+                            <label>$INFO[ListItem.Property(badge)]</label>
+                        </control>
+                    </itemlayout>
+                    <focusedlayout width="268" height="396">
+                        <control type="image"><top>-4</top><left>26</left><width>216</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image"><top>312</top><left>26</left><width>216</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image"><top>-4</top><left>26</left><width>4</width><height>320</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image"><top>-4</top><left>238</left><width>4</width><height>320</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image">
+                            <top>0</top><left>30</left><width>208</width><height>312</height>
+                            <texture background="true">$INFO[ListItem.Property(thumbnail)]</texture>
+                            <aspectratio align="center" aligny="center">keep</aspectratio>
+                        </control>
+                        <!-- Progress track: 6px over a 59FFFFFF track. At
+                             4px/40FFFFFF the whole widget vanished on a real
+                             1080p panel, which reads as "no progress" - the
+                             one state the bar exists to show. -->
+                        <control type="image"><top>322</top><left>30</left><width>208</width><height>6</height><texture colordiffuse="59FFFFFF">white.png</texture>
+                            <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
+                        </control>
+                        <control type="image"><top>322</top><left>30</left><height>6</height><texture colordiffuse="FF38BDF8">white.png</texture>
+                            <width>$INFO[ListItem.Property(progress_width)]</width>
+                            <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
+                        </control>
+                        <control type="label"><top>336</top><left>30</left><width>208</width><height>28</height><font>font10</font><textcolor>FFFFFFFF</textcolor>
+                            <label>[B]$INFO[ListItem.Label][/B]</label>
+                        </control>
+                        <control type="label"><top>364</top><left>30</left><width>208</width><height>24</height><font>font10</font>
+                            <label>$INFO[ListItem.Property(badge)]</label>
+                        </control>
+                    </focusedlayout>
+                </control>
+
+                <!-- library -->
+                <control type="label" id="30137"><left>0</left><top>0</top><width>1500</width><height>42</height><font>font13</font><textcolor>8CEEF3F6</textcolor><aligny>center</aligny>
+                    <label></label>
+                    <visible>Integer.IsGreater(Container(30032).NumItems,0)</visible>
+                </control>
+                <control type="panel" id="30032">
+                    <left>0</left><top>0</top><width>1720</width><height>396</height>
+                    <orientation>horizontal</orientation>
+                    <onleft>30032</onleft><onright>30032</onright>
+                    <scrolltime tween="cubic" easing="out">240</scrolltime>
+                    <visible>Integer.IsGreater(Container(30032).NumItems,0)</visible>
+                    <itemlayout width="268" height="396">
+                        <control type="image">
+                            <top>0</top><left>30</left><width>208</width><height>312</height>
+                            <texture colordiffuse="8CFFFFFF" background="true">$INFO[ListItem.Property(thumbnail)]</texture>
+                            <aspectratio align="center" aligny="center">keep</aspectratio>
+                            <visible>String.IsEmpty(ListItem.Property(watched))</visible>
+                        </control>
+                        <!-- A finished title is dimmed so the eye skips past it. -->
+                        <control type="image">
+                            <top>0</top><left>30</left><width>208</width><height>312</height>
+                            <texture colordiffuse="47FFFFFF" background="true">$INFO[ListItem.Property(thumbnail)]</texture>
+                            <aspectratio align="center" aligny="center">keep</aspectratio>
+                            <visible>!String.IsEmpty(ListItem.Property(watched))</visible>
+                        </control>
+                        <!-- Progress track: 6px over a 59FFFFFF track. At
+                             4px/40FFFFFF the whole widget vanished on a real
+                             1080p panel, which reads as "no progress" - the
+                             one state the bar exists to show. -->
+                        <control type="image"><top>322</top><left>30</left><width>208</width><height>6</height><texture colordiffuse="59FFFFFF">white.png</texture>
+                            <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
+                        </control>
+                        <control type="image"><top>322</top><left>30</left><height>6</height><texture colordiffuse="FF38BDF8">white.png</texture>
+                            <width>$INFO[ListItem.Property(progress_width)]</width>
+                            <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
+                        </control>
+                        <control type="label"><top>336</top><left>30</left><width>208</width><height>28</height><font>font10</font><textcolor>A6EEF3F6</textcolor>
+                            <label>$INFO[ListItem.Label]</label>
+                        </control>
+                        <control type="label"><top>364</top><left>30</left><width>208</width><height>24</height><font>font10</font>
+                            <label>$INFO[ListItem.Property(badge)]</label>
+                        </control>
+                    </itemlayout>
+                    <focusedlayout width="268" height="396">
+                        <control type="image"><top>-4</top><left>26</left><width>216</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image"><top>312</top><left>26</left><width>216</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image"><top>-4</top><left>26</left><width>4</width><height>320</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image"><top>-4</top><left>238</left><width>4</width><height>320</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image">
+                            <top>0</top><left>30</left><width>208</width><height>312</height>
+                            <texture background="true">$INFO[ListItem.Property(thumbnail)]</texture>
+                            <aspectratio align="center" aligny="center">keep</aspectratio>
+                        </control>
+                        <!-- Progress track: 6px over a 59FFFFFF track. At
+                             4px/40FFFFFF the whole widget vanished on a real
+                             1080p panel, which reads as "no progress" - the
+                             one state the bar exists to show. -->
+                        <control type="image"><top>322</top><left>30</left><width>208</width><height>6</height><texture colordiffuse="59FFFFFF">white.png</texture>
+                            <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
+                        </control>
+                        <control type="image"><top>322</top><left>30</left><height>6</height><texture colordiffuse="FF38BDF8">white.png</texture>
+                            <width>$INFO[ListItem.Property(progress_width)]</width>
+                            <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
+                        </control>
+                        <control type="label"><top>336</top><left>30</left><width>208</width><height>28</height><font>font10</font><textcolor>FFFFFFFF</textcolor>
+                            <label>[B]$INFO[ListItem.Label][/B]</label>
+                        </control>
+                        <control type="label"><top>364</top><left>30</left><width>208</width><height>24</height><font>font10</font>
+                            <label>$INFO[ListItem.Property(badge)]</label>
+                        </control>
+                    </focusedlayout>
+                </control>
             </control>
         </control>
     </controls>

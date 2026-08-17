@@ -305,3 +305,45 @@ def test_resolve_next_up_returns_none_outside_the_next_up_band(mystuff, item):
                        {'id': 'tt1:1:3', 'season': 1, 'episode': 3}]}
 
     assert mystuff.resolve_next_up(item, meta) is None
+
+
+# ---------------------------------------------------------------------------
+# group_by_band()
+# ---------------------------------------------------------------------------
+
+
+def test_group_by_band_splits_in_band_order(mystuff):
+    items = mystuff.merge_entries([
+        _progress('movie', 'watched', 98.0, '2026-08-16T04:00:00Z'),
+        _progress('series', 'nextup', 99.0, '2026-08-16T03:00:00Z', video_id='nextup:1:1'),
+        _progress('movie', 'resuming', 50.0, '2026-08-16T02:00:00Z'),
+    ], [{'_id': 'saved', 'type': 'movie', 'name': 'Saved'}])
+
+    grouped = mystuff.group_by_band(items)
+
+    assert [band for band, _members in grouped] == [
+        mystuff.BAND_RESUME, mystuff.BAND_NEXT_UP, mystuff.BAND_RECENT, mystuff.BAND_LIBRARY,
+    ]
+    assert [[i['id'] for i in members] for _band, members in grouped] == [
+        ['resuming'], ['nextup'], ['watched'], ['saved'],
+    ]
+
+
+def test_group_by_band_omits_empty_bands(mystuff):
+    """An empty entry would make GridWindow.onInit() focus a row the skin
+    does not draw."""
+    items = mystuff.merge_entries([_progress('movie', 'tt1', 50.0, '2026-08-16T00:00:00Z')], [])
+
+    assert [band for band, _m in mystuff.group_by_band(items)] == [mystuff.BAND_RESUME]
+
+
+def test_group_by_band_tolerates_empty_input(mystuff):
+    assert mystuff.group_by_band([]) == []
+    assert mystuff.group_by_band(None) == []
+
+
+def test_every_band_has_a_heading_string(mystuff):
+    """Each row is labelled with its band's name, so a band with no
+    heading id would draw a blank header."""
+    for band in mystuff.BAND_ORDER:
+        assert band in mystuff.BAND_HEADINGS

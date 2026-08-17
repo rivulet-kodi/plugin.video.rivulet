@@ -8,8 +8,9 @@ dicts, hand it to a coverflow - and they overlap heavily in practice (a
 title you are part-way through is usually also in your library). Showing
 them as separate destinations made the viewer guess which one held the
 thing they wanted. This module merges both sources on their common
-`(type, id)` key and renders the result as a poster grid
-(`lib.ui.gridwindow`) in one deliberate order - see `merge_entries()`.
+`(type, id)` key and renders the result as one labelled poster row per
+band (`lib.ui.gridwindow`) - see `merge_entries()` for the merge and
+`group_by_band()` for the split into rows.
 
 Band ordering (the flat list is grouped, not sorted by one key):
 
@@ -212,6 +213,24 @@ def merge_entries(progress_entries, library_entries):
     return merged
 
 
+def group_by_band(items):
+    """Split the merged list into `[(band, [item, ...]), ...]` in
+    `BAND_ORDER`, dropping bands with nothing in them.
+
+    The grid draws one labelled row per band (see `lib.ui.gridwindow`),
+    so this is the shape that screen consumes. Bands with no members are
+    dropped rather than passed through empty: the skin would hide the row
+    anyway, and an empty entry here would make the first-band focus in
+    `GridWindow.onInit()` land on a row that is not drawn.
+    """
+    grouped = []
+    for band in BAND_ORDER:
+        members = [item for item in items or [] if item.get('band') == band]
+        if members:
+            grouped.append((band, members))
+    return grouped
+
+
 def resolve_next_up(item, meta):
     """For a `BAND_NEXT_UP` item, the `meta['videos']` entry after the
     episode the viewer just finished (`item['video_id']`), via
@@ -369,7 +388,7 @@ def open_my_stuff():
     log('mystuff: opening grid (%d items)' % len(items), xbmc.LOGINFO)
     try:
         from lib.ui.gridwindow import open_grid
-        selected = open_grid(items, heading=L(30241))
+        selected = open_grid(group_by_band(items), heading=L(30241))
     except Exception as exc:  # a skin/UI failure must surface, not vanish
         log('mystuff: grid failed to open: %r' % (exc,), xbmc.LOGERROR)
         notify(L(30032))
