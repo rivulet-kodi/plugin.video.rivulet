@@ -6,6 +6,7 @@
 # Grouped into one PR per ecosystem: these arrive as version bumps with no
 # behaviour to review individually, and each separate PR would spend one of the
 # repo's 3 CodeRabbit reviews per rolling hour.
+---
 version: 2
 
 updates:
