@@ -30,6 +30,15 @@
      around the artwork, again following those apps: the tile lifts toward
      the viewer instead of being caged, and nothing overlaps the poster.
 
+     HEADER SPACING. A band header is a 96px box with its text aligned to
+     the BOTTOM, not a 42px box with it centred. That puts the whitespace
+     ABOVE the header rather than evenly around it, so each header groups
+     with the row it labels instead of floating midway between two rows -
+     which is how Netflix and Apple TV space their row titles, and the
+     reason ~76px of air now sits above a header where 18px did before.
+     Keep the air in the header box: raising `itemgap` instead would push
+     the header away from its own posters as well.
+
      `usecontrolcoords` is what makes the stack work: each control is laid
      out under the previous one, so a row whose list is empty collapses
      entirely - both its header and its panel are `visible` on that list's
@@ -89,14 +98,14 @@
             </control>
 
             <control type="grouplist" id="30001">
-                <left>96</left><top>146</top><width>1824</width><height>1000</height>
+                <left>96</left><top>132</top><width>1824</width><height>1100</height>
                 <orientation>vertical</orientation>
-                <itemgap>10</itemgap>
+                <itemgap>56</itemgap>
                 <usecontrolcoords>true</usecontrolcoords>
                 <scrolltime tween="cubic" easing="out">300</scrolltime>
 
                 <!-- resume -->
-                <control type="label" id="30107"><left>0</left><top>0</top><width>1500</width><height>42</height><font>font13</font><textcolor>FF38BDF8</textcolor><aligny>center</aligny>
+                <control type="label" id="30107"><left>0</left><top>0</top><width>1500</width><height>44</height><font>font13</font><textcolor>FF38BDF8</textcolor><aligny>center</aligny>
                     <label></label>
                     <visible>Integer.IsGreater(Container(30002).NumItems,0)</visible>
                 </control>
@@ -175,7 +184,7 @@
                 </control>
 
                 <!-- next_up -->
-                <control type="label" id="30117"><left>0</left><top>0</top><width>1500</width><height>42</height><font>font13</font><textcolor>FFFBBF24</textcolor><aligny>center</aligny>
+                <control type="label" id="30117"><left>0</left><top>0</top><width>1500</width><height>44</height><font>font13</font><textcolor>FFFBBF24</textcolor><aligny>center</aligny>
                     <label></label>
                     <visible>Integer.IsGreater(Container(30012).NumItems,0)</visible>
                 </control>
@@ -254,7 +263,7 @@
                 </control>
 
                 <!-- recent -->
-                <control type="label" id="30127"><left>0</left><top>0</top><width>1500</width><height>42</height><font>font13</font><textcolor>8CEEF3F6</textcolor><aligny>center</aligny>
+                <control type="label" id="30127"><left>0</left><top>0</top><width>1500</width><height>44</height><font>font13</font><textcolor>8CEEF3F6</textcolor><aligny>center</aligny>
                     <label></label>
                     <visible>Integer.IsGreater(Container(30022).NumItems,0)</visible>
                 </control>
@@ -333,7 +342,7 @@
                 </control>
 
                 <!-- library -->
-                <control type="label" id="30137"><left>0</left><top>0</top><width>1500</width><height>42</height><font>font13</font><textcolor>8CEEF3F6</textcolor><aligny>center</aligny>
+                <control type="label" id="30137"><left>0</left><top>0</top><width>1500</width><height>44</height><font>font13</font><textcolor>8CEEF3F6</textcolor><aligny>center</aligny>
                     <label></label>
                     <visible>Integer.IsGreater(Container(30032).NumItems,0)</visible>
                 </control>

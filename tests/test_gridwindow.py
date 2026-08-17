@@ -498,3 +498,33 @@ def test_cell_is_tall_enough_for_everything_it_draws():
     assert max(bottoms) <= cell_h, (
         'cell is %dpx tall but draws down to %dpx - the overflow lands in the next row'
         % (cell_h, max(bottoms)))
+
+
+def test_bands_are_separated_by_real_whitespace():
+    """One band's badges and the next band's header need room between them:
+    at a 10px itemgap there were 18px, which read as cramped on a device,
+    where the reference TV apps leave roughly half a poster width.
+
+    The space is the grouplist's `itemgap` rather than a taller header box.
+    A 96px header with `aligny=bottom` was tried first and Kodi centred the
+    text in it anyway, which put the air UNDER the header - between a title
+    and its own posters - exactly the wrong place."""
+    import re
+
+    xml = _grid_xml()
+    gap = re.search(r'<itemgap>(\d+)</itemgap>', xml)
+    assert gap, 'no itemgap on the grouplist'
+    assert int(gap.group(1)) >= 40, (
+        'itemgap %s leaves the bands crowded together' % gap.group(1))
+
+    headers = re.findall(
+        r'<control type="label" id="\d+"><left>\d+</left><top>\d+</top>'
+        r'<width>\d+</width><height>(\d+)</height><font>\w+</font>',
+        xml,
+    )
+    assert headers, 'no band headers found'
+    for height in headers:
+        # A header much taller than its text re-creates the same bug from
+        # the other side, padding it away from the row it labels.
+        assert int(height) <= 60, (
+            'header box %spx pads the title away from its own posters' % height)
