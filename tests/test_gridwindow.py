@@ -471,3 +471,30 @@ def test_each_band_row_hides_itself_when_empty(ctx):
         assert xml.count('<visible>%s</visible>' % condition) == 2, (
             '%s: expected both its header and its panel gated on %s' % (band, condition))
         assert re.search(r'<control type="label" id="%d"' % label_id, xml)
+
+
+def test_cell_is_tall_enough_for_everything_it_draws():
+    """A cell shorter than its own contents spills into the row below: at
+    a 454px cell whose badge ended at 462, the next band's header landed
+    on top of the previous row's percentages on a real device. The panel
+    height must cover the lowest thing any cell draws."""
+    import re
+
+    xml = _grid_xml()
+    cell = re.search(r'<itemlayout width="\d+" height="(\d+)">', xml)
+    assert cell, 'no itemlayout found'
+    cell_h = int(cell.group(1))
+
+    # The bottom edge of every positioned child of a cell layout.
+    bottoms = [
+        int(top) + int(height)
+        for top, height in re.findall(r'<top>(\d+)</top><left>\d+</left><width>\d+</width><height>(\d+)</height>', xml)
+    ]
+    bottoms += [
+        int(top) + int(height)
+        for top, height in re.findall(r'<control type="label"><top>(\d+)</top><left>\d+</left><width>\d+</width><height>(\d+)</height>', xml)
+    ]
+    assert bottoms, 'no positioned cell children found'
+    assert max(bottoms) <= cell_h, (
+        'cell is %dpx tall but draws down to %dpx - the overflow lands in the next row'
+        % (cell_h, max(bottoms)))

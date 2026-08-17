@@ -59,16 +59,16 @@ BAND_ROWS = {
 LIST = BAND_ROWS['resume'][0]
 
 #: Width, in skin pixels, of a cell's progress track - must match the
-#: 208px bar in `GridWindow.xml`'s cell layouts, since `_progress_width()`
+#: 256px bar in `GridWindow.xml`'s cell layouts, since `_progress_width()`
 #: scales into it.
 #:
-#: 208 is the poster's REAL rendered width, not merely its layout box: the
-#: artwork is drawn `aspectratio=keep` into a 208x312 box, a true 2:3, so
+#: 256 is the poster's REAL rendered width, not merely its layout box: the
+#: artwork is drawn `aspectratio=keep` into a 256x384 box, a true 2:3, so
 #: a standard poster fills it edge to edge. The two must stay equal - at
 #: an earlier 240 track against a 216-wide rendered poster the bar
 #: overhung the artwork by 12px each side, plainly visible on a real
 #: device against the focused cell's outline. A test pins them together.
-PROGRESS_TRACK_WIDTH = 208
+PROGRESS_TRACK_WIDTH = 256
 
 #: Floor on a rendered progress bar, in skin pixels. A title watched 1-2%
 #: scales to a sub-pixel sliver that renders as nothing at all, which
