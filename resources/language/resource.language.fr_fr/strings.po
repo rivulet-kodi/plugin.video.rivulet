@@ -699,3 +699,7 @@ msgstr "Reprenez là où vous vous êtes arrêté"
 msgctxt "#30233"
 msgid "Show Continue watching"
 msgstr "Afficher Reprendre la lecture"
+
+msgctxt "#30234"
+msgid "now"
+msgstr "aujourd'hui"

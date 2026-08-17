@@ -699,3 +699,7 @@ msgstr "前回の続きから再生できます"
 msgctxt "#30233"
 msgid "Show Continue watching"
 msgstr "続きを見るを表示"
+
+msgctxt "#30234"
+msgid "now"
+msgstr "現在"

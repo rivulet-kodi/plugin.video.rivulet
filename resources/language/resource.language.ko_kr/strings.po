@@ -699,3 +699,7 @@ msgstr "중단한 부분부터 다시 시작합니다"
 msgctxt "#30233"
 msgid "Show Continue watching"
 msgstr "이어보기 표시"
+
+msgctxt "#30234"
+msgid "now"
+msgstr "현재"

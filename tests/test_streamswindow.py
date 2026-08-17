@@ -417,7 +417,7 @@ def test_oninit_meta_renders_year_runtime_rating_and_genres_into_the_info_panel(
     ctx = load_streamswindow()
     win = _make_window(ctx.streamswindow)
     win.meta = {
-        'releaseInfo': '2015-', 'runtime': '48 min', 'imdbRating': '8.7',
+        'releaseInfo': '2015-2019', 'runtime': '48 min', 'imdbRating': '8.7',
         'genres': ['Drama', 'Crime', 'Thriller', 'Extra'],
     }
     # Two distinct addons -> no single-provider dedupe, isolating this to
@@ -427,7 +427,28 @@ def test_oninit_meta_renders_year_runtime_rating_and_genres_into_the_info_panel(
     win.onInit()
 
     assert win.getControl(ctx.streamswindow.INFO_PANEL).text == (
-        '2015 \u00b7 48 min\n\u2605 8.7\nDrama / Crime / Thriller'
+        '2015-2019 \u00b7 48 min\n\u2605 8.7\nDrama / Crime / Thriller'
+    )
+
+
+def test_oninit_closes_a_running_series_range_with_now(load_streamswindow):
+    """A still-running series' open-ended range gains the localized
+    "now" rather than losing its dash silently - the same range
+    DetailWindow and the coverflow hero print. Cinemeta sends the EN
+    DASH the old `.rstrip('-')` never matched.
+
+    The kodistubs fake returns a 'STR<id>' marker for any string id, so
+    this also pins that the word is localized rather than hardcoded."""
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.meta = {'releaseInfo': '2022\u2013', 'runtime': '60 min'}
+    win.pairs = [({'addon': 'AddonA'}, {}), ({'addon': 'AddonB'}, {})]
+
+    win.onInit()
+
+    now = 'STR%d' % ctx.streamswindow._NOW_STRING_ID
+    assert win.getControl(ctx.streamswindow.INFO_PANEL).text == (
+        '2022\u2013%s \u00b7 60 min' % now
     )
 
 

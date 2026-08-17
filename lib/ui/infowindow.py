@@ -71,6 +71,98 @@ _INFO_ACTION = 11
 _CONTEXT_MENU_ACTION = 117
 
 
+#: Separator between the hero's metadata segments, matching the
+#: ' · '-joined lines `detailwindow._metadata_line()` and
+#: `streamswindow._rebuild_list()` already build. U+00B7 is in
+#: `_SAFE_ANYWHERE` (both Estuary faces have it), so the joined line
+#: renders whatever font the label ends up using.
+_META_SEPARATOR = ' · '
+
+#: strings.po id for the range terminator a still-running series gets
+#: in place of a bare dangling dash ("2022–now"). Translated in all 14
+#: locales. DetailWindow and StreamsWindow print the same range from
+#: the same id, so the three screens agree.
+_NOW_STRING_ID = 30234
+
+#: How the hero labels its IMDb rating. The bare number rendered as
+#: "9.0" in an accent-coloured box, which reads as a percentage, a
+#: season count or a price as easily as a rating - the scale it is on
+#: was carried entirely by the colour. Spelled out rather than drawn as
+#: a `★`: the star is in `_SANS_ONLY` (NotoMono has no glyph and
+#: renders tofu - the exact bug tests/test_glyph_coverage.py exists to
+#: catch), and "IMDb" additionally names *which* 10-point scale this is,
+#: which the star alone never did. Left untranslated, like the RIVULET
+#: wordmark, because it is a brand name - tests/test_skin_xml.py's
+#: `_ALLOWED_LITERAL_WORDS` carries the matching entry for the XML side.
+_RATING_LABEL = 'IMDb'
+
+
+def _rating_segment(rating):
+    """`'IMDb 9.0'` for a hero metadata line, or `''` when the meta
+    carries no rating - never a dangling label with nothing after it.
+
+    Pure helper - no xbmc - so it is trivially unit-testable on its own.
+    """
+    rating = str(rating or '').strip()
+    return '%s %s' % (_RATING_LABEL, rating) if rating else ''
+
+
+def _year_range(meta, now_word):
+    """The hero's release-year text: Stremio's `releaseInfo`, falling
+    back to the date part of `released`, rendered by
+    `playbackmeta.year_range()` (which is where the open-ended-range
+    handling and its reasoning live).
+
+    Pure helper - no xbmc - so it is trivially unit-testable on its own.
+    """
+    from lib.ui.playbackmeta import year_range
+
+    meta = meta or {}
+    released = meta.get('released')
+    date_only = released.split('T', 1)[0] if released else ''
+    return year_range(meta.get('releaseInfo') or date_only or '', now_word)
+
+
+def _year_text(meta):
+    """`_year_range()` with the localized "now" resolved - see there."""
+    from lib.ui.compat import L
+
+    return _year_range(meta, L(_NOW_STRING_ID))
+
+
+def _meta_line(props):
+    """Join the hero's year/rating/runtime/genre into the single line
+    ShowcaseWindow.xml renders, skipping whatever the meta does not
+    carry so a sparse item never shows a dangling separator.
+
+    Built here rather than laid out in the skin because Kodi sizes a
+    control from the XML at load time and cannot fit a box to its text:
+    the hero used three fixed 110px boxes, which is wide enough for a
+    bare `2019` but truncates a real series range (`2010-2017` needs
+    ~140px at Mono26 and rendered as `2010...`) and leaves under a pixel
+    either side of a `120 min` runtime. One flowing label has no width
+    to overflow, and is the same shape the other two screens that print
+    this metadata already use.
+
+    Genre rides on the end of this same line, where the chip layout
+    always put it. It is the one segment that used to need its own
+    control, because it had to be placed in whichever slot the chips
+    ahead of it left open; joined into the string there are no slots to
+    place it in, so the reflow matrix that placement needed is gone
+    with it.
+
+    Pure helper - no xbmc - so it is trivially unit-testable on its own.
+    """
+    props = props or {}
+    segments = (
+        props.get('year') or '',
+        _rating_segment(props.get('rating')),
+        props.get('runtime') or '',
+        props.get('genre') or '',
+    )
+    return _META_SEPARATOR.join(segment for segment in segments if segment)
+
+
 def _item_properties(meta):
     """Map one Stremio catalog meta to the string Properties
     ShowcaseWindow.xml's coverflow reads via `$INFO[ListItem.Property(...)]`.
@@ -81,17 +173,21 @@ def _item_properties(meta):
     poster = meta.get('poster')
     logo = meta.get('logo')
     background = meta.get('background')
-    released = meta.get('released')
-    date_only = released.split('T', 1)[0] if released else ''
-    return {
+    props = {
         'thumbnail': poster or logo or '',
         'fanart': background or logo or poster or '',
         'genre': ', '.join(meta.get('genres') or []),
         'rating': meta.get('imdbRating') or '',
         'plot': meta.get('description') or '',
-        'year': meta.get('releaseInfo') or date_only or '',
+        'year': _year_text(meta),
         'runtime': meta.get('runtime') or '',
     }
+    # Precomposed for the skin: `meta_line` is what the hero actually
+    # renders, but `year`/`rating`/`runtime`/`genre` stay individually
+    # exposed - the enrich merge in `_enrich_fetch()` reads them back
+    # per field. Built last, so it sees the fields above it.
+    props['meta_line'] = _meta_line(props)
+    return props
 
 
 #: The header wordmark's separator, at the design's rgba(238,243,246,.18) -
@@ -532,8 +628,13 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         # Hand off to the UI thread rather than touching the ListItem here:
         # it is inside the ControlList the skin renders every frame.
         with self._enrich_lock:
+            # `meta_line` travels with them: it is what the hero renders,
+            # and a fetch that lands a rating or a release range would
+            # otherwise merge the field but leave the composed line as
+            # the sparse one built before the fetch.
             self._enrich_pending[index] = {
-                key: props.get(key, '') for key in ('genre', 'rating', 'plot', 'year')
+                key: props.get(key, '')
+                for key in ('genre', 'rating', 'plot', 'year', 'meta_line')
             }
         # ...and wake it, or nothing would apply the queue until the user's
         # next keypress - by which time focus has usually left the item

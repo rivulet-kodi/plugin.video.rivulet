@@ -699,3 +699,7 @@ msgstr "Da weitermachen, wo du aufgehört hast"
 msgctxt "#30233"
 msgid "Show Continue watching"
 msgstr "Weiterschauen anzeigen"
+
+msgctxt "#30234"
+msgid "now"
+msgstr "heute"

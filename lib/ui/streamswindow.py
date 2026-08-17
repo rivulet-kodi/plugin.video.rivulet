@@ -130,6 +130,11 @@ _ADDON_STRING_ID = 30202
 _ADDONS_STRING_ID = 30203
 _CACHED_STRING_ID = 30208
 
+#: strings.po id for the range terminator a still-running series gets in
+#: place of a dangling dash ('2022–now') - see `_rebuild_list()`. The
+#: same id DetailWindow and the coverflow hero use.
+_NOW_STRING_ID = 30234
+
 #: Brief settle pause before reopening the picker after playback ends -
 #: gives Kodi's player teardown a moment to finish before a fresh modal
 #: window is drawn on top of it. Also reused as the settle pause after
@@ -436,9 +441,14 @@ class StreamsWindow(BaseWindow):
         self._rendered_single_provider = single_provider
 
         from lib.ui.compat import L
+        from lib.ui.playbackmeta import year_range
 
         meta = self.meta or {}
-        year = str(meta.get('releaseInfo') or meta.get('year') or '').rstrip('-')
+        # A still-running series' open-ended range is closed with the
+        # localized "now" rather than left as a dangling dash - see
+        # `playbackmeta.year_range()`; DetailWindow and the coverflow
+        # hero print the same range from the same id.
+        year = year_range(meta.get('releaseInfo') or meta.get('year') or '', L(_NOW_STRING_ID))
         runtime = meta.get('runtime') or ''
         top_line = ' \u00b7 '.join(part for part in (year, runtime) if part)
         lines = [top_line] if top_line else []

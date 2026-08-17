@@ -699,3 +699,7 @@ msgstr ""
 msgctxt "#30233"
 msgid "Show Continue watching"
 msgstr ""
+
+msgctxt "#30234"
+msgid "now"
+msgstr ""

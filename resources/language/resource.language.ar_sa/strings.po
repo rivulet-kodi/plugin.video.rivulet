@@ -699,3 +699,7 @@ msgstr "تابع من حيث توقفت"
 msgctxt "#30233"
 msgid "Show Continue watching"
 msgstr "إظهار متابعة المشاهدة"
+
+msgctxt "#30234"
+msgid "now"
+msgstr "الآن"

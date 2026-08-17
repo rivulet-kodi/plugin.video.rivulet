@@ -117,6 +117,7 @@ def test_item_properties_full_meta_maps_every_field(load_infowindow):
         'plot': 'A plot.',
         'year': '2019',
         'runtime': '132 min',
+        'meta_line': '2019 · IMDb 8.4 · 132 min · Action, Sci-Fi',
     }
 
 
@@ -140,6 +141,111 @@ def test_item_properties_year_prefers_release_info_over_released_date(load_infow
     ctx = load_infowindow()
     props = ctx.infowindow._item_properties({'releaseInfo': '2014-2020', 'released': '2019-05-01T00:00:00.000Z'})
     assert props['year'] == '2014-2020'
+
+
+def test_year_range_closes_open_ended_series_with_a_word(load_infowindow):
+    """A still-running series arrives open-ended (`2010-`). The full
+    matrix of range shapes is covered against
+    `playbackmeta.year_range()` in tests/test_streaminfo.py; this pins
+    that the hero routes through it at all."""
+    ctx = load_infowindow()
+    assert ctx.infowindow._year_range({'releaseInfo': '2010-'}, 'now') == '2010-now'
+    assert ctx.infowindow._year_range({'releaseInfo': '2022–'}, 'now') == '2022–now'
+    assert ctx.infowindow._year_range({'releaseInfo': '2010-2017'}, 'now') == '2010-2017'
+
+
+def test_year_range_never_mangles_the_released_date_fallback(load_infowindow):
+    """The `released` fallback is a full ISO date whose hyphens are
+    separators, not an open range - it must not gain a "now". This is
+    the hero's own fallback, not something the shared helper sees."""
+    ctx = load_infowindow()
+    got = ctx.infowindow._year_range({'released': '2021-07-04T00:00:00.000Z'}, 'now')
+    assert got == '2021-07-04'
+
+
+def test_year_range_localizes_the_now_word(load_infowindow):
+    """`_year_text()` resolves the word through the addon's own string
+    catalog, so all 14 locales get it translated rather than an English
+    literal baked into the range."""
+    ctx = load_infowindow()
+    year = ctx.infowindow._item_properties({'releaseInfo': '2022-'})['year']
+    # the kodistubs fake returns a 'STR<id>' marker for any string id
+    assert year == '2022-STR%d' % ctx.infowindow._NOW_STRING_ID
+
+
+# ---------------------------------------------------------------------------
+# _meta_line() - the hero's year/rating/runtime line
+# ---------------------------------------------------------------------------
+
+
+def test_meta_line_joins_year_rating_runtime_and_genre(load_infowindow):
+    ctx = load_infowindow()
+    line = ctx.infowindow._meta_line({
+        'year': '2005', 'rating': '2.5', 'runtime': '120 min',
+        'genre': 'Horror, Sci-Fi',
+    })
+    assert line == '2005 · IMDb 2.5 · 120 min · Horror, Sci-Fi'
+
+
+def test_meta_line_keeps_genre_last(load_infowindow):
+    """Genre trails the metadata, where the chip layout always put it."""
+    ctx = load_infowindow()
+    line = ctx.infowindow._meta_line({'year': '2005', 'genre': 'Horror'})
+    assert line == '2005 · Horror'
+    assert line.endswith('Horror')
+
+
+def test_meta_line_genre_alone_carries_no_separator(load_infowindow):
+    ctx = load_infowindow()
+    assert ctx.infowindow._meta_line({'genre': 'Drama'}) == 'Drama'
+
+
+def test_meta_line_full_series_range_is_never_truncated(load_infowindow):
+    """The reported Sherlock bug: the year rendered as `2010...` because
+    the chip it sat in was a fixed 110px box and a 9-character range
+    needs ~140px at Mono26. The composed line carries the range whole -
+    there is no fixed-width box left to clip it."""
+    ctx = load_infowindow()
+    props = ctx.infowindow._item_properties({
+        'releaseInfo': '2010-2017', 'imdbRating': '9.0',
+    })
+    assert props['year'] == '2010-2017'
+    assert props['meta_line'] == '2010-2017 · IMDb 9.0'
+    assert '...' not in props['meta_line']
+
+
+def test_meta_line_labels_the_rating_as_imdb(load_infowindow):
+    """The reported bug that a bare accent-coloured `9.0` never said what
+    scale it was on."""
+    ctx = load_infowindow()
+    assert ctx.infowindow._meta_line({'rating': '9.0'}) == 'IMDb 9.0'
+
+
+def test_meta_line_skips_missing_segments_without_dangling_separators(load_infowindow):
+    ctx = load_infowindow()
+    _meta_line = ctx.infowindow._meta_line
+    assert _meta_line({'year': '2019'}) == '2019'
+    assert _meta_line({'year': '2019', 'runtime': '98 min'}) == '2019 · 98 min'
+    assert _meta_line({'rating': '7.1', 'runtime': '98 min'}) == 'IMDb 7.1 · 98 min'
+    assert _meta_line({}) == ''
+    assert _meta_line(None) == ''
+
+
+def test_meta_line_omits_rating_label_when_there_is_no_rating(load_infowindow):
+    """A bare `IMDb` with no number after it would be worse than nothing."""
+    ctx = load_infowindow()
+    assert ctx.infowindow._rating_segment('') == ''
+    assert ctx.infowindow._rating_segment(None) == ''
+    assert 'IMDb' not in ctx.infowindow._meta_line({'year': '2019', 'runtime': '98 min'})
+
+
+def test_meta_line_uses_only_glyphs_both_estuary_faces_have(load_infowindow):
+    """The separator must stay renderable: U+00B7 is in NotoMono as well
+    as NotoSans, unlike the `★` that shipped tofu once already (see
+    tests/test_glyph_coverage.py)."""
+    ctx = load_infowindow()
+    line = ctx.infowindow._meta_line({'year': '2010-2017', 'rating': '9.0', 'runtime': '120 min'})
+    assert set(ch for ch in line if ord(ch) > 127) == {'·'}
 
 
 def test_item_properties_year_falls_back_to_date_only_released(load_infowindow):
@@ -167,7 +273,8 @@ def test_item_properties_runtime_is_empty_string_when_absent(load_infowindow):
 def test_item_properties_missing_fields_are_empty_strings(load_infowindow):
     ctx = load_infowindow()
     assert ctx.infowindow._item_properties({}) == {
-        'thumbnail': '', 'fanart': '', 'genre': '', 'rating': '', 'plot': '', 'year': '', 'runtime': '',
+        'thumbnail': '', 'fanart': '', 'genre': '', 'rating': '', 'plot': '', 'year': '',
+        'runtime': '', 'meta_line': '',
     }
 
 
@@ -832,8 +939,14 @@ def test_enrich_worker_merges_into_metas_and_queues_props(load_infowindow, monke
     assert win.metas[0]['description'] == 'A full plot.'
     assert win.metas[0]['genres'] == ['Drama', 'Thriller']
     # ...and queued for the UI thread rather than written to a ListItem.
+    # `meta_line` rides along with the individual fields: it is what the
+    # hero renders, so a fetch that lands a rating must recompose it or
+    # the screen keeps the sparse line built before the fetch.
     assert win._enrich_pending == {
-        0: {'genre': 'Drama, Thriller', 'rating': '7.9', 'plot': 'A full plot.', 'year': '2026'},
+        0: {
+            'genre': 'Drama, Thriller', 'rating': '7.9', 'plot': 'A full plot.',
+            'year': '2026', 'meta_line': '2026 · IMDb 7.9 · Drama, Thriller',
+        },
     }
 
 

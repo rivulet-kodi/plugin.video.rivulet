@@ -190,11 +190,39 @@ def test_season_count_zero_for_specials_only(load_detailwindow):
 
 def test_metadata_line_joins_every_present_segment(load_detailwindow):
     ctx = load_detailwindow()
-    meta = {'releaseInfo': '2025-', 'imdbRating': '7.6'}
+    meta = {'releaseInfo': '2020-2024', 'imdbRating': '7.6'}
 
     line = ctx.detailwindow._metadata_line(meta, 2)
 
-    assert line == '2025 \u00b7 2 SEASONS \u00b7 [COLOR FF38BDF8]\u2605 7.6[/COLOR]'
+    assert line == '2020-2024 \u00b7 2 SEASONS \u00b7 [COLOR FF38BDF8]\u2605 7.6[/COLOR]'
+
+
+def test_metadata_line_closes_a_running_series_range_with_now(load_detailwindow):
+    """A still-running series arrives open-ended (`2025-`). The dash
+    used to be stripped, which silently lost the fact that the show has
+    not ended; it is now closed with the localized "now" - the same
+    range the coverflow hero and StreamsWindow print.
+
+    The kodistubs fake returns a 'STR<id>' marker for any string id, so
+    this also pins that the word is localized rather than hardcoded."""
+    ctx = load_detailwindow()
+    now = 'STR%d' % ctx.detailwindow._NOW_STRING_ID
+
+    line = ctx.detailwindow._metadata_line({'releaseInfo': '2025-'}, 0)
+
+    assert line == '2025-%s' % now
+
+
+def test_metadata_line_handles_the_en_dash_cinemeta_sends(load_detailwindow):
+    """Cinemeta terminates every range with an EN DASH, not the ASCII
+    hyphen the old `.rstrip('-')` looked for - so that strip never fired
+    on a real series at all."""
+    ctx = load_detailwindow()
+    now = 'STR%d' % ctx.detailwindow._NOW_STRING_ID
+
+    assert ctx.detailwindow._metadata_line({'releaseInfo': '2022\u2013'}, 0) == '2022\u2013%s' % now
+    # a closed range is untouched
+    assert ctx.detailwindow._metadata_line({'releaseInfo': '2011\u20132019'}, 0) == '2011\u20132019'
 
 
 def test_metadata_line_singular_season(load_detailwindow):
@@ -401,7 +429,7 @@ def test_oninit_sets_heading_bold_and_left_column_metadata(load_detailwindow):
     picker = ctx.detailwindow
     win = _make_window(picker)
     win.start({
-        'id': 'tt1', 'name': 'The Sheep Detectives', 'releaseInfo': '2025-',
+        'id': 'tt1', 'name': 'The Sheep Detectives', 'releaseInfo': '2023-2025',
         'imdbRating': '7.6', 'genres': ['Comedy', 'Mystery', 'Crime'],
         'videos': [
             {'id': 'v-1x01', 'season': 1, 'episode': 1, 'title': 'S1E1'},
@@ -413,7 +441,7 @@ def test_oninit_sets_heading_bold_and_left_column_metadata(load_detailwindow):
 
     assert win.getControl(picker.HEADING).label == '[B]THE SHEEP DETECTIVES[/B]'
     assert win.getControl(picker.METADATA_LINE).label == (
-        '2025 \u00b7 2 SEASONS \u00b7 [COLOR FF38BDF8]\u2605 7.6[/COLOR]'
+        '2023-2025 \u00b7 2 SEASONS \u00b7 [COLOR FF38BDF8]\u2605 7.6[/COLOR]'
     )
     assert win.getControl(picker.GENRES_LINE).label == 'Comedy \u00b7 Mystery \u00b7 Crime'
 
