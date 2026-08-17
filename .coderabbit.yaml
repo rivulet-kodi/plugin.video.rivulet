@@ -1,0 +1,78 @@
+# CodeRabbit review configuration - see issue #23.
+#
+# Only the two keys that change behaviour are set. Every scalar the proposal
+# also carried - profile: chill, request_changes_workflow: false,
+# high_level_summary: true, review_status: true, poem: false,
+# auto_review.enabled: true, auto_review.drafts: false, chat.auto_reply: true -
+# is already the documented default, so setting it would only pin us to today's
+# default while looking like a decision.
+#
+# This repo is on the Open Source plan (unlimited public repos, Pro+ features,
+# no card), NOT the Free plan, which is summarization-only. Two consequences of
+# that tier worth knowing before trusting a review's absence:
+#
+#   - Automatic review needs >= 10 stars; below that every review must be asked
+#     for with `@coderabbitai review`. We are at 14.
+#   - PR reviews are rate-limited by star count (1-10/hour) and each push's
+#     incremental review spends one. When the allowance runs out CodeRabbit
+#     posts a check named "Review rate limited" that PASSES BY DESIGN, so it
+#     cannot be used as a required check - a green tree does not mean reviewed.
+#
+# ruff, mypy and a 90% branch-coverage gate already run on every PR; this exists
+# for the judgement none of them can offer.
+
+---
+reviews:
+  path_filters:
+    - "!**/*.zip"
+    - "!artwork/**"
+    - "!site/**"
+    - "!repository.rivulet/**"
+
+  path_instructions:
+    - path: "lib/**/*.py"
+      instructions: >-
+        Kodi addon, Python 3.8 is the floor - flag syntax or stdlib usage newer
+        than 3.8. Kodi's xbmc* modules do not exist outside Kodi and are
+        import-guarded or mocked; never flag those as broken imports.
+
+        Prioritise, in order: (1) behaviour changes hidden inside a refactor,
+        especially a branch no test covers; (2) calls to methods or attributes
+        that do not exist on the receiver, and other signs of plausible but
+        incorrect code; (3) resource lifetime - caches without eviction, file
+        handles or subprocesses not released on the error path, callbacks
+        registered without a matching teardown.
+
+        Style nits are already covered by ruff; skip them. printf-style
+        formatting ("%s" %) is deliberate at the 3.8 floor and used ~200 times -
+        do not flag it.
+    - path: "lib/service_runner.py"
+      instructions: >-
+        Supervises the stremio-server-go subprocess for the lifetime of a Kodi
+        session, and subclasses xbmc.Monitor and xbmc.Player. Scrutinise the
+        shutdown path: every early return or exception inside the supervision
+        loop should still terminate the child process and close its log handle.
+        Flag any new state that grows per playback or per loop iteration.
+
+        Two known-deliberate shapes here, do not flag either: the log handle is
+        opened without a context manager because it outlives the function by
+        design, and the health-check loop catches HTTPError inside the loop to
+        close the response so the socket does not leak.
+
+        main() is the most complex function in the codebase. Weigh any
+        simplification of it against the shutdown path specifically.
+    - path: "lib/store.py"
+      instructions: >-
+        Persistent JSON-backed store with in-memory caches. Existing entry caps
+        (MAX_PROGRESS_ENTRIES, MAX_SEARCH_HISTORY, MAX_PROGRESS_AGE_DAYS) are
+        deliberate - flag new cached or persisted collections that lack an
+        equivalent bound or eviction path. _read_cache has no size cap on
+        purpose: its keys are a closed set of seven fixed file paths, so flag
+        anything that makes that key set data-controlled, not the missing cap.
+        Writes use optimistic compare-and-swap rather than OS locking; flag
+        changes that assume exclusive access.
+    - path: "tests/**/*.py"
+      instructions: >-
+        pytest suite behind a 90% branch-coverage gate. Focus on whether a test
+        actually exercises the branch it claims to, and whether a new code path
+        arrived without one. Do not comment on test style.
