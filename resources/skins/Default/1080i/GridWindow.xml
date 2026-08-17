@@ -8,8 +8,13 @@
 
      Geometry: 6 columns x 276 = 1656, inside the skin's standard 96px
      left margin (96 + 1656 = 1752, leaving a 168px right gutter for the
-     scrollbar at 1839). Each cell is 276x468: a 240x360 poster, a 34px
-     title line under it, and a 22px band/progress line under that.
+     scrollbar at 1839). Each cell is 276x430 - a 240x324 poster, the
+     progress track, then the title and badge lines - so the 860px panel
+     shows exactly TWO full rows (2 x 430). The cell height and the panel
+     height must stay in that exact multiple: a panel taller than a whole
+     number of rows clips the bottom row's labels while still drawing its
+     posters, which reads as a rendering bug (confirmed on a real device
+     at the original 468px cell in an 820px panel).
      The focused cell swaps to a 4px accent outline, matching
      ShowcaseWindow's focused poster treatment rather than inventing a
      second focus idiom. -->
@@ -54,13 +59,13 @@
             </control>
 
             <control type="panel" id="30002">
-                <left>96</left><top>200</top><width>1680</width><height>820</height>
+                <left>96</left><top>186</top><width>1680</width><height>860</height>
                 <onleft>30002</onleft><onright>30002</onright>
                 <pagecontrol>30010</pagecontrol>
                 <scrolltime tween="cubic" easing="out">240</scrolltime>
-                <itemlayout width="276" height="468">
+                <itemlayout width="276" height="430">
                     <control type="image">
-                        <top>0</top><left>18</left><width>240</width><height>360</height>
+                        <top>0</top><left>18</left><width>240</width><height>324</height>
                         <texture colordiffuse="8CFFFFFF" background="true">$INFO[ListItem.Property(thumbnail)]</texture>
                         <aspectratio align="center" aligny="center">keep</aspectratio>
                     </control>
@@ -68,48 +73,53 @@
                          a 240-wide track with the watched fraction filled.
                          `progress_width` is precomputed in Python (Kodi's
                          skin engine has no arithmetic). -->
-                    <control type="image"><top>364</top><left>18</left><width>240</width><height>4</height><texture colordiffuse="40FFFFFF">white.png</texture>
+                    <!-- 6px, and a track light enough to read as an empty
+                         bar against the near-black plate: at 4px/40FFFFFF
+                         the whole widget vanished on a real 1080p panel
+                         (device check), which reads as "no progress" -
+                         the one state the bar exists to show. -->
+                    <control type="image"><top>330</top><left>18</left><width>240</width><height>6</height><texture colordiffuse="59FFFFFF">white.png</texture>
                         <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
                     </control>
-                    <control type="image"><top>364</top><left>18</left><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture>
+                    <control type="image"><top>330</top><left>18</left><height>6</height><texture colordiffuse="FF38BDF8">white.png</texture>
                         <width>$INFO[ListItem.Property(progress_width)]</width>
                         <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
                     </control>
-                    <control type="label"><top>378</top><left>18</left><width>240</width><height>32</height><font>font10</font><textcolor>A6EEF3F6</textcolor>
+                    <control type="label"><top>346</top><left>18</left><width>240</width><height>32</height><font>font10</font><textcolor>A6EEF3F6</textcolor>
                         <label>$INFO[ListItem.Label]</label>
                     </control>
-                    <control type="label"><top>410</top><left>18</left><width>240</width><height>26</height><font>font10</font><textcolor>66EEF3F6</textcolor>
+                    <control type="label"><top>378</top><left>18</left><width>240</width><height>26</height><font>font10</font><textcolor>66EEF3F6</textcolor>
                         <label>$INFO[ListItem.Property(badge)]</label>
                     </control>
                 </itemlayout>
-                <focusedlayout width="276" height="468">
+                <focusedlayout width="276" height="430">
                     <control type="image"><top>-4</top><left>14</left><width>248</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
-                    <control type="image"><top>360</top><left>14</left><width>248</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
-                    <control type="image"><top>-4</top><left>14</left><width>4</width><height>368</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
-                    <control type="image"><top>-4</top><left>258</left><width>4</width><height>368</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                    <control type="image"><top>324</top><left>14</left><width>248</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                    <control type="image"><top>-4</top><left>14</left><width>4</width><height>332</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                    <control type="image"><top>-4</top><left>258</left><width>4</width><height>332</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
                     <control type="image">
-                        <top>0</top><left>18</left><width>240</width><height>360</height>
+                        <top>0</top><left>18</left><width>240</width><height>324</height>
                         <texture background="true">$INFO[ListItem.Property(thumbnail)]</texture>
                         <aspectratio align="center" aligny="center">keep</aspectratio>
                     </control>
-                    <control type="image"><top>364</top><left>18</left><width>240</width><height>4</height><texture colordiffuse="40FFFFFF">white.png</texture>
+                    <control type="image"><top>330</top><left>18</left><width>240</width><height>6</height><texture colordiffuse="59FFFFFF">white.png</texture>
                         <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
                     </control>
-                    <control type="image"><top>364</top><left>18</left><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture>
+                    <control type="image"><top>330</top><left>18</left><height>6</height><texture colordiffuse="FF38BDF8">white.png</texture>
                         <width>$INFO[ListItem.Property(progress_width)]</width>
                         <visible>!String.IsEmpty(ListItem.Property(progress_width))</visible>
                     </control>
-                    <control type="label"><top>378</top><left>18</left><width>240</width><height>32</height><font>font10</font><textcolor>FFFFFFFF</textcolor>
+                    <control type="label"><top>346</top><left>18</left><width>240</width><height>32</height><font>font10</font><textcolor>FFFFFFFF</textcolor>
                         <label>[B]$INFO[ListItem.Label][/B]</label>
                     </control>
-                    <control type="label"><top>410</top><left>18</left><width>240</width><height>26</height><font>font10</font><textcolor>FF38BDF8</textcolor>
+                    <control type="label"><top>378</top><left>18</left><width>240</width><height>26</height><font>font10</font><textcolor>FF38BDF8</textcolor>
                         <label>$INFO[ListItem.Property(badge)]</label>
                     </control>
                 </focusedlayout>
             </control>
 
             <control type="scrollbar" id="30010">
-                <left>1839</left><top>200</top><width>21</width><height>820</height>
+                <left>1839</left><top>186</top><width>21</width><height>860</height>
                 <texturesliderbar colordiffuse="33FFFFFF">white.png</texturesliderbar>
                 <textureslidernib colordiffuse="FF38BDF8">white.png</textureslidernib>
                 <textureslidernibfocus colordiffuse="FF38BDF8">white.png</textureslidernibfocus>
