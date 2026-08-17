@@ -1,0 +1,34 @@
+# Every workflow run currently warns that actions/checkout@v4 and
+# actions/setup-python@v5 target Node.js 20, which GitHub deprecated and now
+# force-runs on Node 24. Pinned major versions do not drift on their own, so
+# without this the warning stays until someone reads the log and bumps by hand.
+#
+# Grouped into one PR per ecosystem: these arrive as version bumps with no
+# behaviour to review individually, and each separate PR would spend one of the
+# repo's 3 CodeRabbit reviews per rolling hour.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+
+  # Dev/test tooling only - the addon itself declares its runtime dependency
+  # through addon.xml's <import addon="script.module.requests">, which Kodi
+  # resolves, not pip. The requests floor stays at 2.22.0 deliberately and the
+  # compat-py38-requests job pins it, so an update here cannot raise it.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      dev-tooling:
+        patterns: ["*"]
+    commit-message:
+      prefix: "test"
