@@ -29,6 +29,11 @@
      Focus is a 6% zoom plus an accent underline rather than a border box
      around the artwork, again following those apps: the tile lifts toward
      the viewer instead of being caged, and nothing overlaps the poster.
+     The zoom is anchored to the poster's LEFT edge, not its centre, so a
+     focused tile grows rightwards and the left column stays flush across
+     every band. Centred, the focused row's first poster sat ~8px left of
+     every other row's first poster - subtle, but a ragged left edge is
+     immediately visible.
 
      HEADER SPACING. A band header is a 96px box with its text aligned to
      the BOTTOM, not a 42px box with it centred. That puts the whitespace
@@ -160,10 +165,10 @@
                     <focusedlayout width="280" height="470">
                         <control type="group">
                         <animation type="Focus" reversible="false">
-                            <effect type="zoom" start="100" end="106" time="180" tween="sine" easing="inout" center="140,192" />
+                            <effect type="zoom" start="100" end="106" time="180" tween="sine" easing="inout" center="12,192" />
                         </animation>
                         <animation type="Unfocus" reversible="false">
-                            <effect type="zoom" start="106" end="100" time="180" tween="sine" easing="inout" center="140,192" />
+                            <effect type="zoom" start="106" end="100" time="180" tween="sine" easing="inout" center="12,192" />
                         </animation>
                         <control type="image">
                             <top>0</top><left>12</left><width>256</width><height>384</height>
@@ -238,10 +243,10 @@
                     <focusedlayout width="280" height="470">
                         <control type="group">
                         <animation type="Focus" reversible="false">
-                            <effect type="zoom" start="100" end="106" time="180" tween="sine" easing="inout" center="140,192" />
+                            <effect type="zoom" start="100" end="106" time="180" tween="sine" easing="inout" center="12,192" />
                         </animation>
                         <animation type="Unfocus" reversible="false">
-                            <effect type="zoom" start="106" end="100" time="180" tween="sine" easing="inout" center="140,192" />
+                            <effect type="zoom" start="106" end="100" time="180" tween="sine" easing="inout" center="12,192" />
                         </animation>
                         <control type="image">
                             <top>0</top><left>12</left><width>256</width><height>384</height>
@@ -316,10 +321,10 @@
                     <focusedlayout width="280" height="470">
                         <control type="group">
                         <animation type="Focus" reversible="false">
-                            <effect type="zoom" start="100" end="106" time="180" tween="sine" easing="inout" center="140,192" />
+                            <effect type="zoom" start="100" end="106" time="180" tween="sine" easing="inout" center="12,192" />
                         </animation>
                         <animation type="Unfocus" reversible="false">
-                            <effect type="zoom" start="106" end="100" time="180" tween="sine" easing="inout" center="140,192" />
+                            <effect type="zoom" start="106" end="100" time="180" tween="sine" easing="inout" center="12,192" />
                         </animation>
                         <control type="image">
                             <top>0</top><left>12</left><width>256</width><height>384</height>
@@ -394,10 +399,10 @@
                     <focusedlayout width="280" height="470">
                         <control type="group">
                         <animation type="Focus" reversible="false">
-                            <effect type="zoom" start="100" end="106" time="180" tween="sine" easing="inout" center="140,192" />
+                            <effect type="zoom" start="100" end="106" time="180" tween="sine" easing="inout" center="12,192" />
                         </animation>
                         <animation type="Unfocus" reversible="false">
-                            <effect type="zoom" start="106" end="100" time="180" tween="sine" easing="inout" center="140,192" />
+                            <effect type="zoom" start="106" end="100" time="180" tween="sine" easing="inout" center="12,192" />
                         </animation>
                         <control type="image">
                             <top>0</top><left>12</left><width>256</width><height>384</height>

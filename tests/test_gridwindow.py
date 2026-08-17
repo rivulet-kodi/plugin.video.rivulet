@@ -542,3 +542,26 @@ def test_bands_are_separated_by_real_whitespace():
         # the other side, padding it away from the row it labels.
         assert int(height) <= 60, (
             'header box %spx pads the title away from its own posters' % height)
+
+
+def test_focus_zoom_is_anchored_to_the_poster_left_edge():
+    """A focused tile must grow rightwards, not outwards from its centre.
+
+    Centred, a 6% zoom pushed the focused row's first poster ~8px left of
+    every other row's first poster, so the left column read as ragged.
+    Anchoring the zoom centre to the poster's own left edge keeps it
+    flush."""
+    import re
+
+    xml = _grid_xml()
+    poster = re.search(
+        r'<top>0</top><left>(\d+)</left><width>\d+</width><height>\d+</height>\s*'
+        r'<texture[^>]*background="true">\$INFO\[ListItem.Property\(thumbnail\)\]</texture>',
+        xml,
+    )
+    assert poster, 'no poster box found'
+    centres = set(re.findall(r'center="(\d+),\d+"', xml))
+    assert centres, 'the focus zoom declares no centre'
+    assert centres == {poster.group(1)}, (
+        'zoom centre %s is not the poster left edge %s - the focused tile will hang '
+        'left of the other rows' % (sorted(centres), poster.group(1)))
