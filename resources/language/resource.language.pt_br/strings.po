@@ -711,3 +711,15 @@ msgstr "ASSISTIDO"
 msgctxt "#30244"
 msgid "Show Continue"
 msgstr "Mostrar Continuar"
+
+msgctxt "#30245"
+msgid "Continue watching"
+msgstr "Continuar assistindo"
+
+msgctxt "#30246"
+msgid "Recently watched"
+msgstr "Assistidos recentemente"
+
+msgctxt "#30247"
+msgid "Your library"
+msgstr "Sua biblioteca"

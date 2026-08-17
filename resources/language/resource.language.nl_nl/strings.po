@@ -711,3 +711,15 @@ msgstr "BEKEKEN"
 msgctxt "#30244"
 msgid "Show Continue"
 msgstr "Verder tonen"
+
+msgctxt "#30245"
+msgid "Continue watching"
+msgstr "Verder kijken"
+
+msgctxt "#30246"
+msgid "Recently watched"
+msgstr "Onlangs bekeken"
+
+msgctxt "#30247"
+msgid "Your library"
+msgstr "Jouw bibliotheek"

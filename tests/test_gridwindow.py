@@ -95,12 +95,31 @@ def test_progress_width_is_empty_when_percent_is_not_a_number(ctx):
 
 
 def test_badge_shows_percent_for_a_resuming_title(ctx):
-    assert ctx.gridwindow._badge(_item(ctx.mystuff.BAND_RESUME, percent=62.4)) == '62%'
+    assert ctx.gridwindow._badge(_item(ctx.mystuff.BAND_RESUME, percent=62.4)) == (
+        '[COLOR FF38BDF8]62%[/COLOR]')
 
 
 def test_badge_names_the_next_up_and_watched_bands(ctx):
-    assert ctx.gridwindow._badge(_item(ctx.mystuff.BAND_NEXT_UP)) == 'STR30242'
-    assert ctx.gridwindow._badge(_item(ctx.mystuff.BAND_RECENT)) == 'STR30243'
+    assert ctx.gridwindow._badge(_item(ctx.mystuff.BAND_NEXT_UP)) == (
+        '[COLOR FFFBBF24]STR30242[/COLOR]')
+    assert ctx.gridwindow._badge(_item(ctx.mystuff.BAND_RECENT)) == (
+        '[COLOR 80EEF3F6]STR30243[/COLOR]')
+
+
+def test_badge_prefers_the_episode_over_the_band_name(ctx):
+    """"S1E3" says more than "NEXT UP", in less room."""
+    item = _item(ctx.mystuff.BAND_NEXT_UP, next_label='S1E3')
+
+    assert ctx.gridwindow._badge(item) == '[COLOR FFFBBF24]S1E3[/COLOR]'
+
+
+def test_each_band_badge_is_a_distinct_colour(ctx):
+    """The colour IS the distinction between bands on a flat grid - two
+    bands sharing one would put the screen back where it started."""
+    colours = ctx.gridwindow._BAND_COLOURS
+    assert len(set(colours.values())) == len(colours)
+    for band in (ctx.mystuff.BAND_RESUME, ctx.mystuff.BAND_NEXT_UP, ctx.mystuff.BAND_RECENT):
+        assert band in colours
 
 
 def test_badge_is_empty_for_a_never_played_library_title(ctx):
@@ -115,17 +134,22 @@ def test_badge_is_empty_for_a_never_played_library_title(ctx):
 
 
 def test_caption_appends_the_resolved_next_episode(ctx):
-    item = _item(ctx.mystuff.BAND_NEXT_UP, next_label='S1E3 · The Great Game')
+    item = _item(ctx.mystuff.BAND_NEXT_UP, next_label='S1E3')
 
-    assert ctx.gridwindow._caption(item) == 'STR30242 · S1E3 · The Great Game'
-
-
-def test_caption_falls_back_to_the_badge_alone(ctx):
-    assert ctx.gridwindow._caption(_item(ctx.mystuff.BAND_RESUME, percent=62.0)) == '62%'
+    assert ctx.gridwindow._caption(item) == 'STR30242 · S1E3'
 
 
-def test_caption_is_empty_for_a_bare_library_title(ctx):
-    assert ctx.gridwindow._caption(_item(ctx.mystuff.BAND_LIBRARY)) == ''
+def test_caption_names_the_band_and_the_percent(ctx):
+    """The caption has room for the band's full name, which is what says
+    WHY the title is on this screen - the badge is the same fact
+    compressed to a colour and a few characters."""
+    assert ctx.gridwindow._caption(_item(ctx.mystuff.BAND_RESUME, percent=62.0)) == (
+        'STR30245 · 62%')
+
+
+def test_caption_names_the_band_for_a_library_title(ctx):
+    """Even a never-played title says why it is here - it is saved."""
+    assert ctx.gridwindow._caption(_item(ctx.mystuff.BAND_LIBRARY)) == 'STR30247'
 
 
 # ---------------------------------------------------------------------------
@@ -140,9 +164,18 @@ def test_make_list_item_sets_every_property_the_skin_draws(ctx):
 
     assert list_item.getLabel() == 'Dune'
     assert list_item.getProperty('thumbnail') == 'p.jpg'
-    assert list_item.getProperty('badge') == '50%'
+    assert list_item.getProperty('badge') == '[COLOR FF38BDF8]50%[/COLOR]'
     assert list_item.getProperty('progress_width') == str(ctx.gridwindow.PROGRESS_TRACK_WIDTH // 2)
-    assert list_item.getProperty('caption') == '50%'
+    assert list_item.getProperty('caption') == 'STR30245 · 50%'
+    assert list_item.getProperty('watched') == ''
+
+
+def test_make_list_item_marks_a_watched_title_for_dimming(ctx):
+    watched = ctx.gridwindow.make_list_item(_item(ctx.mystuff.BAND_RECENT))
+    resuming = ctx.gridwindow.make_list_item(_item(ctx.mystuff.BAND_RESUME, percent=50.0))
+
+    assert watched.getProperty('watched') == '1'
+    assert resuming.getProperty('watched') == ''
 
 
 def test_make_list_item_tolerates_a_title_with_no_name_or_poster(ctx):
@@ -242,3 +275,100 @@ def test_start_returns_none_for_an_empty_grid_without_opening_it(ctx):
 
     assert win.start([]) is None
     assert win.modal_calls == 0
+
+
+# ---------------------------------------------------------------------------
+# Skin/Python agreement
+# ---------------------------------------------------------------------------
+
+
+def _grid_xml():
+    """GridWindow.xml's source, for the geometry invariants the Python and
+    the skin have to agree on."""
+    import os
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(repo_root, 'resources', 'skins', 'Default', '1080i', 'GridWindow.xml')
+    with open(path, encoding='utf-8') as handle:
+        return handle.read()
+
+
+def test_progress_track_sits_on_the_poster_edges(ctx):
+    """`_progress_width()` scales a percent into PROGRESS_TRACK_WIDTH and
+    the skin draws the result as a literal pixel width, so the two must
+    agree - AND the track must sit on the poster's own box, or the bar
+    overhangs the artwork (which it visibly did at a 240 track over a
+    216-wide rendered poster)."""
+    import re
+
+    xml = _grid_xml()
+    tracks = re.findall(
+        r'<control type="image"><top>\d+</top><left>(\d+)</left><width>(\d+)</width>'
+        r'<height>6</height><texture colordiffuse="59FFFFFF">',
+        xml,
+    )
+    assert len(tracks) == 2, 'expected one progress track per layout, found %d' % len(tracks)
+    for _left, width in tracks:
+        assert int(width) == ctx.gridwindow.PROGRESS_TRACK_WIDTH
+
+    posters = re.findall(
+        r'<top>0</top><left>(\d+)</left><width>(\d+)</width><height>\d+</height>\s*'
+        r'<texture[^>]*background="true">\$INFO\[ListItem.Property\(thumbnail\)\]</texture>',
+        xml,
+    )
+    assert posters, 'no poster box found'
+    # There are more poster controls than tracks (the item layout draws a
+    # normal and a dimmed-watched variant, the focused layout one more),
+    # so compare the set of EDGES they occupy rather than pairing them up.
+    assert set(posters) == set(tracks), (
+        'poster boxes %s and progress tracks %s do not share the same edges'
+        % (sorted(set(posters)), sorted(set(tracks))))
+
+
+def test_poster_box_is_a_true_two_thirds_aspect():
+    """The poster is drawn `aspectratio=keep`, so a box that is not 2:3
+    renders the artwork narrower than its box - exactly what put the
+    progress bar and the labels out of line with the visible poster."""
+    import re
+
+    boxes = re.findall(
+        r'<left>\d+</left><width>(\d+)</width><height>(\d+)</height>\s*'
+        r'<texture[^>]*background="true">\$INFO\[ListItem.Property\(thumbnail\)\]</texture>',
+        _grid_xml(),
+    )
+    assert boxes, 'no poster box found'
+    for width, height in boxes:
+        assert int(width) / int(height) == pytest.approx(2 / 3, abs=0.001), (
+            'poster box %sx%s is not 2:3' % (width, height))
+
+
+def test_panel_height_is_a_whole_number_of_rows():
+    """A panel sized to a fraction of a row draws the next row's posters
+    with their labels cut off by the panel edge, which reads as a
+    rendering fault rather than as "scroll for more" - the exact bug a
+    468px cell in an 820px panel produced on a real device."""
+    import re
+
+    block = _grid_xml()
+    block = block[block.index('<control type="panel" id="30002">'):]
+    panel = re.search(
+        r'<left>\d+</left><top>\d+</top><width>\d+</width><height>(\d+)</height>', block)
+    assert panel, 'panel 30002 geometry not found'
+    cell = re.search(r'<itemlayout width="\d+" height="(\d+)">', block)
+    assert cell, 'panel itemlayout not found'
+
+    panel_h, cell_h = int(panel.group(1)), int(cell.group(1))
+    assert panel_h % cell_h == 0, (
+        'panel %d is not a whole number of %dpx rows (%.2f)' % (panel_h, cell_h, panel_h / cell_h))
+
+
+def test_panel_fits_inside_the_frame():
+    """Nothing below the fold: the panel must end inside the 1080 frame,
+    or its last row is drawn off-screen."""
+    import re
+
+    block = _grid_xml()
+    block = block[block.index('<control type="panel" id="30002">'):]
+    geom = re.search(
+        r'<left>\d+</left><top>(\d+)</top><width>\d+</width><height>(\d+)</height>', block)
+    assert geom, 'panel 30002 geometry not found'
+    assert int(geom.group(1)) + int(geom.group(2)) <= 1080

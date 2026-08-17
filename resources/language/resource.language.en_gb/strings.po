@@ -711,3 +711,15 @@ msgstr ""
 msgctxt "#30244"
 msgid "Show Continue"
 msgstr ""
+
+msgctxt "#30245"
+msgid "Continue watching"
+msgstr ""
+
+msgctxt "#30246"
+msgid "Recently watched"
+msgstr ""
+
+msgctxt "#30247"
+msgid "Your library"
+msgstr ""

@@ -53,6 +53,17 @@ BAND_LIBRARY = 'library'
 #: exactly this sequence.
 BAND_ORDER = (BAND_RESUME, BAND_NEXT_UP, BAND_RECENT, BAND_LIBRARY)
 
+#: band -> the localized-string id naming it. The grid names the band of
+#: whichever title is focused (`gridwindow._caption()`), which is what
+#: tells the viewer WHY that title is on the screen; the per-card badge
+#: is the same information compressed to a colour and a few characters.
+BAND_HEADINGS = {
+    BAND_RESUME: 30245,
+    BAND_NEXT_UP: 30242,
+    BAND_RECENT: 30246,
+    BAND_LIBRARY: 30247,
+}
+
 #: Cap on the number of titles fetched for the played bands (resume /
 #: next-up / recent). Each one costs a `views._fetch_meta` fan-out on a
 #: cache miss, so this bounds a cold open's worst case - the same reason
@@ -313,6 +324,29 @@ def _enrich(items):
     return [item for item in items if item.get('name')]
 
 
+def _label_next_episodes(items):
+    """Fill in `next_label` ("S1E3") on every next-up item whose series
+    meta `_enrich()` already fetched, so the card can name the episode it
+    would actually play rather than a bare "NEXT UP".
+
+    Uses the `videos` list `_enrich()` stashed on the item, so this costs
+    no extra addon traffic. An item whose meta never arrived, or whose
+    series has no next episode (a finished final season), simply keeps no
+    label and the grid falls back to the band name. Mutates `items` in
+    place, like the enrich pass above it.
+    """
+    for item in items:
+        if item.get('band') != BAND_NEXT_UP:
+            continue
+        video = resolve_next_up(item, {'videos': item.get('videos') or []})
+        if not video:
+            continue
+        season, episode = video.get('season'), video.get('episode')
+        if season is None or episode is None:
+            continue
+        item['next_label'] = 'S%dE%d' % (season, episode)
+
+
 def open_my_stuff():
     """Fetch both sources, merge them, and show the result in the grid.
     Returns True if the caller (HomeWindow) should also close (playback
@@ -326,6 +360,7 @@ def open_my_stuff():
     with busy_dialog(L(30033)):
         merged = merge_entries(store.get_progress_entries(), _fetch_library_entries(store))
         items = _enrich(merged)
+        _label_next_episodes(items)
 
     if not items:
         notify(L(30030))

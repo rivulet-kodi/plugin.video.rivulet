@@ -711,3 +711,15 @@ msgstr "İZLENDİ"
 msgctxt "#30244"
 msgid "Show Continue"
 msgstr "Devam et'i göster"
+
+msgctxt "#30245"
+msgid "Continue watching"
+msgstr "İzlemeye devam et"
+
+msgctxt "#30246"
+msgid "Recently watched"
+msgstr "Son izlenenler"
+
+msgctxt "#30247"
+msgid "Your library"
+msgstr "Kitaplığınız"

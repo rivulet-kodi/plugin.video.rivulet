@@ -711,3 +711,15 @@ msgstr "視聴済み"
 msgctxt "#30244"
 msgid "Show Continue"
 msgstr "「続きを見る」を表示"
+
+msgctxt "#30245"
+msgid "Continue watching"
+msgstr "続きを見る"
+
+msgctxt "#30246"
+msgid "Recently watched"
+msgstr "最近見た作品"
+
+msgctxt "#30247"
+msgid "Your library"
+msgstr "ライブラリ"

@@ -711,3 +711,15 @@ msgstr "VU"
 msgctxt "#30244"
 msgid "Show Continue"
 msgstr "Afficher Continuer"
+
+msgctxt "#30245"
+msgid "Continue watching"
+msgstr "Reprendre"
+
+msgctxt "#30246"
+msgid "Recently watched"
+msgstr "Vu récemment"
+
+msgctxt "#30247"
+msgid "Your library"
+msgstr "Votre bibliothèque"

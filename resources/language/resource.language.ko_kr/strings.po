@@ -711,3 +711,15 @@ msgstr "시청 완료"
 msgctxt "#30244"
 msgid "Show Continue"
 msgstr "이어보기 표시"
+
+msgctxt "#30245"
+msgid "Continue watching"
+msgstr "이어서 시청"
+
+msgctxt "#30246"
+msgid "Recently watched"
+msgstr "최근 시청"
+
+msgctxt "#30247"
+msgid "Your library"
+msgstr "내 라이브러리"

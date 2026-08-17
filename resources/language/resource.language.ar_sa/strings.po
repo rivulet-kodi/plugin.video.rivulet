@@ -711,3 +711,15 @@ msgstr "تمت المشاهدة"
 msgctxt "#30244"
 msgid "Show Continue"
 msgstr "إظهار المتابعة"
+
+msgctxt "#30245"
+msgid "Continue watching"
+msgstr "متابعة المشاهدة"
+
+msgctxt "#30246"
+msgid "Recently watched"
+msgstr "شوهد مؤخرًا"
+
+msgctxt "#30247"
+msgid "Your library"
+msgstr "مكتبتك"

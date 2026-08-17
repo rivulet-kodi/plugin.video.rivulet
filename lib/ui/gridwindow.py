@@ -39,9 +39,16 @@ LIST = 30002
 HEADING = 30006
 
 #: Width, in skin pixels, of a cell's progress track - must match the
-#: 240px bar in `GridWindow.xml`'s item layouts, since `_progress_width()`
+#: 216px bar in `GridWindow.xml`'s item layouts, since `_progress_width()`
 #: scales into it.
-PROGRESS_TRACK_WIDTH = 240
+#:
+#: 216 is the poster's REAL rendered width, not merely its layout box: the
+#: artwork is drawn `aspectratio=keep` into a 216x324 box, a true 2:3, so
+#: a standard poster fills it edge to edge. The two must stay equal - at
+#: an earlier 240 track against that same 216-wide rendered poster the bar
+#: overhung the artwork by 12px each side, plainly visible on a real
+#: device against the focused cell's outline.
+PROGRESS_TRACK_WIDTH = 216
 
 #: Floor on a rendered progress bar, in skin pixels. A title watched 1-2%
 #: scales to a sub-pixel sliver that renders as nothing at all, which
@@ -72,51 +79,94 @@ def _progress_width(item):
     return str(max(_MIN_PROGRESS_WIDTH, min(PROGRESS_TRACK_WIDTH, width)))
 
 
+#: band -> the accent colour its badge is drawn in. The bands are what
+#: order the grid, but on a real device a flat wall of posters gave no
+#: way to tell a half-watched title from a saved one: the badge text was
+#: the only cue, and at font10 in one dim grey it read as noise. Colour
+#: is what makes the distinction legible at a glance, across a whole
+#: screen, without spending a poster row on section headers.
+#:
+#: Blue is the skin's own accent (resume - the common case, and what the
+#: progress bar under it is already tinted). Amber lifts next-up out of
+#: that blue so "there is a new episode waiting" is the one thing that
+#: catches the eye. Watched is deliberately the dimmest thing on screen.
+_BAND_COLOURS = {
+    'resume': 'FF38BDF8',
+    'next_up': 'FFFBBF24',
+    'recent': '80EEF3F6',
+}
+
+
 def _badge(item):
     """The short caption under a cell's title, naming why the title is on
     this screen: its percent for a part-watched title, the localized band
-    name for next-up/watched, and nothing at all for a library title that
-    has never been played (the absence IS the state - a grid where every
-    cell carries a badge makes the badges worthless)."""
+    name for next-up/watched (with the episode that would actually play,
+    when it is known), and nothing at all for a library title that has
+    never been played - the absence IS the state, and a grid where every
+    cell carries a badge makes the badges worthless.
+
+    Wrapped in the band's `[COLOR]` (see `_BAND_COLOURS`) so the bands
+    stay distinguishable across a screenful of posters."""
     from lib.ui.compat import L
     from lib.ui.mystuff import BAND_NEXT_UP, BAND_RECENT, BAND_RESUME
 
     band = item.get('band')
+    text = ''
     if band == BAND_RESUME:
         percent = item.get('percent')
         if isinstance(percent, (int, float)) and not isinstance(percent, bool):
-            return '%d%%' % int(percent)
+            text = '%d%%' % int(percent)
+    elif band == BAND_NEXT_UP:
+        # The episode itself is the useful part - "S1E3" says more than
+        # "NEXT UP", and says it in less room.
+        text = item.get('next_label') or L(30242)
+    elif band == BAND_RECENT:
+        text = L(30243)
+    if not text:
         return ''
-    if band == BAND_NEXT_UP:
-        return L(30242)
-    if band == BAND_RECENT:
-        return L(30243)
-    return ''
+    colour = _BAND_COLOURS.get(band)
+    return '[COLOR %s]%s[/COLOR]' % (colour, text) if colour else text
 
 
 def _caption(item):
-    """The dim line under the focused title at the top of the screen -
-    the badge, plus the next episode's own label when one has been
-    resolved (`lib.ui.mystuff.resolve_next_up()`), so a next-up title
-    says which episode it would actually play rather than just "NEXT
-    UP"."""
-    badge = _badge(item)
-    episode = item.get('next_label')
-    if badge and episode:
-        return '%s · %s' % (badge, episode)
-    return badge or episode or ''
+    """The line under the focused title at the top of the screen: the
+    band's own name, plus the next episode when one has been resolved
+    (`lib.ui.mystuff.resolve_next_up()`), so a next-up title says which
+    episode it would play. Unlike `_badge()` this has room for the band's
+    full name, which is what actually tells the viewer WHY the title is
+    on this screen."""
+    from lib.ui.compat import L
+    from lib.ui.mystuff import BAND_HEADINGS, BAND_NEXT_UP, BAND_RESUME
+
+    band = item.get('band')
+    heading = BAND_HEADINGS.get(band)
+    parts = [L(heading)] if heading else []
+    if band == BAND_RESUME:
+        percent = item.get('percent')
+        if isinstance(percent, (int, float)) and not isinstance(percent, bool):
+            parts.append('%d%%' % int(percent))
+    elif band == BAND_NEXT_UP and item.get('next_label'):
+        parts.append(item['next_label'])
+    return ' · '.join(parts)
 
 
 def make_list_item(item):
     """Project one merged `lib.ui.mystuff` item onto a `ListItem` for the
     grid. Pure apart from `L()`, so tests can assert every property
     without a window."""
+    from lib.ui.mystuff import BAND_RECENT
+
     list_item = xbmcgui.ListItem(label=item.get('name') or '')
     list_item.setProperties({
         'thumbnail': item.get('poster') or '',
         'badge': _badge(item),
         'progress_width': _progress_width(item),
         'caption': _caption(item),
+        # Finished titles are dimmed by the skin so the eye skips past
+        # them, the way a watched episode greys out in most apps. A
+        # non-empty property is the skin's visibility condition, so the
+        # value itself is arbitrary - only its presence matters.
+        'watched': '1' if item.get('band') == BAND_RECENT else '',
     })
     return list_item
 
