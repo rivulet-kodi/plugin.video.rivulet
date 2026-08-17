@@ -196,7 +196,7 @@
                             <aspectratio align="center" aligny="center">keep</aspectratio>
                         </control>
                         <!-- Accent underline under the focused poster. -->
-                        <control type="image"><top>434</top><left>16</left><width>256</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image"><top>434</top><left>16</left><width>288</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
                         <!-- Progress track: 6px over a 59FFFFFF track. At
                              4px/40FFFFFF the whole widget vanished on a real
                              1080p panel, which reads as "no progress" - the
@@ -269,7 +269,7 @@
                             <aspectratio align="center" aligny="center">keep</aspectratio>
                         </control>
                         <!-- Accent underline under the focused poster. -->
-                        <control type="image"><top>434</top><left>16</left><width>256</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image"><top>434</top><left>16</left><width>288</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
                         <!-- Progress track: 6px over a 59FFFFFF track. At
                              4px/40FFFFFF the whole widget vanished on a real
                              1080p panel, which reads as "no progress" - the
@@ -342,7 +342,7 @@
                             <aspectratio align="center" aligny="center">keep</aspectratio>
                         </control>
                         <!-- Accent underline under the focused poster. -->
-                        <control type="image"><top>434</top><left>16</left><width>256</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image"><top>434</top><left>16</left><width>288</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
                         <!-- Progress track: 6px over a 59FFFFFF track. At
                              4px/40FFFFFF the whole widget vanished on a real
                              1080p panel, which reads as "no progress" - the
@@ -415,7 +415,7 @@
                             <aspectratio align="center" aligny="center">keep</aspectratio>
                         </control>
                         <!-- Accent underline under the focused poster. -->
-                        <control type="image"><top>434</top><left>16</left><width>256</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                        <control type="image"><top>434</top><left>16</left><width>288</width><height>4</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
                         <!-- Progress track: 6px over a 59FFFFFF track. At
                              4px/40FFFFFF the whole widget vanished on a real
                              1080p panel, which reads as "no progress" - the

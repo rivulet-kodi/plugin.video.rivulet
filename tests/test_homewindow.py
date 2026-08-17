@@ -790,3 +790,55 @@ def test_onclick_mystuff_stays_open_when_open_my_stuff_returns_false(load_homewi
     win.onClick(ctx.homewindow.LIST)
 
     assert win.closed is False
+
+
+# ---------------------------------------------------------------------------
+# home_show_continue -> home_show_mystuff migration
+# ---------------------------------------------------------------------------
+
+
+def test_a_disabled_continue_row_stays_disabled_after_the_rename(load_homewindow):
+    """The merged row took a new setting id, so without this anyone who had
+    deliberately turned the old row OFF would silently get the new one back
+    on."""
+    ctx = load_homewindow(settings={'home_show_continue': 'false'})
+
+    ctx.homewindow._migrate_mystuff_setting()
+
+    assert ctx.compat.ADDON.getSetting('home_show_mystuff') == 'false'
+    assert ctx.compat.ADDON.getSetting('home_show_continue') == ''
+
+
+def test_an_enabled_continue_row_needs_no_migration(load_homewindow):
+    """The new setting already defaults to on, so a true (or unset) old
+    value is already correct and must not be written over."""
+    ctx = load_homewindow(settings={'home_show_continue': 'true'})
+
+    ctx.homewindow._migrate_mystuff_setting()
+
+    assert ctx.compat.ADDON.getSetting('home_show_mystuff') != 'false'
+    assert ctx.compat.ADDON.getSetting('home_show_continue') == ''
+
+
+def test_migration_is_idempotent(load_homewindow):
+    """Clearing the old key is what makes a second launch a no-op - it must
+    not re-apply an old value over a choice the user has since changed."""
+    ctx = load_homewindow(settings={'home_show_continue': 'false'})
+
+    ctx.homewindow._migrate_mystuff_setting()
+    ctx.compat.ADDON.setSetting('home_show_mystuff', 'true')   # user turns it back on
+    ctx.homewindow._migrate_mystuff_setting()
+
+    assert ctx.compat.ADDON.getSetting('home_show_mystuff') == 'true'
+
+
+def test_migration_survives_a_broken_settings_write(load_homewindow, monkeypatch):
+    """A cosmetic migration must never stop Home from opening."""
+    ctx = load_homewindow(settings={'home_show_continue': 'false'})
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError('settings unwritable')
+
+    monkeypatch.setattr(ctx.compat.ADDON, 'setSetting', _boom)
+
+    ctx.homewindow._migrate_mystuff_setting()   # must not raise

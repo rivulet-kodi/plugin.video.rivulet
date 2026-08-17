@@ -702,7 +702,7 @@ msgstr "Weiter"
 
 msgctxt "#30242"
 msgid "NEXT UP"
-msgstr "NÄCHSTE"
+msgstr "ALS NÄCHSTES"
 
 msgctxt "#30243"
 msgid "WATCHED"

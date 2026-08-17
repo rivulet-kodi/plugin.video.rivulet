@@ -347,3 +347,92 @@ def test_every_band_has_a_heading_string(mystuff):
     heading id would draw a blank header."""
     for band in mystuff.BAND_ORDER:
         assert band in mystuff.BAND_HEADINGS
+
+
+# ---------------------------------------------------------------------------
+# _label_next_episodes() - a finished series is not "next up"
+# ---------------------------------------------------------------------------
+
+
+def test_a_series_with_no_next_episode_moves_to_recently_watched(mystuff):
+    """A finished final season has nothing to play next, so it belongs with
+    the other watched titles rather than sitting under "NEXT UP" with no
+    episode to name."""
+    items = [{
+        'band': mystuff.BAND_NEXT_UP, 'video_id': 'tt1:2:6',
+        'videos': [
+            {'id': 'tt1:2:5', 'season': 2, 'episode': 5},
+            {'id': 'tt1:2:6', 'season': 2, 'episode': 6},
+        ],
+    }]
+
+    mystuff._label_next_episodes(items)
+
+    assert items[0]['band'] == mystuff.BAND_RECENT
+    assert 'next_label' not in items[0]
+
+
+def test_a_series_whose_meta_never_arrived_stays_in_next_up(mystuff):
+    """With no `videos` there is no way to tell "final season" from "not
+    fetched yet", so the band is left alone rather than guessing the title
+    is finished."""
+    items = [{'band': mystuff.BAND_NEXT_UP, 'video_id': 'tt1:1:2', 'videos': []}]
+
+    mystuff._label_next_episodes(items)
+
+    assert items[0]['band'] == mystuff.BAND_NEXT_UP
+
+
+def test_a_series_with_a_next_episode_stays_put_and_is_labelled(mystuff):
+    items = [{
+        'band': mystuff.BAND_NEXT_UP, 'video_id': 'tt1:1:2',
+        'videos': [
+            {'id': 'tt1:1:2', 'season': 1, 'episode': 2},
+            {'id': 'tt1:1:3', 'season': 1, 'episode': 3},
+        ],
+    }]
+
+    mystuff._label_next_episodes(items)
+
+    assert items[0]['band'] == mystuff.BAND_NEXT_UP
+    assert items[0]['next_label'] == 'S1E3'
+
+
+# ---------------------------------------------------------------------------
+# _enrich() - next-up items are fetched even when already enriched
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_fetches_next_up_items_that_already_have_name_and_poster(mystuff):
+    """A series in BOTH the library and the progress cache arrives with a
+    name and poster from the library - but the library entry carries no
+    `videos`, so without a fetch the next episode can never be resolved.
+    That is the common case, not an edge one."""
+    fetched = []
+
+    class _Views:
+        _MAX_ADDON_WORKERS = 4
+
+        @staticmethod
+        def _map_addons(fn, items):
+            return [fn(item) for item in items]
+
+        @staticmethod
+        def _fetch_meta(stype, sid, store=True, on_miss=None):
+            fetched.append(sid)
+            return {'name': 'Sherlock', 'poster': 'p.jpg',
+                    'videos': [{'id': 'tt1:1:2', 'season': 1, 'episode': 2},
+                               {'id': 'tt1:1:3', 'season': 1, 'episode': 3}]}
+
+    import sys
+    sys.modules['lib.ui'].views = _Views
+    mystuff.get_store = lambda: type('S', (), {'data_dir': None})()
+
+    items = [{
+        'type': 'series', 'id': 'tt1', 'band': mystuff.BAND_NEXT_UP,
+        'video_id': 'tt1:1:2', 'name': 'Sherlock', 'poster': 'p.jpg',
+    }]
+    mystuff._enrich(items)
+
+    assert fetched == ['tt1'], 'an already-named next-up item must still be fetched for its videos'
+    assert items[0].get('videos'), 'the videos list must reach the item'

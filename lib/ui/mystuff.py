@@ -305,11 +305,23 @@ def _enrich(items):
     """
     from lib.ui import views
 
-    needs_fetch = [item for item in items if not item.get('name') or not item.get('poster')]
+    # A next-up item is fetched even when it already has name and poster:
+    # those come from the library entry, which carries no `videos`, and
+    # without that list `_label_next_episodes()` cannot say which episode
+    # is next. That is the COMMON case - a series you are part-way through
+    # is usually also in your library - so skipping it left the band
+    # showing a bare "NEXT UP" exactly where the episode matters most.
+    needs_fetch = [
+        item for item in items
+        if not item.get('name') or not item.get('poster') or item.get('band') == BAND_NEXT_UP
+    ]
     if not needs_fetch:
         return items
 
     def _fetch(item):
+        """One item's meta, plus whether it was a genuine cache miss - the
+        flag `store_cached_metas()` below needs to avoid re-stamping TTLs
+        on entries that were already cached."""
         was_fresh = []
         meta = views._fetch_meta(
             item['type'], item['id'], store=False,
@@ -349,16 +361,30 @@ def _label_next_episodes(items):
     would actually play rather than a bare "NEXT UP".
 
     Uses the `videos` list `_enrich()` stashed on the item, so this costs
-    no extra addon traffic. An item whose meta never arrived, or whose
-    series has no next episode (a finished final season), simply keeps no
-    label and the grid falls back to the band name. Mutates `items` in
-    place, like the enrich pass above it.
+    no extra addon traffic.
+
+    Also demotes a series that turns out to have NO next episode: if its
+    meta arrived and nothing follows the episode just finished, the title
+    is finished rather than next-up, so it moves to `BAND_RECENT` before
+    `group_by_band()` splits the list. An item whose meta never arrived is
+    left where it is - with no `videos` there is no way to tell "final
+    season" from "not fetched yet". Mutates `items` in place, like the
+    enrich pass above it.
     """
     for item in items:
         if item.get('band') != BAND_NEXT_UP:
             continue
-        video = resolve_next_up(item, {'videos': item.get('videos') or []})
+        videos = item.get('videos') or []
+        video = resolve_next_up(item, {'videos': videos})
         if not video:
+            # No next episode. If the meta actually arrived and simply has
+            # nothing after this one - a finished final season - the title
+            # is not "next up" at all; it is finished, and belongs with the
+            # other watched titles. Without a meta we cannot tell the two
+            # apart, so the band is left alone and the card keeps its
+            # unqualified "NEXT UP".
+            if videos:
+                item['band'] = BAND_RECENT
             continue
         season, episode = video.get('season'), video.get('episode')
         if season is None or episode is None:

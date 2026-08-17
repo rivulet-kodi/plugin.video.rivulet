@@ -259,6 +259,39 @@ _ACTIONS = {
 }
 
 
+def _migrate_mystuff_setting():
+    """Carry a `home_show_continue` value over to `home_show_mystuff` once.
+
+    The merged row replaced two rows and took a new setting id with it, so
+    anyone who had deliberately turned the old "Continue watching" row OFF
+    would silently get the new row switched back on. This copies that
+    decision across the rename exactly once.
+
+    Only a `false` needs carrying: the new setting already defaults to
+    True, so an unset or true old value is already correct. The old key is
+    cleared afterwards, which is also what makes this idempotent - a
+    second launch finds nothing to migrate and cannot re-apply the value
+    over a choice the user has since changed.
+
+    Best-effort: a settings read/write failing here must never stop Home
+    from opening, so any exception is logged and swallowed.
+    """
+    import xbmc
+
+    from lib.ui.compat import ADDON, log, setting_bool
+
+    try:
+        raw = (ADDON.getSetting('home_show_continue') or '').strip()
+        if not raw:
+            return
+        if not setting_bool('home_show_continue', True):
+            ADDON.setSetting('home_show_mystuff', 'false')
+            log('homewindow: carried home_show_continue=false to home_show_mystuff', xbmc.LOGINFO)
+        ADDON.setSetting('home_show_continue', '')
+    except Exception as exc:
+        log('homewindow: home_show_mystuff migration failed: %r' % (exc,), xbmc.LOGWARNING)
+
+
 def _notify_if_updated(store):
     """Toast the user once when the running addon version differs from the
     version `store` last recorded - the "tell them on next launch" approach
@@ -310,6 +343,7 @@ def open_home():
     # here too (not just inside _notify_if_updated): a cosmetic toast must
     # never stop Home from opening, even if Store construction itself
     # fails (e.g. an unwritable profile directory).
+    _migrate_mystuff_setting()
     try:
         _notify_if_updated(get_store())
     except Exception as exc:

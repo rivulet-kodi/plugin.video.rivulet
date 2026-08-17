@@ -194,6 +194,7 @@ class GridWindow(BaseWindow):
     """See module docstring. Built/run via `open_grid()`."""
 
     def __init__(self, *args, **kwargs):
+        """Start empty; `start()` supplies the bands and runs the modal."""
         super().__init__(*args, **kwargs)
         self.bands = []
         self.heading = ''
@@ -213,6 +214,9 @@ class GridWindow(BaseWindow):
         return self.selected
 
     def onInit(self):
+        """Fill one row per band, label it, and focus the first populated
+        one. Re-runs whenever `uicommon.ModalStackWindow` reopens a screen
+        force-closed for playback, so every row is reset first."""
         from lib.ui.compat import L
         from lib.ui.mystuff import BAND_HEADINGS
 
@@ -281,6 +285,9 @@ class GridWindow(BaseWindow):
             pass
 
     def onAction(self, action):
+        """Close on a back action; otherwise refresh the hero and fanart,
+        since any other action may have moved the focus - including up/down
+        between band rows, which the grouplist handles itself."""
         from lib.ui.uicommon import BACK_ACTIONS
 
         if action.getId() in BACK_ACTIONS:
@@ -292,6 +299,8 @@ class GridWindow(BaseWindow):
         self._update_background()
 
     def onClick(self, control_id):
+        """Record the picked title and close, so `start()` can return it.
+        Clicks on anything but a band row are ignored."""
         if control_id not in {list_id for list_id, _label in BAND_ROWS.values()}:
             return
         item = self._focused_item()

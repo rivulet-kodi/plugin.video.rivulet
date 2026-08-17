@@ -599,3 +599,28 @@ def test_focus_is_marked_without_scaling_the_cell():
     assert focused, 'no focusedlayout found'
     assert 'FF38BDF8' in focused.group(1), (
         'the focused layout draws no accent mark, so focus is invisible')
+
+
+def test_the_focus_underline_spans_the_whole_poster():
+    """The accent underline is the only thing marking focus, so it must
+    match the poster it sits under. After the poster grew to 288 the
+    underline was left at 256 in all four bands - 32px short, and visibly
+    so against the artwork above it."""
+    import re
+
+    xml = _grid_xml()
+    poster = re.search(
+        r'<top>0</top><left>(\d+)</left><width>(\d+)</width><height>\d+</height>\s*'
+        r'<texture[^>]*background="true">\$INFO\[ListItem.Property\(thumbnail\)\]</texture>',
+        xml)
+    assert poster, 'no poster box found'
+    poster_x, poster_w = poster.group(1), poster.group(2)
+
+    # The 4px accent bar drawn under a focused poster, one per band row.
+    underlines = re.findall(
+        r'<control type="image"><top>\d+</top><left>(\d+)</left><width>(\d+)</width>'
+        r'<height>4</height><texture colordiffuse="FF38BDF8">', xml)
+    assert underlines, 'no focus underline found'
+    for x, w in underlines:
+        assert (x, w) == (poster_x, poster_w), (
+            'underline %s@%s does not match the poster %s@%s' % (w, x, poster_w, poster_x))
