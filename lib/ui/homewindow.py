@@ -5,7 +5,7 @@ navigation model this and every other custom screen shares).
 
 Discover/Search/Library each draw a nested modal over Home and only
 close it once their own selection chain reaches playback (see
-`_open_discover`/`_open_search`/`_open_library`); Add-ons has no
+`_open_discover`/`_open_search`/`_open_mystuff`); Add-ons has no
 playback path of its own, so Home always stays open behind it (see
 `_open_addons`). Settings opens Kodi's own native settings dialog,
 which is not worth replacing.
@@ -63,14 +63,20 @@ def _remainder_types(available):
 
 
 #: (localized-string id, action) - the authoritative definition of Home's menu rows.
+#:
+#: `mystuff` replaces what used to be two separate rows, "Continue
+#: watching" (30231) and "Library" (30002): both built a list of metas
+#: and handed it to the same coverflow, and they overlap heavily in
+#: practice (a title you are part-way through is usually also in your
+#: library), so splitting them made the viewer guess which one held the
+#: thing they wanted. See `lib.ui.mystuff` for the merge and its bands.
 _MENU = (
-    (30231, 'continue'),
+    (30241, 'mystuff'),
     (30213, 'movies'),
     (30214, 'series'),
     (30215, 'anime'),
     (30227, 'other'),
     (30001, 'search'),
-    (30002, 'library'),
     (30003, 'addons'),
     (30004, 'settings'),
 )
@@ -80,13 +86,12 @@ _MENU = (
 #: label per row - localized via L(), not plain literals, so it follows
 #: Kodi's language setting the same as every other row's main label.
 _SUBTITLES = {
-    'continue': 30232,
+    'mystuff': 30232,
     'movies': 30216,
     'series': 30217,
     'anime': 30218,
     'other': 30228,
     'search': 30149,
-    'library': 30150,
     'addons': 30151,
     'settings': 30152,
 }
@@ -123,15 +128,13 @@ def _type_row_enabled(action, available):
     return setting_bool(setting_id, True)
 
 
-def _menu_items(show_library, addons=None, show_continue=False):
+def _menu_items(show_mystuff, addons=None):
     from lib.ui.compat import L, addon_media_path
 
     available = _available_types(addons or [])
     items = []
     for string_id, action in _MENU:
-        if action == 'continue' and not show_continue:
-            continue
-        if action == 'library' and not show_library:
+        if action == 'mystuff' and not show_mystuff:
             continue
         if action in TYPE_ROW_TYPES and not _type_row_enabled(action, available):
             continue
@@ -167,15 +170,15 @@ class HomeWindow(BaseWindow):
 
     def onInit(self):
         from lib.ui.compat import addon_fanart, setting_bool
-        from lib.ui.continuewatching import has_resumable
+        from lib.ui.mystuff import has_content
 
         store = get_store()
         auth = store.get_auth()
         # Recomputed every onInit(): onInit() re-runs on every resume from
         # a nested modal (see reset() below), so the row appears/
-        # disappears the moment progress crosses the resumable band or the
-        # setting flips, without restarting the addon.
-        show_continue = setting_bool('home_show_continue', True) and has_resumable(store)
+        # disappears the moment the first title is played or the user logs
+        # in, without restarting the addon.
+        show_mystuff = setting_bool('home_show_mystuff', True) and has_content(store)
         self.getControl(BACKGROUND).setImage(addon_fanart())
         control = self.getControl(LIST)
         # reset() before addItems(): onInit() runs again when
@@ -186,7 +189,7 @@ class HomeWindow(BaseWindow):
         # an addon that publishes a new type) is reflected on the way back
         # here without restarting the addon.
         control.reset()
-        control.addItems(_menu_items(bool(auth), store.get_addons(), show_continue))
+        control.addItems(_menu_items(show_mystuff, store.get_addons()))
         self.getControl(STATUS_LABEL).setLabel(_status_text(auth))
         self.setFocusId(LIST)
 
@@ -201,9 +204,9 @@ class HomeWindow(BaseWindow):
             handler(self)
 
 
-def _open_continue(window):
-    from lib.ui.continuewatching import open_continue_watching
-    if open_continue_watching():
+def _open_mystuff(window):
+    from lib.ui.mystuff import open_my_stuff
+    if open_my_stuff():
         window.close()
 
 
@@ -225,12 +228,6 @@ def _open_search(window):
         window.close()
 
 
-def _open_library(window):
-    from lib.ui.librarywindow import open_library
-    if open_library():
-        window.close()
-
-
 def _open_addons(window):
     from lib.ui.addonswindow import open_addons
     open_addons()
@@ -248,13 +245,12 @@ L_FOR_ACTION = {action: string_id for string_id, action in _MENU}
 
 
 _ACTIONS = {
-    'continue': _open_continue,
+    'mystuff': _open_mystuff,
     'movies': lambda window: _open_type_row(window, 'movies'),
     'series': lambda window: _open_type_row(window, 'series'),
     'anime': lambda window: _open_type_row(window, 'anime'),
     'other': lambda window: _open_type_row(window, 'other'),
     'search': _open_search,
-    'library': _open_library,
     'addons': _open_addons,
     'settings': _open_settings,
 }

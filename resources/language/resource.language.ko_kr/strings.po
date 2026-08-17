@@ -693,8 +693,8 @@ msgid "Continue watching"
 msgstr "이어보기"
 
 msgctxt "#30232"
-msgid "Pick up where you left off"
-msgstr "중단한 부분부터 다시 시작합니다"
+msgid "Resume, next up, and your library"
+msgstr "이어보기, 다음 화, 내 라이브러리"
 
 msgctxt "#30233"
 msgid "Show Continue watching"
@@ -703,3 +703,19 @@ msgstr "이어보기 표시"
 msgctxt "#30234"
 msgid "now"
 msgstr "현재"
+
+msgctxt "#30241"
+msgid "My Stuff"
+msgstr "내 목록"
+
+msgctxt "#30242"
+msgid "NEXT UP"
+msgstr "다음 화"
+
+msgctxt "#30243"
+msgid "WATCHED"
+msgstr "시청 완료"
+
+msgctxt "#30244"
+msgid "Show My Stuff"
+msgstr "내 목록 표시"

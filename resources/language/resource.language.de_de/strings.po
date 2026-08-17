@@ -693,8 +693,8 @@ msgid "Continue watching"
 msgstr "Weiterschauen"
 
 msgctxt "#30232"
-msgid "Pick up where you left off"
-msgstr "Da weitermachen, wo du aufgehört hast"
+msgid "Resume, next up, and your library"
+msgstr "Fortsetzen, Nächste Folge und deine Bibliothek"
 
 msgctxt "#30233"
 msgid "Show Continue watching"
@@ -703,3 +703,19 @@ msgstr "Weiterschauen anzeigen"
 msgctxt "#30234"
 msgid "now"
 msgstr "heute"
+
+msgctxt "#30241"
+msgid "My Stuff"
+msgstr "Meine Sachen"
+
+msgctxt "#30242"
+msgid "NEXT UP"
+msgstr "NÄCHSTE"
+
+msgctxt "#30243"
+msgid "WATCHED"
+msgstr "GESEHEN"
+
+msgctxt "#30244"
+msgid "Show My Stuff"
+msgstr "Meine Sachen anzeigen"

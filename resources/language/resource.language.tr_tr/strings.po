@@ -693,8 +693,8 @@ msgid "Continue watching"
 msgstr "İzlemeye devam et"
 
 msgctxt "#30232"
-msgid "Pick up where you left off"
-msgstr "Kaldığın yerden devam et"
+msgid "Resume, next up, and your library"
+msgstr "Devam et, sıradaki ve kitaplığınız"
 
 msgctxt "#30233"
 msgid "Show Continue watching"
@@ -703,3 +703,19 @@ msgstr "İzlemeye devam et göster"
 msgctxt "#30234"
 msgid "now"
 msgstr "devam"
+
+msgctxt "#30241"
+msgid "My Stuff"
+msgstr "Benim İçeriklerim"
+
+msgctxt "#30242"
+msgid "NEXT UP"
+msgstr "SIRADAKİ"
+
+msgctxt "#30243"
+msgid "WATCHED"
+msgstr "İZLENDİ"
+
+msgctxt "#30244"
+msgid "Show My Stuff"
+msgstr "Benim İçeriklerimi göster"

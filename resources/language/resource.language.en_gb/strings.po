@@ -693,7 +693,7 @@ msgid "Continue watching"
 msgstr ""
 
 msgctxt "#30232"
-msgid "Pick up where you left off"
+msgid "Resume, next up, and your library"
 msgstr ""
 
 msgctxt "#30233"
@@ -702,4 +702,20 @@ msgstr ""
 
 msgctxt "#30234"
 msgid "now"
+msgstr ""
+
+msgctxt "#30241"
+msgid "My Stuff"
+msgstr ""
+
+msgctxt "#30242"
+msgid "NEXT UP"
+msgstr ""
+
+msgctxt "#30243"
+msgid "WATCHED"
+msgstr ""
+
+msgctxt "#30244"
+msgid "Show My Stuff"
 msgstr ""

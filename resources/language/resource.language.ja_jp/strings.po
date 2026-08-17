@@ -693,8 +693,8 @@ msgid "Continue watching"
 msgstr "続きを見る"
 
 msgctxt "#30232"
-msgid "Pick up where you left off"
-msgstr "前回の続きから再生できます"
+msgid "Resume, next up, and your library"
+msgstr "再開、次のエピソード、ライブラリ"
 
 msgctxt "#30233"
 msgid "Show Continue watching"
@@ -703,3 +703,19 @@ msgstr "続きを見るを表示"
 msgctxt "#30234"
 msgid "now"
 msgstr "現在"
+
+msgctxt "#30241"
+msgid "My Stuff"
+msgstr "マイリスト"
+
+msgctxt "#30242"
+msgid "NEXT UP"
+msgstr "次のエピソード"
+
+msgctxt "#30243"
+msgid "WATCHED"
+msgstr "視聴済み"
+
+msgctxt "#30244"
+msgid "Show My Stuff"
+msgstr "マイリストを表示"
