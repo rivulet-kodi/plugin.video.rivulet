@@ -40,10 +40,21 @@
      the header away from its own posters as well.
 
      `usecontrolcoords` is what makes the stack work: each control is laid
-     out under the previous one, so a row whose list is empty collapses
-     entirely - both its header and its panel are `visible` on that list's
-     own NumItems. A viewer with nothing finished sees no "Recently
-     watched" heading at all, rather than an empty band.
+     out under the previous one, so an empty row collapses and the bands
+     below it move up. Only the HEADER is gated on
+     `Integer.IsGreater(Container(id).NumItems,0)`, so a viewer with
+     nothing finished sees no "Recently watched" heading; the panel itself
+     is deliberately NOT gated.
+
+     That last point is load-bearing, and cost a long debugging session.
+     `Container(id).NumItems` does not update synchronously with
+     `addItems()` - measured on a real device, it still reads 0 in the
+     same pass, and only settles ~100ms later. A panel carrying that
+     condition is therefore still INVISIBLE when `onInit()` calls
+     `setFocusId()` on it, Kodi refuses to focus an invisible control
+     ("Control 30002 in window 13003 has been asked to focus, but it
+     can't"), and a window with nothing focused never redraws - it looks
+     frozen on screen while every row is correctly populated underneath.
 
      THE CELL LAYOUTS ARE GENERATED: all four rows carry a byte-identical
      copy, because this skin has no Includes.xml to share one through.
@@ -114,7 +125,6 @@
                     <orientation>horizontal</orientation>
                     <onleft>30002</onleft><onright>30002</onright>
                     <scrolltime tween="cubic" easing="out">260</scrolltime>
-                    <visible>Integer.IsGreater(Container(30002).NumItems,0)</visible>
                     <itemlayout width="280" height="470">
                         <control type="image">
                             <top>0</top><left>12</left><width>256</width><height>384</height>
@@ -193,7 +203,6 @@
                     <orientation>horizontal</orientation>
                     <onleft>30012</onleft><onright>30012</onright>
                     <scrolltime tween="cubic" easing="out">260</scrolltime>
-                    <visible>Integer.IsGreater(Container(30012).NumItems,0)</visible>
                     <itemlayout width="280" height="470">
                         <control type="image">
                             <top>0</top><left>12</left><width>256</width><height>384</height>
@@ -272,7 +281,6 @@
                     <orientation>horizontal</orientation>
                     <onleft>30022</onleft><onright>30022</onright>
                     <scrolltime tween="cubic" easing="out">260</scrolltime>
-                    <visible>Integer.IsGreater(Container(30022).NumItems,0)</visible>
                     <itemlayout width="280" height="470">
                         <control type="image">
                             <top>0</top><left>12</left><width>256</width><height>384</height>
@@ -351,7 +359,6 @@
                     <orientation>horizontal</orientation>
                     <onleft>30032</onleft><onright>30032</onright>
                     <scrolltime tween="cubic" easing="out">260</scrolltime>
-                    <visible>Integer.IsGreater(Container(30032).NumItems,0)</visible>
                     <itemlayout width="280" height="470">
                         <control type="image">
                             <top>0</top><left>12</left><width>256</width><height>384</height>

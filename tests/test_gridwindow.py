@@ -458,18 +458,32 @@ def test_every_band_has_a_row(ctx):
         assert band in ctx.gridwindow.BAND_ROWS
 
 
-def test_each_band_row_hides_itself_when_empty(ctx):
-    """Both the poster row AND its header are gated on the list's own
-    NumItems, so an empty band collapses instead of leaving a heading over
-    nothing - the whole reason the rows are separate controls."""
+def test_only_the_header_is_gated_on_numitems(ctx):
+    """An empty band shows no heading - but the PANEL must never carry that
+    condition.
+
+    `Container(id).NumItems` does not update synchronously with
+    `addItems()`: measured on a real device it still reads 0 in the same
+    pass and settles ~100ms later. A panel gated on it is therefore still
+    invisible when `onInit()` focuses it, Kodi refuses to focus an
+    invisible control, and a window with nothing focused never redraws -
+    it looks frozen while every row is correctly populated underneath.
+    That cost a long debugging session; this test is the guard."""
     import re
 
     xml = _grid_xml()
     for band, (list_id, label_id) in ctx.gridwindow.BAND_ROWS.items():
-        condition = 'Integer.IsGreater(Container(%d).NumItems,0)' % list_id
-        # Once for the header label, once for the panel.
-        assert xml.count('<visible>%s</visible>' % condition) == 2, (
-            '%s: expected both its header and its panel gated on %s' % (band, condition))
+        condition = '<visible>Integer.IsGreater(Container(%d).NumItems,0)</visible>' % list_id
+        assert xml.count(condition) == 1, (
+            '%s: expected exactly one NumItems gate (its header), found %d'
+            % (band, xml.count(condition)))
+        # ...and it must be the header's, not the panel's.
+        panel = re.search(
+            r'<control type="panel" id="%d">(.*?)</control>' % list_id, xml, flags=re.S)
+        assert panel, '%s: panel %d not found' % (band, list_id)
+        assert 'NumItems' not in panel.group(1), (
+            '%s: the panel is gated on NumItems, which makes it unfocusable '
+            'in the pass that fills it' % band)
         assert re.search(r'<control type="label" id="%d"' % label_id, xml)
 
 
