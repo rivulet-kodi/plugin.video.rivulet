@@ -1,11 +1,20 @@
-# Every workflow run currently warns that actions/checkout@v4 and
-# actions/setup-python@v5 target Node.js 20, which GitHub deprecated and now
-# force-runs on Node 24. Pinned major versions do not drift on their own, so
-# without this the warning stays until someone reads the log and bumps by hand.
+# Every workflow run warned that actions/checkout@v4 and actions/setup-python@v5
+# target Node.js 20, which GitHub deprecated and now force-runs on Node 24. A
+# pinned major does not drift on its own, so that warning stayed until someone
+# read a log and bumped by hand. #26 was the first pass.
 #
-# Grouped into one PR per ecosystem: these arrive as version bumps with no
-# behaviour to review individually, and each separate PR would spend one of the
-# repo's 3 CodeRabbit reviews per rolling hour.
+# Grouped into one PR: these arrive as version bumps with no behaviour to review
+# individually, and each separate PR would spend one of the repo's 3 CodeRabbit
+# reviews per rolling hour.
+#
+# github-actions ONLY, deliberately. pip was tried in a36c83e and reverted here:
+# every floor in requirements-dev.txt is deliberately held at the last
+# 3.8-compatible release for the Kodi 19 "Matrix" CI leg, and mypy is capped
+# below 2.0 because 2.x dropped `--python-version 3.8/3.9` and would silently
+# discard this project's py38/py39-scoped config. Dependabot proposed exactly
+# that in #27 - `requests>=2.34.2` (no 3.8 distribution) and `mypy>=2.3.0` - and
+# would re-propose it every month. There is nothing for it to contribute where
+# every floor is a decision rather than a lag.
 ---
 version: 2
 
@@ -19,17 +28,3 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: "ci"
-
-  # Dev/test tooling only - the addon itself declares its runtime dependency
-  # through addon.xml's <import addon="script.module.requests">, which Kodi
-  # resolves, not pip. The requests floor stays at 2.22.0 deliberately and the
-  # compat-py38-requests job pins it, so an update here cannot raise it.
-  - package-ecosystem: pip
-    directory: /
-    schedule:
-      interval: monthly
-    groups:
-      dev-tooling:
-        patterns: ["*"]
-    commit-message:
-      prefix: "test"
