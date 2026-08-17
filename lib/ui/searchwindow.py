@@ -157,6 +157,117 @@ def _rank_by_credit(metas, query):
     return sorted(metas, key=_credit_rank)
 
 
+def _dedupe(metas):
+    """Collapse metas sharing a `(type, id)` to a single entry, keeping
+    each title's first-seen position.
+
+    The fan-out asks every search-capable catalog the same question, so
+    the same title genuinely comes back many times over - a title in
+    both Cinemeta's `top` catalog and an aggregator's own search catalog
+    is two copies before any addon is even duplicated. Measured against
+    a real install (Cinemeta plus AIOLists' four search catalogs),
+    "alien" returned 96 metas covering 57 distinct titles: 41% of what
+    the coverflow showed was a repeat of something already in it.
+
+    Fields are merged rather than dropped with the losing copy. Search
+    previews are trimmed per-addon and each addon trims differently, so
+    the union across duplicates carries strictly more metadata than any
+    single copy - on that same install Inception came back three times
+    and only the third copy carried `imdbRating`. A field is filled in
+    only where the winner has nothing, so the first-seen copy stays
+    authoritative wherever it actually has a value.
+
+    Metas with no `id` are dropped: `open_detail()` is keyed by id, so
+    an id-less meta is a dead entry in the coverflow.
+    """
+    winners = {}
+    order = []
+    for meta_obj in metas:
+        content_id = meta_obj.get('id')
+        if not content_id:
+            continue
+        key = (meta_obj.get('type'), content_id)
+        winner = winners.get(key)
+        if winner is None:
+            winners[key] = dict(meta_obj)
+            order.append(key)
+            continue
+        for field, value in meta_obj.items():
+            if winner.get(field) in (None, '', []) and value not in (None, '', []):
+                winner[field] = value
+    return [winners[key] for key in order]
+
+
+#: `_match_tier()`'s return values, best first. Only their ORDER
+#: matters - they are ranks handed to `sorted()`, never arithmetic.
+_TIER_EXACT, _TIER_PREFIX, _TIER_WORD, _TIER_SUBSTRING, _TIER_OTHER = range(5)
+
+
+def _match_tier(name, needle):
+    """Rank how well `name` matches `needle` - both already casefolded
+    and stripped by `_rank_by_title()`.
+
+    Tiers rather than a similarity score: `search=` is plain full-text
+    and every addon implements it differently, so the only signal that
+    generalises across them is how the returned title relates to what
+    was typed. Exact beats "starts with" beats "contains the query as a
+    whole word" beats "contains it anywhere".
+
+    The whole-word tier is what separates "Alien Nation" from "My
+    Stepmother Is an Alien" - both merely contain the query, but only
+    one leads with it. Trailing punctuation is stripped per word so a
+    mid-title "Alien:" still counts as the word "alien".
+    """
+    if not name:
+        return _TIER_OTHER
+    if name == needle:
+        return _TIER_EXACT
+    if name.startswith(needle):
+        return _TIER_PREFIX
+    if any(word.strip(':,.-!?\'"') == needle for word in name.split()):
+        return _TIER_WORD
+    if needle in name:
+        return _TIER_SUBSTRING
+    return _TIER_OTHER
+
+
+def _rank_by_title(metas, query, feed_index=None):
+    """Stable-sort `metas` by `_match_tier()`, best tier first, breaking
+    ties within a tier by `lib.ui.searchfeed`'s popularity/rating boost
+    when `feed_index` is given.
+
+    Stable, so titles the feed says nothing about keep the order they
+    already had - this only ever moves a title relative to titles in a
+    DIFFERENT tier, or above one the feed scores lower in the SAME tier,
+    and never invents an ordering where neither the tier nor the feed
+    expressed one. Runs after `_rank_by_credit()` and so reorders its
+    output: a credited title that does not also match by name is still a
+    name miss, and the coverflow should lead with what the user typed.
+
+    The tier always outranks the boost - popularity breaks ties, it does
+    not cross tiers. `stremio-core` folds its boost into the text-match
+    score instead, letting a popular title outrank a better textual
+    match; here the query is typed in full and submitted rather than
+    completed keystroke by keystroke, so a title the user typed exactly
+    must not be displaced by a more popular near-match.
+    """
+    needle = (query or '').casefold().strip()
+    if not needle:
+        return metas
+    if feed_index is None:
+        return sorted(metas, key=lambda meta_obj: _match_tier((meta_obj.get('name') or '').casefold().strip(), needle))
+
+    from lib.ui.searchfeed import boost
+
+    index, max_rating, max_popularity = feed_index
+
+    def _rank(meta_obj):
+        tier = _match_tier((meta_obj.get('name') or '').casefold().strip(), needle)
+        return (tier, -boost(meta_obj, index, max_rating, max_popularity))
+
+    return sorted(metas, key=_rank)
+
+
 def run_query(store, client, query):
     """Fan `query` across every search-capable catalog
     (`iter_catalogs(..., extra_required='search')`) and return the
@@ -167,7 +278,13 @@ def run_query(store, client, query):
     without going through `SearchWindow` -
     `lib.ui.infowindow.open_credits_picker()`'s "person" dispatch is the
     second caller. Writes no history, opens no coverflow - callers own
-    both."""
+    both.
+
+    The collected metas are deduplicated (`_dedupe()`) and then ordered
+    by how well each title matches the query (`_rank_by_title()`), after
+    the existing credit ranking. Both callers want that: a person
+    dispatch from `open_credits_picker()` fans out the same way and gets
+    the same duplicates back."""
     from lib.stremio.addons import AddonError, iter_catalogs, safe_url_for_log
     from lib.ui.compat import L, log
 
@@ -188,7 +305,32 @@ def run_query(store, client, query):
             for meta_obj in results or []:
                 meta_obj['type'] = meta_obj.get('type') or cat.get('type')
                 metas.append(meta_obj)
-    return _rank_by_credit(metas, query)
+    return _rank_by_title(_dedupe(_rank_by_credit(metas, query)), query, _feed_index(store, client))
+
+
+def _feed_index(store, client):
+    """The `lib.ui.searchfeed` index for `_rank_by_title()`, or None when
+    the feed is unavailable - a cold fetch that fails, a store with no
+    `data_dir`, or a client with no session to borrow.
+
+    Reuses the `AddonClient`'s own `requests.Session()` rather than
+    opening a second one: the feed is an ordinary HTTPS GET and the
+    session already carries the addon's connection pooling.
+
+    None (rather than an empty index) is deliberate - it routes
+    `_rank_by_title()` down its feedless path, which is exactly the
+    behaviour this module had before the feed existed.
+    """
+    data_dir = getattr(store, 'data_dir', None)
+    session = getattr(client, 'session', None)
+    if data_dir is None or session is None:
+        return None
+    from lib.ui.searchfeed import build_index, load_records
+
+    records = load_records(data_dir, session)
+    if not records:
+        return None
+    return build_index(records)
 
 
 def open_search():
