@@ -59,16 +59,16 @@ BAND_ROWS = {
 LIST = BAND_ROWS['resume'][0]
 
 #: Width, in skin pixels, of a cell's progress track - must match the
-#: 240px bar in `GridWindow.xml`'s cell layouts, since `_progress_width()`
+#: 232px bar in `GridWindow.xml`'s cell layouts, since `_progress_width()`
 #: scales into it.
 #:
-#: 240 is the poster's REAL rendered width, not merely its layout box: the
-#: artwork is drawn `aspectratio=keep` into a 240x360 box, a true 2:3, so
+#: 232 is the poster's REAL rendered width, not merely its layout box: the
+#: artwork is drawn `aspectratio=keep` into a 232x348 box, a true 2:3, so
 #: a standard poster fills it edge to edge. The two must stay equal - at
 #: an earlier 240 track against a 216-wide rendered poster the bar
 #: overhung the artwork by 12px each side, plainly visible on a real
 #: device against the focused cell's outline. A test pins them together.
-PROGRESS_TRACK_WIDTH = 240
+PROGRESS_TRACK_WIDTH = 232
 
 #: Floor on a rendered progress bar, in skin pixels. A title watched 1-2%
 #: scales to a sub-pixel sliver that renders as nothing at all, which
@@ -149,25 +149,24 @@ def _badge(item):
 
 
 def _caption(item):
-    """The line under the focused title at the top of the screen: the
-    band's own name, plus the next episode when one has been resolved
-    (`lib.ui.mystuff.resolve_next_up()`), so a next-up title says which
-    episode it would play. Unlike `_badge()` this has room for the band's
-    full name, which is what actually tells the viewer WHY the title is
-    on this screen."""
-    from lib.ui.compat import L
-    from lib.ui.mystuff import BAND_HEADINGS, BAND_NEXT_UP, BAND_RESUME
+    """The line under the focused title at the top of the screen.
 
+    Deliberately does NOT name the band. The focused card always sits
+    directly under its own band header, so repeating "Continue watching"
+    here put the same words on screen twice within about 80 pixels - and
+    a third time in the breadcrumb. What the header cannot say is where
+    THIS title stands, so that is all this line carries: how far in you
+    are, or which episode is next.
+    """
     band = item.get('band')
-    heading = BAND_HEADINGS.get(band)
-    parts = [L(heading)] if heading else []
-    if band == BAND_RESUME:
+    if band == 'resume':
         percent = item.get('percent')
         if isinstance(percent, (int, float)) and not isinstance(percent, bool):
-            parts.append('%d%%' % int(percent))
-    elif band == BAND_NEXT_UP and item.get('next_label'):
-        parts.append(item['next_label'])
-    return ' · '.join(parts)
+            return '%d%% watched' % int(percent)
+        return ''
+    if band == 'next_up':
+        return item.get('next_label') or ''
+    return ''
 
 
 def make_list_item(item):

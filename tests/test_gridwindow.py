@@ -136,20 +136,22 @@ def test_badge_is_empty_for_a_never_played_library_title(ctx):
 def test_caption_appends_the_resolved_next_episode(ctx):
     item = _item(ctx.mystuff.BAND_NEXT_UP, next_label='S1E3')
 
-    assert ctx.gridwindow._caption(item) == 'STR30242 · S1E3'
+    assert ctx.gridwindow._caption(item) == 'S1E3'
 
 
-def test_caption_names_the_band_and_the_percent(ctx):
-    """The caption has room for the band's full name, which is what says
-    WHY the title is on this screen - the badge is the same fact
-    compressed to a colour and a few characters."""
-    assert ctx.gridwindow._caption(_item(ctx.mystuff.BAND_RESUME, percent=62.0)) == (
-        'STR30245 · 62%')
+def test_caption_does_not_repeat_the_band_name(ctx):
+    """The focused card always sits directly under its own band header, so
+    naming the band here put the same words on screen twice within about
+    80px - and a third time in the breadcrumb. The caption carries only
+    what the header cannot say: how far into THIS title you are."""
+    assert ctx.gridwindow._caption(_item(ctx.mystuff.BAND_RESUME, percent=62.0)) == '62% watched'
 
 
-def test_caption_names_the_band_for_a_library_title(ctx):
-    """Even a never-played title says why it is here - it is saved."""
-    assert ctx.gridwindow._caption(_item(ctx.mystuff.BAND_LIBRARY)) == 'STR30247'
+def test_caption_is_empty_for_bands_with_nothing_extra_to_say(ctx):
+    """A saved or finished title has no per-title detail the header does
+    not already carry, so the line stays blank rather than echoing it."""
+    assert ctx.gridwindow._caption(_item(ctx.mystuff.BAND_LIBRARY)) == ''
+    assert ctx.gridwindow._caption(_item(ctx.mystuff.BAND_RECENT)) == ''
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +168,7 @@ def test_make_list_item_sets_every_property_the_skin_draws(ctx):
     assert list_item.getProperty('thumbnail') == 'p.jpg'
     assert list_item.getProperty('badge') == '[COLOR FF38BDF8]50%[/COLOR]'
     assert list_item.getProperty('progress_width') == str(ctx.gridwindow.PROGRESS_TRACK_WIDTH // 2)
-    assert list_item.getProperty('caption') == 'STR30245 · 50%'
+    assert list_item.getProperty('caption') == '50% watched'
     assert list_item.getProperty('watched') == ''
 
 
