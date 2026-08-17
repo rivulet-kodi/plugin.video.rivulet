@@ -264,6 +264,7 @@ def verify_executable(path):
             [path, "version"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            check=False,
             timeout=VERIFY_TIMEOUT)
     except OSError:
         raise UnsupportedPlatformError("%s cannot be executed on this device" % path)
