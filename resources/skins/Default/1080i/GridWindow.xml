@@ -26,14 +26,13 @@
      next is cut by the frame - the same "more below" cue, and the reason
      the stack is not squeezed to fit every band at once.
 
-     Focus is a 6% zoom plus an accent underline rather than a border box
-     around the artwork, again following those apps: the tile lifts toward
-     the viewer instead of being caged, and nothing overlaps the poster.
-     The zoom is anchored to the poster's LEFT edge, not its centre, so a
-     focused tile grows rightwards and the left column stays flush across
-     every band. Centred, the focused row's first poster sat ~8px left of
-     every other row's first poster - subtle, but a ragged left edge is
-     immediately visible.
+     Focus is an accent underline under the poster, and nothing else. A 6%
+     zoom was tried first, following those apps, and removed: Kodi applies
+     the animation to the whole cell GROUP - poster and labels together -
+     so a focused card grew 2px into the neighbouring poster and ~11px up
+     into the hero caption above the first row. Sizing the cell around the
+     growth would cost real poster width on every card to animate one, and
+     the underline already says which card has focus.
 
      ROW OVERLAP. `itemgap` is NEGATIVE (-70), so consecutive rows overlap
      by that much. This is Estuary's own trick for stacked widget rows -
@@ -190,12 +189,6 @@
                     </itemlayout>
                     <focusedlayout width="264" height="444">
                         <control type="group">
-                        <animation type="Focus" reversible="false">
-                            <effect type="zoom" start="100" end="106" time="180" tween="sine" easing="inout" center="12,192" />
-                        </animation>
-                        <animation type="Unfocus" reversible="false">
-                            <effect type="zoom" start="106" end="100" time="180" tween="sine" easing="inout" center="12,192" />
-                        </animation>
                         <control type="image">
                             <top>0</top><left>12</left><width>240</width><height>360</height>
                             <texture background="true">$INFO[ListItem.Property(thumbnail)]</texture>
@@ -269,12 +262,6 @@
                     </itemlayout>
                     <focusedlayout width="264" height="444">
                         <control type="group">
-                        <animation type="Focus" reversible="false">
-                            <effect type="zoom" start="100" end="106" time="180" tween="sine" easing="inout" center="12,192" />
-                        </animation>
-                        <animation type="Unfocus" reversible="false">
-                            <effect type="zoom" start="106" end="100" time="180" tween="sine" easing="inout" center="12,192" />
-                        </animation>
                         <control type="image">
                             <top>0</top><left>12</left><width>240</width><height>360</height>
                             <texture background="true">$INFO[ListItem.Property(thumbnail)]</texture>
@@ -348,12 +335,6 @@
                     </itemlayout>
                     <focusedlayout width="264" height="444">
                         <control type="group">
-                        <animation type="Focus" reversible="false">
-                            <effect type="zoom" start="100" end="106" time="180" tween="sine" easing="inout" center="12,192" />
-                        </animation>
-                        <animation type="Unfocus" reversible="false">
-                            <effect type="zoom" start="106" end="100" time="180" tween="sine" easing="inout" center="12,192" />
-                        </animation>
                         <control type="image">
                             <top>0</top><left>12</left><width>240</width><height>360</height>
                             <texture background="true">$INFO[ListItem.Property(thumbnail)]</texture>
@@ -427,12 +408,6 @@
                     </itemlayout>
                     <focusedlayout width="264" height="444">
                         <control type="group">
-                        <animation type="Focus" reversible="false">
-                            <effect type="zoom" start="100" end="106" time="180" tween="sine" easing="inout" center="12,192" />
-                        </animation>
-                        <animation type="Unfocus" reversible="false">
-                            <effect type="zoom" start="106" end="100" time="180" tween="sine" easing="inout" center="12,192" />
-                        </animation>
                         <control type="image">
                             <top>0</top><left>12</left><width>240</width><height>360</height>
                             <texture background="true">$INFO[ListItem.Property(thumbnail)]</texture>

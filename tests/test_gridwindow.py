@@ -567,24 +567,25 @@ def test_a_focused_band_row_fits_inside_the_frame():
         'will be clipped' % second_row_bottom)
 
 
-def test_focus_zoom_is_anchored_to_the_poster_left_edge():
-    """A focused tile must grow rightwards, not outwards from its centre.
+def test_focus_is_marked_without_scaling_the_cell():
+    """Focus must not be shown by zooming the cell.
 
-    Centred, a 6% zoom pushed the focused row's first poster ~8px left of
-    every other row's first poster, so the left column read as ragged.
-    Anchoring the zoom centre to the poster's own left edge keeps it
-    flush."""
+    Kodi applies a layout animation to the whole cell GROUP - poster and
+    labels together - so a 6% zoom grew a focused card about 2px into the
+    neighbouring poster and ~11px up into the hero caption above the first
+    row. Reserving room for the growth would cost real poster width on
+    every card in order to animate one, so focus is an accent underline
+    instead."""
     import re
 
     xml = _grid_xml()
-    poster = re.search(
-        r'<top>0</top><left>(\d+)</left><width>\d+</width><height>\d+</height>\s*'
-        r'<texture[^>]*background="true">\$INFO\[ListItem.Property\(thumbnail\)\]</texture>',
-        xml,
-    )
-    assert poster, 'no poster box found'
-    centres = set(re.findall(r'center="(\d+),\d+"', xml))
-    assert centres, 'the focus zoom declares no centre'
-    assert centres == {poster.group(1)}, (
-        'zoom centre %s is not the poster left edge %s - the focused tile will hang '
-        'left of the other rows' % (sorted(centres), poster.group(1)))
+    assert 'type="zoom"' not in xml, (
+        'a zoom animation is back; it scales the whole cell and overlaps '
+        'the neighbouring poster and the hero')
+
+    # The focused layout must still mark itself somehow, or focus becomes
+    # invisible - the underline is drawn in the skin's accent colour.
+    focused = re.search(r'<focusedlayout[^>]*>(.*?)</focusedlayout>', xml, flags=re.S)
+    assert focused, 'no focusedlayout found'
+    assert 'FF38BDF8' in focused.group(1), (
+        'the focused layout draws no accent mark, so focus is invisible')
