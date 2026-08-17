@@ -809,14 +809,22 @@ def test_a_disabled_continue_row_stays_disabled_after_the_rename(load_homewindow
     assert ctx.compat.ADDON.getSetting('home_show_continue') == ''
 
 
-def test_an_enabled_continue_row_needs_no_migration(load_homewindow):
-    """The new setting already defaults to on, so a true (or unset) old
-    value is already correct and must not be written over."""
-    ctx = load_homewindow(settings={'home_show_continue': 'true'})
+def test_an_enabled_continue_row_does_not_overwrite_the_new_setting(load_homewindow):
+    """A true old value carries nothing across - and must not stomp on a
+    newer choice.
+
+    The pre-existing `home_show_mystuff` here is what gives the test teeth:
+    without it, a migration that wrongly wrote `'true'` would look
+    identical to one that correctly did nothing.
+    """
+    ctx = load_homewindow(settings={
+        'home_show_continue': 'true',      # the old row was left on
+        'home_show_mystuff': 'false',      # ...but the new one has since been turned off
+    })
 
     ctx.homewindow._migrate_mystuff_setting()
 
-    assert ctx.compat.ADDON.getSetting('home_show_mystuff') != 'false'
+    assert ctx.compat.ADDON.getSetting('home_show_mystuff') == 'false'
     assert ctx.compat.ADDON.getSetting('home_show_continue') == ''
 
 
