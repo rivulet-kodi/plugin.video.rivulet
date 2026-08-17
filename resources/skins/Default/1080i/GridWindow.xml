@@ -46,20 +46,26 @@
 
      `usecontrolcoords` is what makes the stack work: each control is laid
      out under the previous one, so an empty row collapses and the bands
-     below it move up. Only the HEADER is gated on
-     `Integer.IsGreater(Container(id).NumItems,0)`, so a viewer with
-     nothing finished sees no "Recently watched" heading; the panel itself
-     is deliberately NOT gated.
+     below it move up. A viewer with nothing finished sees no "Recently
+     watched" heading, and up/down navigation never lands on a row that
+     is not there.
 
-     That last point is load-bearing, and cost a long debugging session.
+     Both are gated on a WINDOW PROPERTY (`band_<name>`) that
+     `GridWindow.onInit()` sets before it focuses anything - deliberately
+     NOT on `Integer.IsGreater(Container(id).NumItems,0)`, which is the
+     obvious condition and is wrong twice over.
+
      `Container(id).NumItems` does not update synchronously with
-     `addItems()` - measured on a real device, it still reads 0 in the
-     same pass, and only settles ~100ms later. A panel carrying that
-     condition is therefore still INVISIBLE when `onInit()` calls
-     `setFocusId()` on it, Kodi refuses to focus an invisible control
-     ("Control 30002 in window 13003 has been asked to focus, but it
-     can't"), and a window with nothing focused never redraws - it looks
-     frozen on screen while every row is correctly populated underneath.
+     `addItems()`: measured on a real device it still reads 0 in the same
+     pass and settles ~100ms later. A panel carrying that condition is
+     still INVISIBLE when `onInit()` calls `setFocusId()` on it, Kodi
+     refuses to focus an invisible control ("Control 30002 in window
+     13003 has been asked to focus, but it can't"), and a window with
+     nothing focused never redraws - it looks frozen while every row is
+     correctly populated underneath. Dropping the gate entirely fixed the
+     freeze but left empty rows visible, and up/down navigation then
+     bounced off them. A window property set from Python is true the
+     moment the row is filled, so it satisfies both.
 
      THE CELL LAYOUTS ARE GENERATED: all four rows carry a byte-identical
      copy, because this skin has no Includes.xml to share one through.
@@ -114,22 +120,29 @@
             </control>
 
             <control type="grouplist" id="30001">
-                <left>96</left><top>132</top><width>1824</width><height>1100</height>
+                <left>96</left><top>132</top><width>1824</width><height>948</height>
                 <orientation>vertical</orientation>
                 <itemgap>56</itemgap>
                 <usecontrolcoords>true</usecontrolcoords>
                 <scrolltime tween="cubic" easing="out">300</scrolltime>
+                <!-- Vertical navigation cycles through the populated band
+                     rows, skipping any that are hidden - Kodi's default
+                     grouplist behaviour, and what skin.estuary's home
+                     widgets do too. It only LOOKS like a bounce when just
+                     two bands have content, because wrapping between two
+                     rows is indistinguishable from refusing to move. -->
 
                 <!-- resume -->
                 <control type="label" id="30107"><left>0</left><top>0</top><width>1500</width><height>44</height><font>font13</font><textcolor>FF38BDF8</textcolor><aligny>center</aligny>
                     <label></label>
-                    <visible>Integer.IsGreater(Container(30002).NumItems,0)</visible>
+                    <visible>!String.IsEmpty(Window.Property(band_resume))</visible>
                 </control>
                 <control type="panel" id="30002">
                     <left>0</left><top>0</top><width>1800</width><height>470</height>
                     <orientation>horizontal</orientation>
                     <onleft>30002</onleft><onright>30002</onright>
                     <scrolltime tween="cubic" easing="out">260</scrolltime>
+                    <visible>!String.IsEmpty(Window.Property(band_resume))</visible>
                     <itemlayout width="280" height="470">
                         <control type="image">
                             <top>0</top><left>12</left><width>256</width><height>384</height>
@@ -201,13 +214,14 @@
                 <!-- next_up -->
                 <control type="label" id="30117"><left>0</left><top>0</top><width>1500</width><height>44</height><font>font13</font><textcolor>FFFBBF24</textcolor><aligny>center</aligny>
                     <label></label>
-                    <visible>Integer.IsGreater(Container(30012).NumItems,0)</visible>
+                    <visible>!String.IsEmpty(Window.Property(band_next_up))</visible>
                 </control>
                 <control type="panel" id="30012">
                     <left>0</left><top>0</top><width>1800</width><height>470</height>
                     <orientation>horizontal</orientation>
                     <onleft>30012</onleft><onright>30012</onright>
                     <scrolltime tween="cubic" easing="out">260</scrolltime>
+                    <visible>!String.IsEmpty(Window.Property(band_next_up))</visible>
                     <itemlayout width="280" height="470">
                         <control type="image">
                             <top>0</top><left>12</left><width>256</width><height>384</height>
@@ -279,13 +293,14 @@
                 <!-- recent -->
                 <control type="label" id="30127"><left>0</left><top>0</top><width>1500</width><height>44</height><font>font13</font><textcolor>8CEEF3F6</textcolor><aligny>center</aligny>
                     <label></label>
-                    <visible>Integer.IsGreater(Container(30022).NumItems,0)</visible>
+                    <visible>!String.IsEmpty(Window.Property(band_recent))</visible>
                 </control>
                 <control type="panel" id="30022">
                     <left>0</left><top>0</top><width>1800</width><height>470</height>
                     <orientation>horizontal</orientation>
                     <onleft>30022</onleft><onright>30022</onright>
                     <scrolltime tween="cubic" easing="out">260</scrolltime>
+                    <visible>!String.IsEmpty(Window.Property(band_recent))</visible>
                     <itemlayout width="280" height="470">
                         <control type="image">
                             <top>0</top><left>12</left><width>256</width><height>384</height>
@@ -357,13 +372,14 @@
                 <!-- library -->
                 <control type="label" id="30137"><left>0</left><top>0</top><width>1500</width><height>44</height><font>font13</font><textcolor>8CEEF3F6</textcolor><aligny>center</aligny>
                     <label></label>
-                    <visible>Integer.IsGreater(Container(30032).NumItems,0)</visible>
+                    <visible>!String.IsEmpty(Window.Property(band_library))</visible>
                 </control>
                 <control type="panel" id="30032">
                     <left>0</left><top>0</top><width>1800</width><height>470</height>
                     <orientation>horizontal</orientation>
                     <onleft>30032</onleft><onright>30032</onright>
                     <scrolltime tween="cubic" easing="out">260</scrolltime>
+                    <visible>!String.IsEmpty(Window.Property(band_library))</visible>
                     <itemlayout width="280" height="470">
                         <control type="image">
                             <top>0</top><left>12</left><width>256</width><height>384</height>

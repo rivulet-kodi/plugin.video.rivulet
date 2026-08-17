@@ -458,33 +458,47 @@ def test_every_band_has_a_row(ctx):
         assert band in ctx.gridwindow.BAND_ROWS
 
 
-def test_only_the_header_is_gated_on_numitems(ctx):
-    """An empty band shows no heading - but the PANEL must never carry that
-    condition.
+def test_rows_are_gated_on_a_window_property_not_numitems(ctx):
+    """Both the header and the row hide when their band is empty - but the
+    condition must be a window property, never Container(id).NumItems.
 
-    `Container(id).NumItems` does not update synchronously with
-    `addItems()`: measured on a real device it still reads 0 in the same
-    pass and settles ~100ms later. A panel gated on it is therefore still
-    invisible when `onInit()` focuses it, Kodi refuses to focus an
-    invisible control, and a window with nothing focused never redraws -
-    it looks frozen while every row is correctly populated underneath.
-    That cost a long debugging session; this test is the guard."""
+    NumItems does not update synchronously with addItems(): measured on a
+    real device it still reads 0 in the same pass and settles ~100ms
+    later. A row gated on it is invisible exactly when onInit() focuses
+    it, Kodi will not focus an invisible control, and a window with
+    nothing focused never redraws - it looks frozen while every row is
+    correctly populated underneath. Removing the gate outright fixed that
+    but left empty rows in the navigation path, where up/down bounced off
+    them. A property set from Python is true the moment the row is
+    filled."""
     import re
 
     xml = _grid_xml()
+    assert '<visible>Integer.IsGreater(Container' not in xml, (
+        'a row is gated on NumItems, which is false in the pass that fills it')
     for band, (list_id, label_id) in ctx.gridwindow.BAND_ROWS.items():
-        condition = '<visible>Integer.IsGreater(Container(%d).NumItems,0)</visible>' % list_id
-        assert xml.count(condition) == 1, (
-            '%s: expected exactly one NumItems gate (its header), found %d'
-            % (band, xml.count(condition)))
-        # ...and it must be the header's, not the panel's.
-        panel = re.search(
-            r'<control type="panel" id="%d">(.*?)</control>' % list_id, xml, flags=re.S)
-        assert panel, '%s: panel %d not found' % (band, list_id)
-        assert 'NumItems' not in panel.group(1), (
-            '%s: the panel is gated on NumItems, which makes it unfocusable '
-            'in the pass that fills it' % band)
+        condition = '<visible>!String.IsEmpty(Window.Property(band_%s))</visible>' % band
+        assert xml.count(condition) == 2, (
+            '%s: expected its header AND its row gated on %s, found %d'
+            % (band, condition, xml.count(condition)))
         assert re.search(r'<control type="label" id="%d"' % label_id, xml)
+        assert re.search(r'<control type="panel" id="%d"' % list_id, xml)
+
+
+def test_oninit_sets_a_band_property_for_every_row(ctx):
+    """The skin reads these to decide which rows exist; a band with items
+    must be truthy and an empty one must be cleared, or a row lingers on
+    screen from a previous open."""
+    win = _window(ctx, bands=[
+        (ctx.mystuff.BAND_RESUME, [_item(ctx.mystuff.BAND_RESUME, name='R', percent=50.0)]),
+    ])
+
+    win.onInit()
+
+    assert win.getProperty('band_%s' % ctx.mystuff.BAND_RESUME) == '1'
+    for band in (ctx.mystuff.BAND_NEXT_UP, ctx.mystuff.BAND_RECENT, ctx.mystuff.BAND_LIBRARY):
+        assert win.getProperty('band_%s' % band) == '', (
+            '%s has no items but its property is set, so the row stays visible' % band)
 
 
 def test_cell_is_tall_enough_for_everything_it_draws():

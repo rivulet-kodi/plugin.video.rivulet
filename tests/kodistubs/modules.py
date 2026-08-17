@@ -359,12 +359,26 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
             self.modal_calls = 0
             self.closed = False
             self.shown = False
+            #: Window properties, as set by `setProperty()`. Real windows
+            #: expose these to the skin as `Window.Property(key)`; Rivulet's
+            #: GridWindow drives each band row's visibility through them
+            #: (see its onInit()).
+            self.properties = {}
             self._valid_control_ids = _declared_control_ids(args[0] if args else None)
 
         def getControl(self, control_id):
             if self._valid_control_ids is not None and control_id not in self._valid_control_ids:
                 raise RuntimeError('Non-Existent Control %d' % control_id)
             return self._controls.setdefault(control_id, FakeWindowControl())
+
+        def setProperty(self, key, value):
+            self.properties[key] = value
+
+        def getProperty(self, key):
+            return self.properties.get(key, '')
+
+        def clearProperty(self, key):
+            self.properties.pop(key, None)
 
         def setFocusId(self, control_id):
             self._focus_id = control_id

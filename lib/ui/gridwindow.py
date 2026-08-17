@@ -232,9 +232,15 @@ class GridWindow(BaseWindow):
             items = filled.get(band) or []
             if items:
                 control.addItems([make_list_item(item) for item in items])
-            # The skin hides an empty row on its NumItems, so the label
-            # only has to be right for a row that has content.
             self.getControl(label_id).setLabel(L(BAND_HEADINGS[band]).upper() if items else '')
+            # Drives both the header's and the row's visibility. The
+            # obvious condition - Integer.IsGreater(Container(id).NumItems,0)
+            # - cannot be used: NumItems still reads 0 in this same pass
+            # (it settles ~100ms later), so a row gated on it is invisible
+            # exactly when setFocusId() runs below, Kodi will not focus an
+            # invisible control, and a window with nothing focused never
+            # redraws. This property is true the moment the row is filled.
+            self.setProperty('band_%s' % band, '1' if items else '')
 
         self.setFocusId(BAND_ROWS[self.bands[0][0]][0])
         self._update_background()
