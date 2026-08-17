@@ -699,3 +699,7 @@ msgstr "Continúa donde lo dejaste"
 msgctxt "#30233"
 msgid "Show Continue watching"
 msgstr "Mostrar Continuar viendo"
+
+msgctxt "#30234"
+msgid "now"
+msgstr "hoy"

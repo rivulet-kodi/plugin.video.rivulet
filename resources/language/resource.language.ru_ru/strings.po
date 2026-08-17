@@ -699,3 +699,7 @@ msgstr "Продолжите с того места, где остановили
 msgctxt "#30233"
 msgid "Show Continue watching"
 msgstr "Показывать Продолжить просмотр"
+
+msgctxt "#30234"
+msgid "now"
+msgstr "н.в."

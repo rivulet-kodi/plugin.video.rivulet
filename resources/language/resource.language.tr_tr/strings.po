@@ -699,3 +699,7 @@ msgstr "Kaldığın yerden devam et"
 msgctxt "#30233"
 msgid "Show Continue watching"
 msgstr "İzlemeye devam et göster"
+
+msgctxt "#30234"
+msgid "now"
+msgstr "devam"

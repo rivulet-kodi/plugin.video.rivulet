@@ -1147,6 +1147,51 @@ def test_parse_year_handles_open_ended_ranges_and_unparseable(value, expected):
     assert playbackmeta.parse_year(value) == expected
 
 
+# ---------------------------------------------------------------------------
+# year_range() - the display form of a `releaseInfo` range, shared by all
+# three screens that print one (ShowcaseWindow's hero, DetailWindow's left
+# column, StreamsWindow's info panel).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("value,expected", [
+    # open-ended: still running, so the dangling separator becomes a word
+    ("2022-", "2022-now"),
+    ("2022–", "2022–now"),   # EN DASH: what Cinemeta actually sends
+    ("2022—", "2022—now"),   # EM DASH, for completeness
+    ("2022 -", "2022-now"),            # stray space before the separator
+    # closed ranges and bare years are untouched
+    ("2011–2019", "2011–2019"),
+    ("2010-2017", "2010-2017"),
+    ("1999", "1999"),
+    # the ISO date callers fall back to: hyphens are separators, not a range
+    ("2021-07-04", "2021-07-04"),
+    # degenerate input must not produce a bare "now"
+    ("", ""),
+    (None, ""),
+    ("-", "-"),
+    ("--", "--"),
+])
+def test_year_range_closes_only_open_ended_ranges(value, expected):
+    """A still-running series arrives open-ended ('2022-'). Printing the
+    dash reads as truncated text, and stripping it loses the fact that
+    the show has not ended - so it is closed with a word instead. The
+    separator already in the data is reused, so the range stays
+    internally consistent.
+
+    Cinemeta terminates every range with an EN DASH, not the ASCII
+    hyphen - so the `.rstrip('-')` this replaced never fired on a real
+    series at all.
+    """
+    assert playbackmeta.year_range(value, "now") == expected
+
+
+def test_year_range_word_is_supplied_by_the_caller():
+    """The module is Kodi-independent: callers pass the localized word
+    in rather than this reaching for the addon's string catalog."""
+    assert playbackmeta.year_range("2022–", "heute") == "2022–heute"
+
+
 @pytest.mark.parametrize("value,expected", [
     ("7.8", 7.8),
     (None, None),

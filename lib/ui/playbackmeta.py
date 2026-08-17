@@ -134,6 +134,45 @@ def parse_year(value):
     return int(match.group()) if match else None
 
 
+#: Trailing characters marking an open-ended `releaseInfo` range - a
+#: series that has started and is still running. Cinemeta terminates
+#: EVERY range with an EN DASH, not the ASCII hyphen ('2011–2019',
+#: '2022–' - confirmed against v3-cinemeta.strem.io), so code matching
+#: only '-' misses every series it sees. The em dash costs nothing to
+#: include and the field is third-party text.
+_YEAR_RANGE_TRAILERS = '-–—'
+
+
+def year_range(value, now_word):
+    """A Stremio `releaseInfo` value rendered for display, with
+    `now_word` closing an open-ended range.
+
+    `releaseInfo` is a RANGE for a series ('2011–2019'), not just a
+    year, and a series that is still running arrives open-ended, as a
+    start year with a dangling separator ('2022–'). Printing that as-is
+    looks like truncated text, but simply stripping the dash loses the
+    very thing it says: that the show has NOT ended. So it is closed
+    with a word instead - '2022–now' - which carries the same
+    information in a way that reads as deliberate.
+
+    The separator already in the data is reused rather than normalised,
+    so a range keeps the same dash on both sides.
+
+    A closed range ('2011–2019'), a bare year ('1999') and the full ISO
+    date callers fall back to ('2021-07-04' - whose hyphens are
+    separators, not an open range) are all returned unchanged.
+
+    `now_word` is passed in rather than localized here so this module
+    stays Kodi-independent; callers resolve it through `compat.L()`.
+    """
+    text = str(value or '').strip()
+    stripped = text.rstrip(_YEAR_RANGE_TRAILERS).rstrip()
+    if stripped == text or not stripped:
+        # Not an open-ended range (or nothing but dashes) - leave it be.
+        return text
+    return '%s%s%s' % (stripped, text[len(stripped):].strip(), now_word)
+
+
 def parse_rating(value):
     """Best-effort float rating out of a Stremio `imdbRating` value
     (e.g. '7.8'), or None for an unparseable value like 'n/a' - never

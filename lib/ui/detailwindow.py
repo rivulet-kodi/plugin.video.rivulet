@@ -53,6 +53,11 @@ _SEASONS_STRING_ID = 30205
 _EPISODE_STRING_ID = 30206
 _EPISODES_STRING_ID = 30207
 
+#: strings.po id for the range terminator a still-running series gets in
+#: place of a dangling dash ('2022–now') - see `_metadata_line()`. The
+#: same id the coverflow hero and StreamsWindow use.
+_NOW_STRING_ID = 30234
+
 #: strings.po id for the per-episode '%d%% WATCHED' readout
 #: _build_episode_items() sets as the `watched_percent` Property -
 #: DetailWindow.xml's label reads that property verbatim (one $INFO
@@ -207,12 +212,19 @@ def _metadata_line(meta, season_count):
     skipped outright rather than left as a dangling ' \u00b7 ' - the
     same join-only-what-exists shape
     lib.ui.streamswindow._rebuild_list() already uses for its own
-    year/rating/genres info panel."""
+    year/rating/genres info panel.
+
+    A still-running series' open-ended range is closed with the
+    localized "now" rather than left as a dangling dash - see
+    `lib.ui.playbackmeta.year_range()`, which the coverflow hero
+    (`infowindow._year_text()`) and StreamsWindow print from too, so
+    the three screens agree on how a running series prints its years."""
     from lib.ui.compat import L
+    from lib.ui.playbackmeta import year_range
 
     meta = meta or {}
     segments = []
-    year = str(meta.get('releaseInfo') or meta.get('year') or '').rstrip('-')
+    year = year_range(meta.get('releaseInfo') or meta.get('year') or '', L(_NOW_STRING_ID))
     if year:
         segments.append(year)
     if season_count > 0:

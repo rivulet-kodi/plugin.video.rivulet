@@ -699,3 +699,7 @@ msgstr "从上次中断的位置继续"
 msgctxt "#30233"
 msgid "Show Continue watching"
 msgstr "显示继续观看"
+
+msgctxt "#30234"
+msgid "now"
+msgstr "至今"
