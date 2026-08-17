@@ -87,6 +87,12 @@ class FakeAddon:
         value = self.settings.get(key, '')
         return '' if value is None else str(value)
 
+    def setSetting(self, key, value):
+        """Write a setting, as `xbmcaddon.Addon.setSetting()` does. Real
+        Kodi stores everything as a string, so this does too - a test that
+        writes `'false'` must read back `'false'`, not `False`."""
+        self.settings[key] = '' if value is None else str(value)
+
     def getSettingBool(self, key):
         return bool(self.settings.get(key, False))
 

@@ -758,7 +758,7 @@ def test_set_progress_retains_just_written_entry_even_when_it_sorts_oldest(tmp_p
     assert len(raw) == 3
 
 
-# --- get_progress_entries() (lib.ui.continuewatching feed) -----------------
+# --- get_progress_entries() (lib.ui.mystuff feed) --------------------------
 
 
 def test_get_progress_entries_empty_store_returns_empty_list(tmp_path):

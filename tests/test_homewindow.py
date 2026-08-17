@@ -6,14 +6,14 @@ network).
 lib.ui.homewindow imports xbmcgui and lib.ui.uicommon at module scope, so
 load_homewindow reloads lib.ui.compat/lib.ui.uicommon/lib.ui.router/
 lib.ui.homewindow fresh together. HomeWindow.onClick()'s 'discover'/
-'search'/'library'/'addons' handlers lazily `from lib.ui.catalogpicker
+'search'/'mystuff'/'addons' handlers lazily `from lib.ui.catalogpicker
 import open_catalog_picker` / `from lib.ui.searchwindow import
-open_search` / `from lib.ui.librarywindow import open_library` / `from
+open_search` / `from lib.ui.mystuff import open_my_stuff` / `from
 lib.ui.addonswindow import open_addons` at call time, so
-lib.ui.catalogpicker/lib.ui.searchwindow/lib.ui.librarywindow/
+lib.ui.catalogpicker/lib.ui.searchwindow/lib.ui.mystuff/
 lib.ui.addonswindow are reloaded too (same reason tests/test_views.py
 reloads lib.ui.infowindow: to get a handle - `ctx.catalogpicker`/`ctx.
-searchwindow`/`ctx.librarywindow`/`ctx.addonswindow` - whose functions
+searchwindow`/`ctx.mystuff`/`ctx.addonswindow` - whose functions
 this file monkeypatches, and to have install_kodi_stubs clean their
 sys.modules entries back up at teardown so no later test file observes
 them bound to a dead test's fakes).
@@ -39,8 +39,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 _RELOAD_MODULE_NAMES = (
     'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.router', 'lib.ui.homewindow',
-    'lib.ui.catalogpicker', 'lib.ui.searchwindow', 'lib.ui.librarywindow', 'lib.ui.addonswindow',
-    'lib.ui.continuewatching',
+    'lib.ui.catalogpicker', 'lib.ui.searchwindow', 'lib.ui.mystuff', 'lib.ui.addonswindow',
 )
 
 
@@ -52,14 +51,13 @@ _ALL_TYPE_ADDONS = [{'transportUrl': 'https://a/manifest.json', 'manifest': {'ca
 
 
 class _FakeStore:
-    """Fake `lib.store.Store` for HomeWindow.onInit(): `get_auth()`'s
-    truthiness decides whether the Library row is shown, `get_addons()`
+    """Fake `lib.store.Store` for HomeWindow.onInit(): `get_addons()`
     supplies the catalogs the type rows auto-hide against (defaulting to
-    one of every type, so a test that only cares about Library still
-    gets all three rows), and `get_progress_entries()` (defaulting to
-    none cached) is what the real `lib.ui.continuewatching.has_resumable()`
-    reads - tests that care about the Continue-watching row's gating
-    monkeypatch `has_resumable()` itself instead of populating this."""
+    one of every type), and `get_auth()`/`get_progress_entries()`
+    (defaulting to logged out with nothing cached) are what the real
+    `lib.ui.mystuff.has_content()` reads - tests that care about the My
+    Stuff row's gating monkeypatch `has_content()` itself instead of
+    populating these."""
 
     def __init__(self, auth=None, addons=None, progress_entries=None):
         self._auth = auth
@@ -140,28 +138,28 @@ def _window_with_focused_action(homewindow_mod, action):
 # ---------------------------------------------------------------------------
 
 
-def test_menu_items_includes_library_when_show_library_true(load_homewindow):
+def test_menu_items_lists_every_row_with_label_and_icon(load_homewindow):
     ctx = load_homewindow()
 
     items = ctx.homewindow._menu_items(True, _ALL_TYPE_ADDONS)
 
     assert [item.getProperty('action') for item in items] == [
-        'movies', 'series', 'anime', 'search', 'library', 'addons', 'settings',
+        'mystuff', 'movies', 'series', 'anime', 'search', 'addons', 'settings',
     ]
     assert [item.getLabel() for item in items] == [
-        'STR30213', 'STR30214', 'STR30215', 'STR30001', 'STR30002', 'STR30003', 'STR30004',
+        'STR30241', 'STR30213', 'STR30214', 'STR30215', 'STR30001', 'STR30003', 'STR30004',
     ]
     assert [item.art['icon'] for item in items] == [
+        ctx.compat.addon_media_path('mystuff.png'),
         ctx.compat.addon_media_path('movies.png'),
         ctx.compat.addon_media_path('series.png'),
         ctx.compat.addon_media_path('anime.png'),
         ctx.compat.addon_media_path('search.png'),
-        ctx.compat.addon_media_path('library.png'),
         ctx.compat.addon_media_path('addons.png'),
         ctx.compat.addon_media_path('settings.png'),
     ]
     assert [item.getProperty('subtitle') for item in items] == [
-        'STR30216', 'STR30217', 'STR30218', 'STR30149', 'STR30150', 'STR30151', 'STR30152',
+        'STR30232', 'STR30216', 'STR30217', 'STR30218', 'STR30149', 'STR30151', 'STR30152',
     ]
 
 
@@ -273,7 +271,7 @@ def test_menu_items_omits_other_row_when_only_curated_types_are_installed(load_h
     items = ctx.homewindow._menu_items(True, _ALL_TYPE_ADDONS)
 
     assert [item.getProperty('action') for item in items] == [
-        'movies', 'series', 'anime', 'search', 'library', 'addons', 'settings',
+        'mystuff', 'movies', 'series', 'anime', 'search', 'addons', 'settings',
     ]
 
 
@@ -325,7 +323,10 @@ def test_status_text_reports_not_logged_in_when_auth_is_none(load_homewindow):
 # ---------------------------------------------------------------------------
 
 
-def test_oninit_shows_library_row_when_authenticated(load_homewindow, monkeypatch):
+def test_oninit_shows_mystuff_row_when_authenticated(load_homewindow, monkeypatch):
+    """Logging in is enough for the merged row on its own: the user may
+    have a library worth opening even with an empty local progress cache
+    (`lib.ui.mystuff.has_content()`)."""
     ctx = load_homewindow(localized={30022: 'Logged in as %s'})
     monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(auth={'authKey': 'x'}))
     win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
@@ -333,7 +334,7 @@ def test_oninit_shows_library_row_when_authenticated(load_homewindow, monkeypatc
     win.onInit()
 
     actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
-    assert actions == ['movies', 'series', 'anime', 'search', 'library', 'addons', 'settings']
+    assert actions == ['mystuff', 'movies', 'series', 'anime', 'search', 'addons', 'settings']
     assert win.getControl(ctx.homewindow.BACKGROUND).image == ctx.compat.ADDON_FANART
     assert win.getControl(ctx.homewindow.STATUS_LABEL).label == '[COLOR FF38BDF8]\u25cf[/COLOR] Logged in as ?'
     assert win.getFocusId() == ctx.homewindow.LIST
@@ -506,26 +507,6 @@ def test_onclick_search_stays_open_when_open_search_returns_false(load_homewindo
     ctx = load_homewindow()
     monkeypatch.setattr(ctx.searchwindow, 'open_search', lambda: False)
     win = _window_with_focused_action(ctx.homewindow, 'search')
-
-    win.onClick(ctx.homewindow.LIST)
-
-    assert win.closed is False
-
-
-def test_onclick_library_closes_when_open_library_returns_true(load_homewindow, monkeypatch):
-    ctx = load_homewindow()
-    monkeypatch.setattr(ctx.librarywindow, 'open_library', lambda: True)
-    win = _window_with_focused_action(ctx.homewindow, 'library')
-
-    win.onClick(ctx.homewindow.LIST)
-
-    assert win.closed is True
-
-
-def test_onclick_library_stays_open_when_open_library_returns_false(load_homewindow, monkeypatch):
-    ctx = load_homewindow()
-    monkeypatch.setattr(ctx.librarywindow, 'open_library', lambda: False)
-    win = _window_with_focused_action(ctx.homewindow, 'library')
 
     win.onClick(ctx.homewindow.LIST)
 
@@ -719,90 +700,153 @@ def test_every_menu_row_has_an_icon_shipped_for_it(load_homewindow):
 # ---------------------------------------------------------------------------
 
 
-def test_menu_items_shows_continue_row_first_when_show_continue_true(load_homewindow):
-    ctx = load_homewindow()
-
-    items = ctx.homewindow._menu_items(True, _ALL_TYPE_ADDONS, show_continue=True)
-
-    assert [item.getProperty('action') for item in items] == [
-        'continue', 'movies', 'series', 'anime', 'search', 'library', 'addons', 'settings',
-    ]
-    assert items[0].getLabel() == 'STR30231'
-    assert items[0].art['icon'] == ctx.compat.addon_media_path('continue.png')
-    assert items[0].getProperty('subtitle') == 'STR30232'
-
-
-def test_menu_items_omits_continue_row_by_default(load_homewindow):
+def test_menu_items_shows_mystuff_row_first_when_show_mystuff_true(load_homewindow):
     ctx = load_homewindow()
 
     items = ctx.homewindow._menu_items(True, _ALL_TYPE_ADDONS)
 
     assert [item.getProperty('action') for item in items] == [
-        'movies', 'series', 'anime', 'search', 'library', 'addons', 'settings',
+        'mystuff', 'movies', 'series', 'anime', 'search', 'addons', 'settings',
     ]
+    assert items[0].getLabel() == 'STR30241'
+    assert items[0].art['icon'] == ctx.compat.addon_media_path('mystuff.png')
+    assert items[0].getProperty('subtitle') == 'STR30232'
 
 
-# ---------------------------------------------------------------------------
-# HomeWindow.onInit() - "Continue watching" row gating
-# ---------------------------------------------------------------------------
-
-
-def test_oninit_shows_continue_row_when_setting_on_and_resumable(load_homewindow, monkeypatch):
+def test_menu_items_omits_mystuff_row_when_gate_false(load_homewindow):
+    """The merged row replaced the separate Continue-watching and Library
+    rows, so neither survives in the menu whatever the gate says."""
     ctx = load_homewindow()
-    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore())
-    monkeypatch.setattr(ctx.continuewatching, 'has_resumable', lambda store: True)
-    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
-    win.onInit()
+    items = ctx.homewindow._menu_items(False, _ALL_TYPE_ADDONS)
 
-    actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
-    assert actions[0] == 'continue'
-
-
-def test_oninit_hides_continue_row_when_setting_off(load_homewindow, monkeypatch):
-    ctx = load_homewindow(settings={'home_show_continue': 'false'})
-    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore())
-    monkeypatch.setattr(ctx.continuewatching, 'has_resumable', lambda store: True)
-    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
-
-    win.onInit()
-
-    actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
+    actions = [item.getProperty('action') for item in items]
+    assert actions == ['movies', 'series', 'anime', 'search', 'addons', 'settings']
     assert 'continue' not in actions
+    assert 'library' not in actions
 
 
-def test_oninit_hides_continue_row_when_nothing_resumable(load_homewindow, monkeypatch):
+# ---------------------------------------------------------------------------
+# HomeWindow.onInit() - "My Stuff" row gating
+# ---------------------------------------------------------------------------
+
+
+def test_oninit_shows_mystuff_row_when_setting_on_and_has_content(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore())
-    monkeypatch.setattr(ctx.continuewatching, 'has_resumable', lambda store: False)
+    monkeypatch.setattr(ctx.mystuff, 'has_content', lambda store: True)
     win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onInit()
 
     actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
-    assert 'continue' not in actions
+    assert actions[0] == 'mystuff'
 
 
-# ---------------------------------------------------------------------------
-# HomeWindow.onClick() - "Continue watching" row
-# ---------------------------------------------------------------------------
+def test_oninit_hides_mystuff_row_when_setting_off(load_homewindow, monkeypatch):
+    ctx = load_homewindow(settings={'home_show_mystuff': 'false'})
+    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore())
+    monkeypatch.setattr(ctx.mystuff, 'has_content', lambda store: True)
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
+
+    win.onInit()
+
+    actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
+    assert 'mystuff' not in actions
 
 
-def test_onclick_continue_closes_when_open_continue_watching_returns_true(load_homewindow, monkeypatch):
+def test_oninit_hides_mystuff_row_when_no_content(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    monkeypatch.setattr(ctx.continuewatching, 'open_continue_watching', lambda: True)
-    win = _window_with_focused_action(ctx.homewindow, 'continue')
+    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore())
+    monkeypatch.setattr(ctx.mystuff, 'has_content', lambda store: False)
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
+
+    win.onInit()
+
+    actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
+    assert 'mystuff' not in actions
+
+
+# ---------------------------------------------------------------------------
+# HomeWindow.onClick() - "My Stuff" row
+# ---------------------------------------------------------------------------
+
+
+def test_onclick_mystuff_closes_when_open_my_stuff_returns_true(load_homewindow, monkeypatch):
+    ctx = load_homewindow()
+    monkeypatch.setattr(ctx.mystuff, 'open_my_stuff', lambda: True)
+    win = _window_with_focused_action(ctx.homewindow, 'mystuff')
 
     win.onClick(ctx.homewindow.LIST)
 
     assert win.closed is True
 
 
-def test_onclick_continue_stays_open_when_open_continue_watching_returns_false(load_homewindow, monkeypatch):
+def test_onclick_mystuff_stays_open_when_open_my_stuff_returns_false(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    monkeypatch.setattr(ctx.continuewatching, 'open_continue_watching', lambda: False)
-    win = _window_with_focused_action(ctx.homewindow, 'continue')
+    monkeypatch.setattr(ctx.mystuff, 'open_my_stuff', lambda: False)
+    win = _window_with_focused_action(ctx.homewindow, 'mystuff')
 
     win.onClick(ctx.homewindow.LIST)
 
     assert win.closed is False
+
+
+# ---------------------------------------------------------------------------
+# home_show_continue -> home_show_mystuff migration
+# ---------------------------------------------------------------------------
+
+
+def test_a_disabled_continue_row_stays_disabled_after_the_rename(load_homewindow):
+    """The merged row took a new setting id, so without this anyone who had
+    deliberately turned the old row OFF would silently get the new one back
+    on."""
+    ctx = load_homewindow(settings={'home_show_continue': 'false'})
+
+    ctx.homewindow._migrate_mystuff_setting()
+
+    assert ctx.compat.ADDON.getSetting('home_show_mystuff') == 'false'
+    assert ctx.compat.ADDON.getSetting('home_show_continue') == ''
+
+
+def test_an_enabled_continue_row_does_not_overwrite_the_new_setting(load_homewindow):
+    """A true old value carries nothing across - and must not stomp on a
+    newer choice.
+
+    The pre-existing `home_show_mystuff` here is what gives the test teeth:
+    without it, a migration that wrongly wrote `'true'` would look
+    identical to one that correctly did nothing.
+    """
+    ctx = load_homewindow(settings={
+        'home_show_continue': 'true',      # the old row was left on
+        'home_show_mystuff': 'false',      # ...but the new one has since been turned off
+    })
+
+    ctx.homewindow._migrate_mystuff_setting()
+
+    assert ctx.compat.ADDON.getSetting('home_show_mystuff') == 'false'
+    assert ctx.compat.ADDON.getSetting('home_show_continue') == ''
+
+
+def test_migration_is_idempotent(load_homewindow):
+    """Clearing the old key is what makes a second launch a no-op - it must
+    not re-apply an old value over a choice the user has since changed."""
+    ctx = load_homewindow(settings={'home_show_continue': 'false'})
+
+    ctx.homewindow._migrate_mystuff_setting()
+    ctx.compat.ADDON.setSetting('home_show_mystuff', 'true')   # user turns it back on
+    ctx.homewindow._migrate_mystuff_setting()
+
+    assert ctx.compat.ADDON.getSetting('home_show_mystuff') == 'true'
+
+
+def test_migration_survives_a_broken_settings_write(load_homewindow, monkeypatch):
+    """A cosmetic migration must never stop Home from opening."""
+    ctx = load_homewindow(settings={'home_show_continue': 'false'})
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError('settings unwritable')
+
+    monkeypatch.setattr(ctx.compat.ADDON, 'setSetting', _boom)
+
+    ctx.homewindow._migrate_mystuff_setting()   # must not raise

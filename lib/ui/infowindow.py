@@ -5,7 +5,7 @@ Ports the reference addon's `platformcode/xbmc_info_window.py::InfoWindow`
 a caller opens it via `open_showcase()` (below) with one already-fetched
 catalog page - `catalogpicker.CatalogPickerWindow._open_catalog()`,
 `searchwindow.SearchWindow._run_search()`,
-`lib.ui.librarywindow.open_library()`, and this module's own
+and this module's own
 `open_credits_picker()` - the user scrolls a horizontal poster
 coverflow (the fanart background updates to match the focused item).
 Picking a movie poster jumps straight to
@@ -697,7 +697,7 @@ def open_showcase(metas, catalog_title=None, more_pages=None):
     meta dict, or None if the user closed the overlay without picking one
     (or `metas` was empty). Every caller already wraps this call in its own
     try/except (catalogpicker._open_catalog, searchwindow._run_search,
-    librarywindow.open_library) and logs+notifies on failure, so an
+    ) and logs+notifies on failure, so an
     exception from .start() keeps propagating unchanged here - this
     only guarantees
     the window is closed first (it may not have had a chance to self-close,
@@ -729,7 +729,7 @@ def open_credits_picker(store, client, meta):
     branch below needs `open_showcase` - already this module's own
     function - while only the rare detail-kind branch needs
     `detailwindow.open_detail`, the exact same lazy import every other
-    `open_showcase()` caller (searchwindow, catalogpicker, librarywindow)
+    `open_showcase()` caller (searchwindow, catalogpicker)
     already makes once a coverflow returns a selection. The
     reverse edge this creates - DetailWindow lazily importing this
     function - is just as function-scoped, so neither module needs the

@@ -3,7 +3,7 @@
     <section id="plugin.video.rivulet">
         <category id="home" label="30219">
             <group id="1">
-                <setting id="home_show_continue" type="boolean" label="30233">
+                <setting id="home_show_mystuff" type="boolean" label="30244">
                     <level>0</level>
                     <default>true</default>
                     <control type="toggle"/>

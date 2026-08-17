@@ -688,18 +688,38 @@ msgctxt "#30230"
 msgid "Open Rivulet automatically on Kodi startup"
 msgstr "Otwieraj Rivulet automatycznie przy starcie Kodi"
 
-msgctxt "#30231"
-msgid "Continue watching"
-msgstr "Kontynuuj oglądanie"
-
 msgctxt "#30232"
-msgid "Pick up where you left off"
-msgstr "Wróć tam, gdzie skończyłeś"
-
-msgctxt "#30233"
-msgid "Show Continue watching"
-msgstr "Pokaż Kontynuuj oglądanie"
+msgid "Resume, next up, and your library"
+msgstr "Wznów, następny i twoja biblioteka"
 
 msgctxt "#30234"
 msgid "now"
 msgstr "teraz"
+
+msgctxt "#30241"
+msgid "Continue"
+msgstr "Kontynuuj"
+
+msgctxt "#30242"
+msgid "NEXT UP"
+msgstr "NASTĘPNY"
+
+msgctxt "#30243"
+msgid "WATCHED"
+msgstr "OBEJRZANE"
+
+msgctxt "#30244"
+msgid "Show Continue"
+msgstr "Pokaż Kontynuuj"
+
+msgctxt "#30245"
+msgid "Continue watching"
+msgstr "Oglądaj dalej"
+
+msgctxt "#30246"
+msgid "Recently watched"
+msgstr "Ostatnio obejrzane"
+
+msgctxt "#30247"
+msgid "Your library"
+msgstr "Twoja biblioteka"

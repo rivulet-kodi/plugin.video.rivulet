@@ -498,7 +498,7 @@ def test_fetch_meta_does_not_cache_a_failed_lookup(load_views, tmp_path):
 
 
 def test_fetch_meta_store_false_skips_the_write_but_still_returns_a_fresh_fetch(load_views, tmp_path):
-    """`store=False` (continuewatching.open_continue_watching()'s batching
+    """`store=False` (mystuff._enrich()'s batching
     path, Finding 7) must not touch the on-disk cache on a fresh fetch -
     the caller takes over persisting the result itself via
     `metacache.store_cached_metas()`."""
@@ -539,7 +539,7 @@ def test_fetch_meta_store_false_still_serves_an_existing_cache_hit(load_views, t
 
 
 def test_fetch_meta_on_miss_is_called_for_a_fresh_fetch(load_views, tmp_path):
-    """`on_miss` (continuewatching.open_continue_watching()'s warm-reopen
+    """`on_miss` (mystuff._enrich()'s warm-reopen
     fix) must fire exactly when this call bypasses the cache and reaches
     for a fresh addon answer, regardless of `store`."""
     ctx = load_views()

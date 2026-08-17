@@ -70,7 +70,7 @@ def test_skin_file_discovery_finds_every_window():
     """Guards every other test in this file: a glob that silently matches
     nothing would make every rule below pass by scanning zero files."""
     paths = _skin_files()
-    assert len(paths) == 12, 'expected 12 window XMLs in %s, found %d: %s' % (_SKIN_DIR, len(paths), paths)
+    assert len(paths) == 13, 'expected 13 window XMLs in %s, found %d: %s' % (_SKIN_DIR, len(paths), paths)
 
 
 @pytest.mark.parametrize('path', _skin_files(), ids=lambda p: os.path.basename(p))

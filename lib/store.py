@@ -1285,7 +1285,7 @@ class Store:
         to ``{'type', 'id', 'video_id', 'position_ms', 'duration_ms',
         'updated_at'}`` dicts -- ``video_id`` is ``None`` when the
         stored key part is ``''`` (a movie, see :meth:`_progress_key`).
-        Feeds ``lib.ui.continuewatching``'s Home "Continue watching"
+        Feeds ``lib.ui.mystuff``'s merged Home "My Stuff" screen
         row from the same on-disk cache :meth:`get_progress` reads, so
         it works fully offline and while logged out too.
 
