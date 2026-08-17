@@ -64,12 +64,15 @@ def _remainder_types(available):
 
 #: (localized-string id, action) - the authoritative definition of Home's menu rows.
 #:
-#: `mystuff` replaces what used to be two separate rows, "Continue
-#: watching" (30231) and "Library" (30002): both built a list of metas
-#: and handed it to the same coverflow, and they overlap heavily in
-#: practice (a title you are part-way through is usually also in your
-#: library), so splitting them made the viewer guess which one held the
-#: thing they wanted. See `lib.ui.mystuff` for the merge and its bands.
+#: The `mystuff` row (labelled "Continue", 30241) replaces what used to
+#: be two separate rows, "Continue watching" and "Library" (30002): both
+#: built a list of metas and handed it to the same coverflow, and they
+#: overlap heavily in practice (a title you are part-way through is
+#: usually also in your library), so splitting them made the viewer guess
+#: which one held the thing they wanted. See `lib.ui.mystuff` for the
+#: merge and its bands. The action/module keep the `mystuff` name: the
+#: row's LABEL is what changed, and the screen still shows the saved
+#: library alongside the resumable titles.
 _MENU = (
     (30241, 'mystuff'),
     (30213, 'movies'),
