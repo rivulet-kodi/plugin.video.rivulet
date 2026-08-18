@@ -1593,11 +1593,14 @@ def test_apply_item_metadata_no_cast_call_when_item_meta_has_no_meta_key(kodi_st
 
 
 class _StubAddonStore:
-    """No-op lib.store.Store stand-in: only get_addons() is reached, and
+    """No-op lib.store.Store stand-in: only get_enabled_addons() is reached, and
     only to build the (unused, since collect_subtitles is monkeypatched
     below) addon list collect_subtitles() would otherwise query."""
 
     def get_addons(self):
+        return []
+
+    def get_enabled_addons(self):
         return []
 
 

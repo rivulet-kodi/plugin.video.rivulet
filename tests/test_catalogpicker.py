@@ -33,7 +33,7 @@ _RELOAD_MODULE_NAMES = (
 
 
 class _FakeStore:
-    """Fake `lib.store.Store`: only `get_addons()` matters to
+    """Fake `lib.store.Store`: only `get_enabled_addons()` matters to
     open_catalog_picker()."""
 
     def __init__(self, addons=None):
@@ -41,6 +41,9 @@ class _FakeStore:
 
     def get_addons(self):
         return self._addons
+
+    def get_enabled_addons(self):
+        return [a for a in self._addons if not (a.get('flags') or {}).get('disabled')]
 
 
 @pytest.fixture
@@ -612,6 +615,38 @@ def test_open_catalog_picker_opens_window_with_discovered_catalogs(load_catalogp
     assert captured['init_args'] == ('CatalogPickerWindow.xml', '/addon/path', 'Default', '1080i')
     assert captured['catalogs'] == [
         ('https://a.example/manifest.json', descriptor['manifest'], {'id': 'top', 'type': 'movie'}),
+    ]
+
+
+def test_open_catalog_picker_excludes_disabled_addons_catalogs(load_catalogpicker, monkeypatch):
+    """A disabled addon stays installed but must never surface a catalog
+    row - open_catalog_picker() fans out over get_enabled_addons(), not
+    every installed descriptor."""
+    ctx = load_catalogpicker(addon_info={'path': '/addon/path'})
+    enabled = {
+        'transportUrl': 'https://a.example/manifest.json',
+        'manifest': {'name': 'Addon A', 'catalogs': [{'id': 'top', 'type': 'movie'}]},
+    }
+    disabled = {
+        'transportUrl': 'https://b.example/manifest.json',
+        'manifest': {'name': 'Addon B', 'catalogs': [{'id': 'other', 'type': 'movie'}]},
+        'flags': {'disabled': True},
+    }
+    monkeypatch.setattr(ctx.catalogpicker, 'get_store', lambda: _FakeStore(addons=[enabled, disabled]))
+    captured = {}
+
+    class RecordingWindow(ctx.catalogpicker.CatalogPickerWindow):
+        def start(self, catalogs, heading=''):
+            captured['catalogs'] = catalogs
+            return True
+
+    monkeypatch.setattr(ctx.catalogpicker, 'CatalogPickerWindow', RecordingWindow)
+
+    result = ctx.catalogpicker.open_catalog_picker()
+
+    assert result is True
+    assert captured['catalogs'] == [
+        ('https://a.example/manifest.json', enabled['manifest'], {'id': 'top', 'type': 'movie'}),
     ]
 
 

@@ -95,6 +95,9 @@ class FakeStore:
     def get_addons(self):
         return self._addons
 
+    def get_enabled_addons(self):
+        return [a for a in self._addons if not (a.get('flags') or {}).get('disabled')]
+
     def get_auth(self):
         return self._auth
 

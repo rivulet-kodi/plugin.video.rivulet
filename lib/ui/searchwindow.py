@@ -289,7 +289,7 @@ def run_query(store, client, query):
     from lib.ui.compat import L, log
 
     metas = []
-    catalogs = list(iter_catalogs(store.get_addons(), extra_required='search'))
+    catalogs = list(iter_catalogs(store.get_enabled_addons(), extra_required='search'))
     total_catalogs = len(catalogs)
     with busy_dialog(L(30033), query) as dialog:
         for index, (transport_url, manifest, cat) in enumerate(catalogs):

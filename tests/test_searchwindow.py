@@ -55,7 +55,7 @@ _RELOAD_MODULE_NAMES = (
 
 class _FakeStore:
     """Fake `lib.store.Store`: an in-memory search-history list plus
-    `get_addons()`'s backing list. `add_search_query`/`clear_search_history`
+    `get_addons()`/`get_enabled_addons()`'s backing list. `add_search_query`/`clear_search_history`
     reproduce the real Store's move-to-front dedup and clear contract (see
     lib/store.py, not touched by this change) closely enough that
     `_run_search`'s post-search `_reload()` reflects the just-recorded
@@ -71,6 +71,9 @@ class _FakeStore:
 
     def get_addons(self):
         return self._addons
+
+    def get_enabled_addons(self):
+        return [a for a in self._addons if not (a.get('flags') or {}).get('disabled')]
 
     def get_search_history(self):
         return list(self._history)

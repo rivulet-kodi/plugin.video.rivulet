@@ -229,7 +229,7 @@ def _attach_subtitles(list_item, behavior_hints, stype, sid):
         if 'filename' in behavior_hints:
             extra.append(('filename', behavior_hints['filename']))
         subs = collect_subtitles(
-            get_client(), get_store().get_addons(), stype, sid, extra=extra or None
+            get_client(), get_store().get_enabled_addons(), stype, sid, extra=extra or None
         )
         subs = filter_subtitles(subs, ADDON.getSetting('subs_language') or 'en')
         urls = [sub['url'] for sub in subs[:20]]

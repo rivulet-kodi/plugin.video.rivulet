@@ -5,7 +5,13 @@ JSON files live under ``data_dir``:
 
 * ``addons.json`` -- list of addon descriptors, each shaped like the
   Stremio addon-collection API: ``{"transportUrl": ..., "manifest": ...,
-  "flags": {...}}``.
+  "flags": {...}}``. Rivulet adds one flag of its own on top of that
+  shape: ``flags.disabled`` (present and ``True``, or absent -- never
+  ``False``), set by :meth:`Store.set_addon_disabled` to hide an addon
+  from catalog/meta/stream/subtitle fan-out (:meth:`Store.get_enabled_addons`)
+  while leaving it installed. This is purely local presentation state,
+  not part of the Stremio addon-collection schema, so it is never pushed
+  by the account sync.
 * ``auth.json`` -- ``{"authKey": ..., "user": {...}}`` when logged in to a
   Stremio account, or absent/``None`` when logged out.
 * ``search_history.json`` -- list of past search query strings, most
@@ -969,6 +975,18 @@ class Store:
             self.set_addons(addons)
         return addons
 
+    def get_enabled_addons(self):
+        """Return installed addon descriptors minus the disabled ones.
+
+        This is the read path every fan-out call site uses to decide which
+        addons to query for catalogs, metas, streams and subtitles.
+        :meth:`get_addons` itself remains the full installed list -- the
+        one the addon manager UI displays and the Stremio account sync
+        pushes -- since ``disabled`` is local presentation state, not part
+        of the addon-collection schema being synced.
+        """
+        return [a for a in self.get_addons() if not (a.get("flags") or {}).get("disabled")]
+
     def set_addons(self, addons):
         addons = list(addons)
         _atomic_write(self._addons_path, addons)
@@ -1075,6 +1093,42 @@ class Store:
             return [a for a in addons if a.get("transportUrl") != transport_url]
 
         self.update_addons(_remove)
+
+    def set_addon_disabled(self, transport_url, disabled):
+        """Toggle ``flags.disabled`` for the addon at ``transport_url``.
+
+        Unlike :meth:`remove_addon`, this is reversible -- flipping a bit
+        the user can flip back -- so protected (built-in) addons may be
+        disabled too; there is no refusal branch here.
+
+        Enabling (``disabled=False``) deletes the ``disabled`` key rather
+        than writing ``False``, so addons.json stays clean and an
+        already-enabled addon compares equal to itself in
+        :meth:`update_addons`'s no-op check. No-ops if ``transport_url``
+        is not installed.
+
+        Safe against a concurrent ``default.py`` process modifying
+        addons.json at the same time -- see :meth:`update_addons`.
+        """
+        def _set_disabled(addons):
+            target = next(
+                (a for a in addons if a.get("transportUrl") == transport_url), None
+            )
+            if target is None:
+                return addons
+            new_flags = dict(target.get("flags") or {})
+            if disabled:
+                new_flags["disabled"] = True
+            else:
+                new_flags.pop("disabled", None)
+            new_target = dict(target)
+            new_target["flags"] = new_flags
+            return [
+                new_target if a.get("transportUrl") == transport_url else a
+                for a in addons
+            ]
+
+        self.update_addons(_set_disabled)
 
     # -- auth --------------------------------------------------------------
 

@@ -1,7 +1,9 @@
 """AddonsWindow: a vertical list of every installed addon - Rivulet's
 add-on manager. Row 0 installs a new addon from a manifest URL; every
-other row opens a yes/no removal prompt for that addon, refused for
-protected/official addons. Built/run via `open_addons()`.
+other row opens an action menu (disable/enable, remove) for that addon -
+removal is refused for protected/official addons, disabling is not
+(it is reversible local state, never pushed to Stremio). Built/run via
+`open_addons()`.
 """
 import xbmcgui
 
@@ -55,7 +57,10 @@ class AddonsWindow(BaseWindow):
         items = [install_item]
         for index, descriptor in enumerate(self.addons):
             manifest = descriptor.get('manifest') or {}
+            flags = descriptor.get('flags') or {}
             label = '%s  \u00b7  v%s' % (manifest.get('name', '?'), manifest.get('version', '?'))
+            if flags.get('disabled'):
+                label += '  \u00b7  ' + L(30251)
             item = xbmcgui.ListItem(label=label, label2=_clean_description(manifest.get('description', '')))
             item.setProperty('position', str(index))
             items.append(item)
@@ -71,7 +76,7 @@ class AddonsWindow(BaseWindow):
         if position == 'install':
             self._install()
             return
-        self._remove(self.addons[int(position)])
+        self._open_actions(self.addons[int(position)])
 
     def _install(self):
         import xbmc
@@ -139,9 +144,36 @@ class AddonsWindow(BaseWindow):
         notify(L(30013))
         self._reload()
 
+    def _open_actions(self, descriptor):
+        from lib.ui import dialogs
+        from lib.ui.compat import L
+
+        manifest = descriptor.get('manifest') or {}
+        flags = descriptor.get('flags') or {}
+        disabled = bool(flags.get('disabled'))
+        rows = [L(30249) if disabled else L(30248), L(30250)]
+        picked = dialogs.choose(manifest.get('name', '?'), rows)
+        if picked == 0:
+            self._toggle(descriptor)
+        elif picked == 1:
+            self._remove(descriptor)
+
+    def _toggle(self, descriptor):
+        from lib.ui.compat import L, notify
+
+        flags = descriptor.get('flags') or {}
+        disabled = bool(flags.get('disabled'))
+        self.store.set_addon_disabled(descriptor.get('transportUrl'), not disabled)
+        # Local presentation state only, deliberately not part of Stremio's
+        # addon-collection schema, so no `_sync_addons_if_logged_in()` push
+        # here - toggling must never cost a network call.
+        notify(L(30252) if disabled else L(30251))
+        self._reload()
+
 
 def open_addons():
-    """List every installed addon with install/remove actions. Mirrors
+    """List every installed addon with install/enable-disable/remove
+    actions. Mirrors
     `catalogpicker.open_catalog_picker`'s error-handling shape; unlike
     that picker there is no should-close-caller outcome to report, so
     this always returns None."""

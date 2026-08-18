@@ -723,3 +723,23 @@ msgstr "最近观看"
 msgctxt "#30247"
 msgid "Your library"
 msgstr "我的库"
+
+msgctxt "#30248"
+msgid "Disable"
+msgstr "禁用"
+
+msgctxt "#30249"
+msgid "Enable"
+msgstr "启用"
+
+msgctxt "#30250"
+msgid "Remove"
+msgstr "移除"
+
+msgctxt "#30251"
+msgid "Disabled"
+msgstr "已禁用"
+
+msgctxt "#30252"
+msgid "Enabled"
+msgstr "已启用"

@@ -723,3 +723,23 @@ msgstr "Son izlenenler"
 msgctxt "#30247"
 msgid "Your library"
 msgstr "Kitaplığınız"
+
+msgctxt "#30248"
+msgid "Disable"
+msgstr "Devre Dışı Bırak"
+
+msgctxt "#30249"
+msgid "Enable"
+msgstr "Etkinleştir"
+
+msgctxt "#30250"
+msgid "Remove"
+msgstr "Kaldır"
+
+msgctxt "#30251"
+msgid "Disabled"
+msgstr "Devre Dışı"
+
+msgctxt "#30252"
+msgid "Enabled"
+msgstr "Etkinleştirildi"

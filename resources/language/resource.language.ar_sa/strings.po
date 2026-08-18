@@ -723,3 +723,23 @@ msgstr "شوهد مؤخرًا"
 msgctxt "#30247"
 msgid "Your library"
 msgstr "مكتبتك"
+
+msgctxt "#30248"
+msgid "Disable"
+msgstr "تعطيل"
+
+msgctxt "#30249"
+msgid "Enable"
+msgstr "تفعيل"
+
+msgctxt "#30250"
+msgid "Remove"
+msgstr "إزالة"
+
+msgctxt "#30251"
+msgid "Disabled"
+msgstr "معطّل"
+
+msgctxt "#30252"
+msgid "Enabled"
+msgstr "مفعّل"

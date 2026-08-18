@@ -782,12 +782,13 @@ def open_credits_picker(store, client, meta):
     if kind == 'discover':
         from lib.stremio.addons import AddonError, safe_url_for_log
 
-        installed = {descriptor.get('transportUrl') for descriptor in store.get_addons()}
+        installed = {descriptor.get('transportUrl') for descriptor in store.get_enabled_addons()}
         # SECURITY: an addon-supplied discover link's transport_url must
         # never cause a fetch to an arbitrary host - only dispatch it
         # once it's confirmed to name one of the user's own installed
-        # addons (resolved against store.get_addons(), never fetched
-        # from the link itself).
+        # AND enabled addons (resolved against store.get_enabled_addons(),
+        # never fetched from the link itself) - a disabled addon is not
+        # dispatchable either.
         if parsed['transport_url'] not in installed:
             log('infowindow: discover link transport not installed: %s' % safe_url_for_log(parsed['transport_url']), xbmc.LOGWARNING)
             return
