@@ -723,3 +723,23 @@ msgstr "Onlangs bekeken"
 msgctxt "#30247"
 msgid "Your library"
 msgstr "Jouw bibliotheek"
+
+msgctxt "#30248"
+msgid "Disable"
+msgstr "Uitschakelen"
+
+msgctxt "#30249"
+msgid "Enable"
+msgstr "Inschakelen"
+
+msgctxt "#30250"
+msgid "Remove"
+msgstr "Verwijderen"
+
+msgctxt "#30251"
+msgid "Disabled"
+msgstr "Uitgeschakeld"
+
+msgctxt "#30252"
+msgid "Enabled"
+msgstr "Ingeschakeld"

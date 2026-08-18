@@ -723,3 +723,23 @@ msgstr ""
 msgctxt "#30247"
 msgid "Your library"
 msgstr ""
+
+msgctxt "#30248"
+msgid "Disable"
+msgstr ""
+
+msgctxt "#30249"
+msgid "Enable"
+msgstr ""
+
+msgctxt "#30250"
+msgid "Remove"
+msgstr ""
+
+msgctxt "#30251"
+msgid "Disabled"
+msgstr ""
+
+msgctxt "#30252"
+msgid "Enabled"
+msgstr ""

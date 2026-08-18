@@ -119,7 +119,7 @@ def _fetch_meta(stype, sid, store=True, on_miss=None):
     for every addon to answer.
 
     Preference order: the old sequential loop always returned the first
-    addon (in store.get_addons() order) with a usable result, since it
+    addon (in store.get_enabled_addons() order) with a usable result, since it
     never even called later addons once one hit. With real concurrency
     every eligible addon is called up front, so that exact guarantee is
     no longer possible in general - but we still prefer the earliest
@@ -175,7 +175,7 @@ def _fetch_meta(stype, sid, store=True, on_miss=None):
         on_miss()
 
     targets = [
-        descriptor for descriptor in data_store.get_addons()
+        descriptor for descriptor in data_store.get_enabled_addons()
         if addons_lib.addon_supports(descriptor.get('manifest') or {}, 'meta', stype, sid)
     ]
     if not targets:

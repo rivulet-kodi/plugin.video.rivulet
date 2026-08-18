@@ -706,7 +706,7 @@ def _supported_stream_addons(stype, sid):
 
     store = get_store()
     addons = []
-    for descriptor in store.get_addons():
+    for descriptor in store.get_enabled_addons():
         manifest = descriptor.get('manifest') or {}
         if addon_supports(manifest, 'stream', stype, sid):
             addons.append((descriptor, manifest))

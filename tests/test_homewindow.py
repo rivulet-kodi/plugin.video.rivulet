@@ -51,7 +51,7 @@ _ALL_TYPE_ADDONS = [{'transportUrl': 'https://a/manifest.json', 'manifest': {'ca
 
 
 class _FakeStore:
-    """Fake `lib.store.Store` for HomeWindow.onInit(): `get_addons()`
+    """Fake `lib.store.Store` for HomeWindow.onInit(): `get_enabled_addons()`
     supplies the catalogs the type rows auto-hide against (defaulting to
     one of every type), and `get_auth()`/`get_progress_entries()`
     (defaulting to logged out with nothing cached) are what the real
@@ -69,6 +69,9 @@ class _FakeStore:
 
     def get_addons(self):
         return self._addons
+
+    def get_enabled_addons(self):
+        return [a for a in self._addons if not (a.get('flags') or {}).get('disabled')]
 
     def get_progress_entries(self):
         return self._progress_entries

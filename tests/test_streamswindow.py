@@ -75,13 +75,16 @@ _RELOAD_MODULE_NAMES = (
 
 
 class _FakeStore:
-    """Fake `lib.store.Store`: only `get_addons()` matters to open_streams()."""
+    """Fake `lib.store.Store`: only `get_enabled_addons()` matters to open_streams()."""
 
     def __init__(self, addons=None):
         self._addons = addons or []
 
     def get_addons(self):
         return self._addons
+
+    def get_enabled_addons(self):
+        return [a for a in self._addons if not (a.get('flags') or {}).get('disabled')]
 
 
 class _FakeAddonClient:
@@ -1001,6 +1004,29 @@ def test_open_streams_filters_unsupported_addons_and_forwards_aggregate_to_the_w
     assert (stype, sid, poster) == ('movie', 'tt1', 'https://x/poster.jpg')
     assert [s for _info, s in pairs] == [stream]
     assert result is False
+
+
+def test_supported_stream_addons_skips_disabled_addon(load_streamswindow):
+    """A disabled addon stays installed but must never be dispatched for
+    streams - `_supported_stream_addons()` fans out over
+    `get_enabled_addons()`, not every installed descriptor."""
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    enabled = {
+        'transportUrl': 't-enabled',
+        'manifest': {'name': 'Enabled', 'resources': ['stream'], 'types': ['movie']},
+    }
+    disabled = {
+        'transportUrl': 't-disabled',
+        'manifest': {'name': 'Disabled', 'resources': ['stream'], 'types': ['movie']},
+        'flags': {'disabled': True},
+    }
+    _wire_data_layer(sw, _FakeStore(addons=[enabled, disabled]), _FakeAddonClient({}))
+
+    addons = sw._supported_stream_addons('movie', 'tt1')
+
+    assert [descriptor['transportUrl'] for descriptor, _manifest in addons] == ['t-enabled']
+
 
 
 def test_open_streams_forwards_heading_art_and_meta_to_the_window(load_streamswindow, monkeypatch):

@@ -723,3 +723,23 @@ msgstr "最近見た作品"
 msgctxt "#30247"
 msgid "Your library"
 msgstr "ライブラリ"
+
+msgctxt "#30248"
+msgid "Disable"
+msgstr "無効にする"
+
+msgctxt "#30249"
+msgid "Enable"
+msgstr "有効にする"
+
+msgctxt "#30250"
+msgid "Remove"
+msgstr "削除"
+
+msgctxt "#30251"
+msgid "Disabled"
+msgstr "無効"
+
+msgctxt "#30252"
+msgid "Enabled"
+msgstr "有効"

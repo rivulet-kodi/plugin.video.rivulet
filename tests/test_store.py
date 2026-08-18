@@ -143,6 +143,93 @@ def test_remove_addon_nonexistent_url_does_not_raise_valueerror_for_protection(t
     assert len(store.get_addons()) == before
 
 
+# --- get_enabled_addons / set_addon_disabled --------------------------------
+
+
+def test_set_addon_disabled_excludes_from_enabled_but_not_from_all(tmp_path):
+    store = make_store(tmp_path)
+    url = "https://custom.example/manifest.json"
+    store.install_addon(url, {"id": "org.custom", "name": "Custom"})
+
+    store.set_addon_disabled(url, True)
+
+    assert url not in {a["transportUrl"] for a in store.get_enabled_addons()}
+    assert url in {a["transportUrl"] for a in store.get_addons()}
+
+
+def test_set_addon_disabled_false_removes_disabled_key_entirely(tmp_path):
+    store = make_store(tmp_path)
+    url = "https://custom.example/manifest.json"
+    store.install_addon(url, {"id": "org.custom", "name": "Custom"})
+    store.set_addon_disabled(url, True)
+
+    store.set_addon_disabled(url, False)
+
+    descriptor = next(a for a in store.get_addons() if a["transportUrl"] == url)
+    assert "disabled" not in descriptor["flags"]
+    assert url in {a["transportUrl"] for a in store.get_enabled_addons()}
+
+
+def test_set_addon_disabled_allows_protected_addon(tmp_path):
+    store = make_store(tmp_path)
+    protected_url = DEFAULT_ADDONS[0]["transportUrl"]
+    store.get_addons()  # seed
+
+    store.set_addon_disabled(protected_url, True)
+
+    descriptor = next(a for a in store.get_addons() if a["transportUrl"] == protected_url)
+    assert descriptor["flags"]["disabled"] is True
+    assert descriptor["flags"]["protected"] is True
+    assert protected_url not in {a["transportUrl"] for a in store.get_enabled_addons()}
+
+
+def test_set_addon_disabled_nonexistent_url_is_noop(tmp_path, monkeypatch):
+    store = make_store(tmp_path)
+    store.get_addons()  # seed
+
+    write_calls = []
+    real_atomic_write = store_module._atomic_write
+
+    def spy_atomic_write(path, data, compact=False):
+        write_calls.append(path)
+        return real_atomic_write(path, data, compact=compact)
+
+    monkeypatch.setattr(store_module, "_atomic_write", spy_atomic_write)
+
+    before = store.get_addons()
+    store.set_addon_disabled("https://does-not-exist.example/manifest.json", True)
+
+    assert write_calls == []
+    assert store.get_addons() == before
+
+
+def test_set_addon_disabled_goes_through_update_addons(tmp_path, monkeypatch):
+    """The write must go through the compare-and-swap path (a fresh read
+    immediately before persisting), not a plain get_addons()+set_addons()
+    that could lose a concurrent writer's update."""
+    store = make_store(tmp_path)
+    url = "https://custom.example/manifest.json"
+    store.install_addon(url, {"id": "org.custom", "name": "Custom"})
+
+    real_read_raw = store_module._read_raw
+    calls = []
+
+    def spy_read_raw(path):
+        calls.append(path)
+        return real_read_raw(path)
+
+    monkeypatch.setattr(store_module, "_read_raw", spy_read_raw)
+
+    store.set_addon_disabled(url, True)
+
+    monkeypatch.undo()  # stop faking reads before verifying the real on-disk result
+    assert len(calls) == 2  # baseline read + pre-write conflict check
+    with open(store._addons_path) as f:
+        on_disk = json.load(f)
+    descriptor = next(a for a in on_disk if a["transportUrl"] == url)
+    assert descriptor["flags"]["disabled"] is True
+
+
 # --- auth ------------------------------------------------------------------
 
 

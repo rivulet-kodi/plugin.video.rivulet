@@ -1331,6 +1331,9 @@ class _Store:
     def get_addons(self):
         return self._addons
 
+    def get_enabled_addons(self):
+        return [a for a in self._addons if not (a.get('flags') or {}).get('disabled')]
+
 
 def _stub_choose(monkeypatch, ctx, answers=None, capture=None):
     """Patches `lib.ui.dialogs.choose` directly (already exhaustively

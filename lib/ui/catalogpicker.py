@@ -278,7 +278,7 @@ def open_catalog_picker(types=None, heading=''):
     from lib.stremio.addons import iter_catalogs
     from lib.ui.compat import L, log, notify
 
-    catalogs = list(iter_catalogs(get_store().get_addons()))
+    catalogs = list(iter_catalogs(get_store().get_enabled_addons()))
     if types is not None:
         wanted = {_base_type(t) for t in types}
         catalogs = [c for c in catalogs if _base_type(c[2].get('type')) in wanted]

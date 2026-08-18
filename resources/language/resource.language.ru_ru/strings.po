@@ -723,3 +723,23 @@ msgstr "Недавно просмотренные"
 msgctxt "#30247"
 msgid "Your library"
 msgstr "Ваша библиотека"
+
+msgctxt "#30248"
+msgid "Disable"
+msgstr "Отключить"
+
+msgctxt "#30249"
+msgid "Enable"
+msgstr "Включить"
+
+msgctxt "#30250"
+msgid "Remove"
+msgstr "Удалить"
+
+msgctxt "#30251"
+msgid "Disabled"
+msgstr "Отключено"
+
+msgctxt "#30252"
+msgid "Enabled"
+msgstr "Включено"

@@ -35,13 +35,15 @@ _RELOAD_MODULE_NAMES = (
 
 class _FakeStore:
     """Fake `lib.store.Store`: tracks `get_addons()`'s backing list plus
-    every `install_addon`/`remove_addon` call, and reproduces
-    `remove_addon`'s real protected-addon `ValueError` refusal."""
+    every `install_addon`/`remove_addon`/`set_addon_disabled` call, and
+    reproduces `remove_addon`'s real protected-addon `ValueError`
+    refusal."""
 
     def __init__(self, addons=None):
         self.addons = list(addons or [])
         self.installed = []
         self.removed = []
+        self.disable_calls = []
 
     def get_addons(self):
         return self.addons
@@ -58,6 +60,18 @@ class _FakeStore:
             raise ValueError('cannot remove protected addon: %s' % transport_url)
         self.removed.append(transport_url)
         self.addons = [a for a in self.addons if a.get('transportUrl') != transport_url]
+
+    def set_addon_disabled(self, transport_url, disabled):
+        self.disable_calls.append((transport_url, disabled))
+        target = next((a for a in self.addons if a.get('transportUrl') == transport_url), None)
+        if target is None:
+            return
+        flags = dict(target.get('flags') or {})
+        if disabled:
+            flags['disabled'] = True
+        else:
+            flags.pop('disabled', None)
+        target['flags'] = flags
 
     def get_auth(self):
         return None
@@ -119,6 +133,19 @@ def _stub_confirm(monkeypatch, ctx, answer, capture=None):
     monkeypatch.setattr(ctx.dialogs, 'confirm', _confirm)
 
 
+def _stub_choose(monkeypatch, ctx, index, capture=None):
+    """Patches `lib.ui.dialogs.choose` directly (already exhaustively
+    covered by tests/test_dialogs.py) rather than driving a real
+    `doModal()` - this suite only needs to prove `_open_actions()` passes
+    the right heading/rows and reacts correctly to the picked index."""
+    def _choose(heading, rows):
+        if capture is not None:
+            capture.append((heading, rows))
+        return index
+
+    monkeypatch.setattr(ctx.dialogs, 'choose', _choose)
+
+
 # ---------------------------------------------------------------------------
 # AddonsWindow.onInit() / _reload() - item building
 # ---------------------------------------------------------------------------
@@ -165,6 +192,22 @@ def test_oninit_truncates_long_descriptions_to_one_line(load_addonswindow, monke
     assert '\n' not in addon_item.label2
 
 
+def test_oninit_marks_disabled_addon_row_label(load_addonswindow, monkeypatch):
+    ctx = load_addonswindow()
+    descriptor = {
+        'transportUrl': 'https://a.example/manifest.json',
+        'manifest': {'name': 'Addon A', 'version': '1.0'},
+        'flags': {'disabled': True},
+    }
+    _wire_store(ctx.addonswindow, _FakeStore(addons=[descriptor]))
+    win = _make_window(ctx.addonswindow)
+
+    win.onInit()
+
+    addon_item = win.getControl(ctx.addonswindow.LIST).items[1]
+    assert addon_item.getLabel() == 'Addon A  \u00b7  v1.0  \u00b7  STR30251'
+
+
 # ---------------------------------------------------------------------------
 # AddonsWindow.onClick() - dispatch
 # ---------------------------------------------------------------------------
@@ -190,6 +233,129 @@ def test_onclick_list_with_no_focused_item_does_not_crash(load_addonswindow, mon
     # No onInit() call -> the list control is never populated.
 
     win.onClick(ctx.addonswindow.LIST)  # must not raise
+
+
+def test_onclick_addon_row_opens_action_menu_with_disable_and_remove_rows(load_addonswindow, monkeypatch):
+    descriptor = _descriptor(name='Addon A')
+    ctx = load_addonswindow()
+    captured = []
+    _stub_choose(monkeypatch, ctx, -1, capture=captured)
+    _wire_store(ctx.addonswindow, _FakeStore(addons=[descriptor]))
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+
+    win.onClick(ctx.addonswindow.LIST)
+
+    assert captured == [('Addon A', ['STR30248', 'STR30250'])]
+
+
+def test_onclick_addon_row_opens_action_menu_with_enable_row_when_disabled(load_addonswindow, monkeypatch):
+    descriptor = _descriptor(name='Addon A')
+    descriptor['flags']['disabled'] = True
+    ctx = load_addonswindow()
+    captured = []
+    _stub_choose(monkeypatch, ctx, -1, capture=captured)
+    _wire_store(ctx.addonswindow, _FakeStore(addons=[descriptor]))
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+
+    win.onClick(ctx.addonswindow.LIST)
+
+    assert captured == [('Addon A', ['STR30249', 'STR30250'])]
+
+
+def test_onclick_dismissed_action_menu_mutates_nothing(load_addonswindow, monkeypatch):
+    descriptor = _descriptor()
+    ctx = load_addonswindow()
+    _stub_choose(monkeypatch, ctx, -1)
+    store = _FakeStore(addons=[descriptor])
+    _wire_store(ctx.addonswindow, store)
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+
+    win.onClick(ctx.addonswindow.LIST)
+
+    assert store.removed == []
+    assert store.disable_calls == []
+    assert ctx.env.notifications == []
+
+
+def test_onclick_toggle_row_disables_addon_notifies_and_reloads(load_addonswindow, monkeypatch):
+    descriptor = _descriptor()
+    ctx = load_addonswindow()
+    _stub_choose(monkeypatch, ctx, 0)
+    store = _FakeStore(addons=[descriptor])
+    _wire_store(ctx.addonswindow, store)
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+
+    win.onClick(ctx.addonswindow.LIST)
+
+    assert store.disable_calls == [(descriptor['transportUrl'], True)]
+    assert ctx.env.notifications == [('Rivulet', 'STR30251', 'info', 4000)]
+    addon_item = win.getControl(ctx.addonswindow.LIST).items[1]
+    assert addon_item.getLabel().endswith('STR30251')
+
+
+def test_onclick_toggle_row_enables_addon_notifies_and_reloads(load_addonswindow, monkeypatch):
+    descriptor = _descriptor()
+    descriptor['flags']['disabled'] = True
+    ctx = load_addonswindow()
+    _stub_choose(monkeypatch, ctx, 0)
+    store = _FakeStore(addons=[descriptor])
+    _wire_store(ctx.addonswindow, store)
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+
+    win.onClick(ctx.addonswindow.LIST)
+
+    assert store.disable_calls == [(descriptor['transportUrl'], False)]
+    assert ctx.env.notifications == [('Rivulet', 'STR30252', 'info', 4000)]
+    addon_item = win.getControl(ctx.addonswindow.LIST).items[1]
+    assert addon_item.getLabel() == 'Addon A  \u00b7  v1.0'
+
+
+def test_onclick_toggle_protected_addon_still_works(load_addonswindow, monkeypatch):
+    """Unlike removal, disabling is reversible local state - there is no
+    protected-addon refusal branch for it."""
+    descriptor = _descriptor(protected=True)
+    ctx = load_addonswindow()
+    _stub_choose(monkeypatch, ctx, 0)
+    store = _FakeStore(addons=[descriptor])
+    _wire_store(ctx.addonswindow, store)
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+
+    win.onClick(ctx.addonswindow.LIST)
+
+    assert store.disable_calls == [(descriptor['transportUrl'], True)]
+    assert ctx.env.notifications == [('Rivulet', 'STR30251', 'info', 4000)]
+
+
+def test_onclick_toggle_never_calls_sync_addons(load_addonswindow, monkeypatch):
+    """The disabled flag is local presentation state, not part of
+    Stremio's addon-collection schema - toggling must never push a sync,
+    unlike install/remove."""
+    descriptor = _descriptor()
+    ctx = load_addonswindow()
+    _stub_choose(monkeypatch, ctx, 0)
+    store = _FakeStore(addons=[descriptor])
+    _wire_store(ctx.addonswindow, store)
+    sync_calls = []
+    monkeypatch.setattr(ctx.views, '_sync_addons_if_logged_in', lambda s: sync_calls.append(s))
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+
+    win.onClick(ctx.addonswindow.LIST)
+
+    assert sync_calls == []
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +441,7 @@ def _descriptor(transport='https://a.example/manifest.json', name='Addon A', pro
 def test_remove_confirmed_removes_notifies_and_reloads(load_addonswindow, monkeypatch):
     descriptor = _descriptor()
     ctx = load_addonswindow()
+    _stub_choose(monkeypatch, ctx, 1)
     captured = []
     _stub_confirm(monkeypatch, ctx, True, capture=captured)
     store = _FakeStore(addons=[descriptor])
@@ -296,6 +463,7 @@ def test_remove_confirmed_removes_notifies_and_reloads(load_addonswindow, monkey
 def test_remove_declined_leaves_addon_untouched(load_addonswindow, monkeypatch):
     descriptor = _descriptor()
     ctx = load_addonswindow()
+    _stub_choose(monkeypatch, ctx, 1)
     _stub_confirm(monkeypatch, ctx, False)
     store = _FakeStore(addons=[descriptor])
     _wire_store(ctx.addonswindow, store)
@@ -312,6 +480,7 @@ def test_remove_declined_leaves_addon_untouched(load_addonswindow, monkeypatch):
 def test_remove_protected_addon_notifies_and_never_calls_remove(load_addonswindow, monkeypatch):
     descriptor = _descriptor(protected=True)
     ctx = load_addonswindow()
+    _stub_choose(monkeypatch, ctx, 1)
     captured = []
     _stub_confirm(monkeypatch, ctx, True, capture=captured)  # scripted answer must never even be consulted
     store = _FakeStore(addons=[descriptor])
@@ -335,6 +504,7 @@ def test_remove_store_raises_valueerror_notifies_protected(load_addonswindow, mo
     refusal is still caught and notified the same way."""
     descriptor = _descriptor()
     ctx = load_addonswindow()
+    _stub_choose(monkeypatch, ctx, 1)
     _stub_confirm(monkeypatch, ctx, True)
     store = _FakeStore(addons=[descriptor])
 

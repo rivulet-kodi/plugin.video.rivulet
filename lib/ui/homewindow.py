@@ -192,7 +192,7 @@ class HomeWindow(BaseWindow):
         # an addon that publishes a new type) is reflected on the way back
         # here without restarting the addon.
         control.reset()
-        control.addItems(_menu_items(show_mystuff, store.get_addons()))
+        control.addItems(_menu_items(show_mystuff, store.get_enabled_addons()))
         self.getControl(STATUS_LABEL).setLabel(_status_text(auth))
         self.setFocusId(LIST)
 
@@ -220,7 +220,7 @@ def _open_type_row(window, action):
     from lib.ui.compat import L
     types = TYPE_ROW_TYPES[action]
     if types is None:  # 'other': not a fixed set - compute the remainder live
-        types = _remainder_types(_available_types(get_store().get_addons()))
+        types = _remainder_types(_available_types(get_store().get_enabled_addons()))
     if open_catalog_picker(types=types, heading=L(L_FOR_ACTION[action])):
         window.close()
 

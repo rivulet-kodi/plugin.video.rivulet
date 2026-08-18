@@ -723,3 +723,23 @@ msgstr "Vu récemment"
 msgctxt "#30247"
 msgid "Your library"
 msgstr "Votre bibliothèque"
+
+msgctxt "#30248"
+msgid "Disable"
+msgstr "Désactiver"
+
+msgctxt "#30249"
+msgid "Enable"
+msgstr "Activer"
+
+msgctxt "#30250"
+msgid "Remove"
+msgstr "Supprimer"
+
+msgctxt "#30251"
+msgid "Disabled"
+msgstr "Désactivé"
+
+msgctxt "#30252"
+msgid "Enabled"
+msgstr "Activé"
