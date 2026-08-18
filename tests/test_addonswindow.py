@@ -596,6 +596,31 @@ def test_remove_confirmed_concurrent_update_notifies_and_reloads_instead_of_rais
     assert reload_calls == [True]
 
 
+def test_install_concurrent_update_notifies_and_does_not_report_success(load_addonswindow, monkeypatch):
+    """`install_addon()` shares the same CAS path, and its guarded call
+    sits before the Stremio collection push - a losing race must notify
+    30032 and stop, never follow up with the "Addon installed" 30012 that
+    would claim a descriptor was persisted."""
+    url = 'https://new.example/manifest.json'
+    ctx = load_addonswindow(dialog_inputs=[url])
+    store = _FakeStore()
+
+    def _raise(transport_url, manifest):
+        raise ConcurrentUpdateError('addons.json changed underneath us')
+
+    monkeypatch.setattr(store, 'install_addon', _raise)
+    _wire_store(ctx.addonswindow, store)
+    _wire_client(ctx.addonswindow, _FakeAddonClient(
+        manifest_result={'id': 'org.new', 'name': 'New Addon', 'version': '1.0'}))
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+
+    win.onClick(ctx.addonswindow.LIST)  # must not raise ConcurrentUpdateError
+
+    assert store.installed == []
+    assert ctx.env.notifications == [('Rivulet', 'STR30032', 'info', 4000)]
+
+
 def test_remove_store_raises_valueerror_is_not_caught_by_guard_mutation(load_addonswindow, monkeypatch):
     """`_guard_mutation()` only catches `ConcurrentUpdateError` - the
     protected-addon `ValueError` refusal must still propagate to
