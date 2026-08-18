@@ -3,10 +3,10 @@
 
 Drives a *running* `kodi-standalone` instance over its raw TCP JSON-RPC
 socket (port 9090, always on - no webserver/auth setup needed) to walk
-through the addon's screens and Kodi's native Add-ons browser, taking a
-screenshot at each stop via the `screenshot` input action (written by
-Kodi to `debug.screenshotpath`, see `userdata/guisettings.xml`), then
-resizes/redacts/renames the result into `artwork/screenshots/`.
+through the addon's screens, taking a screenshot at each stop via the
+`screenshot` input action (written by Kodi to `debug.screenshotpath`,
+see `userdata/guisettings.xml`), then resizes/redacts/renames the result
+into `artwork/screenshots/`.
 
 Requirements (all one-time, on the machine actually running Kodi):
   - Kodi installed with the Rivulet addon, logged in, with at least one
@@ -23,7 +23,7 @@ Usage:
 
 Every step is logged; a failed/slow step (e.g. a stream never resolving)
 just gets skipped rather than hanging the whole run - re-run for that one
-shot by hand if needed, editing SELECTION at the bottom.
+shot by hand if needed, commenting out the legs already captured.
 """
 import json
 import os
@@ -140,7 +140,7 @@ def _raw_size(path):
 def optimise(path):
     """Shrink `path` losslessly, in place.
 
-    These 11 images ship inside every addon zip and are served on every
+    These images ship inside every addon zip and are served on every
     page load of the project site, so the bytes are worth reclaiming.
     Both tools are optional - a machine without them still produces
     correct, just larger, output.
@@ -238,66 +238,54 @@ def goto_home(rpc, delay=2.0):
     time.sleep(max(delay, 6.0))
 
 
-def _home_rows():
-    """Map each HomeWindow action to its row index, read out of
-    `lib.ui.homewindow._MENU` - the authoritative definition.
+#: HomeWindow's list control (`lib.ui.homewindow.LIST`). Every row carries
+#: its dispatch action as a ListItem property, which Kodi exposes to
+#: JSON-RPC - that property is what makes the walk verifiable.
+HOME_LIST = 30002
 
-    Parsed with `ast` rather than imported: `lib.ui.homewindow` binds
-    `xbmcgui` at module scope and cannot load outside Kodi. These used to
-    be hardcoded, and went stale the moment the `other` row was inserted
-    at index 3 - every leg after it then walked to the wrong screen, which
-    is the same class of failure as counting keypresses.
 
-    Assumes every row is present, which holds on the capture machine: it
-    is logged in (Library) and has addons publishing types outside the
-    three curated rows (Other). A machine missing either would shift the
-    rows below it. `continue` is conditional the same way - it needs the
-    setting on and an in-band local playback-progress entry - and is
-    absent on a fresh capture machine, shifting every row after it.
+def info_label(rpc, label):
+    """One `XBMC.GetInfoLabels` value, or ''.
+
+    Kodi resolves info labels for custom windows too, so
+    `Container(30002).*` reads Home's live list rather than a model of
+    it. Empty means Home is not active or its list is still being built.
     """
-    import ast
-
-    source = os.path.join(_REPO_ROOT, 'lib', 'ui', 'homewindow.py')
-    with open(source, encoding='utf-8') as handle:
-        tree = ast.parse(handle.read())
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and any(
-                getattr(t, 'id', None) == '_MENU' for t in node.targets):
-            actions = [e.elts[1].value for e in node.value.elts]
-            return {action: index for index, action in enumerate(actions)}
-    raise SystemExit('could not find _MENU in %s' % source)
+    result = (rpc.call("XBMC.GetInfoLabels", {"labels": [label]}) or {}).get("result") or {}
+    return result.get(label) or ""
 
 
-#: HomeWindow's rows, by action name -> row index.
-HOME_ROWS = _home_rows()
-HOME_MOVIES = HOME_ROWS['movies']
-HOME_SEARCH = HOME_ROWS['search']
-HOME_LIBRARY = HOME_ROWS['library']
-HOME_ADDONS = HOME_ROWS['addons']
-
-#: Rows to step down in Kodi's "Video add-ons" folder to reach Rivulet.
-#: The folder lists ".." first, then user video plugins sorted by name;
-#: on this machine that is ".." / Rai Play / Rivulet. Confirmed against
-#: `Addons.GetAddons(type=xbmc.python.pluginsource, content=video)`
-#: rather than guessed - re-check it if the capture machine's installed
-#: add-ons change.
-RIVULET_BROWSER_ROW = 2
+def focused_action(rpc):
+    """The dispatch action of Home's currently focused row."""
+    return info_label(rpc, "Container(%d).ListItem.Property(action)" % HOME_LIST)
 
 
-def select_row(rpc, index):
-    """Focus Home's row `index` and open it.
+def select_action(rpc, action):
+    """Focus Home's `action` row and open it, verified per keypress.
 
-    Counts DOWN ONLY, from the freshly-built HomeWindow `goto_home()`
-    guarantees, whose selection starts at row 0. It must not try to
-    "return to the top" first: Kodi's lists WRAP, so Input.Up from row 0
-    lands on the last row, and a fixed run of Ups walks the selection
-    somewhere unpredictable - which is how one capture opened Kodi's addon
-    settings dialog (window 10140) instead of the Movies picker.
+    Counting Downs to a row index does not work: Home's rows are
+    conditional (`mystuff` needs playback progress, each type row needs a
+    setting plus an installed addon publishing that type, `other` needs
+    leftover types), so the visible list is a subset of
+    `lib.ui.homewindow._MENU` and every index below a hidden row shifts.
+    A run against a 7-row Home shot the Add-ons screen as `search` and
+    left Kodi sitting in Kodi's own add-on settings dialog. Reading the
+    focused row's action instead makes a wrong row impossible rather than
+    unlikely.
+
+    Steps DOWN ONLY from the freshly-built HomeWindow `goto_home()`
+    guarantees (selection on row 0), and stops at one full wrap: Kodi's
+    lists wrap, so a missing action would otherwise loop forever.
     """
-    for _ in range(index):
+    rows = int(info_label(rpc, "Container(%d).NumItems" % HOME_LIST) or 0)
+    for _ in range(rows):
+        if focused_action(rpc) == action:
+            rpc.call("Input.Select")
+            return
         rpc.call("Input.Down")
         time.sleep(0.3)
-    rpc.call("Input.Select")
+    raise SystemExit("Home has no %r row - is the capture machine missing its"
+                     " progress/addons/settings for it?" % action)
 
 
 def main():
@@ -309,7 +297,7 @@ def main():
     goto_home(rpc, delay=3.0)
     curate(take_screenshot(rpc, "home"), "home", redact=True)
 
-    select_row(rpc, HOME_MOVIES)
+    select_action(rpc, 'movies')
     time.sleep(3.0)
     curate(take_screenshot(rpc, "discover_catalogs"), "discover-catalogs")
 
@@ -328,7 +316,7 @@ def main():
     time.sleep(1.5)
 
     goto_home(rpc)
-    select_row(rpc, HOME_SEARCH)
+    select_action(rpc, 'search')
     time.sleep(2.5)
     curate(take_screenshot(rpc, "search"), "search")
 
@@ -341,36 +329,14 @@ def main():
     curate(take_screenshot(rpc, "search_results"), "search-results")
 
     goto_home(rpc)
-    select_row(rpc, HOME_LIBRARY)
+    select_action(rpc, 'mystuff')
     time.sleep(2.5)
-    curate(take_screenshot(rpc, "library"), "library")
+    curate(take_screenshot(rpc, "mystuff"), "mystuff")
 
     goto_home(rpc)
-    select_row(rpc, HOME_ADDONS)
+    select_action(rpc, 'addons')
     time.sleep(2.5)
     curate(take_screenshot(rpc, "addons_manager"), "addons-manager")
-
-    # Kodi's own add-on browser. Jump straight to the Video add-ons folder
-    # by path rather than counting rows down the category list - that count
-    # is a property of the user's Kodi install, and the old fixed 11 landed
-    # in "Audio encoders" here.
-    rpc.call("Input.Back")   # close AddonsWindow -> Rivulet Home
-    time.sleep(1.0)
-    rpc.call("Input.Back")   # close Rivulet -> Kodi shell
-    time.sleep(1.5)
-    rpc.call("GUI.ActivateWindow",
-             {"window": "addonbrowser", "parameters": ["addons://user/xbmc.addon.video/"]})
-    time.sleep(2.0)
-    # Sorted by name with ".." first, so Rivulet sits at RIVULET_BROWSER_ROW.
-    # Verified against Addons.GetAddons rather than assumed.
-    for _ in range(RIVULET_BROWSER_ROW):
-        rpc.call("Input.Down")
-        time.sleep(0.25)
-    curate(take_screenshot(rpc, "kodi_video_addons"), "kodi-addon-browser")
-
-    rpc.call("Input.Select")  # addon info dialog
-    time.sleep(1.2)
-    curate(take_screenshot(rpc, "kodi_addon_info"), "kodi-addon-info")
 
     print(f"Done. Curated screenshots in {OUT_DIR}")
 
