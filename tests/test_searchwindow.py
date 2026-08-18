@@ -331,6 +331,23 @@ def test_run_query_writes_no_search_history(load_searchwindow):
     assert store.search_queries == []
 
 
+def test_run_query_sends_no_request_to_a_disabled_search_capable_addon(load_searchwindow):
+    """A search-capable addon Store.get_enabled_addons() filters out as
+    disabled must receive zero catalog requests - run_query() must fan
+    out through get_enabled_addons(), not get_addons()."""
+    ctx = load_searchwindow()
+    enabled_transport = 'https://a.example/manifest.json'
+    disabled_transport = 'https://b.example/manifest.json'
+    disabled = _search_catalog_descriptor(disabled_transport, 'B')
+    disabled['flags'] = {'disabled': True}
+    store = _FakeStore(addons=[_search_catalog_descriptor(enabled_transport, 'A'), disabled])
+    client = _FakeAddonClient(catalog_results={enabled_transport: [], disabled_transport: []})
+
+    ctx.searchwindow.run_query(store, client, 'batman')
+
+    assert [call[0] for call in client.calls] == [enabled_transport]
+
+
 # ---------------------------------------------------------------------------
 # _rank_by_credit() - moved from the deleted lib.ui.views.search(); applied
 # inside run_query() to every collected meta before it is returned.

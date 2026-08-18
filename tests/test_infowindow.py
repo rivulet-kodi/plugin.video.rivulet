@@ -1486,6 +1486,33 @@ def test_context_menu_genre_entry_with_uninstalled_transport_is_skipped_and_logg
     assert any('not installed' in msg for msg, _level in ctx.env.log_calls)
 
 
+def test_context_menu_genre_entry_with_disabled_transport_is_skipped_and_logged(
+    load_infowindow, monkeypatch,
+):
+    """A discover link naming an installed-but-DISABLED transport must be
+    treated the same as not-installed: dispatch reads
+    get_enabled_addons(), never get_addons()."""
+    from urllib.parse import quote
+
+    ctx = load_infowindow()
+    transport = 'https://a.example/manifest.json'
+    url = 'stremio:///discover/%s/movie/top?genre=Drama' % quote(transport, safe='')
+    full_meta = {'id': 'tt1', 'type': 'movie', 'links': [_link('Drama', 'Genres', url)]}
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: full_meta)
+    disabled_store = _Store([{'transportUrl': transport, 'flags': {'disabled': True}}])
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: disabled_store)
+    monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
+    _stub_choose(monkeypatch, ctx, answers=[0])
+    fetch_calls = []
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda *a, **k: fetch_calls.append((a, k)) or [])
+    win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
+
+    _fire_context_menu(win, ctx)
+
+    assert fetch_calls == []
+    assert any('not installed' in msg for msg, _level in ctx.env.log_calls)
+
+
 def test_context_menu_with_no_usable_links_notifies_and_shows_no_picker(load_infowindow, monkeypatch):
     ctx = load_infowindow()
     monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: {'id': 'tt1', 'type': 'movie'})  # no links

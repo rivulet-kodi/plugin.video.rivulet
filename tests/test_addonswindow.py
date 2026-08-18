@@ -5,8 +5,8 @@ Kodi runtime, no network).
 
 lib.ui.addonswindow imports xbmcgui, lib.ui.uicommon, and `get_store`/
 `get_client` (from lib.ui.dependencies) at module scope; every other
-collaborator (`lib.stremio.addons.AddonError`, `lib.ui.compat.L`/`log`/
-`notify`, `lib.ui.dialogs.confirm`, `lib.ui.views._sync_addons_if_logged_in`) is imported lazily
+collaborator (`lib.store.ConcurrentUpdateError`, `lib.stremio.addons.AddonError`,
+`lib.ui.compat.L`/`log`/`notify`, `lib.ui.dialogs.confirm`, `lib.ui.views._sync_addons_if_logged_in`) is imported lazily
 inside the method that needs it - so this file fakes the shared
 Store/AddonClient providers by assigning directly to
 `addonswindow.get_store`/`addonswindow.get_client` (the same way
@@ -24,6 +24,7 @@ import contextlib
 
 import pytest
 
+from lib.store import ConcurrentUpdateError
 from lib.stremio.addons import AddonError
 from tests.kodistubs import install_kodi_stubs
 
@@ -522,6 +523,112 @@ def test_remove_store_raises_valueerror_notifies_protected(load_addonswindow, mo
     assert ctx.env.notifications == [
         ('Rivulet', 'STR30191', 'info', 4000),
     ]
+
+
+# ---------------------------------------------------------------------------
+# AddonsWindow._guard_mutation() - ConcurrentUpdateError handling
+# ---------------------------------------------------------------------------
+
+
+def test_onclick_toggle_concurrent_update_notifies_and_reloads_instead_of_raising(load_addonswindow, monkeypatch):
+    """`set_addon_disabled()` goes through the same CAS `update_addons()`
+    path as install/remove - Kodi running `default.py` as concurrent OS
+    processes can make it lose the race, and `_guard_mutation()` must
+    notify + reload instead of letting `ConcurrentUpdateError` escape the
+    click handler."""
+    descriptor = _descriptor()
+    ctx = load_addonswindow()
+    _stub_choose(monkeypatch, ctx, 0)
+    store = _FakeStore(addons=[descriptor])
+
+    def _raise(transport_url, disabled):
+        raise ConcurrentUpdateError('addons.json changed underneath us')
+
+    monkeypatch.setattr(store, 'set_addon_disabled', _raise)
+    _wire_store(ctx.addonswindow, store)
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    reload_calls = []
+    original_reload = win._reload
+
+    def _counting_reload():
+        reload_calls.append(True)
+        original_reload()
+
+    monkeypatch.setattr(win, '_reload', _counting_reload)
+
+    win.onClick(ctx.addonswindow.LIST)  # must not raise ConcurrentUpdateError
+
+    assert ctx.env.notifications == [('Rivulet', 'STR30032', 'info', 4000)]
+    assert reload_calls == [True]
+
+
+def test_remove_confirmed_concurrent_update_notifies_and_reloads_instead_of_raising(load_addonswindow, monkeypatch):
+    """Same guard as the toggle case, for `remove_addon()` - a losing CAS
+    race must notify + reload rather than raise out of `_remove()`."""
+    descriptor = _descriptor()
+    ctx = load_addonswindow()
+    _stub_choose(monkeypatch, ctx, 1)
+    _stub_confirm(monkeypatch, ctx, True)
+    store = _FakeStore(addons=[descriptor])
+
+    def _raise(transport_url):
+        raise ConcurrentUpdateError('addons.json changed underneath us')
+
+    monkeypatch.setattr(store, 'remove_addon', _raise)
+    _wire_store(ctx.addonswindow, store)
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    reload_calls = []
+    original_reload = win._reload
+
+    def _counting_reload():
+        reload_calls.append(True)
+        original_reload()
+
+    monkeypatch.setattr(win, '_reload', _counting_reload)
+
+    win.onClick(ctx.addonswindow.LIST)  # must not raise ConcurrentUpdateError
+
+    assert ctx.env.notifications == [('Rivulet', 'STR30032', 'info', 4000)]
+    assert reload_calls == [True]
+
+
+def test_remove_store_raises_valueerror_is_not_caught_by_guard_mutation(load_addonswindow, monkeypatch):
+    """`_guard_mutation()` only catches `ConcurrentUpdateError` - the
+    protected-addon `ValueError` refusal must still propagate to
+    `_remove()`'s own handler unchanged, notifying the refusal string
+    WITHOUT the extra `_reload()` a concurrent-update failure would
+    trigger."""
+    descriptor = _descriptor()
+    ctx = load_addonswindow()
+    _stub_choose(monkeypatch, ctx, 1)
+    _stub_confirm(monkeypatch, ctx, True)
+    store = _FakeStore(addons=[descriptor])
+
+    def _raise(transport_url):
+        raise ValueError('cannot remove protected addon: %s' % transport_url)
+
+    monkeypatch.setattr(store, 'remove_addon', _raise)
+    _wire_store(ctx.addonswindow, store)
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    reload_calls = []
+    original_reload = win._reload
+
+    def _counting_reload():
+        reload_calls.append(True)
+        original_reload()
+
+    monkeypatch.setattr(win, '_reload', _counting_reload)
+
+    win.onClick(ctx.addonswindow.LIST)  # must not raise ValueError
+
+    assert ctx.env.notifications == [('Rivulet', 'STR30191', 'info', 4000)]
+    assert reload_calls == []
 
 
 # ---------------------------------------------------------------------------
