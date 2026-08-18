@@ -76,11 +76,9 @@ Rivulet's custom UI:
 | :---: | :---: |
 | **Detail + streams** | **Addon manager** |
 
-In Kodi's native UI:
-
-| ![Add-ons browser](artwork/screenshots/kodi-addon-browser.png) | ![Add-on info](artwork/screenshots/kodi-addon-info.png) |
+| ![Continue](artwork/screenshots/mystuff.png) | ![Search results](artwork/screenshots/search-results.png) |
 | :---: | :---: |
-| **Add-ons browser** | **Add-on info** |
+| **Continue** | **Search** |
 
 ## Install
 
@@ -193,8 +191,8 @@ Screenshots in the [Screenshots](#screenshots) section above are generated,
 not hand-picked crops - `scripts/capture_screenshots.py` drives a running
 `kodi-standalone` instance over its always-on TCP JSON-RPC socket
 (`127.0.0.1:9090`, no webserver setup needed), walks every screen listed
-there plus Kodi's native Add-ons browser, and writes the curated result to
-`artwork/screenshots/`. Re-run it after a UI change to refresh the gallery.
+there, and writes the curated result to `artwork/screenshots/`. Re-run it
+after a UI change to refresh the gallery.
 
 ---
 
