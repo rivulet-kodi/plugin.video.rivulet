@@ -78,6 +78,34 @@ class AddonsWindow(BaseWindow):
             return
         self._open_actions(self.addons[int(position)])
 
+    def _guard_mutation(self, mutate):
+        """Run a store mutation that goes through the CAS `update_addons()`
+        path and turn `lib.store.ConcurrentUpdateError` into user
+        feedback instead of an unhandled exception escaping the Kodi
+        click handler.
+
+        Kodi can run `default.py` as separate concurrent OS processes, so
+        two clicks can race to update the same addons file; when the
+        retried read-modify-write in `update_addons()` gives up, this
+        notifies `L(30032)`, reloads the list to reflect whatever ended
+        up persisted, and returns `False` so the caller skips its own
+        success notification. Any other exception (e.g. `_remove`'s
+        protected-addon `ValueError`) is left to propagate untouched.
+        """
+        import xbmc
+
+        from lib.store import ConcurrentUpdateError
+        from lib.ui.compat import L, log, notify
+
+        try:
+            mutate()
+        except ConcurrentUpdateError as exc:
+            log('addonswindow: concurrent update: %s' % exc, xbmc.LOGWARNING)
+            notify(L(30032))
+            self._reload()
+            return False
+        return True
+
     def _install(self):
         import xbmc
 
@@ -112,7 +140,8 @@ class AddonsWindow(BaseWindow):
 
         from lib.ui.views import _sync_addons_if_logged_in
 
-        self.store.install_addon(transport_url, manifest)
+        if not self._guard_mutation(lambda: self.store.install_addon(transport_url, manifest)):
+            return
         _sync_addons_if_logged_in(self.store)
         notify(L(30012))
         self._reload()
@@ -135,7 +164,8 @@ class AddonsWindow(BaseWindow):
         from lib.ui.views import _sync_addons_if_logged_in
 
         try:
-            self.store.remove_addon(descriptor.get('transportUrl'))
+            if not self._guard_mutation(lambda: self.store.remove_addon(descriptor.get('transportUrl'))):
+                return
         except ValueError:
             notify(L(_PROTECTED_MESSAGE_STRING_ID))
             return
@@ -163,7 +193,8 @@ class AddonsWindow(BaseWindow):
 
         flags = descriptor.get('flags') or {}
         disabled = bool(flags.get('disabled'))
-        self.store.set_addon_disabled(descriptor.get('transportUrl'), not disabled)
+        if not self._guard_mutation(lambda: self.store.set_addon_disabled(descriptor.get('transportUrl'), not disabled)):
+            return
         # Local presentation state only, deliberately not part of Stremio's
         # addon-collection schema, so no `_sync_addons_if_logged_in()` push
         # here - toggling must never cost a network call.

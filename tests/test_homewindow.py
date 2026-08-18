@@ -377,6 +377,27 @@ def test_oninit_sets_status_label_to_name_when_email_is_absent(load_homewindow, 
     assert win.getControl(ctx.homewindow.STATUS_LABEL).label == '[COLOR FF38BDF8]\u25cf[/COLOR] Logged in as Me'
 
 
+def test_oninit_omits_type_row_supplied_only_by_a_disabled_addon(load_homewindow, monkeypatch):
+    """A catalog type published only by a disabled add-on must not get a
+    row: onInit() must fan out through get_enabled_addons(), not
+    get_addons() (which would include it)."""
+    ctx = load_homewindow()
+    addons = [
+        {'transportUrl': 'https://a/manifest.json',
+         'manifest': {'catalogs': [{'type': 'movie', 'id': 'm'}]}},
+        {'transportUrl': 'https://b/manifest.json', 'flags': {'disabled': True},
+         'manifest': {'catalogs': [{'type': 'anime', 'id': 'a'}]}},
+    ]
+    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(addons=addons))
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
+
+    win.onInit()
+
+    actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
+    assert 'anime' not in actions
+    assert 'movies' in actions
+
+
 # ---------------------------------------------------------------------------
 # HomeWindow.onAction()
 # ---------------------------------------------------------------------------

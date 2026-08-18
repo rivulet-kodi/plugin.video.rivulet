@@ -1604,6 +1604,34 @@ class _StubAddonStore:
         return []
 
 
+class _FakeSubtitleStore:
+    """lib.store.Store stand-in carrying real descriptors (unlike
+    _StubAddonStore above): the disabled-addon dispatch test below needs
+    get_enabled_addons() to actually filter, since collect_subtitles()
+    runs unpatched there."""
+
+    def __init__(self, addons):
+        self._addons = addons
+
+    def get_addons(self):
+        return self._addons
+
+    def get_enabled_addons(self):
+        return [a for a in self._addons if not (a.get('flags') or {}).get('disabled')]
+
+
+class _FakeSubtitleClient:
+    """Fake AddonClient.subtitles(): records every transport_url queried,
+    so a test can assert a disabled addon received no request."""
+
+    def __init__(self):
+        self.calls = []
+
+    def subtitles(self, base, rtype, sid, extra=None):
+        self.calls.append(base)
+        return [{'lang': 'en', 'url': '%s/sub.srt' % base}]
+
+
 def _install_collect_subtitles(monkeypatch, player_module, subs):
     monkeypatch.setattr(player_module, 'collect_subtitles', lambda *a, **k: subs)
     monkeypatch.setattr(player_module, 'get_client', lambda: None)
@@ -1665,6 +1693,30 @@ def test_attach_subtitles_disabled_setting_skips_collect_subtitles_entirely(kodi
 
     assert calls == []
     assert list_item.subtitles is None
+
+
+def test_attach_subtitles_never_dispatches_to_a_disabled_addon(kodi_stubs, monkeypatch):
+    """collect_subtitles() must fan out through get_enabled_addons(), not
+    get_addons(): a disabled subtitle-capable addon must receive no
+    request, even though it would otherwise return a match."""
+    env = kodi_stubs.env
+    env.addon.settings['subs_enable'] = True
+    env.addon.settings['subs_language'] = 'en'
+    manifest = {'resources': ['subtitles'], 'types': ['movie']}
+    client = _FakeSubtitleClient()
+    store = _FakeSubtitleStore([
+        {'transportUrl': 'https://enabled.example/manifest.json', 'manifest': manifest},
+        {'transportUrl': 'https://disabled.example/manifest.json', 'manifest': manifest,
+         'flags': {'disabled': True}},
+    ])
+    monkeypatch.setattr(kodi_stubs.player, 'get_client', lambda: client)
+    monkeypatch.setattr(kodi_stubs.player, 'get_store', lambda: store)
+    list_item = kodi_stubs.player.xbmcgui.ListItem()
+
+    kodi_stubs.player._attach_subtitles(list_item, {}, 'movie', 'tt1')
+
+    assert client.calls == ['https://enabled.example/manifest.json']
+    assert list_item.subtitles == ['https://enabled.example/manifest.json/sub.srt']
 
 
 # --- play_direct(on_ready=...): fires immediately before xbmc.Player().play(),

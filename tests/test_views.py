@@ -376,6 +376,28 @@ def test_fetch_meta_skips_addon_returning_no_usable_result(load_views):
     assert result == hit_meta
 
 
+def test_fetch_meta_never_dispatches_to_a_disabled_addon(load_views):
+    """_fetch_meta()'s fan-out must read get_enabled_addons(), not
+    get_addons(): a disabled meta-capable addon must receive no request,
+    even though it would otherwise be the only hit."""
+    ctx = load_views()
+    views = ctx.views
+    descriptor_disabled = {
+        'transportUrl': 'https://disabled.example/manifest.json',
+        'manifest': {'id': 'org.disabled', 'resources': ['meta'], 'types': ['series'], 'idPrefixes': ['tt']},
+        'flags': {'disabled': True},
+    }
+    client = FakeAddonClient(meta_results={
+        'https://disabled.example/manifest.json': {'id': 'tt1', 'name': 'Should Never Be Fetched', 'type': 'series'},
+    })
+    _wire_data_layer(views, FakeStore(addons=[descriptor_disabled]), client)
+
+    result = views._fetch_meta('series', 'tt1')
+
+    assert result is None
+    assert client.meta_calls == []
+
+
 def test_fetch_meta_returns_without_waiting_for_a_slower_addon(load_views):
     """The first-listed (preferred) addon is the slow one; a second addon
     answers almost immediately with an equally usable result. The slow
