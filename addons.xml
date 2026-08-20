@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.19.1" provider-name="M0RF30">
+<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.19.2" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0" />
     <import addon="script.module.requests" version="2.22.0" />
@@ -12,7 +12,9 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse and search catalogs by type, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote stremio-server-go streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.19.1:
+    <news>v0.19.2:
+- Fix: one misbehaving add-on could silently take its own sources out of the picker, and leave the list waiting on them forever. Each add-on is asked for streams on its own background worker, but only network errors were caught there - anything else (an add-on answering with a malformed stream list, or a single entry odd enough to break the quality/size parsing) killed that worker before it could report back, so its sources vanished and the picker kept waiting on an answer that was never coming. Every failure is now contained to the one add-on that caused it, and the log finally names which add-on failed instead of only counting them.
+v0.19.1:
 - Fix: on Windows, an empty command-prompt window opened on top of Kodi, and closing it only brought it straight back. The streaming server Rivulet runs in the background is a console program, and Windows hands one its own window unless it is told not to; closing that window stopped the server, which Rivulet then restarted, opening a new one. The window is now suppressed outright, along with the brief flash that appeared right after the server was downloaded for the first time. Linux, macOS and Android never showed it and are unaffected.
 v0.19.0:
 - New: an add-on can now be switched off instead of removed. Until now the add-on manager offered only install and remove, so silencing a source that returned nothing useful - or an official add-on that cannot be removed at all - meant losing its settings and reinstalling it from its manifest URL later. Picking an add-on now opens a short menu with Disable (or Enable) and Remove. A disabled add-on stays installed and keeps its place, but is no longer asked for catalogs, titles, streams or subtitles, and its catalogs stop lighting up Home's rows. The state is local to this Kodi box and is not pushed to your Stremio account.
