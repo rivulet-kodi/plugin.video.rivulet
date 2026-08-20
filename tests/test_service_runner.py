@@ -472,10 +472,13 @@ def test_start_spawns_popen_with_argv_env_and_opens_log_for_append(fake_popen, t
     sp.stop()
 
 
-def test_start_omits_windows_only_kwargs_on_posix(fake_popen, tmp_path):
+def test_start_omits_windows_only_kwargs_on_posix(monkeypatch, fake_popen, tmp_path):
     """`no_window_kwargs()` is `{}` off Windows; a stray `creationflags=0`
     would make POSIX's real `Popen` raise ValueError outright, so the
-    absence of these keys (not merely a falsy value) is the contract."""
+    absence of these keys (not merely a falsy value) is the contract.
+    os.name is pinned rather than inherited from the host so this stays a
+    POSIX-branch test even when the suite itself runs ON Windows."""
+    monkeypatch.setattr(service_runner.procflags.os, 'name', 'posix')
     sp = _server_process(tmp_path)
     sp.start()
 

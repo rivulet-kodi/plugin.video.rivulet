@@ -19,15 +19,11 @@ stubs at all.
 from lib import procflags
 
 
-def test_no_window_kwargs_empty_on_the_real_platform_when_not_windows():
-    """Sanity check against the real, un-monkeypatched `os.name`: this
-    suite runs on POSIX, so the function must return an empty dict without
-    any patching at all."""
-    if procflags.os.name != "nt":
-        assert procflags.no_window_kwargs() == {}
-
-
 def test_no_window_kwargs_empty_when_os_name_is_posix(monkeypatch):
+    """`os.name` is pinned rather than read from the host, so both branches
+    are exercised deterministically wherever the suite runs -- including ON
+    Windows, where an unpatched "is it empty?" check would assert the
+    opposite of what it claims to test."""
     monkeypatch.setattr(procflags.os, "name", "posix")
     assert procflags.no_window_kwargs() == {}
 

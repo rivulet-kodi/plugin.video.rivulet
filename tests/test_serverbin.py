@@ -407,6 +407,9 @@ def test_verify_executable_forwards_no_window_kwargs_on_windows_only(monkeypatch
 
     monkeypatch.setattr(serverbin.subprocess, "run", _record)
 
+    # Pin the POSIX branch rather than inheriting the host's os.name, so this
+    # half keeps testing POSIX behaviour when the suite runs ON Windows.
+    monkeypatch.setattr(serverbin.procflags.os, "name", "posix")
     verify_executable("/fake/path/stremio-server")
     posix_args, posix_kwargs = calls[0]
     assert "creationflags" not in posix_kwargs
