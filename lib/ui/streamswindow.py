@@ -676,12 +676,24 @@ def _query_addon_streams(client, transport_url, addon_name, stype, sid):
     `_MAX_STREAM_ADDON_WORKERS`) instead of the old serial `for` loop's
     one-at-a-time calls (see the module docstring for the measured
     5.0s/27.6s cost that caused). Returns a `(pairs, failed)` tuple;
-    `failed` is True on `AddonError`, already logged here at DEBUG with
-    only `safe_url_for_log()`'s safe scheme+host and the exception's
-    TYPE - never the raw url or exception text, which may embed
+    `failed` is True on failure, already logged here (an `AddonError` at
+    DEBUG, anything unexpected at ERROR) with the addon's NAME plus only
+    `safe_url_for_log()`'s safe scheme+host and the exception's TYPE -
+    never the raw url or exception text, which may embed
     credentials/paths/queries - so a caller can aggregate a single
     WARNING across every addon's own outcome without re-deriving this
-    per-addon detail itself."""
+    per-addon detail itself. The name matters: the aggregate is only a
+    count, so without it a user reporting "addon X's streams never
+    appear" (issue #32) leaves no way to tell WHICH addon dropped out.
+
+    Parsing runs inside the same guard as the fetch. A stream resource
+    is arbitrary third-party JSON: a body that is a bare list rather
+    than an object (`.get` -> AttributeError), or one item hostile
+    enough to break `parse_stream`, must not escape to the caller. This
+    function IS a worker-thread body (`_start_stream_fetch_workers`),
+    and an exception escaping it kills that thread before it can queue
+    any result at all - which does not just lose this addon, it leaves
+    the consumer blocking forever on a result that will never arrive."""
     import xbmc
 
     from lib.stremio.addons import AddonError, safe_url_for_log
@@ -689,11 +701,15 @@ def _query_addon_streams(client, transport_url, addon_name, stype, sid):
 
     try:
         results = client.streams(transport_url, stype, sid)
+        pairs = [(streaminfo.parse_stream(stream, addon_name=addon_name), stream) for stream in results or []]
     except AddonError as exc:
-        log('streamswindow: %s failed: %s' % (
-            safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGDEBUG)
+        log('streamswindow: %s (%s) failed: %s' % (
+            addon_name, safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGDEBUG)
         return [], True
-    pairs = [(streaminfo.parse_stream(stream, addon_name=addon_name), stream) for stream in results or []]
+    except Exception as exc:  # noqa: BLE001 - see docstring: a worker thread that dies here wedges its consumer
+        log('streamswindow: %s (%s) raised %s' % (
+            addon_name, safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGERROR)
+        return [], True
     return pairs, False
 
 
