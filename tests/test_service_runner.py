@@ -472,6 +472,59 @@ def test_start_spawns_popen_with_argv_env_and_opens_log_for_append(fake_popen, t
     sp.stop()
 
 
+def test_start_omits_windows_only_kwargs_on_posix(monkeypatch, fake_popen, tmp_path):
+    """`no_window_kwargs()` is `{}` off Windows; a stray `creationflags=0`
+    would make POSIX's real `Popen` raise ValueError outright, so the
+    absence of these keys (not merely a falsy value) is the contract.
+    os.name is pinned rather than inherited from the host so this stays a
+    POSIX-branch test even when the suite itself runs ON Windows."""
+    monkeypatch.setattr(service_runner.procflags.os, 'name', 'posix')
+    sp = _server_process(tmp_path)
+    sp.start()
+
+    kwargs = fake_popen[0]['kwargs']
+    assert 'creationflags' not in kwargs
+    assert 'startupinfo' not in kwargs
+
+    sp.stop()
+
+
+class _FakeStartupInfo:
+    def __init__(self):
+        self.dwFlags = 0
+        self.wShowWindow = None
+
+
+def test_start_forwards_no_window_kwargs_on_windows(monkeypatch, fake_popen, tmp_path):
+    """Issue #30: stremio-server.exe is a console-subsystem Go binary;
+    spawned from Kodi (a GUI process with no console), Windows allocates
+    it a fresh console window. Closing that window sends
+    CTRL_CLOSE_EVENT, killing the child, which the supervisor above then
+    restarts -- popping a new window right back ("closing it reopens
+    it"). start() must splat lib.procflags.no_window_kwargs() into the
+    Popen() call to suppress that window, without disturbing any of the
+    argv/env/stdout/stderr/stdin values the POSIX case already asserts."""
+    monkeypatch.setattr(service_runner.procflags.os, 'name', 'nt')
+    monkeypatch.setattr(
+        service_runner.procflags.subprocess, 'STARTUPINFO', _FakeStartupInfo, raising=False)
+
+    sp = _server_process(tmp_path, server_url='http://127.0.0.1:9090')
+    sp.start()
+
+    call = fake_popen[0]
+    assert call['argv'] == ['/opt/bin/stremio-server']
+    assert call['kwargs']['env']['APP_PATH'] == str(tmp_path / 'server')
+    assert call['kwargs']['env']['HTTP_PORT'] == '9090'
+    assert call['kwargs']['stderr'] == subprocess.STDOUT
+    assert call['kwargs']['stdin'] == subprocess.DEVNULL
+    assert call['kwargs']['stdout'].name == str(tmp_path / 'server.log')
+    assert call['kwargs']['stdout'].mode == 'a'
+    assert call['kwargs']['creationflags'] == 0x08000000  # CREATE_NO_WINDOW
+    assert call['kwargs']['startupinfo'].wShowWindow == 0  # SW_HIDE
+
+    sp.stop()
+
+
 def test_build_env_does_not_mutate_the_real_process_environment(tmp_path):
     sp = _server_process(tmp_path)
     env = sp.build_env()

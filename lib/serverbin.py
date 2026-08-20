@@ -28,6 +28,8 @@ try:
 except ImportError:  # pragma: no cover - exercised only without the dependency
     requests = None  # type: ignore[assignment]
 
+from lib import procflags
+
 GITHUB_REPO = "M0Rf30/stremio-server-go"
 SERVER_TAG = "v0.12.0"
 USER_AGENT = "plugin.video.rivulet"
@@ -257,7 +259,8 @@ def verify_executable(path):
     non-zero exit status or a timeout is tolerated silently: some builds
     may not implement the `version` subcommand at all, and refusing an
     otherwise-successful install over that would be a worse outcome than
-    skipping the check.
+    skipping the check. On Windows this spawn is window-suppressed (see
+    lib/procflags.py) so a fresh install never flashes a console box.
     """
     try:
         subprocess.run(
@@ -265,7 +268,8 @@ def verify_executable(path):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
-            timeout=VERIFY_TIMEOUT)
+            timeout=VERIFY_TIMEOUT,
+            **procflags.no_window_kwargs())
     except OSError:
         raise UnsupportedPlatformError("%s cannot be executed on this device" % path)
     except subprocess.TimeoutExpired:

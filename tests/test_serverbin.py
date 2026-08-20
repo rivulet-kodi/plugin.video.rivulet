@@ -18,6 +18,7 @@ import tarfile
 
 import pytest
 
+from lib import serverbin
 from lib.serverbin import (
     GITHUB_REPO,
     PINNED_SHA256,
@@ -378,3 +379,53 @@ def test_verify_executable_tolerates_timeout(monkeypatch):
     monkeypatch.setattr(subprocess, "run", _timeout)
 
     verify_executable("/fake/path/stremio-server")  # must not raise
+
+
+class _FakeStartupInfo:
+    def __init__(self):
+        self.dwFlags = 0
+        self.wShowWindow = None
+
+
+def test_verify_executable_forwards_no_window_kwargs_on_windows_only(monkeypatch):
+    """Issue #30's second, easy-to-miss spawn site: right after an install,
+    verify_executable() runs `<path> version` as a one-shot sanity check --
+    on Windows that flash-pops its own empty cmd console unless it too
+    forwards lib.procflags.no_window_kwargs() to subprocess.run(). Captures
+    the kwargs actually reaching subprocess.run() on POSIX and on a
+    simulated Windows, proving the Windows-only kwargs appear only on 'nt'
+    while every argument verify_executable itself controls (the argv,
+    stdout/stderr redirection, check, timeout) is unchanged either way."""
+    calls = []
+
+    class _Completed:
+        returncode = 0
+
+    def _record(*args, **kwargs):
+        calls.append((args, kwargs))
+        return _Completed()
+
+    monkeypatch.setattr(serverbin.subprocess, "run", _record)
+
+    # Pin the POSIX branch rather than inheriting the host's os.name, so this
+    # half keeps testing POSIX behaviour when the suite runs ON Windows.
+    monkeypatch.setattr(serverbin.procflags.os, "name", "posix")
+    verify_executable("/fake/path/stremio-server")
+    posix_args, posix_kwargs = calls[0]
+    assert "creationflags" not in posix_kwargs
+    assert "startupinfo" not in posix_kwargs
+
+    monkeypatch.setattr(serverbin.procflags.os, "name", "nt")
+    monkeypatch.setattr(
+        serverbin.procflags.subprocess, "STARTUPINFO", _FakeStartupInfo, raising=False)
+
+    verify_executable("/fake/path/stremio-server")
+    win_args, win_kwargs = calls[1]
+
+    assert win_args == posix_args == (["/fake/path/stremio-server", "version"],)
+    assert win_kwargs["stdout"] == posix_kwargs["stdout"] == subprocess.DEVNULL
+    assert win_kwargs["stderr"] == posix_kwargs["stderr"] == subprocess.DEVNULL
+    assert win_kwargs["check"] == posix_kwargs["check"] is False
+    assert win_kwargs["timeout"] == posix_kwargs["timeout"]
+    assert win_kwargs["creationflags"] == 0x08000000  # CREATE_NO_WINDOW
+    assert win_kwargs["startupinfo"].wShowWindow == 0  # SW_HIDE
