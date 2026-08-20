@@ -1200,6 +1200,60 @@ def test_open_streams_multiple_addon_failures_still_log_a_single_aggregate_warni
     assert not [lvl for _msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGERROR]
 
 
+def test_open_streams_survives_an_addon_whose_payload_breaks_parsing(
+    load_streamswindow, monkeypatch,
+):
+    """A stream resource is arbitrary third-party JSON: a body that is a
+    bare list (`.get` -> AttributeError) or an item hostile enough to
+    break `parse_stream` must be reported as that ONE addon's failure,
+    never escape `_query_addon_streams` - it runs as a worker-thread
+    body, and an exception there kills the thread before it queues any
+    result, wedging the consumer on an answer that never comes (the
+    silent-drop shape behind issue #32). The healthy addon's own streams
+    must still reach the window."""
+    ctx = load_streamswindow()
+    import xbmc
+    sw = ctx.streamswindow
+    bad_transport = 'https://bad.example/manifest.json'
+    ok_transport = 'https://ok.example/manifest.json'
+    bad = {
+        'transportUrl': bad_transport,
+        'manifest': {'name': 'Bad', 'resources': ['stream'], 'types': ['movie']},
+    }
+    working = {
+        'transportUrl': ok_transport,
+        'manifest': {'name': 'Working', 'resources': ['stream'], 'types': ['movie']},
+    }
+    ok_stream = {'url': 'https://a.example/a.mp4'}
+    captured = {}
+
+    def exploding_parse(stream, addon_name=None):
+        if addon_name == 'Bad':
+            raise TypeError('hostile payload')
+        return {'addon': addon_name, 'title': 'ok'}
+
+    client = _FakeAddonClient({bad_transport: [{'infoHash': 'x'}], ok_transport: [ok_stream]})
+    _wire_data_layer(sw, _FakeStore(addons=[bad, working]), client)
+    monkeypatch.setattr(sw.streaminfo, 'parse_stream', exploding_parse)
+
+    class RecordingWindow(sw.StreamsWindow):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
+            captured['pairs'] = pairs
+            return True
+
+    monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: (False, False))
+
+    assert sw.open_streams('movie', 'tt1') is False
+    assert [s for _info, s in captured['pairs']] == [ok_stream]
+    errors = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGERROR]
+    assert any('Bad' in msg and 'bad.example' in msg and 'TypeError' in msg for msg in errors)
+    assert not any('hostile payload' in msg or 'manifest.json' in msg for msg in errors)
+    warnings = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGWARNING]
+    assert len(warnings) == 1 and 'streamswindow: 1 addon(s) failed' in warnings[0]
+
+
+
 def test_open_streams_addon_failure_log_never_leaks_credentials_path_or_query(load_streamswindow):
     ctx = load_streamswindow()
     import xbmc
