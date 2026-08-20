@@ -33,7 +33,7 @@ import subprocess
 import time
 from urllib.parse import urlparse
 
-from lib import library
+from lib import library, procflags
 from lib import settings as _settings
 from lib.store import Store
 from lib.stremio.api import StremioAPI
@@ -371,6 +371,9 @@ class ServerProcess:
                 stdout=self._log_fh,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
+                # Suppress Windows' console-window popup for this console-
+                # subsystem child; see lib/procflags.py for why.
+                **procflags.no_window_kwargs(),
             )
         except Exception:
             if self._log_fh is not None:
