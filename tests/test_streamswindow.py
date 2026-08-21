@@ -1153,6 +1153,31 @@ def test_open_streams_addonerror_is_logged_and_skipped_not_fatal(load_streamswin
     assert 'streamswindow: 1 addon(s) failed' in warnings[0]
 
 
+def test_query_addon_streams_logs_addon_error_category_at_debug(load_streamswindow):
+    """The reported bug (issue #34): a stale debrid key surfaces as HTTP
+    401 from `_get_json`, but the old log line collapsed every distinct
+    failure to the bare literal "AddonError". `addon_error_detail()`
+    carries the safe category through, so the DEBUG line now
+    distinguishes 401 from 404/ConnectionError/etc. without touching
+    `str(exc)` (still never logged - see the credential-leak guard
+    above)."""
+    ctx = load_streamswindow()
+    import xbmc
+    sw = ctx.streamswindow
+    transport = 'https://stremio.torbox.app/manifest.json'
+    client = _FakeAddonClient({
+        transport: AddonError('GET %s failed: HTTP 401' % transport, category='HTTP 401'),
+    })
+
+    pairs, failed = sw._query_addon_streams(client, transport, 'TorBox', 'movie', 'tt1')
+
+    assert failed is True
+    assert pairs == []
+    debug_msgs = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGDEBUG]
+    assert any('TorBox' in msg and 'stremio.torbox.app' in msg and 'HTTP 401' in msg for msg in debug_msgs)
+    assert not any('manifest.json' in msg for msg in debug_msgs)
+
+
 def test_open_streams_multiple_addon_failures_still_log_a_single_aggregate_warning(
     load_streamswindow, monkeypatch,
 ):

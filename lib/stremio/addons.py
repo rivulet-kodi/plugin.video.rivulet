@@ -121,7 +121,21 @@ def build_resource_url(base, resource, rtype, rid, extra=None):
 
 
 class AddonError(Exception):
-    """Raised when an addon HTTP request fails or returns malformed JSON."""
+    """Raised when an addon HTTP request fails or returns malformed JSON.
+
+    `category` is an optional, safe-by-construction detail alongside the
+    (possibly unsafe) `message`: it MUST only ever be a value produced by
+    `_request_error_category()` or a fixed literal such as 'invalid JSON'
+    - never raw exception text, never a url - so log sites can surface it
+    via `addon_error_detail()` without repeating the credential/path/query
+    leakage `message` may carry (raise sites elsewhere in the codebase
+    build `message` from arbitrary, unsanitized text).
+    """
+
+    def __init__(self, message, category=None):
+        super().__init__(message)
+        self.category = category
+
 
 
 def validate_transport_url(url):
@@ -217,6 +231,21 @@ def _request_error_category(exc):
     return type(exc).__name__
 
 
+def addon_error_detail(exc):
+    """A safe, log-ready label for any exception raised while talking to
+    an addon: the exception's TYPE plus, if present, the safe `category`
+    an `AddonError` may carry - never `str(exc)`, which for third-party
+    exceptions (or legacy/unsanitized `AddonError` raise sites) may embed
+    credentials, a path, or a query string. Log sites MUST call this
+    instead of `type(exc).__name__` so a bare "AddonError" becomes
+    something actionable like "AddonError (HTTP 404)" whenever the
+    category is available, while staying exactly as safe when it isn't."""
+    category = getattr(exc, 'category', None)
+    if category:
+        return '%s (%s)' % (type(exc).__name__, category)
+    return type(exc).__name__
+
+
 class AddonClient:
     """Thin HTTP client for the addon manifest/catalog/meta/stream/subtitles
     resources. One `requests.Session()` per client instance (stored as
@@ -236,11 +265,12 @@ class AddonClient:
             resp = self.session.get(url, timeout=self.timeout)
             resp.raise_for_status()
         except requests.RequestException as exc:
-            raise AddonError('GET %s failed: %s' % (safe, _request_error_category(exc)))
+            category = _request_error_category(exc)
+            raise AddonError('GET %s failed: %s' % (safe, category), category=category)
         try:
             return resp.json()
         except ValueError:
-            raise AddonError('GET %s returned invalid JSON' % safe)
+            raise AddonError('GET %s returned invalid JSON' % safe, category='invalid JSON')
 
     def manifest(self, transport_url):
         """GET the addon manifest (transport_url normally ends in /manifest.json)."""

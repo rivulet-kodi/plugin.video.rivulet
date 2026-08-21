@@ -23,7 +23,12 @@ import xbmcgui
 import xbmcplugin
 
 from lib.stremio import addons as addons_lib
-from lib.stremio.addons import AddonError, safe_url_for_log, validate_transport_url
+from lib.stremio.addons import (
+    AddonError,
+    addon_error_detail,
+    safe_url_for_log,
+    validate_transport_url,
+)
 from lib.stremio.api import ApiError, StremioAPI
 from lib.ui import compat, dialogs, router, urlutil
 from lib.ui.compat import L, log, notify
@@ -186,7 +191,7 @@ def _fetch_meta(stype, sid, store=True, on_miss=None):
         try:
             return client.meta(transport_url, stype, sid)
         except AddonError as exc:
-            log('views._fetch_meta: %s failed: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGWARNING)
+            log('views._fetch_meta: %s failed: %s' % (safe_url_for_log(transport_url), addon_error_detail(exc)), xbmc.LOGWARNING)
             return None
 
     if len(targets) == 1:
@@ -331,7 +336,7 @@ def iter_catalog_pages(transport, ctype, cid, extra=None, catalog=None):
             )
         except AddonError as exc:
             log('views.iter_catalog_pages: %s page %d failed: %s - keeping what landed'
-                % (safe_url_for_log(transport), page_index, type(exc).__name__),
+                % (safe_url_for_log(transport), page_index, addon_error_detail(exc)),
                 xbmc.LOGWARNING)
             return
         if not page:
@@ -435,7 +440,7 @@ def _refresh_addon_manifests(store, client):
         try:
             return client.manifest(transport_url)
         except AddonError as exc:
-            log('views._refresh_addon_manifests: %s failed: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGWARNING)
+            log('views._refresh_addon_manifests: %s failed: %s' % (safe_url_for_log(transport_url), addon_error_detail(exc)), xbmc.LOGWARNING)
             return None
 
     fetched = _map_addons(_fetch, descriptors)
