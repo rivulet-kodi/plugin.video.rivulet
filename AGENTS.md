@@ -4,7 +4,7 @@
 
 Rivulet (`plugin.video.rivulet`) is a Kodi video addon implementing a **Stremio addon-protocol client**: it browses catalogs published by community Stremio addons, resolves streams, and plays them through an embedded or remote `stremio-server-go` streaming server. It ships its own 1920x1080 skin rather than drawing through the user's Kodi skin.
 
-Two independently versioned artifacts live here: the addon (`addon.xml`, currently 0.17.0) and the Kodi repository addon that delivers it (`repository.rivulet/addon.xml`, currently 1.0.2).
+Two independently versioned artifacts live here: the addon (`addon.xml`, currently 0.20.0) and the Kodi repository addon that delivers it (`repository.rivulet/addon.xml`, currently 1.0.2).
 
 ## Architecture & Data Flow
 
@@ -30,15 +30,17 @@ Browsing: `lib/ui/views.py` fans a request across installed addons -> `lib/strem
 
 **Service flow.** `service.py` -> `lib/service_runner.py:main()` supervises the `stremio-server-go` subprocess for the whole Kodi session: probes for a listening server, falls back to an external one, downloads the binary via `lib/serverbin.py` when missing, and syncs playback progress to the Stremio API. It is the only long-lived process and the most complex function in the codebase (radon E-33) — weigh any refactor of it against the shutdown path specifically.
 
+**Counted strings must be count-neutral.** These `.po` files carry no plural-form machinery: the code picks between a singular id and a non-singular one, which is wrong for Polish, Russian, Arabic and Turkish at most values. Write `Label: %d` constructions rather than inflecting the counted noun, and do not build plural selection. Any `%`-formatted id that production code formats must also be registered in `tests/kodistubs/fakes.py`'s `_DEFAULT_LOCALIZED`, or the fake returns a placeholder-free `STR<id>` and `L(id) % n` raises `TypeError` under test.
+
 **Fan-out is bounded per call site, deliberately.** `lib/ui/views.py:38` sets `_MAX_ADDON_WORKERS = 8`; `lib/ui/streamswindow.py:103` and `lib/stremio/subtitles.py:92` each carry their *own* local copy. `streamswindow.py:103-107` explains why: every fan-out point bounds its own pool because this runs on low-power ARM boxes. Do not "DRY" these into one shared constant.
 
 ## Key Directories
 
 | Path | Purpose |
 |---|---|
-| `lib/stremio/` | Protocol client: `addons.py` (manifests, catalogs, fan-out), `api.py` (account sync), `server.py` (streaming server), `streaminfo.py` (quality/seeder/cache decoration), `subtitles.py`, `metalinks.py` |
+| `lib/stremio/` | Protocol client: `addons.py` (manifests, catalogs, fan-out), `addoncatalogs.py` (the `addon_catalog` resource: collapsed per id, pooled, TTL-cached), `api.py` (account sync), `contentrating.py` (adult heuristic), `server.py` (streaming server), `streaminfo.py` (quality/seeder/cache decoration + source filtering), `subtitles.py`, `metalinks.py` |
 | `lib/ui/` | Windows, dialogs, routing, playback. All Kodi API contact lives here, except `lib/service_runner.py` |
-| `resources/skins/Default/1080i/` | 13 window XMLs, authored at 1920x1080 |
+| `resources/skins/Default/1080i/` | 14 window XMLs, authored at 1920x1080 |
 | `resources/language/resource.language.*/` | 14 locales, `strings.po` |
 | `tests/kodistubs/` | Fake `xbmc*` modules; the reason the suite runs off-Kodi |
 | `repository.rivulet/` | The Kodi repository addon, versioned independently |
@@ -50,7 +52,7 @@ Browsing: `lib/ui/views.py` fans a request across installed addons -> `lib/strem
 **Prefer the uv invocations — they need no local setup and are what these gates were last verified with:**
 
 ```bash
-uvx --with-requirements requirements-dev.txt pytest tests/ -q          # 1778 passed, ~2.5s
+uvx --with-requirements requirements-dev.txt pytest tests/ -q          # 2095 passed, ~4.5s
 uvx --with-requirements requirements-dev.txt ruff check lib tests
 uvx --with-requirements requirements-dev.txt mypy
 uvx --with-requirements requirements-dev.txt pytest tests/ --cov --cov-report=term-missing
@@ -95,7 +97,7 @@ make parallel    # pytest -n auto
 
 **Window infrastructure.** `lib/ui/uicommon.py` provides the modal stack (`_MODAL_WINDOW_STACK`), `BaseWindow`, and `BACK_ACTIONS = frozenset({9, 10, 92})` (`uicommon.py:74`). `close_windows_for_playback()` must force-close the stack before playback and reopen after.
 
-**Localization.** 177 ids spanning `#30000`-`#30247` (gaps are normal — never renumber, and allocate above the current maximum) in `resources/language/resource.language.en_gb/strings.po`, the source of truth. Adding a user-visible string means adding it to **all 14 locales**, with `msgctxt "#3XXXX"`. Skin XML reads them as `$LOCALIZE(30247)`.
+**Localization.** 232 ids spanning `#30000`-`#30360` (gaps are normal — never renumber, and allocate above the current maximum) in `resources/language/resource.language.en_gb/strings.po`, the source of truth. Adding a user-visible string means adding it to **all 14 locales**, with `msgctxt "#3XXXX"`. Skin XML reads them as `$LOCALIZE(30360)`.
 
 **Settings.** `resources/settings.xml`, ids are `<category>_<feature>` (`home_show_movies`, `server_enable`, `bt_listen_port`). `server_enable` is first in its category on purpose: Kodi otherwise opens Settings inside the `server_url` text box, trapping the arrow keys.
 
@@ -129,7 +131,7 @@ make parallel    # pytest -n auto
 
 ## Testing & QA
 
-pytest, **1778 tests, ~93% coverage against `fail_under = 90`** with branch coverage on. Roughly 2.5s for the full suite — there is no excuse for not running it.
+pytest, **2095 tests, ~93% coverage against `fail_under = 90`** with branch coverage on. Roughly 4.5s for the full suite — there is no excuse for not running it.
 
 - **Kodi is faked, not installed.** `tests/kodistubs/install.py` is a context manager that snapshots `sys.modules`, injects fresh fake `xbmc`/`xbmcgui`/`xbmcplugin`/`xbmcaddon`/`xbmcvfs` modules, re-imports the targets against them, and restores everything exactly on exit. Fakes are per-test, and `tests/kodistubs/fakes.py:Env` records every Kodi call for assertions.
 - **The fake `WindowXML` validates control ids against the real skin XML** (`tests/kodistubs/modules.py`), so a Python/skin mismatch fails in tests.
@@ -137,6 +139,6 @@ pytest, **1778 tests, ~93% coverage against `fail_under = 90`** with branch cove
 - **Warnings are errors**: `filterwarnings = ["error", ...]` (`pyproject.toml:12-16`). `ResourceWarning` therefore fails the suite — this is why `lib/service_runner.py` closes `HTTPError` responses inside its health-check loop, and why `PERF203` there is deliberate.
 - **Network is blocked at the socket level** by an autouse fixture in `tests/conftest.py`; use `FakeSession`/`FakeResponse` from there.
 - Windows are exercised by calling `onInit`/`onClick`/`onAction` directly, not through a Kodi event loop.
-- `tests/test_glyph_coverage.py` and `tests/test_skin_xml.py` need real Estuary fonts at `/usr/share/kodi/addons/skin.estuary/fonts`; they run locally on a machine with Kodi installed and skip in CI. Expect **1778 passed / 0 skipped** locally versus 2 skips on CI.
+- `tests/test_glyph_coverage.py` and `tests/test_skin_xml.py` need real Estuary fonts at `/usr/share/kodi/addons/skin.estuary/fonts`; they run locally on a machine with Kodi installed and skip in CI. Expect **2095 passed / 0 skipped** locally versus 2 skips on CI.
 
 CI gates every PR with six required checks: `build`, `lint-type`, `test (3.8)`, `test (3.11)`, `test (3.13)`, `compat-py38-requests`. `main` requires them plus conversation resolution and linear history; squash-merge only.
