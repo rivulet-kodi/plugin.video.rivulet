@@ -505,6 +505,44 @@ def test_onclick_move_concurrent_update_notifies_and_reloads_instead_of_raising(
     assert reload_calls == [True]
 
 
+def test_onclick_move_store_raises_valueerror_notifies_without_reload(load_addonswindow, monkeypatch):
+    """`_guard_mutation()` only catches `ConcurrentUpdateError` - if a
+    concurrent `default.py` process removes the addon while
+    `dialogs.choose()`'s action menu is still open (it blocks), `Store.
+    move_addon()`'s own not-installed `ValueError` refusal must still
+    propagate to `_move()`'s own handler, notifying the refusal string
+    WITHOUT the extra `_reload()` a concurrent-update failure would
+    trigger - same shape as `_remove()`'s protected-addon `ValueError`
+    guard."""
+    first = _descriptor(transport='https://a.example/manifest.json', name='Addon A')
+    second = _descriptor(transport='https://b.example/manifest.json', name='Addon B')
+    ctx = load_addonswindow()
+    _stub_choose(monkeypatch, ctx, 2)  # "Move down" on the first addon
+    store = _FakeStore(addons=[first, second])
+
+    def _raise(transport_url, delta):
+        raise ValueError('addon not installed: %s' % transport_url)
+
+    monkeypatch.setattr(store, 'move_addon', _raise)
+    _wire_store(ctx.addonswindow, store)
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    reload_calls = []
+    original_reload = win._reload
+
+    def _counting_reload(*args, **kwargs):
+        reload_calls.append(True)
+        original_reload(*args, **kwargs)
+
+    monkeypatch.setattr(win, '_reload', _counting_reload)
+
+    win.onClick(ctx.addonswindow.LIST)  # must not raise ValueError
+
+    assert ctx.env.notifications == [('Rivulet', 'STR30272', 'info', 4000)]
+    assert reload_calls == []
+
+
 # ---------------------------------------------------------------------------
 # AddonsWindow._install() - install-from-URL row
 # ---------------------------------------------------------------------------

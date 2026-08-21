@@ -751,3 +751,7 @@ msgstr "Sposta su"
 msgctxt "#30271"
 msgid "Move down"
 msgstr "Sposta giù"
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr "L'add-on non è più installato"

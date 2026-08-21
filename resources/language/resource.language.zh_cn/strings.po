@@ -751,3 +751,7 @@ msgstr "上移"
 msgctxt "#30271"
 msgid "Move down"
 msgstr "下移"
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr "插件已不存在"

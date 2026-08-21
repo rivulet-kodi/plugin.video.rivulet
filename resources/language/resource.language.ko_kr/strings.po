@@ -751,3 +751,7 @@ msgstr "위로 이동"
 msgctxt "#30271"
 msgid "Move down"
 msgstr "아래로 이동"
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr "애드온이 더 이상 설치되어 있지 않습니다"

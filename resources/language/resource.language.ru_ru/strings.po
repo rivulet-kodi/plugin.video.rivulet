@@ -751,3 +751,7 @@ msgstr "Переместить вверх"
 msgctxt "#30271"
 msgid "Move down"
 msgstr "Переместить вниз"
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr "Дополнение больше не установлено"

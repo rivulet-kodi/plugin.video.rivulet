@@ -751,3 +751,7 @@ msgstr "Subir"
 msgctxt "#30271"
 msgid "Move down"
 msgstr "Bajar"
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr "El complemento ya no está instalado"

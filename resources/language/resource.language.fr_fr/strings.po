@@ -751,3 +751,7 @@ msgstr "Monter"
 msgctxt "#30271"
 msgid "Move down"
 msgstr "Descendre"
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr "L'extension n'est plus installée"

@@ -17,6 +17,11 @@ LIST = 30002
 #: addons.
 _PROTECTED_MESSAGE_STRING_ID = 30191
 
+#: strings.po id for the move refusal shown when a concurrent process
+#: removed the addon while its action menu was open (`move_addon()`
+#: raises `ValueError` for a `transportUrl` that is no longer installed).
+_NOT_INSTALLED_MESSAGE_STRING_ID = 30272
+
 
 def _clean_description(text):
     """Collapse a manifest description to one line - CR/LF and repeated
@@ -233,11 +238,24 @@ class AddonsWindow(BaseWindow):
         (unlike `_toggle`'s local-only `disabled` flag): list order is
         part of the synced addon-collection shape, not presentation
         state.
+
+        `dialogs.choose()` blocks while the action menu is open, and Kodi
+        runs `default.py` as concurrent OS processes, so another process
+        can remove this very addon while the menu sits open; `move_addon()`
+        then raises `ValueError` for the now-uninstalled `transportUrl`.
+        Handled exactly like `_remove()`'s protected-addon `ValueError`:
+        notify and return without reloading - nothing here has mutated
+        the in-memory list, so it is still coherent as-is.
         """
+        from lib.ui.compat import L, notify
         from lib.ui.views import _sync_addons_if_logged_in
 
         transport_url = descriptor.get('transportUrl')
-        if not self._guard_mutation(lambda: self.store.move_addon(transport_url, delta)):
+        try:
+            if not self._guard_mutation(lambda: self.store.move_addon(transport_url, delta)):
+                return
+        except ValueError:
+            notify(L(_NOT_INSTALLED_MESSAGE_STRING_ID))
             return
         _sync_addons_if_logged_in(self.store)
         self._reload(focus_transport_url=transport_url)

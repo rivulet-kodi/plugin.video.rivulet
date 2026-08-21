@@ -751,3 +751,7 @@ msgstr "Omhoog verplaatsen"
 msgctxt "#30271"
 msgid "Move down"
 msgstr "Omlaag verplaatsen"
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr "Add-on is niet meer geïnstalleerd"

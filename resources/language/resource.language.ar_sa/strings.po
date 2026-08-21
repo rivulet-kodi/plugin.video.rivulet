@@ -751,3 +751,7 @@ msgstr "نقل للأعلى"
 msgctxt "#30271"
 msgid "Move down"
 msgstr "نقل للأسفل"
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr "لم تعد الإضافة مثبتة"

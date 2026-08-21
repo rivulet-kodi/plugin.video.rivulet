@@ -751,3 +751,7 @@ msgstr "Yukarı taşı"
 msgctxt "#30271"
 msgid "Move down"
 msgstr "Aşağı taşı"
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr "Eklenti artık yüklü değil"

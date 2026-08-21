@@ -751,3 +751,7 @@ msgstr ""
 msgctxt "#30271"
 msgid "Move down"
 msgstr ""
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr ""
