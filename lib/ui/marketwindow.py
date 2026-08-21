@@ -275,15 +275,37 @@ class MarketWindow(BaseWindow):
 
 def _configure_url(transport_url):
     """The addon's `/configure` HTML setup-page URL, derived by swapping
-    `manifest.json` for `configure` on its transport URL - the same
-    convention stremio-web itself uses to link a configurable addon's
-    setup page. Only ever shown as plain text (see `_configure()`);
-    never fetched or rendered - Kodi has no embedded browser."""
+    `manifest.json` for `configure` on its transport URL's *path* - the
+    same convention stremio-web itself uses to link a configurable
+    addon's setup page. Operating on the parsed path (not the raw
+    string) matters because `validate_transport_url()` explicitly
+    allows - and preserves - a `?query` component on transport URLs;
+    swapping the suffix on the whole string would then land "/configure"
+    after the query instead of the path, e.g. turning
+    "https://host/manifest.json?token=x" into the unopenable
+    "https://host/manifest.json?token=x/configure" instead of
+    "https://host/configure?token=x". Only ever shown as plain text (see
+    `_configure()`); never fetched or rendered - Kodi has no embedded
+    browser."""
+    from urllib.parse import urlsplit, urlunsplit
+
     from lib.stremio.addons import MANIFEST_SUFFIX
 
-    if transport_url.endswith(MANIFEST_SUFFIX):
-        return transport_url[:-len(MANIFEST_SUFFIX)] + '/configure'
-    return transport_url.rstrip('/') + '/configure'
+    try:
+        scheme, netloc, path, query, fragment = urlsplit(transport_url)
+    except ValueError:
+        # Unparsable (e.g. a malformed IPv6 host) - a third-party addon's
+        # transportUrl is untrusted input; fall back to the old
+        # whole-string behaviour rather than raising out of a UI callback.
+        if transport_url.endswith(MANIFEST_SUFFIX):
+            return transport_url[:-len(MANIFEST_SUFFIX)] + '/configure'
+        return transport_url.rstrip('/') + '/configure'
+
+    if path.endswith(MANIFEST_SUFFIX):
+        path = path[:-len(MANIFEST_SUFFIX)] + '/configure'
+    else:
+        path = path.rstrip('/') + '/configure'
+    return urlunsplit((scheme, netloc, path, query, fragment))
 
 
 def open_market():

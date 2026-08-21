@@ -346,3 +346,51 @@ def test_onclick_empty_placeholder_row_is_a_noop(load_marketwindow):
     win.onClick(ctx.marketwindow.LIST)  # must not raise
 
     assert store.installed == []
+
+
+# ---------------------------------------------------------------------------
+# _configure_url()
+# ---------------------------------------------------------------------------
+
+
+def test_configure_url_bare_manifest(load_marketwindow):
+    ctx = load_marketwindow()
+    assert ctx.marketwindow._configure_url('https://host/manifest.json') == 'https://host/configure'
+
+
+def test_configure_url_configured_manifest_keeps_config_path_segment(load_marketwindow):
+    ctx = load_marketwindow()
+    url = 'https://host/eyJhIjoxfQ==/manifest.json'
+    assert ctx.marketwindow._configure_url(url) == 'https://host/eyJhIjoxfQ==/configure'
+
+
+def test_configure_url_with_query_string_moves_configure_into_the_path(load_marketwindow):
+    # validate_transport_url() explicitly allows and preserves a `?query`
+    # component (lib/stremio/addons.py) - swapping the suffix on the raw
+    # string would land "/configure" after the query instead of the path.
+    ctx = load_marketwindow()
+    url = 'https://host/manifest.json?token=abc123'
+    assert ctx.marketwindow._configure_url(url) == 'https://host/configure?token=abc123'
+
+
+def test_configure_url_with_fragment_is_preserved_alongside_query(load_marketwindow):
+    ctx = load_marketwindow()
+    url = 'https://host/manifest.json?token=abc#frag'
+    assert ctx.marketwindow._configure_url(url) == 'https://host/configure?token=abc#frag'
+
+
+def test_configure_url_without_manifest_suffix_falls_back_to_appending(load_marketwindow):
+    # No "/manifest.json" suffix to swap - best-effort fallback appends
+    # "/configure" directly, same as build_resource_url()'s own fallback.
+    ctx = load_marketwindow()
+    url = 'https://host/some/other/path'
+    assert ctx.marketwindow._configure_url(url) == 'https://host/some/other/path/configure'
+
+
+def test_configure_url_unparsable_url_falls_back_to_whole_string_swap(load_marketwindow):
+    # A malformed netloc (e.g. an invalid IPv6 literal) makes urlsplit()
+    # raise ValueError; a third-party addon's transportUrl is untrusted,
+    # so this must degrade to the old plain-string behaviour, not raise.
+    ctx = load_marketwindow()
+    url = 'https://[bad/manifest.json'
+    assert ctx.marketwindow._configure_url(url) == 'https://[bad/configure'
