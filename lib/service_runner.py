@@ -104,10 +104,12 @@ POST_DOWNLOAD_RECHECK_INTERVAL = 0.5
 # probe_listening() (an external/manually-started server appearing at
 # server_url, the "only remedy" UnsupportedPlatformError's own docstring
 # points users at) and resolve_binary() (a binary appearing, or a noexec
-# mount clearing -- install_binary() already places a chmod'd binary at the
-# exact bundled path resolve_binary() checks BEFORE calling
-# verify_executable(), so a valid executable can already be sitting there
-# when this exception fires). What the latch does is coarsen the recheck
+# mount clearing -- when nothing was installed yet, install_binary()
+# deliberately leaves the chmod'd binary at the exact bundled path
+# resolve_binary() checks even though verify_executable() rejected it, so a
+# now-runnable executable can already be sitting there when this exception
+# fires; it does NOT do that when it would have to overwrite a binary that
+# was already installed). What the latch does is coarsen the recheck
 # cadence from MISSING_BINARY_RECHECK_INTERVAL's 5s to this interval instead
 # -- still frequent enough to notice either kind of recovery within 5
 # minutes, far short of the 17,280 wakeups/day the old un-coarsened 5s
@@ -954,9 +956,13 @@ def main():
         off it.
 
         Three deliberate restrictions:
-          - Bundled binaries only. An explicit `server_binary` setting or
-            a PATH hit is the user's own build; we neither stamped it nor
-            get to replace it.
+          - Bundled path only, and only when the user has not named it
+            themselves. A PATH hit or a `server_binary` setting is the
+            user's own build; we neither stamped it nor get to replace it,
+            and `server_binary` can legitimately point AT the bundled
+            path (someone who dropped a hand-built binary exactly there),
+            which resolve_binary() returns from its explicit branch --
+            indistinguishable by path alone, so the setting is checked too.
           - Once per session (`upgrade_attempted`), so a failing download
             cannot re-fetch on every 5s spawn retry.
           - Failures are non-fatal: an offline user with a stale binary
@@ -968,7 +974,9 @@ def main():
         caller unwinds the supervision loop instead of spawning.
         """
         nonlocal upgrade_attempted
-        if upgrade_attempted or not is_bundled_binary(binary, profile_dir):
+        if (upgrade_attempted
+                or not is_bundled_binary(binary, profile_dir)
+                or binary == monitor.binary_setting):
             return binary
         upgrade_attempted = True
 
