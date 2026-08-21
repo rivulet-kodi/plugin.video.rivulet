@@ -489,11 +489,16 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         addon caches no library items at all -- see
         `lib.ui.mystuff._fetch_library_entries()`'s identical live
         fetch) -- `_current_library_state()` fetches it fresh every time
-        this menu opens, logged in or not."""
+        this menu opens, logged in or not. `lookup_ok` is forwarded
+        unchanged to `_toggle_library()`/`_toggle_watched()`: a failed
+        lookup still renders the (unavoidably guessed) default wording
+        below, but the two mutation handlers refuse to act on that
+        guess -- see `_current_library_state()`'s own docstring for why
+        a failed lookup must never be treated as "no record"."""
         from lib.ui import dialogs
         from lib.ui.compat import L
 
-        auth, item = self._current_library_state()
+        auth, item, lookup_ok = self._current_library_state()
         in_library = bool(item) and not item.get('removed')
         watched = bool(item) and bool((item.get('state') or {}).get('flaggedWatched'))
 
@@ -506,38 +511,57 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         if picked == 0:
             self._open_credits()
         elif picked == 1:
-            self._toggle_library(auth, item, add=not in_library)
+            self._toggle_library(auth, item, add=not in_library, lookup_ok=lookup_ok)
         elif picked == 2:
-            self._toggle_watched(auth, item, watched=not watched)
+            self._toggle_watched(auth, item, watched=not watched, lookup_ok=lookup_ok)
 
     def _current_library_state(self):
-        """`(auth, item)` for `self.meta` -- `auth` is `Store.get_auth()`'s
-        dict or `None` when logged out (skips the network call entirely:
-        a write nobody's account can accept has nothing to look up);
-        `item` is the account's live libraryItem record for this title,
-        or `None` when it has no record yet (never watched, never
-        added). A lookup failure degrades to `item=None` -- the SAME
-        "fetch may fail, the menu must still open" stance
-        `lib.ui.mystuff._fetch_library_entries()` already takes -- which
-        conveniently is also the correct default wording (offer "Add"/
-        "Mark watched" as if nothing existed yet)."""
+        """`(auth, item, lookup_ok)` for `self.meta` -- `auth` is
+        `Store.get_auth()`'s dict or `None` when logged out (skips the
+        network call entirely: a write nobody's account can accept has
+        nothing to look up, and `lookup_ok` is `True` in that case --
+        there is nothing left ambiguous about it). When logged in,
+        `item` is the account's live libraryItem record for this title
+        (`None` meaning it genuinely has no record yet -- never
+        watched, never added) and `lookup_ok` says whether that `item`
+        value is trustworthy.
+
+        A failed lookup returns `(auth, None, False)`, NOT the same
+        `(auth, None)` shape a genuinely-absent record produces: those
+        two outcomes used to collapse onto the same `item=None`
+        sentinel, which is the actual bug this tri-state return fixes
+        -- `_toggle_library()`/`_toggle_watched()` would otherwise
+        build a FRESH payload from `self.meta` and have
+        `_push_library_item()` overwrite the account's existing
+        server-side record (watch counts, timestamps, flags) because a
+        transient network error looked identical to "no such record".
+        Callers MUST check `lookup_ok` before trusting `item`, never
+        just its truthiness.
+
+        The network round trip itself runs under `busy_dialog()` (see
+        the module-level import) so a slow lookup shows progress
+        instead of a frozen window -- the same mitigation
+        `lib.ui.views.py` and `streamswindow.py` already use for their
+        own UI-callback HTTP, per this addon's synchronous-HTTP-plus-
+        busy-dialog convention (never background threads)."""
         import xbmc
 
         from lib.stremio.api import ApiError
-        from lib.ui.compat import log
+        from lib.ui.compat import L, log
         from lib.ui.dependencies import get_api, get_store
 
         auth = get_store().get_auth()
         if not auth:
-            return None, None
+            return None, None, True
         try:
-            item = get_api().get_library_item(auth.get('authKey'), self.meta.get('id'))
+            with busy_dialog(L(30033)):
+                item = get_api().get_library_item(auth.get('authKey'), self.meta.get('id'))
         except ApiError as exc:
             log('detailwindow: library lookup failed: %r' % (exc,), xbmc.LOGWARNING)
-            item = None
-        return auth, item
+            return auth, None, False
+        return auth, item, True
 
-    def _toggle_library(self, auth, item, add):
+    def _toggle_library(self, auth, item, add, lookup_ok):
         """Push an explicit `library_add_payload()` (built fresh from
         `self.meta` -- see that function's own docstring for why it
         never takes `item`) or a `library_remove_payload()` tombstone of
@@ -547,34 +571,47 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         failing silently or attempting a write with no `authKey` to send
         (the real API would just reject a `None` authKey as a normal
         auth error -- notifying directly here is both cheaper and
-        clearer). A network failure notifies too and returns before the
-        success notification, so a failed write never leaves the user
-        believing it landed."""
+        clearer). `lookup_ok=False` (see `_current_library_state()`)
+        notifies and bails the SAME way, before either payload builder
+        runs -- a failed lookup's `item=None` is not "no record", and
+        both payload builders would otherwise silently overwrite the
+        account's actual server-side state. A network failure notifies
+        too and returns before the success notification, so a failed
+        write never leaves the user believing it landed."""
         from lib import library
         from lib.ui.compat import L, notify
 
         if auth is None:
             notify(L(30190))
+            return
+        if not lookup_ok:
+            notify(L(30302))
             return
         payload = library.library_add_payload(self.meta) if add else library.library_remove_payload(item)
         if not self._push_library_item(auth, payload):
             return
         notify(L(30297) if add else L(30298))
 
-    def _toggle_watched(self, auth, item, watched):
+    def _toggle_watched(self, auth, item, watched, lookup_ok):
         """Push a `mark_watched_payload()` built from the already-fetched
         `item`, or a fresh `build_library_item(self.meta)` when the
         account has no record at all yet (marking watched with no prior
         record is exactly the IMPLICIT `removed=True`/`temp=True` record
         `build_library_item()`'s own docstring describes stremio-core
         creating the first time a title is watched without ever being
-        explicitly added). Same logged-out/failed-write notifications as
-        `_toggle_library()`."""
+        explicitly added). Same logged-out/lookup-failed/failed-write
+        notifications as `_toggle_library()` -- `lookup_ok=False` must
+        block the fresh-`build_library_item()` fallback too, since that
+        fallback is only correct when the account truly has no record,
+        which a failed lookup never establishes."""
         from lib import library
         from lib.ui.compat import L, notify
 
         if auth is None:
             notify(L(30190))
+            return
+        if not lookup_ok:
+            notify(L(30302))
             return
         base = item if item is not None else library.build_library_item(self.meta)
         payload = library.mark_watched_payload(base, watched)
@@ -589,7 +626,12 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         returns `True` on success, or notifies `L(30301)` and returns
         `False` on any `ApiError` (network failure or a server-side
         error envelope alike) so neither caller's own success
-        notification runs after a write that never actually landed."""
+        notification runs after a write that never actually landed.
+        The write itself runs under `busy_dialog()`, same as the
+        lookup in `_current_library_state()` -- this account round
+        trip is another UI-callback HTTP call this addon deliberately
+        keeps synchronous, mitigated with progress feedback rather than
+        a threading rewrite."""
         import xbmc
 
         from lib.stremio.api import ApiError
@@ -597,7 +639,8 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         from lib.ui.dependencies import get_api
 
         try:
-            get_api().put_library_item(auth.get('authKey'), payload)
+            with busy_dialog(L(30033)):
+                get_api().put_library_item(auth.get('authKey'), payload)
         except ApiError as exc:
             log('detailwindow: library write failed: %r' % (exc,), xbmc.LOGWARNING)
             notify(L(30301))

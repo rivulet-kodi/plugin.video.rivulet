@@ -960,7 +960,14 @@ def test_context_menu_failed_write_notifies_failure_not_success(load_detailwindo
     assert ctx.env.notifications == [('Rivulet', 'STR30301', 'info', 4000)]
 
 
-def test_context_menu_lookup_failure_degrades_to_add_wording_without_crashing(load_detailwindow, monkeypatch):
+def test_context_menu_lookup_failure_still_offers_default_wording_without_crashing(load_detailwindow, monkeypatch):
+    """A failed `get_library_item()` still has to render SOME wording for
+    rows 1/2 - `_open_context_menu()` falls back to the same "nothing
+    exists yet" default a genuine empty record would produce (Add /
+    Mark watched). The row wording is cosmetic; what actually matters
+    is that neither row's write goes through on a bad guess - see the
+    two tests below, which pick these same rows and assert on the
+    write's absence instead of just cancelling."""
     ctx = load_detailwindow()
     win = _make_window(ctx.detailwindow)
     win.meta = {'id': 'tt1', 'name': 'Breaking Bad'}
@@ -971,6 +978,92 @@ def test_context_menu_lookup_failure_degrades_to_add_wording_without_crashing(lo
     win._open_context_menu()
 
     assert captured == [('Breaking Bad', ['STR30196', 'STR30293', 'STR30295'])]
+
+
+def test_context_menu_add_after_lookup_failure_notifies_and_performs_no_write(load_detailwindow, monkeypatch):
+    """The actual Finding-A bug: a FAILED lookup must never be treated
+    as "no record" - picking "Add" here must not let `_toggle_library()`
+    build a fresh payload and overwrite whatever the server actually
+    has for this title."""
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    win.meta = {'id': 'tt1', 'name': 'Breaking Bad'}
+    store, api = _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, get_error=ApiError('boom'))
+    _stub_choose(monkeypatch, ctx, 1)  # row 1: "Add to library" wording, but the lookup never actually succeeded
+
+    win._open_context_menu()
+
+    assert api.put_calls == []
+    assert ctx.env.notifications == [('Rivulet', 'STR30302', 'info', 4000)]
+
+
+def test_context_menu_mark_watched_after_lookup_failure_notifies_and_performs_no_write(load_detailwindow, monkeypatch):
+    """Same guard for the Mark-watched row: `_toggle_watched()`'s
+    no-prior-record fallback (`build_library_item()`) is only correct
+    when the account truly has no record, which a failed lookup never
+    establishes."""
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    win.meta = {'id': 'tt1', 'name': 'Breaking Bad'}
+    store, api = _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, get_error=ApiError('boom'))
+    _stub_choose(monkeypatch, ctx, 2)  # row 2: "Mark as watched"
+
+    win._open_context_menu()
+
+    assert api.put_calls == []
+    assert ctx.env.notifications == [('Rivulet', 'STR30302', 'info', 4000)]
+
+
+def test_context_menu_cast_and_crew_still_works_after_lookup_failure(load_detailwindow, monkeypatch):
+    """A failed library lookup must not block the non-mutating Cast &
+    Crew row - it never touches `get_api()`/`get_store()` at all."""
+    ctx = load_detailwindow()
+    import xbmcgui
+    win = _make_window(ctx.detailwindow)
+    win.meta = {
+        'id': 'tt1', 'name': 'Breaking Bad',
+        'links': [{'name': 'Bryan Cranston', 'category': 'Cast', 'url': 'stremio:///search?search=Bryan%20Cranston'}],
+    }
+    win.stype = 'series'
+    fetch_calls = []
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: fetch_calls.append((stype, sid)) or {})
+    monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
+    _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, get_error=ApiError('boom'))
+    captured = []
+    # picked=0 (Cast & Crew) on the top-level menu, then -1 (cancel) on
+    # open_credits_picker()'s own nested person list.
+    _stub_choose(monkeypatch, ctx, [0, -1], capture=captured)
+
+    win.onAction(xbmcgui.Action(ctx.detailwindow._CONTEXT_MENU_ACTION))
+
+    assert fetch_calls == []  # self.meta was already full - no re-fetch
+    assert captured[-1] == ('STR30196', [('Bryan Cranston', 'Cast')])
+
+
+def test_current_library_state_wraps_the_lookup_in_a_busy_dialog(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    win.meta = {'id': 'tt1'}
+    _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok'}, item=None)
+    busy = _record_busy_calls(monkeypatch, ctx.dialogs)
+
+    win._current_library_state()
+
+    assert busy.created == [('STR30033', '')]
+    assert busy.closed == 1
+
+
+def test_push_library_item_wraps_the_write_in_a_busy_dialog(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    _, api = _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok'})
+    busy = _record_busy_calls(monkeypatch, ctx.dialogs)
+
+    result = win._push_library_item({'authKey': 'tok'}, {'_id': 'tt1'})
+
+    assert result is True
+    assert busy.created == [('STR30033', '')]
+    assert busy.closed == 1
 
 
 # ---------------------------------------------------------------------------

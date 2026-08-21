@@ -791,3 +791,7 @@ msgstr "تم وضع علامة كغير مُشاهَد"
 msgctxt "#30301"
 msgid "Failed to update library"
 msgstr "فشل تحديث المكتبة"
+
+msgctxt "#30302"
+msgid "Failed to check library status"
+msgstr "فشل التحقق من حالة المكتبة"

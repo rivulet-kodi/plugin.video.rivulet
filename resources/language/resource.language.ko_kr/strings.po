@@ -791,3 +791,7 @@ msgstr "시청 안 함으로 표시됨"
 msgctxt "#30301"
 msgid "Failed to update library"
 msgstr "라이브러리를 업데이트하지 못했습니다"
+
+msgctxt "#30302"
+msgid "Failed to check library status"
+msgstr "라이브러리 상태를 확인하지 못했습니다"

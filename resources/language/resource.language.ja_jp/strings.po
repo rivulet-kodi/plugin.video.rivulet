@@ -791,3 +791,7 @@ msgstr "未視聴にしました"
 msgctxt "#30301"
 msgid "Failed to update library"
 msgstr "ライブラリを更新できませんでした"
+
+msgctxt "#30302"
+msgid "Failed to check library status"
+msgstr "ライブラリの状態を確認できませんでした"

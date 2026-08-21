@@ -791,3 +791,7 @@ msgstr "Отмечено как непросмотренное"
 msgctxt "#30301"
 msgid "Failed to update library"
 msgstr "Не удалось обновить библиотеку"
+
+msgctxt "#30302"
+msgid "Failed to check library status"
+msgstr "Не удалось проверить состояние библиотеки"

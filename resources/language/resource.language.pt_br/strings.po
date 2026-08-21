@@ -791,3 +791,7 @@ msgstr "Marcado como não visto"
 msgctxt "#30301"
 msgid "Failed to update library"
 msgstr "Não foi possível atualizar a biblioteca"
+
+msgctxt "#30302"
+msgid "Failed to check library status"
+msgstr "Não foi possível verificar o status da biblioteca"

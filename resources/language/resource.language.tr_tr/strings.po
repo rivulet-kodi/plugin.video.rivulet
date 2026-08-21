@@ -791,3 +791,7 @@ msgstr "İzlenmedi olarak işaretlendi"
 msgctxt "#30301"
 msgid "Failed to update library"
 msgstr "Kitaplık güncellenemedi"
+
+msgctxt "#30302"
+msgid "Failed to check library status"
+msgstr "Kitaplık durumu kontrol edilemedi"
