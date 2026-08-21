@@ -195,10 +195,17 @@ class CatalogPickerWindow(BaseWindow):
 
     def _focused_catalog(self):
         """The `(transport_url, manifest, catalog)` tuple under the LIST's
-        current selection, or None if nothing is focused - the
-        bounds-safe lookup `onClick()`/the context-menu handling share."""
+        current selection, or None if nothing is focused OR the
+        selection is the synthetic "New Episodes" row
+        (`_make_new_episodes_item()`) - that row carries no `position`
+        property because it indexes nothing in `self.catalogs`, so
+        `int(focused.getProperty('position'))` on it raises ValueError
+        on an empty string. Rejecting it here, rather than in each
+        caller, is what makes this the bounds-safe lookup onClick()'s
+        catalog-row fallback and the context-menu's genre lookup can
+        both share without re-deriving the same guard."""
         focused = self.getControl(LIST).getSelectedItem()
-        if focused is None:
+        if focused is None or focused.getProperty('kind') == 'new_episodes':
             return None
         return self.catalogs[int(focused.getProperty('position'))]
 
@@ -459,6 +466,18 @@ def _mark_episode_seen(episode):
         log('catalogpicker: failed to mark episode seen: %r' % (exc,), xbmc.LOGWARNING)
 
 
+#: The exact `types=` set `lib.ui.homewindow`'s Series row passes
+#: (`_TYPE_ROWS`'s `frozenset({'series', 'tv'})` - `tv` is the stray
+#: declared type that row's own comment folds into Series). Pinning New
+#: Episodes checks the reduced `wanted` set against this by equality,
+#: not mere membership: `'series' in wanted` is also true for a
+#: hypothetical mixed filter like `{'series', 'movie'}`, which is not
+#: the Series screen. Today `home` is the only caller and always passes
+#: exactly this set, so this equality check is hardening against a
+#: hypothetical future picker rather than a fix for an observed bug.
+_SERIES_SCREEN_TYPES = frozenset({'series', 'tv'})
+
+
 def open_catalog_picker(types=None, heading=''):
     """List the installed addons' catalogs and open the coverflow for the
     one picked. `types` restricts the list to those Stremio content types
@@ -487,14 +506,17 @@ def open_catalog_picker(types=None, heading=''):
         return False
     catalogs = _sort_catalogs(catalogs)
 
-    # Pinned only on the Series screen specifically (not an unfiltered
-    # picker that happens to include series catalogs, and never on
-    # Movies/Anime/Other): New Episodes is series-specific, so it only
-    # ever belongs where shows live. Gated on the same setting the old
-    # Home row used - it stays off entirely rather than paying for the
-    # addon-fetching computation below when the user has disabled it.
+    # Pinned only on the Series screen specifically - `wanted` must
+    # equal `_SERIES_SCREEN_TYPES` exactly, not merely contain 'series',
+    # so a picker filtered to a superset (e.g. a hypothetical
+    # {'series', 'movie'}) does not also pick this up (never on
+    # Movies/Anime/Other either). New Episodes is series-specific, so it
+    # only ever belongs where shows live. Gated on the same setting the
+    # old Home row used - it stays off entirely rather than paying for
+    # the addon-fetching computation below when the user has disabled
+    # it.
     new_episode_items = []
-    if wanted is not None and 'series' in wanted and setting_bool('home_show_new_episodes', True):
+    if wanted == _SERIES_SCREEN_TYPES and setting_bool('home_show_new_episodes', True):
         new_episode_items = _new_episode_items(store)
 
     log('catalogpicker: opening CatalogPickerWindow (%d catalogs)' % len(catalogs), xbmc.LOGINFO)

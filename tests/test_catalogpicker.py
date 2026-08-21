@@ -1047,6 +1047,32 @@ def test_onaction_back_actions_still_close_through_the_new_onaction(load_catalog
     assert win.closed is True
 
 
+def test_onaction_context_menu_on_the_pinned_new_episodes_row_does_not_crash(load_catalogpicker, monkeypatch):
+    """The pinned "New Episodes" row (`_make_new_episodes_item()`) is
+    synthetic and carries no `position` property, unlike every real
+    catalog row `_make_item()` builds. Before `_focused_catalog()`
+    rejected it (see its docstring), pressing 117 while it was focused
+    reached `int(focused.getProperty('position'))` on an empty string
+    and raised ValueError - this is that regression, focused on row 0
+    exactly like `onInit()` places the pinned row."""
+    ctx = load_catalogpicker()
+    import xbmcgui
+    picker = ctx.catalogpicker
+    win = _make_window(picker)
+    win.catalogs = [('https://a.example/manifest.json', {'name': 'A'}, _GENRE_OPTIONAL_CATALOG)]
+    win.new_episode_items = [{'type': 'series', 'id': 'tt1', 'video_id': 's1e2'}]
+    win.onInit()
+    win.getControl(picker.LIST).selected_index = 0  # the pinned row itself
+    win.setFocusId(picker.LIST)
+    captured = []
+    _stub_choose(monkeypatch, ctx, -1, capture=captured)
+
+    win.onAction(xbmcgui.Action(picker._CONTEXT_MENU_ACTION))  # must not raise
+
+    assert captured == []  # no genre dialog for a row that is not a catalog
+    assert win.closed is False
+
+
 # ---------------------------------------------------------------------------
 # open_catalog_picker() - dropping permanently-unreachable catalogs
 # ---------------------------------------------------------------------------
@@ -1220,8 +1246,8 @@ def test_open_catalog_picker_omits_new_episodes_row_when_the_setting_is_off(
     assert calls == []  # gated before the addon-fetching computation ever runs
 
 
-@pytest.mark.parametrize('types', [{'movie'}, {'anime'}, {'porn'}, None], ids=[
-    'movies', 'anime', 'other', 'unfiltered',
+@pytest.mark.parametrize('types', [{'movie'}, {'anime'}, {'porn'}, {'series', 'movie'}, None], ids=[
+    'movies', 'anime', 'other', 'mixed-series-movie', 'unfiltered',
 ])
 def test_open_catalog_picker_never_pins_new_episodes_outside_the_series_screen(
     load_catalogpicker, monkeypatch, types,
