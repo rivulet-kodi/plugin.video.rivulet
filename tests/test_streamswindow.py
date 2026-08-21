@@ -105,6 +105,19 @@ class _FakeAddonClient:
         return result
 
 
+class _SpoofedCategoryError(Exception):
+    """A non-`AddonError` exception that happens to carry a `category`
+    attribute of its own - standing in for some future/third-party
+    exception type outside `AddonError`'s safe-by-construction contract
+    (see `_safe_failure_reason()`'s docstring in lib/ui/streamswindow.py).
+    Used below to prove that contract is never extended to an arbitrary
+    exception via `hasattr(exc, 'category')` duck-typing."""
+
+    def __init__(self, message, category):
+        super().__init__(message)
+        self.category = category
+
+
 @pytest.fixture
 def load_streamswindow():
     """Factory fixture: `load_streamswindow(addon_info=None)` installs fresh
@@ -1313,6 +1326,68 @@ def test_query_addon_streams_logs_addon_error_category_at_debug(load_streamswind
     debug_msgs = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGDEBUG]
     assert any('TorBox' in msg and 'stremio.torbox.app' in msg and 'HTTP 401' in msg for msg in debug_msgs)
     assert not any('manifest.json' in msg for msg in debug_msgs)
+
+
+def test_query_addon_streams_never_trusts_a_category_attribute_off_a_non_addonerror_exception(
+    load_streamswindow,
+):
+    """The safe-category contract documented on `_safe_failure_reason()`
+    holds ONLY for `AddonError.category` - it is populated exclusively
+    by `_request_error_category()`/fixed literals at `AddonError` raise
+    sites, never by arbitrary code. A `category` attribute on any OTHER
+    exception type carries no such guarantee: nothing stops it from
+    being a live credential. `_query_addon_streams()` must fall back to
+    the exception's bare type name for such an exception instead of
+    duck-typing on `hasattr(exc, 'category')`, and that fallback must
+    never touch the log at any level."""
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    transport = 'https://evil.example/manifest.json'
+    secret = 'sk_live_51H8xJ2eZvKYlo2C'
+    client = _FakeAddonClient({
+        transport: _SpoofedCategoryError('boom', category=secret),
+    })
+
+    pairs, failed, reason = sw._query_addon_streams(client, transport, 'Spoofed', 'movie', 'tt1')
+
+    assert failed is True
+    assert pairs == []
+    assert reason == '_SpoofedCategoryError'
+    all_messages = ' '.join(msg for msg, _level in ctx.env.log_calls)
+    assert secret not in all_messages
+
+
+def test_open_streams_aggregate_warning_names_a_spoofed_category_addon_by_type_not_by_secret(
+    load_streamswindow, monkeypatch,
+):
+    """End-to-end companion to the unit test above: the aggregate
+    WARNING - the ONLY failure detail a default-log-level user ever
+    sees - must name a failing addon by its exception's bare type name
+    when that exception is not an `AddonError`, never by a `category`
+    attribute duck-typed off it, even when that attribute holds a
+    credential-shaped secret."""
+    ctx = load_streamswindow()
+    import xbmc
+    sw = ctx.streamswindow
+    transport = 'https://evil.example/manifest.json'
+    secret = 'sk_live_51H8xJ2eZvKYlo2C'
+    addon = {
+        'transportUrl': transport,
+        'manifest': {'name': 'Spoofed', 'resources': ['stream'], 'types': ['movie']},
+    }
+    client = _FakeAddonClient({transport: _SpoofedCategoryError('boom', category=secret)})
+    _wire_data_layer(sw, _FakeStore(addons=[addon]), client)
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: (False, False))
+
+    result = sw.open_streams('movie', 'tt1')
+
+    assert result is False  # the only addon failed -> no streams at all
+    all_messages = ' '.join(msg for msg, _level in ctx.env.log_calls)
+    assert secret not in all_messages
+    warnings = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGWARNING]
+    assert warnings == [
+        '[plugin.video.rivulet] streamswindow: 1 addon(s) failed: Spoofed (_SpoofedCategoryError)',
+    ]
 
 
 def test_open_streams_multiple_addon_failures_still_log_a_single_aggregate_warning(

@@ -814,17 +814,28 @@ _MAX_NAMED_ADDON_FAILURES = 8
 
 
 def _safe_failure_reason(exc):
-    """The short, safe-to-log-at-default-level piece of `exc` the
-    aggregate WARNING below can name a failing addon by, without
+    """The short, safe-to-log-at-default-level piece of an `AddonError`
+    the aggregate WARNING below can name a failing addon by, without
     repeating `_query_addon_streams()`'s own fuller per-addon DEBUG
-    detail: an `AddonError.category` when present - already
-    safe-by-construction, see `AddonError`'s own docstring in
-    lib/stremio/addons.py - else the exception's bare type name (e.g.
-    'ConnectionError'). NEVER `str(exc)` and NEVER a url: for a stale
-    debrid key, `str(exc)` can embed the user's own credentials, which
-    is exactly why only the category (or, absent one, the type name)
-    is considered safe to surface here."""
-    return getattr(exc, 'category', None) or type(exc).__name__
+    detail: `exc.category` - safe-by-construction ONLY for `AddonError`,
+    see that class's own docstring in lib/stremio/addons.py: `category`
+    is populated exclusively by `_request_error_category()` or a fixed
+    literal at `AddonError` raise sites, so it can never be `str(exc)`
+    or a url.
+
+    This function is deliberately typed to `AddonError` alone, and
+    callers MUST only reach it from an `except AddonError` branch where
+    that guarantee actually holds - never via `hasattr(exc, 'category')`
+    duck-typing on an arbitrary exception. A bare attribute check is NOT
+    the same contract: any other exception type (a parsing error today,
+    anything third-party tomorrow) could carry a `category` attribute
+    of its own for unrelated reasons, and nothing stops that value from
+    being as sensitive as a credential - exactly the leak this WARNING
+    exists to avoid. Every other exception must use its own bare type
+    name (e.g. 'ConnectionError') instead, computed directly at the
+    call site rather than through this function - see
+    `_query_addon_streams()`'s generic `except Exception` branch below."""
+    return exc.category or type(exc).__name__
 
 
 def _summarize_addon_failures(failures):
@@ -862,10 +873,13 @@ def _query_addon_streams(client, transport_url, addon_name, stype, sid):
     without re-deriving this per-addon detail itself. The name
     matters: the aggregate is only a count, so without it a user
     reporting "addon X's streams never appear" (issue #32) leaves no
-    way to tell WHICH addon dropped out. `reason` is
-    `_safe_failure_reason()`'s short form of that same safe detail (a
-    category, or else the exception's bare type name) - `None` on
-    success - so `_summarize_addon_failures()` can name each failing
+    way to tell WHICH addon dropped out. `reason` is the same safe
+    detail in short form: `_safe_failure_reason()`'s `AddonError`
+    category for the first branch below, or, for any other exception,
+    its own bare type name computed directly at that branch (never
+    duck-typed through `_safe_failure_reason()` - see that function's
+    own docstring for why) - `None` on success - so
+    `_summarize_addon_failures()` can name each failing
     addon in the one aggregate line visible at Kodi's default log
     level, where debug logging (and this function's own per-addon
     line) is off (issue #34).
@@ -893,7 +907,7 @@ def _query_addon_streams(client, transport_url, addon_name, stype, sid):
     except Exception as exc:  # noqa: BLE001 - see docstring: a worker thread that dies here wedges its consumer
         log('streamswindow: %s (%s) raised %s' % (
             addon_name, safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGERROR)
-        return [], True, _safe_failure_reason(exc)
+        return [], True, type(exc).__name__
     return pairs, False, None
 
 
