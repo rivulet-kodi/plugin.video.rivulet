@@ -109,11 +109,10 @@ def platform_key():
     os_name is one of {"Linux", "Darwin", "Windows", "Android", "iOS",
     "tvOS"}; arch is one of {"x86_64", "arm64", "armv7"} (or the raw
     `platform.machine()` value when it doesn't match a known mapping).
-    Android runs a Linux kernel, so platform.system() alone can't tell it
-    apart from desktop Linux -- Kodi sets ANDROID_ROOT/ANDROID_STORAGE in
-    its process environment there, and some Android Python builds also
-    report "android" via sys.platform. The Apple mobile systems report
-    "Darwin" for the same reason (see `_apple_mobile_os`).
+    Neither Android nor the Apple mobile systems can be recognised from
+    `platform.system()` alone -- they report "Linux" and "Darwin" exactly
+    as their desktop counterparts do (see `_is_android` and
+    `_apple_mobile_os` for the signals that separate them).
 
     Only Linux/Darwin/Windows have pinned assets; the Android and
     iOS/tvOS values exist so callers can report what was actually
@@ -146,6 +145,10 @@ def platform_key():
 
 
 def _is_android():
+    """True on Android, which reports platform.system() == "Linux" like any
+    other Linux. Kodi sets ANDROID_ROOT/ANDROID_STORAGE in its process
+    environment there, and some Android Python builds also report
+    "android" via sys.platform."""
     if os.environ.get("ANDROID_ROOT") or os.environ.get("ANDROID_STORAGE"):
         return True
     return "android" in sys.platform.lower()

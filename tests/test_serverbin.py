@@ -356,12 +356,17 @@ def test_install_binary_refuses_apple_mobile_before_any_network_request(
     platform.machine() says "arm64" and the Darwin/arm64 asset would
     otherwise match and download in full before failing at exec time."""
     _set_platform(monkeypatch, "Darwin", machine, sys_platform=sys_platform)
+    # A dest_dir that does not exist yet: the refusal must land before
+    # install_binary()'s os.makedirs(), so nothing at all is set up. A
+    # regression that only moved the guard below the download would still
+    # leave no final binary behind, and pass a weaker assertion.
+    dest_dir = tmp_path / "bin"
 
     with pytest.raises(UnsupportedPlatformError):
-        install_binary(str(tmp_path))
+        install_binary(str(dest_dir))
 
     assert fake_requests.calls == []
-    assert not (tmp_path / "stremio-server").exists()
+    assert not dest_dir.exists()
 
 
 def test_install_binary_still_installs_on_macos_arm64(tmp_path, monkeypatch, fake_requests):
