@@ -872,13 +872,7 @@ msgctxt "#30280"
 msgid "Hide adult content"
 msgstr "隐藏成人内容"
 
-msgctxt "#30333"
-msgid "Browse addon marketplace"
-msgstr "浏览插件市场"
 
-msgctxt "#30334"
-msgid "Discover and install addons published by your other addons"
-msgstr "发现并安装由您的其他插件发布的插件"
 
 msgctxt "#30335"
 msgid "Installed"
@@ -913,8 +907,40 @@ msgid "Install this addon?"
 msgstr "要安装此插件吗？"
 
 msgctxt "#30343"
-msgid "Marketplace"
-msgstr "市场"
+msgid "Addon catalogs"
+msgstr "插件目录"
+
+msgctxt "#30344"
+msgid "Browse addon catalogs"
+msgstr "浏览插件目录"
+
+msgctxt "#30345"
+msgid "Install from URL"
+msgstr "从网址安装"
+
+msgctxt "#30346"
+msgid "Search addon catalogs"
+msgstr "搜索插件目录"
+
+msgctxt "#30347"
+msgid "Clear search"
+msgstr "清除搜索"
+
+msgctxt "#30348"
+msgid "Showing %d of %d"
+msgstr "显示 %d / 共 %d"
+
+msgctxt "#30349"
+msgid "No addons match your search"
+msgstr "没有匹配的插件"
+
+msgctxt "#30350"
+msgid "Add addons"
+msgstr "添加插件"
+
+msgctxt "#30351"
+msgid "Browse catalogs, or install from a manifest URL"
+msgstr "浏览目录，或从清单网址安装"
 
 msgctxt "#30360"
 msgid "New episodes: %d"

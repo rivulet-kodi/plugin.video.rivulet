@@ -872,13 +872,7 @@ msgctxt "#30280"
 msgid "Hide adult content"
 msgstr ""
 
-msgctxt "#30333"
-msgid "Browse addon marketplace"
-msgstr ""
 
-msgctxt "#30334"
-msgid "Discover and install addons published by your other addons"
-msgstr ""
 
 msgctxt "#30335"
 msgid "Installed"
@@ -913,7 +907,39 @@ msgid "Install this addon?"
 msgstr ""
 
 msgctxt "#30343"
-msgid "Marketplace"
+msgid "Addon catalogs"
+msgstr ""
+
+msgctxt "#30344"
+msgid "Browse addon catalogs"
+msgstr ""
+
+msgctxt "#30345"
+msgid "Install from URL"
+msgstr ""
+
+msgctxt "#30346"
+msgid "Search addon catalogs"
+msgstr ""
+
+msgctxt "#30347"
+msgid "Clear search"
+msgstr ""
+
+msgctxt "#30348"
+msgid "Showing %d of %d"
+msgstr ""
+
+msgctxt "#30349"
+msgid "No addons match your search"
+msgstr ""
+
+msgctxt "#30350"
+msgid "Add addons"
+msgstr ""
+
+msgctxt "#30351"
+msgid "Browse catalogs, or install from a manifest URL"
 msgstr ""
 
 msgctxt "#30360"

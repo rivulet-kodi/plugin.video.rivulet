@@ -13,7 +13,7 @@ needs a follow-up manifest fetch the way `AddonClient.catalog()`'s meta
 previews do.
 
 Cinemeta ships this seeded into `lib.store.DEFAULT_ADDONS` with its
-`addonCatalogs` array already committed, so `lib.ui.marketwindow` works
+`addonCatalogs` array already committed, so `lib.ui.addoncatalogwindow` works
 offline-seeded on first run with no new dependency - but nothing here is
 Cinemeta-specific: `iter_addon_catalogs()` reads the field off WHATEVER
 addons happen to be installed, so any addon publishing `addonCatalogs`
@@ -24,8 +24,26 @@ Roughly half of a community catalog's entries set
 that same live census) - installing one of those as-is yields an addon
 that looks installed but silently 404s/errors on every resource until
 configured through a web page Kodi cannot render. `descriptor_state()`
-is what stops `lib.ui.marketwindow` from offering a plain "install" on
+is what stops `lib.ui.addoncatalogwindow` from offering a plain "install" on
 those.
+
+A live census against Cinemeta found 11 declared `(type, id)` pairs -
+`all|movie|series|channel` under id `official`, plus
+`all|movie|series|channel|tv|Podcasts|other` under id `community` -
+fetched as 11 separate GETs that pull 297 rows for only 102 unique
+addons (7 official + 95 community), because each id's `all` variant
+already returns everything its narrower type variants repeat.
+`iter_unique_addon_catalogs()` collapses an addon's declared catalogs
+to one entry per unique id (preferring the `all` type when declared),
+turning Cinemeta's 11 pairs into 2 requests for the same 102 addons.
+About 16% of a community catalog's transportUrls are dead in practice,
+so `fetch_addon_catalogs()` fans several sources out concurrently,
+bounded like every other fan-out site in this codebase (see
+`lib.ui.views._MAX_ADDON_WORKERS`), and keeps one dead source from
+losing every other source's rows. `fetch_addon_catalog_cached()` adds
+a short TTL in front of `fetch_addon_catalog()` so re-opening the same
+catalog inside one already-running process costs zero HTTP requests;
+see its own docstring for why that cache is a plain in-process dict.
 
 Reuses `lib.stremio.addons`' HTTP/error/timeout/logging conventions
 (`AddonError`, `validate_transport_url`, `safe_url_for_log`,
@@ -33,6 +51,10 @@ Reuses `lib.stremio.addons`' HTTP/error/timeout/logging conventions
 hierarchy, so every call site that already catches `AddonError` from
 `AddonClient` catches this module's errors too.
 """
+import heapq
+import threading
+import time
+
 from lib.stremio import addons as _addons
 from lib.stremio.addons import (
     AddonError,
@@ -60,7 +82,7 @@ def iter_addon_catalogs(addons):
     with no per-addon special-casing: ANY installed addon publishing
     `addonCatalogs` contributes here, not only whichever ships as
     Rivulet's seeded default (currently Cinemeta, in
-    `lib.store.DEFAULT_ADDONS`) - a marketplace that only worked for one
+    `lib.store.DEFAULT_ADDONS`) - a catalog browser that only worked for one
     hardcoded addon would stop working the moment that addon is removed
     or replaced by the user.
     """
@@ -129,6 +151,186 @@ def fetch_addon_catalog(client_or_session, transport_url, type_, id_):
     return addons_list
 
 
+def iter_unique_addon_catalogs(addons):
+    """Like `iter_addon_catalogs()`, but yields at most one
+    `(transport_url, manifest, addon_catalog)` per unique catalog `id`
+    declared by each addon, instead of one per declared `(type, id)`
+    pair - see the module docstring for the measured 11-pairs/2-ids
+    Cinemeta numbers this collapsing is built from.
+
+    Picks, per id: the descriptor declaring type `all` when one
+    exists, regardless of where it falls in declaration order;
+    otherwise the first-declared descriptor for that id, keeping ITS
+    type - an addon publishing a catalog only under narrower types (no
+    `all` variant) is still fetched exactly once, under whichever type
+    it happened to declare first, rather than dropped or fetched once
+    per type.
+
+    `iter_addon_catalogs()` itself is left untouched: `lib.ui.
+    addoncatalogwindow` still calls it directly today, so changing its
+    yield shape out from under that caller would silently break it.
+    This is the collapsing helper callers can opt into instead.
+    """
+    for descriptor in addons or []:
+        manifest = descriptor.get('manifest') or {}
+        transport_url = descriptor.get('transportUrl')
+        chosen = {}
+        order = []
+        for addon_catalog in manifest.get('addonCatalogs') or []:
+            catalog_id = addon_catalog.get('id')
+            if catalog_id is None:
+                continue
+            if catalog_id not in chosen:
+                order.append(catalog_id)
+                chosen[catalog_id] = addon_catalog
+            elif addon_catalog.get('type') == 'all' and chosen[catalog_id].get('type') != 'all':
+                chosen[catalog_id] = addon_catalog
+        for catalog_id in order:
+            yield transport_url, manifest, chosen[catalog_id]
+
+
+#: Cap on concurrent addon_catalog HTTP calls per `fetch_addon_catalogs()`
+#: fan-out. Deliberately this module's OWN constant, never a shared import
+#: of `lib.ui.views._MAX_ADDON_WORKERS` - AGENTS.md is explicit that fan-out
+#: is bounded per call site, not DRY'd into one shared constant, because
+#: this runs on low-power ARM boxes; this module also has no dependency on
+#: `lib.ui` today and must not grow one just to reuse a number.
+_MAX_CATALOG_WORKERS = 8
+
+#: How long a cached `fetch_addon_catalog()` response is served before
+#: being treated as stale. Mirrors `lib.ui.metacache.TTL_SECONDS`'s
+#: reasoning - short on purpose, just long enough to cover one browsing
+#: session (open the catalog window, back out, reopen it, re-filter) without
+#: risking a long-lived stale answer once a source addon's own catalog
+#: changes.
+_CATALOG_CACHE_TTL_SECONDS = 300
+
+#: In-process cache of `(transport_url, type_, id_) -> (fetched_at,
+#: addons_list)`. A plain module-level dict, NOT `lib.ui.metacache`'s
+#: on-disk JSON file: this module has zero Kodi imports by design (module
+#: docstring) and must stay that way, so it has no `xbmcvfs`-found data
+#: directory to persist a cache file into. The accepted tradeoff: a fresh
+#: `default.py` invocation always starts cold, because Kodi runs every
+#: `plugin://` invocation as its OWN OS process (`lib.store`'s module
+#: docstring documents the same constraint) - one process's cache cannot
+#: outlive it. That is fine here: this cache only exists to stop the SAME
+#: already-open window from re-fetching the same catalog several times in
+#: its own lifetime, never to survive across separate plugin invocations.
+_catalog_cache = {}  # type: dict
+_catalog_cache_lock = threading.Lock()
+
+#: Backstop cap on `_catalog_cache`'s size, independent of the TTL above.
+#: In any ONE snapshot the key set is bounded and small - installed
+#: addons times each addon's declared `addonCatalogs` entries - which is
+#: why `fetch_addon_catalog_cached()` below evicts only the single key
+#: it just found expired rather than sweeping the whole dict on every
+#: call (see that function's docstring). But a long-lived Kodi session
+#: can install and remove addons repeatedly, and a removed addon's key
+#: is never read again to let the TTL path above evict it, so the dict
+#: is only *practically* bounded, not formally. Mirrors
+#: `lib.store.MAX_PROGRESS_ENTRIES`: a fixed-count backstop with oldest
+#: entries evicted first, rather than inventing an LRU this cache has
+#: no other need for. 64 is generous headroom over any real install
+#: (Cinemeta alone declares 2 collapsed catalog ids per
+#: `iter_unique_addon_catalogs()`'s own docstring) while still bounding
+#: memory if a user churns through many addons in one session.
+_MAX_CATALOG_CACHE_ENTRIES = 64
+
+
+def _evict_oldest_catalog_cache_entries():
+    """Trim `_catalog_cache` down to `_MAX_CATALOG_CACHE_ENTRIES`,
+    dropping the oldest-`fetched_at` entries first - same eviction order
+    as `lib.store._prune_progress` (oldest-first by timestamp), since
+    entries nobody has re-read in a while are the ones most likely to
+    belong to an addon that is no longer installed. Caller MUST hold
+    `_catalog_cache_lock`.
+    """
+    overflow = len(_catalog_cache) - _MAX_CATALOG_CACHE_ENTRIES
+    if overflow <= 0:
+        return
+    oldest_keys = heapq.nsmallest(
+        overflow, _catalog_cache, key=lambda key: _catalog_cache[key][0]
+    )
+    for key in oldest_keys:
+        del _catalog_cache[key]
+
+
+def fetch_addon_catalog_cached(client_or_session, transport_url, type_, id_):
+    """`fetch_addon_catalog()`, served from `_catalog_cache` when a prior
+    call for the same `(transport_url, type_, id_)` completed less than
+    `_CATALOG_CACHE_TTL_SECONDS` ago - see that constant's docstring for
+    why this is an in-process dict rather than a disk cache. A cache hit
+    issues zero HTTP requests.
+
+    An expired entry is evicted here (not merely bypassed): each entry's
+    `addons_list` is a FULL fetched catalog - ~95 entries each carrying a
+    complete manifest for a community catalog per the module docstring's
+    live census - so leaving stale entries in the dict would keep that
+    memory alive for the rest of the process's life for no benefit.
+    Evicting just THIS key (not sweeping `_catalog_cache` for every other
+    expired entry too) is deliberate: see `_MAX_CATALOG_CACHE_ENTRIES`'s
+    docstring for why the key set is small enough that a full sweep would
+    be bookkeeping this cache does not need - every live key gets re-read
+    on the next browse and self-evicts here when it goes stale.
+    """
+    key = (transport_url, type_, id_)
+    now = time.monotonic()
+    with _catalog_cache_lock:
+        cached = _catalog_cache.get(key)
+        if cached is not None:
+            if now - cached[0] < _CATALOG_CACHE_TTL_SECONDS:
+                return cached[1]
+            del _catalog_cache[key]
+    addons_list = fetch_addon_catalog(client_or_session, transport_url, type_, id_)
+    with _catalog_cache_lock:
+        _catalog_cache[key] = (now, addons_list)
+        _evict_oldest_catalog_cache_entries()
+    return addons_list
+
+
+def fetch_addon_catalogs(client_or_session, sources):
+    """Fetch several `(transport_url, type_, id_)` catalog sources
+    concurrently through `fetch_addon_catalog_cached()`, bounded by
+    `_MAX_CATALOG_WORKERS`.
+
+    Returns `(entries, failures)`: `entries` is every fetched addon
+    envelope entry from every SUCCESSFUL source, concatenated in source
+    order; `failures` is a list of `(transport_url, type_, id_, error)`
+    for every source whose fetch raised `AddonError`. Measured live,
+    about 16% of a community catalog's transportUrls are dead - one dead
+    source must never cost the other sources their rows, so each fetch
+    runs inside its own try/except in the worker thread, exactly like
+    `lib.ui.views._map_addons()`'s callers are expected to guard their
+    own per-item call.
+    """
+    sources = list(sources or [])
+    if not sources:
+        return [], []
+
+    def _fetch_one(source):
+        transport_url, type_, id_ = source
+        try:
+            return fetch_addon_catalog_cached(client_or_session, transport_url, type_, id_), None
+        except AddonError as exc:
+            return None, (transport_url, type_, id_, exc)
+
+    if len(sources) == 1:
+        results = [_fetch_one(sources[0])]
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(len(sources), _MAX_CATALOG_WORKERS)) as pool:
+            results = list(pool.map(_fetch_one, sources))
+
+    entries = []
+    failures = []
+    for addons_list, failure in results:
+        if failure is not None:
+            failures.append(failure)
+        else:
+            entries.extend(addons_list)
+    return entries, failures
+
+
 def _version_key(version):
     """Best-effort sortable key for a dotted version string like
     "1.2.3", tolerant of anything an addon manifest might actually put
@@ -156,7 +358,7 @@ def _is_newer(catalog_version, installed_version):
 
 def descriptor_state(descriptor, installed_addons):
     """Classify one `addon_catalog` entry against the locally installed
-    addon list, for `lib.ui.marketwindow` to badge/gate each row:
+    addon list, for `lib.ui.addoncatalogwindow` to badge/gate each row:
 
     - `STATE_INSTALLED`: already installed, and the catalog's own
       manifest declares no newer `version`.

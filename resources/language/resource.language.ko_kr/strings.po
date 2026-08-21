@@ -872,13 +872,7 @@ msgctxt "#30280"
 msgid "Hide adult content"
 msgstr "성인 콘텐츠 숨기기"
 
-msgctxt "#30333"
-msgid "Browse addon marketplace"
-msgstr "애드온 마켓플레이스 둘러보기"
 
-msgctxt "#30334"
-msgid "Discover and install addons published by your other addons"
-msgstr "다른 애드온이 게시한 애드온을 찾아 설치하세요"
 
 msgctxt "#30335"
 msgid "Installed"
@@ -913,8 +907,40 @@ msgid "Install this addon?"
 msgstr "이 애드온을 설치하시겠습니까?"
 
 msgctxt "#30343"
-msgid "Marketplace"
-msgstr "마켓"
+msgid "Addon catalogs"
+msgstr "애드온 카탈로그"
+
+msgctxt "#30344"
+msgid "Browse addon catalogs"
+msgstr "애드온 카탈로그 찾아보기"
+
+msgctxt "#30345"
+msgid "Install from URL"
+msgstr "URL에서 설치"
+
+msgctxt "#30346"
+msgid "Search addon catalogs"
+msgstr "애드온 카탈로그 검색"
+
+msgctxt "#30347"
+msgid "Clear search"
+msgstr "검색 지우기"
+
+msgctxt "#30348"
+msgid "Showing %d of %d"
+msgstr "표시 중: %d / %d"
+
+msgctxt "#30349"
+msgid "No addons match your search"
+msgstr "검색과 일치하는 애드온이 없습니다"
+
+msgctxt "#30350"
+msgid "Add addons"
+msgstr "애드온 추가"
+
+msgctxt "#30351"
+msgid "Browse catalogs, or install from a manifest URL"
+msgstr "카탈로그를 찾아보거나 매니페스트 URL로 설치"
 
 msgctxt "#30360"
 msgid "New episodes: %d"

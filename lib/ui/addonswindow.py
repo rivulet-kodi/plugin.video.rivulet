@@ -1,11 +1,12 @@
 """AddonsWindow: a vertical list of every installed addon - Rivulet's
-add-on manager. Row 0 installs a new addon from a manifest URL, row 1
-opens the addon marketplace; every row after those two static rows
-opens an action menu (disable/enable, remove, move up/down) for that
-addon - removal is refused for protected/official addons, disabling
-is not (it is reversible local state, never pushed to Stremio), and
-moving reorders the list every catalog/stream fan-out call site walks
-in order. Built/run via `open_addons()`.
+add-on manager. Row 0 is a single "Add addons" row that opens a chooser
+for "Browse addon catalogs" (`_open_addon_catalog()`) or "Install from
+URL" (`_install()`); every row after it opens an action menu (disable/
+enable, remove, move up/down) for that addon - removal is refused for
+protected/official addons, disabling is not (it is reversible local
+state, never pushed to Stremio), and moving reorders the list every
+catalog/stream fan-out call site walks in order. Built/run via
+`open_addons()`.
 """
 import xbmcgui
 
@@ -56,11 +57,11 @@ class AddonsWindow(BaseWindow):
         self.setFocusId(LIST)
         if focus_transport_url is None:
             return
-        # The static rows built by `_build_items()` ("install", "market",
-        # ...) sit ahead of every addon row, so an addon's list position is
-        # its addons-list index plus however many static rows precede it.
+        # The static row(s) built by `_build_items()` ("add", ...) sit
+        # ahead of every addon row, so an addon's list position is its
+        # addons-list index plus however many static rows precede it.
         # Derived from the built item list itself (rather than a literal
-        # +1/+2) so a future third static row can't silently break focus
+        # +1) so a future second static row can't silently break focus
         # again - see the move-up/down entries in _open_actions().
         static_row_count = len(items) - len(self.addons)
         index = next(
@@ -73,13 +74,9 @@ class AddonsWindow(BaseWindow):
     def _build_items(self):
         from lib.ui.compat import L
 
-        install_item = xbmcgui.ListItem(
-            label=L(30010), label2=L(30192),
-        )
-        install_item.setProperty('position', 'install')
-        market_item = xbmcgui.ListItem(label=L(30333), label2=L(30334))
-        market_item.setProperty('position', 'market')
-        items = [install_item, market_item]
+        add_item = xbmcgui.ListItem(label=L(30350), label2=L(30351))
+        add_item.setProperty('position', 'add')
+        items = [add_item]
         for index, descriptor in enumerate(self.addons):
             manifest = descriptor.get('manifest') or {}
             flags = descriptor.get('flags') or {}
@@ -98,11 +95,8 @@ class AddonsWindow(BaseWindow):
         if focused is None:
             return
         position = focused.getProperty('position')
-        if position == 'install':
-            self._install()
-            return
-        if position == 'market':
-            self._open_market()
+        if position == 'add':
+            self._add_addons()
             return
         index = int(position)
         self._open_actions(self.addons[index], index)
@@ -134,6 +128,23 @@ class AddonsWindow(BaseWindow):
             self._reload()
             return False
         return True
+
+    def _add_addons(self):
+        """Single static row's chooser: two static rows (install-from-
+        URL, addon catalogs) made the window half chrome before every
+        addon the user actually installed. `L(30344)` ("Browse addon
+        catalogs") opens `_open_addon_catalog()`; `L(30345)` ("Install
+        from URL") opens `_install()`. Dismissing the chooser
+        (`dialogs.choose()` returns -1) is a no-op - neither flow runs."""
+        from lib.ui import dialogs
+        from lib.ui.compat import L
+
+        rows = [L(30344), L(30345)]
+        actions = [self._open_addon_catalog, self._install]
+        picked = dialogs.choose(L(30350), rows)
+        if not 0 <= picked < len(actions):
+            return
+        actions[picked]()
 
     def _install(self):
         import xbmc
@@ -176,14 +187,14 @@ class AddonsWindow(BaseWindow):
         notify(L(30012))
         self._reload()
 
-    def _open_market(self):
-        """Row next to "Install addon from URL": browse/install addons
-        from other addons' own `addon_catalog` resources instead of
-        typing a manifest URL. `MarketWindow` may install/update addons
-        while open, so reload once it closes to reflect that."""
-        from lib.ui.marketwindow import open_market
+    def _open_addon_catalog(self):
+        """One of `_add_addons()`'s two chooser entries: browse/install
+        addons from other addons' own `addon_catalog` resources instead
+        of typing a manifest URL. `AddonCatalogWindow` may install/update
+        addons while open, so reload once it closes to reflect that."""
+        from lib.ui.addoncatalogwindow import open_addon_catalog
 
-        open_market()
+        open_addon_catalog()
         self._reload()
 
     def _remove(self, descriptor):
