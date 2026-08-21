@@ -126,6 +126,42 @@ def test_platform_key_darwin_arm64(monkeypatch):
     assert platform_key() == ("Darwin", "arm64")
 
 
+@pytest.mark.parametrize("machine,expected_os", [
+    ("iPhone14,5", "iOS"),
+    ("iPad13,4", "iOS"),
+    ("iPod9,1", "iOS"),
+    ("AppleTV11,1", "tvOS"),
+])
+def test_platform_key_apple_mobile_detected_from_hardware_model(
+        monkeypatch, machine, expected_os):
+    """Kodi's iOS/tvOS builds report platform.system() == "Darwin" exactly
+    like macOS; on real hardware `platform.machine()` is the device model,
+    which is what tells them apart (and tvOS from iOS)."""
+    _set_platform(monkeypatch, "Darwin", machine, sys_platform="darwin")
+    assert platform_key()[0] == expected_os
+
+
+@pytest.mark.parametrize("sys_platform,expected_os", [
+    ("ios", "iOS"),
+    ("ipados", "iOS"),
+    ("tvos", "tvOS"),
+])
+def test_platform_key_apple_mobile_detected_from_sys_platform(
+        monkeypatch, sys_platform, expected_os):
+    """CPython's own iOS support (3.13+) reports "ios"/"tvos" in
+    sys.platform and "arm64" in platform.machine() -- no model string to
+    key off, so the sys.platform signal must stand on its own."""
+    _set_platform(monkeypatch, "Darwin", "arm64", sys_platform=sys_platform)
+    assert platform_key() == (expected_os, "arm64")
+
+
+def test_platform_key_macos_arm64_is_not_mistaken_for_apple_mobile(monkeypatch):
+    """The Apple-mobile probe must not swallow desktop macOS, which is a
+    fully supported target with pinned assets."""
+    _set_platform(monkeypatch, "Darwin", "arm64", sys_platform="darwin")
+    assert platform_key() == ("Darwin", "arm64")
+
+
 # --- PINNED_SHA256 / select_asset -------------------------------------------
 
 # Exact digests reviewed against the v0.12.0 GitHub release page +
@@ -305,6 +341,48 @@ def test_install_binary_raises_no_asset_error_for_unpinned_platform_before_any_n
         install_binary(str(tmp_path))
 
     assert fake_requests.calls == []
+
+
+@pytest.mark.parametrize("machine,sys_platform", [
+    ("iPhone14,5", "darwin"),   # real iOS hardware: model in machine()
+    ("AppleTV11,1", "darwin"),  # real tvOS hardware
+    ("arm64", "ios"),           # CPython 3.13+ iOS build
+    ("arm64", "tvos"),
+])
+def test_install_binary_refuses_apple_mobile_before_any_network_request(
+        tmp_path, monkeypatch, fake_requests, machine, sys_platform):
+    """iOS/tvOS sandboxing makes a downloaded binary unrunnable, so the
+    fetch must be refused locally -- notably including the case where
+    platform.machine() says "arm64" and the Darwin/arm64 asset would
+    otherwise match and download in full before failing at exec time."""
+    _set_platform(monkeypatch, "Darwin", machine, sys_platform=sys_platform)
+    # A dest_dir that does not exist yet: the refusal must land before
+    # install_binary()'s os.makedirs(), so nothing at all is set up. A
+    # regression that only moved the guard below the download would still
+    # leave no final binary behind, and pass a weaker assertion.
+    dest_dir = tmp_path / "bin"
+
+    with pytest.raises(UnsupportedPlatformError):
+        install_binary(str(dest_dir))
+
+    assert fake_requests.calls == []
+    assert not dest_dir.exists()
+
+
+def test_install_binary_still_installs_on_macos_arm64(tmp_path, monkeypatch, fake_requests):
+    """Guard against the Apple-mobile refusal above over-reaching into
+    desktop macOS, whose Darwin/arm64 asset is pinned and supported."""
+    _set_platform(monkeypatch, "Darwin", "arm64", sys_platform="darwin")
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
+    archive_bytes = _make_tar_gz({"stremio-server": b"macos-binary"})
+    monkeypatch.setitem(
+        PINNED_SHA256, ("Darwin", "arm64"), hashlib.sha256(archive_bytes).hexdigest())
+    fake_requests.queue_get(_StreamResponse(archive_bytes))
+
+    result_path = install_binary(str(tmp_path))
+
+    assert result_path == str(tmp_path / "stremio-server")
+    assert fake_requests.calls[0]["url"].endswith("stremio-server_Darwin_arm64.tar.gz")
 
 
 def test_no_asset_error_is_a_download_error_subclass():
