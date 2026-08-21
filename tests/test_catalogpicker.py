@@ -29,21 +29,37 @@ from tests.kodistubs import install_kodi_stubs
 _RELOAD_MODULE_NAMES = (
     'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.router', 'lib.ui.dialogs',
     'lib.ui.views', 'lib.ui.infowindow', 'lib.ui.detailwindow', 'lib.ui.catalogpicker',
+    'lib.ui.mystuff', 'lib.ui.gridwindow',
 )
 
 
 class _FakeStore:
-    """Fake `lib.store.Store`: only `get_enabled_addons()` matters to
-    open_catalog_picker()."""
+    """Fake `lib.store.Store`: `get_enabled_addons()` is what
+    `open_catalog_picker()` fans catalogs out over; `get_progress_entries()`/
+    `get_seen_episodes()`/`set_seen_episodes()` back the pinned "New
+    Episodes" row's `_followed_series()`/`_mark_episode_seen()` - the same
+    shape as `tests/test_homewindow.py`'s fake, which this mirrors now
+    that the row lives here."""
 
-    def __init__(self, addons=None):
+    def __init__(self, addons=None, progress_entries=None, seen_episodes=None):
         self._addons = addons or []
+        self._progress_entries = [] if progress_entries is None else progress_entries
+        self._seen_episodes = {} if seen_episodes is None else dict(seen_episodes)
 
     def get_addons(self):
         return self._addons
 
     def get_enabled_addons(self):
         return [a for a in self._addons if not (a.get('flags') or {}).get('disabled')]
+
+    def get_progress_entries(self):
+        return self._progress_entries
+
+    def get_seen_episodes(self):
+        return self._seen_episodes
+
+    def set_seen_episodes(self, seen):
+        self._seen_episodes = dict(seen)
 
 
 @pytest.fixture
@@ -57,11 +73,13 @@ def load_catalogpicker():
     test end.
     """
     with contextlib.ExitStack() as stack:
-        def _load(addon_info=None, dialog_inputs=None):
+        def _load(addon_info=None, dialog_inputs=None, settings=None, localized=None):
             return stack.enter_context(install_kodi_stubs(
                 reload=_RELOAD_MODULE_NAMES,
                 addon_info=addon_info,
                 dialog_inputs=dialog_inputs,
+                settings=settings,
+                localized=localized,
             ))
 
         yield _load
@@ -602,7 +620,7 @@ def test_open_catalog_picker_opens_window_with_discovered_catalogs(load_catalogp
             captured['init_args'] = args
             super().__init__(*args, **kwargs)
 
-        def start(self, catalogs, heading=''):
+        def start(self, catalogs, heading='', new_episode_items=None):
             captured['catalogs'] = catalogs
             captured['heading'] = heading
             return True
@@ -636,7 +654,7 @@ def test_open_catalog_picker_excludes_disabled_addons_catalogs(load_catalogpicke
     captured = {}
 
     class RecordingWindow(ctx.catalogpicker.CatalogPickerWindow):
-        def start(self, catalogs, heading=''):
+        def start(self, catalogs, heading='', new_episode_items=None):
             captured['catalogs'] = catalogs
             return True
 
@@ -677,7 +695,7 @@ def test_open_catalog_picker_types_filter_matches_dotted_subtype_base(load_catal
     captured = {}
 
     class RecordingWindow(ctx.catalogpicker.CatalogPickerWindow):
-        def start(self, catalogs, heading=''):
+        def start(self, catalogs, heading='', new_episode_items=None):
             captured['catalogs'] = catalogs
             return True
 
@@ -699,7 +717,7 @@ def test_open_catalog_picker_types_filter_is_case_insensitive(load_catalogpicker
     captured = {}
 
     class RecordingWindow(ctx.catalogpicker.CatalogPickerWindow):
-        def start(self, catalogs, heading=''):
+        def start(self, catalogs, heading='', new_episode_items=None):
             captured['catalogs'] = catalogs
             return True
 
@@ -726,7 +744,7 @@ def test_open_catalog_picker_types_filter_to_remainder_excludes_curated_types(lo
     captured = {}
 
     class RecordingWindow(ctx.catalogpicker.CatalogPickerWindow):
-        def start(self, catalogs, heading=''):
+        def start(self, catalogs, heading='', new_episode_items=None):
             captured['catalogs'] = catalogs
             return True
 
@@ -759,7 +777,7 @@ def test_open_catalog_picker_window_is_closed_exactly_once_when_start_raises(
             self.close_calls += 1
             super().close()
 
-        def start(self, catalogs, heading=''):
+        def start(self, catalogs, heading='', new_episode_items=None):
             # Stands in for a crash inside onInit()/onAction() while the
             # modal loop is running - self.close() (the window's own,
             # normal-path close) never gets a chance to run.
@@ -785,6 +803,14 @@ _SEARCH_CATALOG = {
     'id': 'tmdb.search', 'type': 'movie', 'name': 'Search',
     'extra': [{'name': 'search', 'isRequired': True}],
 }
+
+
+def _search_only_catalog(catalog_id):
+    """A minimal search-only catalog dict (see `_SEARCH_CATALOG` above)
+    for the `_sort_catalogs()` fixtures, distinguished only by `id`."""
+    return {'id': catalog_id, 'type': 'movie', 'extra': [{'name': 'search', 'isRequired': True}]}
+
+
 _GENRE_REQUIRED_CATALOG = {
     'id': 'year', 'type': 'movie', 'name': 'New',
     'extra': [{'name': 'genre', 'isRequired': True, 'options': ['2026', '2025']}],
@@ -1021,6 +1047,32 @@ def test_onaction_back_actions_still_close_through_the_new_onaction(load_catalog
     assert win.closed is True
 
 
+def test_onaction_context_menu_on_the_pinned_new_episodes_row_does_not_crash(load_catalogpicker, monkeypatch):
+    """The pinned "New Episodes" row (`_make_new_episodes_item()`) is
+    synthetic and carries no `position` property, unlike every real
+    catalog row `_make_item()` builds. Before `_focused_catalog()`
+    rejected it (see its docstring), pressing 117 while it was focused
+    reached `int(focused.getProperty('position'))` on an empty string
+    and raised ValueError - this is that regression, focused on row 0
+    exactly like `onInit()` places the pinned row."""
+    ctx = load_catalogpicker()
+    import xbmcgui
+    picker = ctx.catalogpicker
+    win = _make_window(picker)
+    win.catalogs = [('https://a.example/manifest.json', {'name': 'A'}, _GENRE_OPTIONAL_CATALOG)]
+    win.new_episode_items = [{'type': 'series', 'id': 'tt1', 'video_id': 's1e2'}]
+    win.onInit()
+    win.getControl(picker.LIST).selected_index = 0  # the pinned row itself
+    win.setFocusId(picker.LIST)
+    captured = []
+    _stub_choose(monkeypatch, ctx, -1, capture=captured)
+
+    win.onAction(xbmcgui.Action(picker._CONTEXT_MENU_ACTION))  # must not raise
+
+    assert captured == []  # no genre dialog for a row that is not a catalog
+    assert win.closed is False
+
+
 # ---------------------------------------------------------------------------
 # open_catalog_picker() - dropping permanently-unreachable catalogs
 # ---------------------------------------------------------------------------
@@ -1039,7 +1091,7 @@ def test_open_catalog_picker_omits_and_logs_catalogs_requiring_unsupportable_ext
     captured = {}
 
     class RecordingWindow(ctx.catalogpicker.CatalogPickerWindow):
-        def start(self, catalogs, heading=''):
+        def start(self, catalogs, heading='', new_episode_items=None):
             captured['catalogs'] = catalogs
             return True
 
@@ -1066,7 +1118,7 @@ def test_open_catalog_picker_omits_genre_required_catalog_with_no_declared_optio
     captured = {}
 
     class RecordingWindow(ctx.catalogpicker.CatalogPickerWindow):
-        def start(self, catalogs, heading=''):
+        def start(self, catalogs, heading='', new_episode_items=None):
             captured['catalogs'] = catalogs
             return True
 
@@ -1076,3 +1128,249 @@ def test_open_catalog_picker_omits_genre_required_catalog_with_no_declared_optio
 
     assert result is True
     assert [cat.get('id') for _t, _m, cat in captured['catalogs']] == ['top']
+
+
+# ---------------------------------------------------------------------------
+# _sort_catalogs() - search-only catalogs float to the top, stably
+# ---------------------------------------------------------------------------
+
+
+def test_sort_catalogs_floats_search_only_catalogs_above_browsable_preserving_relative_order(
+    load_catalogpicker,
+):
+    ctx = load_catalogpicker()
+    browsable_a = ('u', {}, {'id': 'a', 'type': 'movie'})
+    search_b = ('u', {}, _search_only_catalog('b'))
+    browsable_c = ('u', {}, {'id': 'c', 'type': 'movie'})
+    search_d = ('u', {}, _search_only_catalog('d'))
+    catalogs = [browsable_a, search_b, browsable_c, search_d]
+
+    sorted_catalogs = ctx.catalogpicker._sort_catalogs(catalogs)
+
+    # Search-only first (b, d), addon order preserved within each group.
+    assert [cat['id'] for _t, _m, cat in sorted_catalogs] == ['b', 'd', 'a', 'c']
+
+
+def test_open_catalog_picker_sorts_search_only_catalogs_first(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker(addon_info={'path': '/addon/path'})
+    descriptor = {
+        'transportUrl': 'https://a.example/manifest.json',
+        'manifest': {'name': 'Addon A', 'catalogs': [
+            {'id': 'a', 'type': 'movie'}, _search_only_catalog('b'),
+            {'id': 'c', 'type': 'movie'}, _search_only_catalog('d'),
+        ]},
+    }
+    monkeypatch.setattr(ctx.catalogpicker, 'get_store', lambda: _FakeStore(addons=[descriptor]))
+    captured = {}
+
+    class RecordingWindow(ctx.catalogpicker.CatalogPickerWindow):
+        def start(self, catalogs, heading='', new_episode_items=None):
+            captured['catalogs'] = catalogs
+            return True
+
+    monkeypatch.setattr(ctx.catalogpicker, 'CatalogPickerWindow', RecordingWindow)
+
+    result = ctx.catalogpicker.open_catalog_picker()
+
+    assert result is True
+    assert [cat.get('id') for _t, _m, cat in captured['catalogs']] == ['b', 'd', 'a', 'c']
+
+
+# ---------------------------------------------------------------------------
+# open_catalog_picker() - pinned "New Episodes" row on the Series screen
+# ---------------------------------------------------------------------------
+
+
+_SERIES_DESCRIPTOR = {
+    'transportUrl': 'https://a.example/manifest.json',
+    'manifest': {'name': 'Addon A', 'catalogs': [{'id': 's', 'type': 'series'}]},
+}
+
+
+def _recording_window(catalogpicker_mod, captured):
+    class RecordingWindow(catalogpicker_mod.CatalogPickerWindow):
+        def start(self, catalogs, heading='', new_episode_items=None):
+            captured['catalogs'] = catalogs
+            captured['new_episode_items'] = new_episode_items
+            return True
+    return RecordingWindow
+
+
+def test_open_catalog_picker_pins_new_episodes_for_the_series_screen_with_a_count(
+    load_catalogpicker, monkeypatch,
+):
+    ctx = load_catalogpicker(addon_info={'path': '/addon/path'})
+    monkeypatch.setattr(ctx.catalogpicker, 'get_store', lambda: _FakeStore(addons=[_SERIES_DESCRIPTOR]))
+    items = [{'type': 'series', 'id': 'tt1', 'video_id': 's1e2'}]
+    monkeypatch.setattr(ctx.catalogpicker, '_new_episode_items', lambda store: items)
+    captured = {}
+    monkeypatch.setattr(ctx.catalogpicker, 'CatalogPickerWindow', _recording_window(ctx.catalogpicker, captured))
+
+    result = ctx.catalogpicker.open_catalog_picker(types={'series', 'tv'})
+
+    assert result is True
+    assert captured['new_episode_items'] == items
+
+
+def test_open_catalog_picker_omits_new_episodes_row_when_count_is_zero(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker(addon_info={'path': '/addon/path'})
+    # No progress entries - _followed_series()/_new_episode_items() run for
+    # real and genuinely find nothing, unlike the setting-off test below.
+    monkeypatch.setattr(ctx.catalogpicker, 'get_store', lambda: _FakeStore(addons=[_SERIES_DESCRIPTOR]))
+    captured = {}
+    monkeypatch.setattr(ctx.catalogpicker, 'CatalogPickerWindow', _recording_window(ctx.catalogpicker, captured))
+
+    result = ctx.catalogpicker.open_catalog_picker(types={'series', 'tv'})
+
+    assert result is True
+    assert captured['new_episode_items'] == []
+
+
+def test_open_catalog_picker_omits_new_episodes_row_when_the_setting_is_off(
+    load_catalogpicker, monkeypatch,
+):
+    ctx = load_catalogpicker(addon_info={'path': '/addon/path'}, settings={'home_show_new_episodes': 'false'})
+    monkeypatch.setattr(ctx.catalogpicker, 'get_store', lambda: _FakeStore(addons=[_SERIES_DESCRIPTOR]))
+    calls = []
+    monkeypatch.setattr(
+        ctx.catalogpicker, '_new_episode_items',
+        lambda store: calls.append(1) or [{'type': 'series', 'id': 'tt1', 'video_id': 's1e2'}],
+    )
+    captured = {}
+    monkeypatch.setattr(ctx.catalogpicker, 'CatalogPickerWindow', _recording_window(ctx.catalogpicker, captured))
+
+    result = ctx.catalogpicker.open_catalog_picker(types={'series', 'tv'})
+
+    assert result is True
+    assert captured['new_episode_items'] == []
+    assert calls == []  # gated before the addon-fetching computation ever runs
+
+
+@pytest.mark.parametrize('types', [{'movie'}, {'anime'}, {'porn'}, {'series', 'movie'}, None], ids=[
+    'movies', 'anime', 'other', 'mixed-series-movie', 'unfiltered',
+])
+def test_open_catalog_picker_never_pins_new_episodes_outside_the_series_screen(
+    load_catalogpicker, monkeypatch, types,
+):
+    ctx = load_catalogpicker(addon_info={'path': '/addon/path'})
+    descriptor = {
+        'transportUrl': 'https://a.example/manifest.json',
+        'manifest': {'name': 'Addon A', 'catalogs': [
+            {'id': 'm', 'type': 'movie'}, {'id': 's', 'type': 'series'},
+            {'id': 'a', 'type': 'anime'}, {'id': 'p', 'type': 'Porn'},
+        ]},
+    }
+    monkeypatch.setattr(ctx.catalogpicker, 'get_store', lambda: _FakeStore(addons=[descriptor]))
+    items = [{'type': 'series', 'id': 'tt1', 'video_id': 's1e2'}]
+    monkeypatch.setattr(ctx.catalogpicker, '_new_episode_items', lambda store: items)
+    captured = {}
+    monkeypatch.setattr(ctx.catalogpicker, 'CatalogPickerWindow', _recording_window(ctx.catalogpicker, captured))
+
+    result = ctx.catalogpicker.open_catalog_picker(types=types)
+
+    assert result is True
+    assert captured['new_episode_items'] == []
+
+
+def test_oninit_pins_the_new_episodes_row_first_with_a_count_neutral_label(load_catalogpicker):
+    ctx = load_catalogpicker(localized={30360: 'New episodes: %d'})
+    picker = ctx.catalogpicker
+    win = _make_window(picker)
+    win.catalogs = [('https://a.example/manifest.json', {'name': 'A'}, {'id': 'x', 'type': 'series'})]
+    win.new_episode_items = [
+        {'type': 'series', 'id': 'tt1', 'video_id': 's1e2'},
+        {'type': 'series', 'id': 'tt2', 'video_id': 's1e3'},
+    ]
+
+    win.onInit()
+
+    items = win.getControl(picker.LIST).items
+    assert items[0].getLabel() == 'STR30313'
+    assert items[0].label2 == 'New episodes: 2'
+    assert items[0].getProperty('kind') == 'new_episodes'
+    assert [item.getLabel() for item in items[1:]] == ['x']
+
+
+def test_onclick_new_episodes_row_marks_seen_and_opens_detail(load_catalogpicker, monkeypatch):
+    ctx = load_catalogpicker()
+    picker = ctx.catalogpicker
+    import xbmcgui
+    win = _make_window(picker)
+    episode = {'type': 'series', 'id': 'tt1', 'video_id': 's1e2'}
+    win.new_episode_items = [episode]
+    item = xbmcgui.ListItem('label')
+    item.setProperty('kind', 'new_episodes')
+    win.getControl(picker.LIST).addItems([item])
+    fake_store = _FakeStore()
+    monkeypatch.setattr(picker, 'get_store', lambda: fake_store)
+    grid_calls = []
+
+    def _fake_open_grid(bands, heading='', labels=None):
+        grid_calls.append((bands, heading, labels))
+        return episode
+
+    monkeypatch.setattr(ctx.gridwindow, 'open_grid', _fake_open_grid)
+    detail_calls = []
+    monkeypatch.setattr(ctx.detailwindow, 'open_detail', lambda stype, sid: detail_calls.append((stype, sid)) or True)
+
+    win.onClick(picker.LIST)
+
+    assert win.closed is True
+    assert win.should_close_caller is True
+    assert detail_calls == [('series', 'tt1')]
+    assert grid_calls[0][0] == [(ctx.gridwindow.NEW_EPISODES_BAND, [episode])]
+    # Acted on (selected), so it must be persisted seen - the row's own
+    # "mark seen on action, not on render" rule.
+    assert fake_store.get_seen_episodes() == {'series\x1ftt1\x1fs1e2': True}
+
+
+def test_onclick_new_episodes_row_stays_open_and_marks_nothing_when_grid_returns_none(
+    load_catalogpicker, monkeypatch,
+):
+    ctx = load_catalogpicker()
+    picker = ctx.catalogpicker
+    import xbmcgui
+    win = _make_window(picker)
+    win.new_episode_items = [{'type': 'series', 'id': 'tt1', 'video_id': 's1e2'}]
+    item = xbmcgui.ListItem('label')
+    item.setProperty('kind', 'new_episodes')
+    win.getControl(picker.LIST).addItems([item])
+    fake_store = _FakeStore()
+    monkeypatch.setattr(picker, 'get_store', lambda: fake_store)
+    monkeypatch.setattr(ctx.gridwindow, 'open_grid', lambda bands, heading='', labels=None: None)
+
+    win.onClick(picker.LIST)
+
+    assert win.closed is False
+    assert fake_store.get_seen_episodes() == {}
+
+
+# ---------------------------------------------------------------------------
+# _followed_series() - moved here from lib.ui.homewindow with the row itself
+# ---------------------------------------------------------------------------
+
+
+def test_followed_series_caps_the_number_of_candidates_fetched(load_catalogpicker):
+    """Bounds `_fetch_series_metas()`'s fan-out to `MAX_NEW_EPISODE_SERIES`
+    series per render, regardless of how many series `progress.json` has
+    accumulated - see `MAX_NEW_EPISODE_SERIES`'s docstring for the cold-
+    metacache render-blocking risk this guards against."""
+    ctx = load_catalogpicker()
+    cap = ctx.catalogpicker.MAX_NEW_EPISODE_SERIES
+    total = cap + 10
+    entries = [
+        {
+            'type': 'series', 'id': 'tt%d' % i, 'video_id': None,
+            'position_ms': 500, 'duration_ms': 1000,
+            'updated_at': '2026-08-%02dT00:00:00Z' % (i + 1),
+        }
+        for i in range(total)
+    ]
+    store = _FakeStore(progress_entries=entries)
+
+    series = ctx.catalogpicker._followed_series(store)
+
+    assert len(series) == cap
+    # latest_by_title() already sorts most-recently-updated first - the
+    # slice must keep that end of the list, not an arbitrary cap.
+    assert {s['id'] for s in series} == {'tt%d' % i for i in range(10, total)}

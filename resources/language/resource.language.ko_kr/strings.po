@@ -849,8 +849,8 @@ msgid "New Episodes"
 msgstr "새 에피소드"
 
 msgctxt "#30314"
-msgid "Show New Episodes"
-msgstr "새 에피소드 표시"
+msgid "Show new episodes under Series"
+msgstr "시리즈에 새 에피소드 표시"
 
 msgctxt "#30315"
 msgid "%d new episode ready to watch"
@@ -915,3 +915,7 @@ msgstr "이 애드온을 설치하시겠습니까?"
 msgctxt "#30343"
 msgid "Marketplace"
 msgstr "마켓"
+
+msgctxt "#30360"
+msgid "New episodes: %d"
+msgstr "새 에피소드: %d"

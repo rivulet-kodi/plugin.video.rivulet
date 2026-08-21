@@ -849,8 +849,8 @@ msgid "New Episodes"
 msgstr "Yeni Bölümler"
 
 msgctxt "#30314"
-msgid "Show New Episodes"
-msgstr "Yeni Bölümleri Göster"
+msgid "Show new episodes under Series"
+msgstr "Yeni Bölümleri Diziler'de Göster"
 
 msgctxt "#30315"
 msgid "%d new episode ready to watch"
@@ -915,3 +915,7 @@ msgstr "Bu eklenti yüklensin mi?"
 msgctxt "#30343"
 msgid "Marketplace"
 msgstr "Pazar"
+
+msgctxt "#30360"
+msgid "New episodes: %d"
+msgstr "Yeni Bölümler: %d"

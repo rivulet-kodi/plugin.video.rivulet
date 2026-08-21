@@ -849,8 +849,8 @@ msgid "New Episodes"
 msgstr "新剧集"
 
 msgctxt "#30314"
-msgid "Show New Episodes"
-msgstr "显示新剧集"
+msgid "Show new episodes under Series"
+msgstr "在剧集中显示新剧集"
 
 msgctxt "#30315"
 msgid "%d new episode ready to watch"
@@ -915,3 +915,7 @@ msgstr "要安装此插件吗？"
 msgctxt "#30343"
 msgid "Marketplace"
 msgstr "市场"
+
+msgctxt "#30360"
+msgid "New episodes: %d"
+msgstr "新剧集：%d"

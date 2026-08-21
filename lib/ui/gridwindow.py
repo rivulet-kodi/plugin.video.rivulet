@@ -54,13 +54,14 @@ BAND_ROWS = {
     'library': (30032, 30137),
 }
 
-#: Reused by `lib.ui.homewindow`'s "New Episodes" Home row for its own,
-#: standalone single-band GridWindow session - that session never runs
-#: alongside "My Stuff"'s four real bands, so borrowing the 'library'
-#: row's (list, header) control ids for it is safe. The skin has no 5th
-#: pair to give a genuinely new band, which the no-new-skin-XML rule
-#: forbids adding; `open_grid()`'s `labels=` overrides that row's header
-#: text away from "Your library" for the borrowing session.
+#: Reused by `lib.ui.catalogpicker`'s pinned "New Episodes" picker row
+#: for its own, standalone single-band GridWindow session - that
+#: session never runs alongside "My Stuff"'s four real bands, so
+#: borrowing the 'library' row's (list, header) control ids for it is
+#: safe. The skin has no 5th pair to give a genuinely new band, which
+#: the no-new-skin-XML rule forbids adding; `open_grid()`'s `labels=`
+#: overrides that row's header text away from "Your library" for the
+#: borrowing session.
 NEW_EPISODES_BAND = 'library'
 
 #: The band whose row is focused when the screen opens - the first one
@@ -219,7 +220,8 @@ class GridWindow(BaseWindow):
         `labels` optionally overrides one or more rows' own header text
         (`{band: string_id}`), for a caller reusing an existing band's
         control ids for an unrelated single-band screen - see
-        `NEW_EPISODES_BAND` and `lib.ui.homewindow._open_new_episodes()`,
+        `NEW_EPISODES_BAND` and
+        `lib.ui.catalogpicker.CatalogPickerWindow._open_new_episodes()`,
         which needs the borrowed 'library' row to say "New episodes"
         rather than "Your library" for its own session."""
         self.bands = [(band, list(items)) for band, items in bands or [] if items]

@@ -58,17 +58,12 @@ class _FakeStore:
     (defaulting to logged out with nothing cached) are what the real
     `lib.ui.mystuff.has_content()` reads - tests that care about the My
     Stuff row's gating monkeypatch `has_content()` itself instead of
-    populating these. `get_seen_episodes()`/`set_seen_episodes()` back
-    `lib.newepisodes.mark_seen` the same way - tests that care about the
-    New Episodes row's gating monkeypatch `_new_episode_items()` itself
-    instead, since that computation is already fully covered by
-    tests/test_newepisodes.py."""
+    populating these."""
 
-    def __init__(self, auth=None, addons=None, progress_entries=None, seen_episodes=None):
+    def __init__(self, auth=None, addons=None, progress_entries=None):
         self._auth = auth
         self._addons = _ALL_TYPE_ADDONS if addons is None else addons
         self._progress_entries = [] if progress_entries is None else progress_entries
-        self._seen_episodes = {} if seen_episodes is None else dict(seen_episodes)
 
     def get_auth(self):
         return self._auth
@@ -81,12 +76,6 @@ class _FakeStore:
 
     def get_progress_entries(self):
         return self._progress_entries
-
-    def get_seen_episodes(self):
-        return self._seen_episodes
-
-    def set_seen_episodes(self, seen):
-        self._seen_episodes = dict(seen)
 
 
 class _FakeVersionStore:
@@ -303,77 +292,6 @@ def test_menu_items_hides_other_row_its_setting_turns_off(load_homewindow):
 
 
 # ---------------------------------------------------------------------------
-# _menu_items() / _new_episodes_subtitle() - "New Episodes" row
-# ---------------------------------------------------------------------------
-
-
-def test_menu_items_shows_new_episodes_row_with_a_count_subtitle(load_homewindow):
-    ctx = load_homewindow(localized={30315: '%d new episode', 30316: '%d new episodes'})
-
-    items = ctx.homewindow._menu_items(True, _ALL_TYPE_ADDONS, new_episode_count=3)
-
-    actions = [item.getProperty('action') for item in items]
-    assert actions == [
-        'mystuff', 'new_episodes', 'movies', 'series', 'anime', 'search', 'addons', 'settings',
-    ]
-    new_episodes_item = items[actions.index('new_episodes')]
-    assert new_episodes_item.getLabel() == 'STR30313'
-    assert new_episodes_item.getProperty('subtitle') == '3 new episodes'
-    assert new_episodes_item.art['icon'] == ctx.compat.addon_media_path('new_episodes.png')
-
-
-def test_menu_items_omits_new_episodes_row_when_count_is_zero(load_homewindow):
-    ctx = load_homewindow()
-
-    items = ctx.homewindow._menu_items(True, _ALL_TYPE_ADDONS)  # new_episode_count defaults to 0
-
-    assert 'new_episodes' not in [item.getProperty('action') for item in items]
-
-
-def test_new_episodes_subtitle_uses_the_singular_form_for_a_count_of_one(load_homewindow):
-    ctx = load_homewindow(localized={30315: '%d new episode', 30316: '%d new episodes'})
-
-    assert ctx.homewindow._new_episodes_subtitle(1) == '1 new episode'
-
-
-def test_new_episodes_subtitle_uses_the_plural_form_for_a_count_above_one(load_homewindow):
-    ctx = load_homewindow(localized={30315: '%d new episode', 30316: '%d new episodes'})
-
-    assert ctx.homewindow._new_episodes_subtitle(5) == '5 new episodes'
-
-
-# ---------------------------------------------------------------------------
-# _followed_series()
-# ---------------------------------------------------------------------------
-
-
-def test_followed_series_caps_the_number_of_candidates_fetched(load_homewindow):
-    """Bounds `_fetch_series_metas()`'s fan-out to `MAX_NEW_EPISODE_SERIES`
-    series per render, regardless of how many series `progress.json` has
-    accumulated - see `MAX_NEW_EPISODE_SERIES`'s docstring for the cold-
-    metacache render-blocking risk this guards against."""
-    ctx = load_homewindow()
-    cap = ctx.homewindow.MAX_NEW_EPISODE_SERIES
-    total = cap + 10
-    entries = [
-        {
-            'type': 'series', 'id': 'tt%d' % i, 'video_id': None,
-            'position_ms': 500, 'duration_ms': 1000,
-            'updated_at': '2026-08-%02dT00:00:00Z' % (i + 1),
-        }
-        for i in range(total)
-    ]
-    store = _FakeStore(progress_entries=entries)
-
-    series = ctx.homewindow._followed_series(store)
-
-    assert len(series) == cap
-    # latest_by_title() already sorts most-recently-updated first - the
-    # slice must keep that end of the list, not an arbitrary cap.
-    assert {s['id'] for s in series} == {'tt%d' % i for i in range(10, total)}
-
-
-# ---------------------------------------------------------------------------
 # _status_text()
 # ---------------------------------------------------------------------------
 
@@ -479,66 +397,6 @@ def test_oninit_omits_type_row_supplied_only_by_a_disabled_addon(load_homewindow
     actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
     assert 'anime' not in actions
     assert 'movies' in actions
-
-
-# ---------------------------------------------------------------------------
-# HomeWindow.onInit() - "New Episodes" row gating
-# ---------------------------------------------------------------------------
-
-
-def test_oninit_shows_new_episodes_row_when_setting_on_and_items_found(load_homewindow, monkeypatch):
-    ctx = load_homewindow()
-    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore())
-    monkeypatch.setattr(ctx.homewindow, '_new_episode_items', lambda store: [
-        {'type': 'series', 'id': 'tt1', 'video_id': 's1e2', 'name': 'A Show'},
-        {'type': 'series', 'id': 'tt2', 'video_id': 's1e3', 'name': 'B Show'},
-    ])
-    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
-
-    win.onInit()
-
-    actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
-    assert 'new_episodes' in actions
-
-
-def test_oninit_hides_new_episodes_row_when_setting_off(load_homewindow, monkeypatch):
-    """The setting gates the (potentially addon-fetching) computation
-    itself, not just the row's visibility - a stub that returns items
-    anyway must still be hidden."""
-    ctx = load_homewindow(settings={'home_show_new_episodes': 'false'})
-    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore())
-    monkeypatch.setattr(ctx.homewindow, '_new_episode_items',
-                         lambda store: [{'type': 'series', 'id': 'tt1', 'video_id': 's1e2'}])
-    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
-
-    win.onInit()
-
-    actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
-    assert 'new_episodes' not in actions
-
-
-def test_oninit_hides_new_episodes_row_when_no_items_found(load_homewindow, monkeypatch):
-    ctx = load_homewindow()
-    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore())
-    monkeypatch.setattr(ctx.homewindow, '_new_episode_items', lambda store: [])
-    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
-
-    win.onInit()
-
-    actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.LIST).items]
-    assert 'new_episodes' not in actions
-
-
-def test_oninit_stashes_new_episode_items_for_the_click_handler(load_homewindow, monkeypatch):
-    ctx = load_homewindow()
-    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore())
-    items = [{'type': 'series', 'id': 'tt1', 'video_id': 's1e2', 'name': 'A Show'}]
-    monkeypatch.setattr(ctx.homewindow, '_new_episode_items', lambda store: items)
-    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
-
-    win.onInit()
-
-    assert win._new_episode_items == items
 
 
 # ---------------------------------------------------------------------------
@@ -957,97 +815,6 @@ def test_onclick_mystuff_stays_open_when_open_my_stuff_returns_false(load_homewi
     win.onClick(ctx.homewindow.LIST)
 
     assert win.closed is False
-
-
-# ---------------------------------------------------------------------------
-# HomeWindow.onClick() - "New Episodes" row
-# ---------------------------------------------------------------------------
-
-
-def test_onclick_new_episodes_marks_the_selected_episode_seen_and_opens_detail(
-    load_homewindow, monkeypatch,
-):
-    ctx = load_homewindow()
-    episode = {'type': 'series', 'id': 'tt1', 'video_id': 's1e2', 'name': 'A Show'}
-    fake_store = _FakeStore()
-    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: fake_store)
-    grid_calls = []
-
-    def _fake_open_grid(bands, heading='', labels=None):
-        grid_calls.append((bands, heading, labels))
-        return episode
-
-    monkeypatch.setattr(ctx.gridwindow, 'open_grid', _fake_open_grid)
-    detail_calls = []
-
-    def _fake_open_detail(stype, sid):
-        detail_calls.append((stype, sid))
-        return True
-
-    monkeypatch.setattr(ctx.detailwindow, 'open_detail', _fake_open_detail)
-    win = _window_with_focused_action(ctx.homewindow, 'new_episodes')
-    win._new_episode_items = [episode]
-
-    win.onClick(ctx.homewindow.LIST)
-
-    assert win.closed is True
-    assert detail_calls == [('series', 'tt1')]
-    assert grid_calls[0][0] == [(ctx.gridwindow.NEW_EPISODES_BAND, [episode])]
-    # Acted on (selected), so it must be persisted seen - the row's own
-    # "mark seen on action, not on render" rule.
-    assert fake_store.get_seen_episodes() == {'series\x1ftt1\x1fs1e2': True}
-
-
-def test_onclick_new_episodes_stays_open_and_marks_nothing_when_grid_returns_none(
-    load_homewindow, monkeypatch,
-):
-    ctx = load_homewindow()
-    fake_store = _FakeStore()
-    monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: fake_store)
-    monkeypatch.setattr(ctx.gridwindow, 'open_grid', lambda bands, heading='', labels=None: None)
-    win = _window_with_focused_action(ctx.homewindow, 'new_episodes')
-    win._new_episode_items = [{'type': 'series', 'id': 'tt1', 'video_id': 's1e2'}]
-
-    win.onClick(ctx.homewindow.LIST)
-
-    assert win.closed is False
-    assert fake_store.get_seen_episodes() == {}
-
-
-def test_onclick_new_episodes_does_nothing_when_no_items_were_stashed(load_homewindow, monkeypatch):
-    """No `onInit()` (or an onInit() that found nothing) leaves
-    `_new_episode_items` unset/empty - the click handler must not open a
-    blank grid."""
-    ctx = load_homewindow()
-    grid_calls = []
-    monkeypatch.setattr(ctx.gridwindow, 'open_grid',
-                         lambda bands, heading='', labels=None: grid_calls.append(1))
-    win = _window_with_focused_action(ctx.homewindow, 'new_episodes')
-
-    win.onClick(ctx.homewindow.LIST)
-
-    assert win.closed is False
-    assert grid_calls == []
-
-
-def test_onclick_new_episodes_notifies_and_stays_open_when_the_grid_raises(
-    load_homewindow, monkeypatch,
-):
-    ctx = load_homewindow(localized={30032: 'Something went wrong'})
-
-    def _boom(bands, heading='', labels=None):
-        raise RuntimeError('skin failed to load')
-
-    monkeypatch.setattr(ctx.gridwindow, 'open_grid', _boom)
-    win = _window_with_focused_action(ctx.homewindow, 'new_episodes')
-    win._new_episode_items = [{'type': 'series', 'id': 'tt1', 'video_id': 's1e2'}]
-
-    win.onClick(ctx.homewindow.LIST)  # must not raise
-
-    assert win.closed is False
-    assert len(ctx.env.notifications) == 1
-    _heading, message, _icon, _time_ms = ctx.env.notifications[0]
-    assert message == 'Something went wrong'
 
 
 # ---------------------------------------------------------------------------
