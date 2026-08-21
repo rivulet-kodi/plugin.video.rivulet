@@ -1,10 +1,11 @@
 """AddonsWindow: a vertical list of every installed addon - Rivulet's
-add-on manager. Row 0 installs a new addon from a manifest URL; every
-other row opens an action menu (disable/enable, remove, move up/down)
-for that addon - removal is refused for protected/official addons,
-disabling is not (it is reversible local state, never pushed to
-Stremio), and moving reorders the list every catalog/stream fan-out
-call site walks in order. Built/run via `open_addons()`.
+add-on manager. Row 0 installs a new addon from a manifest URL, row 1
+opens the addon marketplace; every row after those two static rows
+opens an action menu (disable/enable, remove, move up/down) for that
+addon - removal is refused for protected/official addons, disabling
+is not (it is reversible local state, never pushed to Stremio), and
+moving reorders the list every catalog/stream fan-out call site walks
+in order. Built/run via `open_addons()`.
 """
 import xbmcgui
 
@@ -50,20 +51,24 @@ class AddonsWindow(BaseWindow):
 
         control = self.getControl(LIST)
         control.reset()
-        control.addItems(self._build_items())
+        items = self._build_items()
+        control.addItems(items)
         self.setFocusId(LIST)
         if focus_transport_url is None:
             return
-        # Control position 0 is the "install" row ahead of every addon
-        # row, so an addon's list position is its addons-list index + 1.
-        # A move that loses the user's place is unusable on a remote
-        # control - see the move-up/down entries in _open_actions().
+        # The static rows built by `_build_items()` ("install", "market",
+        # ...) sit ahead of every addon row, so an addon's list position is
+        # its addons-list index plus however many static rows precede it.
+        # Derived from the built item list itself (rather than a literal
+        # +1/+2) so a future third static row can't silently break focus
+        # again - see the move-up/down entries in _open_actions().
+        static_row_count = len(items) - len(self.addons)
         index = next(
             (i for i, a in enumerate(self.addons) if a.get('transportUrl') == focus_transport_url),
             None,
         )
         if index is not None:
-            control.selectItem(index + 1)
+            control.selectItem(index + static_row_count)
 
     def _build_items(self):
         from lib.ui.compat import L
@@ -72,7 +77,9 @@ class AddonsWindow(BaseWindow):
             label=L(30010), label2=L(30192),
         )
         install_item.setProperty('position', 'install')
-        items = [install_item]
+        market_item = xbmcgui.ListItem(label=L(30333), label2=L(30334))
+        market_item.setProperty('position', 'market')
+        items = [install_item, market_item]
         for index, descriptor in enumerate(self.addons):
             manifest = descriptor.get('manifest') or {}
             flags = descriptor.get('flags') or {}
@@ -93,6 +100,9 @@ class AddonsWindow(BaseWindow):
         position = focused.getProperty('position')
         if position == 'install':
             self._install()
+            return
+        if position == 'market':
+            self._open_market()
             return
         index = int(position)
         self._open_actions(self.addons[index], index)
@@ -164,6 +174,16 @@ class AddonsWindow(BaseWindow):
             return
         _sync_addons_if_logged_in(self.store)
         notify(L(30012))
+        self._reload()
+
+    def _open_market(self):
+        """Row next to "Install addon from URL": browse/install addons
+        from other addons' own `addon_catalog` resources instead of
+        typing a manifest URL. `MarketWindow` may install/update addons
+        while open, so reload once it closes to reflect that."""
+        from lib.ui.marketwindow import open_market
+
+        open_market()
         self._reload()
 
     def _remove(self, descriptor):

@@ -871,3 +871,47 @@ msgstr "신규"
 msgctxt "#30280"
 msgid "Hide adult content"
 msgstr "성인 콘텐츠 숨기기"
+
+msgctxt "#30333"
+msgid "Browse addon marketplace"
+msgstr "애드온 마켓플레이스 둘러보기"
+
+msgctxt "#30334"
+msgid "Discover and install addons published by your other addons"
+msgstr "다른 애드온이 게시한 애드온을 찾아 설치하세요"
+
+msgctxt "#30335"
+msgid "Installed"
+msgstr "설치됨"
+
+msgctxt "#30336"
+msgid "Update available"
+msgstr "업데이트 사용 가능"
+
+msgctxt "#30337"
+msgid "Needs configuration"
+msgstr "구성 필요"
+
+msgctxt "#30338"
+msgid "%s is already installed"
+msgstr "%s은(는) 이미 설치되어 있습니다"
+
+msgctxt "#30339"
+msgid "No addon catalogs found. Install an addon that publishes one, such as Cinemeta."
+msgstr "애드온 카탈로그를 찾을 수 없습니다. Cinemeta처럼 카탈로그를 게시하는 애드온을 설치하세요."
+
+msgctxt "#30340"
+msgid "Could not load %s's addon catalog"
+msgstr "%s의 애드온 카탈로그를 불러올 수 없습니다"
+
+msgctxt "#30341"
+msgid "%s needs configuration. Open %s in a browser, configure it, then paste the resulting manifest URL"
+msgstr "%s에는 구성이 필요합니다. 브라우저에서 %s를 열어 구성한 다음, 생성된 매니페스트 URL을 붙여넣으세요"
+
+msgctxt "#30342"
+msgid "Install this addon?"
+msgstr "이 애드온을 설치하시겠습니까?"
+
+msgctxt "#30343"
+msgid "Marketplace"
+msgstr "마켓"

@@ -871,3 +871,47 @@ msgstr "新着"
 msgctxt "#30280"
 msgid "Hide adult content"
 msgstr "アダルトコンテンツを非表示にする"
+
+msgctxt "#30333"
+msgid "Browse addon marketplace"
+msgstr "アドオンマーケットプレイスを閲覧"
+
+msgctxt "#30334"
+msgid "Discover and install addons published by your other addons"
+msgstr "他のアドオンが公開しているアドオンを見つけてインストール"
+
+msgctxt "#30335"
+msgid "Installed"
+msgstr "インストール済み"
+
+msgctxt "#30336"
+msgid "Update available"
+msgstr "アップデートあり"
+
+msgctxt "#30337"
+msgid "Needs configuration"
+msgstr "設定が必要"
+
+msgctxt "#30338"
+msgid "%s is already installed"
+msgstr "%s はすでにインストールされています"
+
+msgctxt "#30339"
+msgid "No addon catalogs found. Install an addon that publishes one, such as Cinemeta."
+msgstr "アドオンカタログが見つかりません。Cinemeta のようにカタログを公開するアドオンをインストールしてください。"
+
+msgctxt "#30340"
+msgid "Could not load %s's addon catalog"
+msgstr "%s のアドオンカタログを読み込めませんでした"
+
+msgctxt "#30341"
+msgid "%s needs configuration. Open %s in a browser, configure it, then paste the resulting manifest URL"
+msgstr "%s には設定が必要です。ブラウザで %s を開いて設定し、生成されたマニフェスト URL を貼り付けてください"
+
+msgctxt "#30342"
+msgid "Install this addon?"
+msgstr "このアドオンをインストールしますか？"
+
+msgctxt "#30343"
+msgid "Marketplace"
+msgstr "マーケット"

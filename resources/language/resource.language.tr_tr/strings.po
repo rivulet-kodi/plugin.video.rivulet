@@ -871,3 +871,47 @@ msgstr "YENİ"
 msgctxt "#30280"
 msgid "Hide adult content"
 msgstr "Yetişkinlere yönelik içeriği gizle"
+
+msgctxt "#30333"
+msgid "Browse addon marketplace"
+msgstr "Eklenti pazarını görüntüle"
+
+msgctxt "#30334"
+msgid "Discover and install addons published by your other addons"
+msgstr "Diğer eklentileriniz tarafından yayınlanan eklentileri keşfedin ve yükleyin"
+
+msgctxt "#30335"
+msgid "Installed"
+msgstr "Yüklendi"
+
+msgctxt "#30336"
+msgid "Update available"
+msgstr "Güncelleme mevcut"
+
+msgctxt "#30337"
+msgid "Needs configuration"
+msgstr "Yapılandırma gerekiyor"
+
+msgctxt "#30338"
+msgid "%s is already installed"
+msgstr "%s zaten yüklü"
+
+msgctxt "#30339"
+msgid "No addon catalogs found. Install an addon that publishes one, such as Cinemeta."
+msgstr "Eklenti kataloğu bulunamadı. Cinemeta gibi bir katalog yayınlayan bir eklenti yükleyin."
+
+msgctxt "#30340"
+msgid "Could not load %s's addon catalog"
+msgstr "%s eklentisinin kataloğu yüklenemedi"
+
+msgctxt "#30341"
+msgid "%s needs configuration. Open %s in a browser, configure it, then paste the resulting manifest URL"
+msgstr "%s yapılandırma gerektiriyor. %s adresini bir tarayıcıda açın, yapılandırın, ardından elde edilen manifest URL'sini yapıştırın"
+
+msgctxt "#30342"
+msgid "Install this addon?"
+msgstr "Bu eklenti yüklensin mi?"
+
+msgctxt "#30343"
+msgid "Marketplace"
+msgstr "Pazar"
