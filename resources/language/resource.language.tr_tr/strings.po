@@ -755,3 +755,39 @@ msgstr "Aşağı taşı"
 msgctxt "#30272"
 msgid "Addon no longer installed"
 msgstr "Eklenti artık yüklü değil"
+
+msgctxt "#30293"
+msgid "Add to library"
+msgstr "Kitaplığa ekle"
+
+msgctxt "#30294"
+msgid "Remove from library"
+msgstr "Kitaplıktan kaldır"
+
+msgctxt "#30295"
+msgid "Mark as watched"
+msgstr "İzlendi olarak işaretle"
+
+msgctxt "#30296"
+msgid "Mark as unwatched"
+msgstr "İzlenmedi olarak işaretle"
+
+msgctxt "#30297"
+msgid "Added to library"
+msgstr "Kitaplığa eklendi"
+
+msgctxt "#30298"
+msgid "Removed from library"
+msgstr "Kitaplıktan kaldırıldı"
+
+msgctxt "#30299"
+msgid "Marked as watched"
+msgstr "İzlendi olarak işaretlendi"
+
+msgctxt "#30300"
+msgid "Marked as unwatched"
+msgstr "İzlenmedi olarak işaretlendi"
+
+msgctxt "#30301"
+msgid "Failed to update library"
+msgstr "Kitaplık güncellenemedi"

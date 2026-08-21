@@ -19,6 +19,16 @@ kwargs (`heading='<Show> \u2013 S01E02 <Episode>'`,
 `art={'poster': ..., 'fanart': ...}`) so its own header can show what is
 about to play without re-fetching the show's meta - the movie-skip path
 in `open_detail()` does the same with the movie's own title/art.
+
+ACTION_CONTEXT_MENU opens `_open_context_menu()`'s combined actions
+menu for the whole title: 'Cast & Crew' plus the Stremio account
+library write actions this addon otherwise only READS from
+(`lib.ui.mystuff`) - Add/Remove library and Mark (un)watched, both
+pushed via `lib.stremio.api.StremioAPI.put_library_item()` using
+payloads `lib.library` builds (`library_add_payload`/
+`library_remove_payload`/`mark_watched_payload`). See
+`_open_context_menu()` for why the row wording is fetched live every
+time rather than cached.
 """
 import xbmcgui
 
@@ -449,20 +459,150 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         if action_id in _SEASON_NAV_ACTIONS and self.getFocusId() == SEASON_BAR:
             self._sync_season_from_bar()
         if action_id == _CONTEXT_MENU_ACTION:
-            self._open_credits()
+            self._open_context_menu()
             return
         if action_id in BACK_ACTIONS:
             self.close()
 
     def _open_credits(self):
-        """ACTION_CONTEXT_MENU: `self.meta` is already the full meta
-        `open_detail()` fetched to build this window, so - unlike
-        ShowcaseWindow's own version of this affordance, where a catalog
-        preview has no `links` - there is nothing left to fetch here."""
+        """'Cast & Crew' row of `_open_context_menu()`: `self.meta` is
+        already the full meta `open_detail()` fetched to build this
+        window, so - unlike ShowcaseWindow's own version of this
+        affordance, where a catalog preview has no `links` - there is
+        nothing left to fetch here."""
         from lib.ui.dependencies import get_client, get_store
         from lib.ui.infowindow import open_credits_picker
 
         open_credits_picker(get_store(), get_client(), self.meta)
+
+    def _open_context_menu(self):
+        """ACTION_CONTEXT_MENU (117): one `dialogs.choose()` actions menu
+        for `self.meta` as a whole -- 'Cast & Crew' (the pre-existing,
+        unchanged `_open_credits()` flow) is always row 0, followed by
+        the library write rows this feature adds (Add/Remove library,
+        Mark (un)watched), mirroring `lib.ui.addonswindow._open_actions()`'s
+        own per-row `choose()` shape (`dialogs.choose(name, rows)` then
+        dispatch by index) rather than a menu-of-menus.
+
+        The Add/Remove and watched ROW WORDING must reflect the
+        account's CURRENT state, never a locally-cached guess (this
+        addon caches no library items at all -- see
+        `lib.ui.mystuff._fetch_library_entries()`'s identical live
+        fetch) -- `_current_library_state()` fetches it fresh every time
+        this menu opens, logged in or not."""
+        from lib.ui import dialogs
+        from lib.ui.compat import L
+
+        auth, item = self._current_library_state()
+        in_library = bool(item) and not item.get('removed')
+        watched = bool(item) and bool((item.get('state') or {}).get('flaggedWatched'))
+
+        rows = [
+            L(30196),
+            L(30294) if in_library else L(30293),
+            L(30296) if watched else L(30295),
+        ]
+        picked = dialogs.choose(self.meta.get('name') or self.meta.get('id') or '', rows)
+        if picked == 0:
+            self._open_credits()
+        elif picked == 1:
+            self._toggle_library(auth, item, add=not in_library)
+        elif picked == 2:
+            self._toggle_watched(auth, item, watched=not watched)
+
+    def _current_library_state(self):
+        """`(auth, item)` for `self.meta` -- `auth` is `Store.get_auth()`'s
+        dict or `None` when logged out (skips the network call entirely:
+        a write nobody's account can accept has nothing to look up);
+        `item` is the account's live libraryItem record for this title,
+        or `None` when it has no record yet (never watched, never
+        added). A lookup failure degrades to `item=None` -- the SAME
+        "fetch may fail, the menu must still open" stance
+        `lib.ui.mystuff._fetch_library_entries()` already takes -- which
+        conveniently is also the correct default wording (offer "Add"/
+        "Mark watched" as if nothing existed yet)."""
+        import xbmc
+
+        from lib.stremio.api import ApiError
+        from lib.ui.compat import log
+        from lib.ui.dependencies import get_api, get_store
+
+        auth = get_store().get_auth()
+        if not auth:
+            return None, None
+        try:
+            item = get_api().get_library_item(auth.get('authKey'), self.meta.get('id'))
+        except ApiError as exc:
+            log('detailwindow: library lookup failed: %r' % (exc,), xbmc.LOGWARNING)
+            item = None
+        return auth, item
+
+    def _toggle_library(self, auth, item, add):
+        """Push an explicit `library_add_payload()` (built fresh from
+        `self.meta` -- see that function's own docstring for why it
+        never takes `item`) or a `library_remove_payload()` tombstone of
+        the already-fetched `item` (only reachable with `add=False` when
+        `_open_context_menu()` found `item` actually in the library, so
+        it is never `None` here). Logged out notifies rather than
+        failing silently or attempting a write with no `authKey` to send
+        (the real API would just reject a `None` authKey as a normal
+        auth error -- notifying directly here is both cheaper and
+        clearer). A network failure notifies too and returns before the
+        success notification, so a failed write never leaves the user
+        believing it landed."""
+        from lib import library
+        from lib.ui.compat import L, notify
+
+        if auth is None:
+            notify(L(30190))
+            return
+        payload = library.library_add_payload(self.meta) if add else library.library_remove_payload(item)
+        if not self._push_library_item(auth, payload):
+            return
+        notify(L(30297) if add else L(30298))
+
+    def _toggle_watched(self, auth, item, watched):
+        """Push a `mark_watched_payload()` built from the already-fetched
+        `item`, or a fresh `build_library_item(self.meta)` when the
+        account has no record at all yet (marking watched with no prior
+        record is exactly the IMPLICIT `removed=True`/`temp=True` record
+        `build_library_item()`'s own docstring describes stremio-core
+        creating the first time a title is watched without ever being
+        explicitly added). Same logged-out/failed-write notifications as
+        `_toggle_library()`."""
+        from lib import library
+        from lib.ui.compat import L, notify
+
+        if auth is None:
+            notify(L(30190))
+            return
+        base = item if item is not None else library.build_library_item(self.meta)
+        payload = library.mark_watched_payload(base, watched)
+        if not self._push_library_item(auth, payload):
+            return
+        notify(L(30299) if watched else L(30300))
+
+    @staticmethod
+    def _push_library_item(auth, payload):
+        """Shared `StremioAPI.put_library_item()` call + failure
+        notification for `_toggle_library()`/`_toggle_watched()` --
+        returns `True` on success, or notifies `L(30301)` and returns
+        `False` on any `ApiError` (network failure or a server-side
+        error envelope alike) so neither caller's own success
+        notification runs after a write that never actually landed."""
+        import xbmc
+
+        from lib.stremio.api import ApiError
+        from lib.ui.compat import L, log, notify
+        from lib.ui.dependencies import get_api
+
+        try:
+            get_api().put_library_item(auth.get('authKey'), payload)
+        except ApiError as exc:
+            log('detailwindow: library write failed: %r' % (exc,), xbmc.LOGWARNING)
+            notify(L(30301))
+            return False
+        return True
 
     def onClick(self, control_id):
         if control_id == SEASON_BAR:

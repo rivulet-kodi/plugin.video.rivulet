@@ -1400,3 +1400,24 @@ def test_player_and_views_share_the_same_store_and_client():
         assert isinstance(ctx.player.get_client(), _CountingClient)
         assert _CountingStore.instances == 1
         assert _CountingClient.instances == 1
+
+
+def test_get_api_resolves_and_caches_a_single_stremio_api_instance():
+    """`lib.ui.dependencies.get_api()` mirrors `get_store()`/
+    `get_client()`'s own lazy singleton shape - `lib.ui.detailwindow`'s
+    library context menu (Add/Remove library, Mark (un)watched) is the
+    first caller, added alongside `lib.stremio.api.StremioAPI.
+    get_library_item()`/`put_library_item()`."""
+    reload_names = ('lib.ui.compat', 'lib.ui.dependencies')
+    with install_kodi_stubs(reload=reload_names) as ctx:
+        class _CountingApi:
+            instances = 0
+
+            def __init__(self, *args, **kwargs):
+                type(self).instances += 1
+
+        ctx.dependencies.StremioAPI = _CountingApi
+
+        assert ctx.dependencies.get_api() is ctx.dependencies.get_api()
+        assert isinstance(ctx.dependencies.get_api(), _CountingApi)
+        assert _CountingApi.instances == 1

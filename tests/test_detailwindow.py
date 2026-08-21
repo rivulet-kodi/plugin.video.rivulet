@@ -25,6 +25,7 @@ import types
 
 import pytest
 
+from lib.stremio.api import ApiError
 from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
@@ -690,32 +691,83 @@ def test_onaction_season_nav_without_focus_on_the_bar_does_not_repopulate(load_d
 
 
 # ---------------------------------------------------------------------------
-# DetailWindow._open_credits() - ACTION_CONTEXT_MENU (117). Unlike
-# ShowcaseWindow's own version of this affordance (which fetches a full
-# meta on demand - a catalog preview has no `links`, see
-# test_infowindow.py's much larger section for that plus the full
-# person/genre/detail dispatch, exhaustively exercised there since the
-# shared logic lives in lib.ui.infowindow.open_credits_picker()),
-# DetailWindow already holds the full meta `open_detail()` fetched to
-# build it - these tests only cover that DetailWindow passes `self.meta`
-# straight through with no re-fetch.
+# DetailWindow._open_context_menu() - ACTION_CONTEXT_MENU (117): one
+# dialogs.choose() actions menu combining the pre-existing 'Cast & Crew'
+# flow (_open_credits() - unchanged, still passes self.meta straight
+# through with no re-fetch, unlike ShowcaseWindow's own version of that
+# affordance which fetches on demand - see test_infowindow.py's much
+# larger section for that) with this feature's library write rows
+# (Add/Remove library, Mark (un)watched).
 # ---------------------------------------------------------------------------
 
 
-def _stub_choose(monkeypatch, ctx, answer, capture=None):
+class _FakeAuthStore:
+    def __init__(self, auth=None):
+        self._auth = auth
+
+    def get_auth(self):
+        return self._auth
+
+
+class _FakeLibraryApi:
+    """Records every get_library_item()/put_library_item() call - the
+    two calls `_current_library_state()`/`_push_library_item()` make
+    through `lib.ui.dependencies.get_api()`."""
+
+    def __init__(self, item=None, get_error=None, put_error=None):
+        self.item = item
+        self.get_error = get_error
+        self.put_error = put_error
+        self.get_calls = []
+        self.put_calls = []
+
+    def get_library_item(self, auth_key, item_id):
+        self.get_calls.append((auth_key, item_id))
+        if self.get_error is not None:
+            raise self.get_error
+        return self.item
+
+    def put_library_item(self, auth_key, item):
+        self.put_calls.append((auth_key, item))
+        if self.put_error is not None:
+            raise self.put_error
+
+
+def _stub_choose(monkeypatch, ctx, answers, capture=None):
     """Patches `lib.ui.dialogs.choose` directly (already exhaustively
     covered by tests/test_dialogs.py) rather than driving a real
     `doModal()` - mirrors tests/test_catalogpicker.py's own helper of
-    the same name."""
+    the same name. `answers` is either a single constant answer (every
+    call returns it - the shape every pre-existing caller of this
+    helper used) or a list consumed in call order, needed now that one
+    onAction() can drive TWO choose() calls (the top-level actions menu,
+    then _open_credits()'s own nested picker when 'Cast & Crew' is
+    picked)."""
+    remaining = list(answers) if isinstance(answers, (list, tuple)) else None
+
     def _choose(heading, rows):
         if capture is not None:
             capture.append((heading, list(rows)))
-        return answer
+        return remaining.pop(0) if remaining is not None else answers
 
     monkeypatch.setattr(ctx.dialogs, 'choose', _choose)
 
 
-def test_context_menu_uses_self_meta_directly_with_no_extra_fetch(load_detailwindow, monkeypatch):
+def _wire_library_deps(monkeypatch, ctx, auth=None, item=None, get_error=None, put_error=None):
+    """Common wiring for `_current_library_state()`/`_push_library_item()`:
+    a fake `Store` (just `get_auth()`) via `get_store()` and a fake
+    `StremioAPI` via `get_api()` - both resolved through
+    `lib.ui.dependencies` exactly like `get_client()` already is in this
+    file's other sections, so the real network/profile-dir code paths
+    are never reached."""
+    store = _FakeAuthStore(auth)
+    api = _FakeLibraryApi(item=item, get_error=get_error, put_error=put_error)
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: store)
+    monkeypatch.setattr(ctx.dependencies, 'get_api', lambda: api)
+    return store, api
+
+
+def test_context_menu_cast_and_crew_uses_self_meta_directly_with_no_extra_fetch(load_detailwindow, monkeypatch):
     ctx = load_detailwindow()
     import xbmcgui
     win = _make_window(ctx.detailwindow)
@@ -726,15 +778,199 @@ def test_context_menu_uses_self_meta_directly_with_no_extra_fetch(load_detailwin
     win.stype = 'series'
     fetch_calls = []
     monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: fetch_calls.append((stype, sid)) or {})
-    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: object())
     monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
+    _wire_library_deps(monkeypatch, ctx, auth=None)
     captured = []
-    _stub_choose(monkeypatch, ctx, -1, capture=captured)
+    # picked=0 (Cast & Crew) on the top-level menu, then -1 (cancel) on
+    # open_credits_picker()'s own nested person list.
+    _stub_choose(monkeypatch, ctx, [0, -1], capture=captured)
 
     win.onAction(xbmcgui.Action(ctx.detailwindow._CONTEXT_MENU_ACTION))
 
     assert fetch_calls == []  # self.meta was already full - no re-fetch
-    assert captured == [('STR30196', [('Bryan Cranston', 'Cast')])]
+    assert captured[-1] == ('STR30196', [('Bryan Cranston', 'Cast')])
+
+
+def test_context_menu_rows_offer_add_and_mark_watched_when_not_in_library(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    win.meta = {'id': 'tt1', 'name': 'Breaking Bad'}
+    _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok'}, item=None)
+    captured = []
+    _stub_choose(monkeypatch, ctx, -1, capture=captured)
+
+    win._open_context_menu()
+
+    assert captured == [('Breaking Bad', ['STR30196', 'STR30293', 'STR30295'])]
+
+
+def test_context_menu_rows_offer_remove_and_mark_unwatched_when_already_in_library_and_watched(
+    load_detailwindow, monkeypatch,
+):
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    win.meta = {'id': 'tt1', 'name': 'Breaking Bad'}
+    item = {'_id': 'tt1', 'removed': False, 'state': {'flaggedWatched': 1}}
+    _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok'}, item=item)
+    captured = []
+    _stub_choose(monkeypatch, ctx, -1, capture=captured)
+
+    win._open_context_menu()
+
+    assert captured == [('Breaking Bad', ['STR30196', 'STR30294', 'STR30296'])]
+
+
+def test_context_menu_removed_record_still_offers_add_not_remove(load_detailwindow, monkeypatch):
+    """A `removed=True` record (the implicit "recently watched, never
+    added" shape `build_library_item()` produces) must still read as
+    "not in library" - never offer "Remove" for something the account
+    doesn't actually consider a library entry."""
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    win.meta = {'id': 'tt1', 'name': 'Breaking Bad'}
+    item = {'_id': 'tt1', 'removed': True, 'temp': True, 'state': {'flaggedWatched': 0}}
+    _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok'}, item=item)
+    captured = []
+    _stub_choose(monkeypatch, ctx, -1, capture=captured)
+
+    win._open_context_menu()
+
+    assert captured == [('Breaking Bad', ['STR30196', 'STR30293', 'STR30295'])]
+
+
+def test_context_menu_cancelled_menu_does_nothing(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    win.meta = {'id': 'tt1', 'name': 'Breaking Bad'}
+    store, api = _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok'}, item=None)
+    _stub_choose(monkeypatch, ctx, -1)
+
+    win._open_context_menu()
+
+    assert api.put_calls == []
+    assert ctx.env.notifications == []
+
+
+def test_context_menu_add_to_library_logged_out_notifies_and_performs_no_write(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    win.meta = {'id': 'tt1', 'name': 'Breaking Bad'}
+    store, api = _wire_library_deps(monkeypatch, ctx, auth=None)
+    _stub_choose(monkeypatch, ctx, 1)  # row 1: "Add to library" (not in library, logged out)
+
+    win._open_context_menu()
+
+    assert api.get_calls == []  # logged out: no lookup either
+    assert api.put_calls == []
+    assert ctx.env.notifications == [('Rivulet', 'STR30190', 'info', 4000)]
+
+
+def test_context_menu_mark_watched_logged_out_notifies_and_performs_no_write(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    win.meta = {'id': 'tt1', 'name': 'Breaking Bad'}
+    _wire_library_deps(monkeypatch, ctx, auth=None)
+    _stub_choose(monkeypatch, ctx, 2)  # row 2: "Mark as watched"
+
+    win._open_context_menu()
+
+    assert ctx.env.notifications == [('Rivulet', 'STR30190', 'info', 4000)]
+
+
+def test_context_menu_add_to_library_pushes_explicit_payload_and_notifies_success(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    win.meta = {'id': 'tt1', 'name': 'Breaking Bad', 'type': 'series'}
+    store, api = _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, item=None)
+    _stub_choose(monkeypatch, ctx, 1)
+
+    win._open_context_menu()
+
+    assert len(api.put_calls) == 1
+    auth_key, payload = api.put_calls[0]
+    assert auth_key == 'tok-123'
+    assert payload['_id'] == 'tt1'
+    assert payload['removed'] is False
+    assert payload['temp'] is False
+    assert ctx.env.notifications == [('Rivulet', 'STR30297', 'info', 4000)]
+
+
+def test_context_menu_remove_from_library_pushes_tombstone_and_notifies_success(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    win.meta = {'id': 'tt1', 'name': 'Breaking Bad'}
+    item = {'_id': 'tt1', 'removed': False, 'temp': False, 'name': 'Breaking Bad', 'state': {'flaggedWatched': 0}}
+    store, api = _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, item=item)
+    _stub_choose(monkeypatch, ctx, 1)  # row 1 reads "Remove from library" for an in-library item
+
+    win._open_context_menu()
+
+    assert len(api.put_calls) == 1
+    auth_key, payload = api.put_calls[0]
+    assert auth_key == 'tok-123'
+    assert payload['removed'] is True
+    assert payload['state'] == item['state']  # unrelated fields preserved
+    assert ctx.env.notifications == [('Rivulet', 'STR30298', 'info', 4000)]
+
+
+def test_context_menu_mark_watched_with_no_prior_record_builds_fresh_item(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    win.meta = {'id': 'tt1', 'name': 'Breaking Bad', 'type': 'series'}
+    store, api = _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, item=None)
+    _stub_choose(monkeypatch, ctx, 2)  # row 2 reads "Mark as watched" with no prior record
+
+    win._open_context_menu()
+
+    assert len(api.put_calls) == 1
+    _auth_key, payload = api.put_calls[0]
+    assert payload['_id'] == 'tt1'
+    assert payload['state']['flaggedWatched'] == 1
+    assert payload['state']['timesWatched'] == 1
+    assert ctx.env.notifications == [('Rivulet', 'STR30299', 'info', 4000)]
+
+
+def test_context_menu_mark_unwatched_clears_flag_on_existing_record(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    win.meta = {'id': 'tt1', 'name': 'Breaking Bad'}
+    item = {'_id': 'tt1', 'removed': False, 'state': {'flaggedWatched': 1, 'timesWatched': 3}}
+    store, api = _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, item=item)
+    _stub_choose(monkeypatch, ctx, 2)  # row 2 reads "Mark as unwatched" - item is already watched
+
+    win._open_context_menu()
+
+    _auth_key, payload = api.put_calls[0]
+    assert payload['state']['flaggedWatched'] == 0
+    assert payload['state']['timesWatched'] == 3  # history untouched by un-marking
+    assert ctx.env.notifications == [('Rivulet', 'STR30300', 'info', 4000)]
+
+
+def test_context_menu_failed_write_notifies_failure_not_success(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    win.meta = {'id': 'tt1', 'name': 'Breaking Bad'}
+    store, api = _wire_library_deps(
+        monkeypatch, ctx, auth={'authKey': 'tok-123'}, item=None, put_error=ApiError('boom'),
+    )
+    _stub_choose(monkeypatch, ctx, 1)
+
+    win._open_context_menu()
+
+    assert ctx.env.notifications == [('Rivulet', 'STR30301', 'info', 4000)]
+
+
+def test_context_menu_lookup_failure_degrades_to_add_wording_without_crashing(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    win.meta = {'id': 'tt1', 'name': 'Breaking Bad'}
+    _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, get_error=ApiError('boom'))
+    captured = []
+    _stub_choose(monkeypatch, ctx, -1, capture=captured)
+
+    win._open_context_menu()
+
+    assert captured == [('Breaking Bad', ['STR30196', 'STR30293', 'STR30295'])]
 
 
 # ---------------------------------------------------------------------------

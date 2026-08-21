@@ -755,3 +755,39 @@ msgstr "Sposta giù"
 msgctxt "#30272"
 msgid "Addon no longer installed"
 msgstr "L'add-on non è più installato"
+
+msgctxt "#30293"
+msgid "Add to library"
+msgstr "Aggiungi alla libreria"
+
+msgctxt "#30294"
+msgid "Remove from library"
+msgstr "Rimuovi dalla libreria"
+
+msgctxt "#30295"
+msgid "Mark as watched"
+msgstr "Segna come visto"
+
+msgctxt "#30296"
+msgid "Mark as unwatched"
+msgstr "Segna come non visto"
+
+msgctxt "#30297"
+msgid "Added to library"
+msgstr "Aggiunto alla libreria"
+
+msgctxt "#30298"
+msgid "Removed from library"
+msgstr "Rimosso dalla libreria"
+
+msgctxt "#30299"
+msgid "Marked as watched"
+msgstr "Segnato come visto"
+
+msgctxt "#30300"
+msgid "Marked as unwatched"
+msgstr "Segnato come non visto"
+
+msgctxt "#30301"
+msgid "Failed to update library"
+msgstr "Impossibile aggiornare la libreria"

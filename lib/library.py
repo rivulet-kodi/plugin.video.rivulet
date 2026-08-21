@@ -258,3 +258,94 @@ def merge_playback(item, position_ms, duration_ms, video_id=None, now=None):
     item['state'] = state
     item['_mtime'] = now_iso
     return item
+
+
+def library_add_payload(meta, now=None):
+    """Build the LibraryItem an EXPLICIT "Add to Library" action pushes --
+    the branch `build_library_item()`'s own docstring named but left
+    "outside this module's scope" (library_item.rs:176-195's PhantomData
+    constructor only ever produces the IMPLICIT `removed=True`/
+    `temp=True` "recently watched, never added" record). Reuses
+    `build_library_item()` for every other field (identity/type/name/
+    poster/behaviorHints, a brand-new `state`) and flips just those two
+    flags to `False` -- the wire signal that this record is a real,
+    permanent library entry rather than a transient one.
+
+    Deliberately built fresh from `meta` alone, never from any existing
+    server-side record for this id: this addon caches no library items
+    (`lib.ui.mystuff._fetch_library_entries()` re-fetches live every
+    time for the same reason), and an explicit "Add" from a title the
+    user has never played has no prior `state` to preserve anyway. A
+    title that already has a `removed=True` implicit record (e.g. from
+    `lib.service_runner`'s playback-progress push) simply gets that
+    record's tombstone flag cleared by this same fresh payload landing
+    on the SAME `_id` key server-side -- its `state` is not carried
+    forward, matching the narrow "meta only" shape this function is
+    given.
+    """
+    item = build_library_item(meta, now)
+    item['removed'] = False
+    item['temp'] = False
+    return item
+
+
+def library_remove_payload(item, now=None):
+    """Return a NEW LibraryItem dict (`item` is never mutated) flagging
+    `item` removed -- Stremio's library "delete" is a tombstone
+    (`removed=True`), never an actual deletion, precisely so the removal
+    itself syncs to every other device on the next `datastoreGet`
+    instead of the record just vanishing locally and resurrecting the
+    moment another device's own pull re-adds it.
+
+    Every OTHER field of `item` -- including `temp`, `state`, and
+    everything else `library_add_payload()`/`merge_playback()` may have
+    already set -- is carried through completely unchanged; only
+    `removed` and `_mtime` differ in the result, the same "only
+    shallow-copy what actually changed" shape `merge_playback()` already
+    uses above.
+    """
+    result = dict(item)
+    result['removed'] = True
+    result['_mtime'] = iso8601_utc(now)
+    return result
+
+
+def mark_watched_payload(item, watched, now=None):
+    """Return a NEW LibraryItem dict (`item` is never mutated) setting
+    `item['state']['flaggedWatched']` to `watched` -- the explicit
+    "Mark as watched"/"Mark as unwatched" action, using exactly the
+    `flaggedWatched`/`timesWatched` pair `merge_playback()` already
+    flips automatically at the 90% threshold (see
+    `WATCHED_THRESHOLD_RATIO`); this function just lets the user set the
+    same two fields by hand instead of waiting for enough playback.
+
+    `timesWatched` increments by exactly one ONLY on the 0->1
+    transition (`flaggedWatched` was falsy and `watched` is True) --
+    mirrors `merge_playback()`'s own "gated by flaggedWatched == 0"
+    increment, and is what makes this function idempotent: feeding its
+    own output back in with the same `watched` value is a no-op past the
+    first call, since the second call's `was_watched` reads back the
+    `True` the first call just wrote. Marking unwatched never
+    decrements `timesWatched` -- that counter is a history of how many
+    times the title WAS completed, not a live flag, so un-marking must
+    not erase that history.
+
+    An `item` with no `state` at all yet (never played, never added)
+    gets a fresh default one first, same as `merge_playback()`. The
+    `state.watched` per-episode bitfield is never touched here either --
+    see the module docstring's CRITICAL note; this function only ever
+    writes `flaggedWatched`/`timesWatched`.
+    """
+    now_iso = iso8601_utc(now)
+    original_state = item.get('state')
+    state = dict(original_state) if isinstance(original_state, dict) else _default_state(now_iso)
+
+    was_watched = bool(state.get('flaggedWatched'))
+    state['flaggedWatched'] = 1 if watched else 0
+    if watched and not was_watched:
+        state['timesWatched'] = int(state.get('timesWatched') or 0) + 1
+
+    result = dict(item)
+    result['state'] = state
+    result['_mtime'] = now_iso
+    return result
