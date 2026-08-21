@@ -251,7 +251,7 @@ def _adult_filtering_enabled():
     return compat.setting_bool('home_hide_adult', True)
 
 
-def iter_catalog_pages(transport, ctype, cid, extra=None, catalog=None):
+def iter_catalog_pages(transport, ctype, cid, extra=None, catalog=None, manifest=None):
     """Yield a catalog's pages, following the protocol's `skip` paging
     until the addon runs out of items.
 
@@ -311,17 +311,22 @@ def iter_catalog_pages(transport, ctype, cid, extra=None, catalog=None):
     fetched - not one request is made, and the generator yields a
     single empty page instead, which existing callers already treat
     as an ordinary empty result (catalogpicker._fetch_and_show()'s
-    "no results" notify), never as a load failure. Otherwise, each
-    page's metas are run through `filter_metas()` before being
-    yielded - but the PRE-filter page is still what the skip/
-    short-page bookkeeping above counts, so adult content vanishing
-    from a page can never desync `skip` from what the addon actually
-    served.
+    "no results" notify), never as a load failure. `manifest`, if
+    given, is passed straight through to `is_adult_catalog()` so an
+    adult-only addon (`manifest['types']` naming an adult type) is
+    caught even when it publishes a neutrally-named catalog - a signal
+    unavailable from `catalog` alone, which is why callers that HAVE
+    the manifest on hand (catalogpicker._fetch_and_show()) must pass
+    it. Otherwise, each page's metas are run through `filter_metas()`
+    before being yielded - but the PRE-filter page is still what the
+    skip/short-page bookkeeping above counts, so adult content
+    vanishing from a page can never desync `skip` from what the addon
+    actually served.
     """
     from lib.stremio.addons import catalog_supports_extra
 
     hide_adult = _adult_filtering_enabled()
-    if hide_adult and is_adult_catalog(catalog if catalog is not None else {'type': ctype}):
+    if hide_adult and is_adult_catalog(catalog if catalog is not None else {'type': ctype}, manifest):
         yield []
         return
 
@@ -396,7 +401,7 @@ def iter_catalog_pages(transport, ctype, cid, extra=None, catalog=None):
         % (safe_url_for_log(transport), _MAX_CATALOG_PAGES), xbmc.LOGINFO)
 
 
-def fetch_catalog_pages(transport, ctype, cid, extra=None, catalog=None):
+def fetch_catalog_pages(transport, ctype, cid, extra=None, catalog=None, manifest=None):
     """Every page of a catalog as one combined list - the eager form of
     `iter_catalog_pages()`, for callers that cannot show partial results
     and would rather wait (the discover-link path, which passes no
@@ -407,7 +412,7 @@ def fetch_catalog_pages(transport, ctype, cid, extra=None, catalog=None):
     than behind a minute-long spinner.
     """
     metas = []
-    for page in iter_catalog_pages(transport, ctype, cid, extra=extra, catalog=catalog):
+    for page in iter_catalog_pages(transport, ctype, cid, extra=extra, catalog=catalog, manifest=manifest):
         metas.extend(page)
     return metas
 

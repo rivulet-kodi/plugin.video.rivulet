@@ -1042,6 +1042,46 @@ def test_fetch_catalog_pages_keeps_paging_past_a_page_that_is_entirely_adult(loa
     assert client.calls == [None, [('skip', 20)], [('skip', 40)]]
 
 
+#: A catalog descriptor with a neutral id/name/type - only the owning
+#: addon's manifest names an adult type, a signal `fetch_catalog_pages()`
+#: only has when a caller passes `manifest` through (catalogpicker's
+#: `_fetch_and_show()` is the real caller that does).
+_NEUTRAL_CATALOG = {'id': 'popular', 'type': 'movie', 'name': 'Popular'}
+_ADULT_ONLY_MANIFEST = {'types': ['xxx']}
+
+
+def test_fetch_catalog_pages_never_fetches_a_neutral_catalog_from_an_adult_only_manifest(load_views):
+    """The catalog's own id/name/type give no signal at all - only the
+    manifest's types name an adult type. Without threading `manifest`
+    through to `is_adult_catalog()`, this catalog would be fetched even
+    with filtering on; regression coverage for that."""
+    ctx = load_views()
+    views = ctx.views
+    client = FakePagingClient([_metas(0, 5)])
+    _wire_data_layer(views, FakeStore(), client)
+
+    metas = views.fetch_catalog_pages(
+        't1', 'movie', 'popular', catalog=_NEUTRAL_CATALOG, manifest=_ADULT_ONLY_MANIFEST,
+    )
+
+    assert metas == []
+    assert client.calls == []
+
+
+def test_fetch_catalog_pages_fetches_a_neutral_catalog_from_an_adult_only_manifest_when_setting_is_off(load_views):
+    ctx = load_views(settings={'home_hide_adult': 'false'})
+    views = ctx.views
+    client = FakePagingClient([_metas(0, 5)])
+    _wire_data_layer(views, FakeStore(), client)
+
+    metas = views.fetch_catalog_pages(
+        't1', 'movie', 'popular', catalog=_NEUTRAL_CATALOG, manifest=_ADULT_ONLY_MANIFEST,
+    )
+
+    assert len(metas) == 5
+    assert client.calls  # the request was actually made
+
+
 # ---------------------------------------------------------------------------
 # login() / logout()
 # ---------------------------------------------------------------------------

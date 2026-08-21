@@ -58,6 +58,14 @@ def test_ordinary_type_does_not_flag_meta():
     assert is_adult_meta({'id': 'tt1', 'name': 'Untitled', 'type': 'movie'}) is False
 
 
+def test_meta_id_containing_marker_flags_meta():
+    assert is_adult_meta({'id': 'xxx-tt1', 'name': 'Untitled'}) is True
+
+
+def test_meta_name_containing_marker_flags_meta():
+    assert is_adult_meta({'id': 'tt1', 'name': 'Hentai Collection'}) is True
+
+
 # ---------------------------------------------------------------------------
 # Word-boundary safety - adversarial non-adult strings containing a marker
 # as a bare substring, not a whole word.

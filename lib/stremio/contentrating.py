@@ -10,7 +10,7 @@ a manifest with no `adult` field anywhere should not conclude we missed
 it - there is nothing to read.
 
 Detection therefore falls back to matching a small set of adult-content
-marker words against free-text fields (genre, catalog id/name) on WORD
+marker words against free-text fields (genre, id, name) on WORD
 BOUNDARIES, never as a bare substring - "Analyze That" or "Milford
 Sound" must not trip on "anal"/"milf" embedded inside a longer word.
 This is a real tradeoff, not a solved problem: word-boundary matching
@@ -19,7 +19,12 @@ a false positive (a franchise called "xXx" would match `\\bxxx\\b`
 verbatim), and conversely a catalog that never says any marker word at
 all is a false negative this module cannot catch. Callers accept both
 risks in exchange for not shipping an allow/deny list of every adult
-addon in existence.
+addon in existence. Matching `id`/`name` (as opposed to just `genre`)
+widens that false-positive surface further still - a title can
+innocently contain a marker word where its genre would not - but a
+meta whose only adult signal is its title (no `adult` flag, no
+matching genre/type) would otherwise sail through `filter_metas()`
+untouched, which is the worse failure for this module's purpose.
 """
 import re
 
@@ -104,11 +109,13 @@ def is_adult_meta(meta):
 
     1. An explicit `adult` field, if the addon supplies one and it
        parses as a bool - this is authoritative even when it disagrees
-       with signal 2/3 (an addon marking `adult: false` on something
+       with signal 2/3/4 (an addon marking `adult: false` on something
        whose genre happens to contain a marker word is trusted, not
        second-guessed).
     2. `genres`/`genre` containing an adult marker word.
-    3. `type` being an adult type (`xxx`/`adult`, or a marker word).
+    3. `id` or `name` containing an adult marker word - see the module
+       docstring for the false-positive tradeoff this accepts.
+    4. `type` being an adult type (`xxx`/`adult`, or a marker word).
 
     Returns False for anything that isn't a dict (no signal to read).
     """
@@ -119,6 +126,8 @@ def is_adult_meta(meta):
         if explicit is not None:
             return explicit
     if any(_contains_marker(genre) for genre in _genre_strings(meta)):
+        return True
+    if _contains_marker(meta.get('id')) or _contains_marker(meta.get('name')):
         return True
     return _type_is_adult(meta.get('type'))
 
