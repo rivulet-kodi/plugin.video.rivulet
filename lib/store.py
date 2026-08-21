@@ -34,6 +34,12 @@ JSON files live under ``data_dir``:
   ``lib.stremio.api.StremioAPI.datastore_get``/``datastore_put``'s job,
   driven by ``lib.service_runner`` only when logged in AND the
   "sync_progress" setting is on).
+* ``seen_episodes.json`` -- the capped ``lib.newepisodes.mark_seen`` set of
+  ``(type, id, video_id)`` composite keys naming which "new episode" Home
+  row candidates the user has already acted on, so a dismissed episode
+  never reappears there. Written wholesale by :meth:`Store.set_seen_episodes`
+  (the caller runs :func:`lib.newepisodes.mark_seen` first) -- never through
+  :meth:`Store.update_addons`, which is addons.json's own compare-and-swap.
 
 Writes are atomic (write to a temp file, then ``os.replace``) so a crash or
 power loss never leaves a half-written JSON file behind. A corrupt file on
@@ -75,6 +81,7 @@ NOW_PLAYING_FILENAME = "now_playing.json"
 RESUME_OFFSET_FILENAME = "resume_offset.json"
 PROGRESS_FILENAME = "progress.json"
 LAST_VERSION_FILENAME = "last_version.json"
+SEEN_EPISODES_FILENAME = "seen_episodes.json"
 
 #: Most-recent-first cap for the persisted search history list.
 MAX_SEARCH_HISTORY = 15
@@ -902,6 +909,7 @@ class Store:
         self._resume_offset_path = os.path.join(self.data_dir, RESUME_OFFSET_FILENAME)
         self._progress_path = os.path.join(self.data_dir, PROGRESS_FILENAME)
         self._last_version_path = os.path.join(self.data_dir, LAST_VERSION_FILENAME)
+        self._seen_episodes_path = os.path.join(self.data_dir, SEEN_EPISODES_FILENAME)
         #: Per-instance memoisation for `_cached_read`: `path -> ((mtime_ns,
         #: size), parsed_value)`. A single process/screen-render often
         #: calls e.g. `get_addons()` many times; a fresh eMMC/SD `open()`
@@ -1303,6 +1311,37 @@ class Store:
         one small string."""
         _atomic_write(self._last_version_path, {"version": str(version)}, compact=True)
         self._invalidate_cache(self._last_version_path)
+
+    def get_seen_episodes(self):
+        """Return the persisted new-episode seen-set -- the capped dict
+        `lib.newepisodes.mark_seen` produces, keyed by that module's own
+        composite ``(type, id, video_id)`` string -- or ``{}`` if nothing
+        has been recorded yet (including a missing/corrupt file). Served
+        from the per-instance read cache -- see `_cached_read`.
+
+        Purely mechanical persistence, like every other small state file
+        here: the cap/prune reasoning lives in `lib.newepisodes.mark_seen`
+        (the caller runs it before calling `set_seen_episodes`), not in
+        this method -- this module stays business-logic-free.
+        """
+        seen = self._cached_read(self._seen_episodes_path, None)
+        return seen if isinstance(seen, dict) else {}
+
+    def set_seen_episodes(self, seen):
+        """Persist the seen-set wholesale, like `set_now_playing`/
+        `set_resume_offset_ms` -- always a full replace, never an
+        `update_addons`-style compare-and-swap: the caller has already
+        run `lib.newepisodes.mark_seen` to compute `seen` (capped), and a
+        lost update under two concurrent `default.py` processes at worst
+        re-shows one episode the user just dismissed elsewhere, corrected
+        the next time either process re-renders Home -- not the kind of
+        loss `update_addons()`'s retry machinery exists for, and unlike
+        addons.json this file is never the target of an install/remove
+        action a user would notice silently losing. Written compactly
+        (see `_atomic_write`): machine-only, never hand-inspected.
+        """
+        _atomic_write(self._seen_episodes_path, dict(seen or {}), compact=True)
+        self._invalidate_cache(self._seen_episodes_path)
 
     @staticmethod
     def _progress_key(content_type, content_id, video_id=None):

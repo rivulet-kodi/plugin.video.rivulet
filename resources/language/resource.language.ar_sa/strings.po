@@ -843,3 +843,27 @@ msgstr "عدد المصادر المخفية بواسطة الفلاتر: %d"
 msgctxt "#30264"
 msgid "Filters matched nothing - showing all sources"
 msgstr "لم تطابق الفلاتر أي نتائج، يتم عرض جميع المصادر"
+
+msgctxt "#30313"
+msgid "New Episodes"
+msgstr "حلقات جديدة"
+
+msgctxt "#30314"
+msgid "Show New Episodes"
+msgstr "إظهار الحلقات الجديدة"
+
+msgctxt "#30315"
+msgid "%d new episode ready to watch"
+msgstr "%d حلقة جديدة جاهزة للمشاهدة"
+
+msgctxt "#30316"
+msgid "%d new episodes ready to watch"
+msgstr "حلقات جديدة جاهزة للمشاهدة: %d"
+
+msgctxt "#30317"
+msgid "New episodes"
+msgstr "حلقات جديدة"
+
+msgctxt "#30318"
+msgid "NEW"
+msgstr "جديد"

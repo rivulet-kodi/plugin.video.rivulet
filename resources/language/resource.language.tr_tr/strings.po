@@ -843,3 +843,27 @@ msgstr "Filtreler nedeniyle %d kaynak gizlendi"
 msgctxt "#30264"
 msgid "Filters matched nothing - showing all sources"
 msgstr "Filtrelerle eşleşen kaynak yok, tüm kaynaklar gösteriliyor"
+
+msgctxt "#30313"
+msgid "New Episodes"
+msgstr "Yeni Bölümler"
+
+msgctxt "#30314"
+msgid "Show New Episodes"
+msgstr "Yeni Bölümleri Göster"
+
+msgctxt "#30315"
+msgid "%d new episode ready to watch"
+msgstr "%d yeni bölüm izlemeye hazır"
+
+msgctxt "#30316"
+msgid "%d new episodes ready to watch"
+msgstr "%d yeni bölüm izlemeye hazır"
+
+msgctxt "#30317"
+msgid "New episodes"
+msgstr "Yeni bölümler"
+
+msgctxt "#30318"
+msgid "NEW"
+msgstr "YENİ"

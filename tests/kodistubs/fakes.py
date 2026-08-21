@@ -61,6 +61,8 @@ _DEFAULT_LOCALIZED = {
     30212: '%d%% WATCHED',
     30262: '%d source hidden by filters',
     30263: '%d sources hidden by filters',
+    30315: '%d new episode ready to watch',
+    30316: '%d new episodes ready to watch',
 }
 
 

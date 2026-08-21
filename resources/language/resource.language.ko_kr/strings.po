@@ -843,3 +843,27 @@ msgstr "필터로 인해 소스 %d개 숨김"
 msgctxt "#30264"
 msgid "Filters matched nothing - showing all sources"
 msgstr "필터와 일치하는 항목이 없어 모든 소스를 표시합니다"
+
+msgctxt "#30313"
+msgid "New Episodes"
+msgstr "새 에피소드"
+
+msgctxt "#30314"
+msgid "Show New Episodes"
+msgstr "새 에피소드 표시"
+
+msgctxt "#30315"
+msgid "%d new episode ready to watch"
+msgstr "새 에피소드 %d개 시청 가능"
+
+msgctxt "#30316"
+msgid "%d new episodes ready to watch"
+msgstr "새 에피소드 %d개 시청 가능"
+
+msgctxt "#30317"
+msgid "New episodes"
+msgstr "새 에피소드"
+
+msgctxt "#30318"
+msgid "NEW"
+msgstr "신규"

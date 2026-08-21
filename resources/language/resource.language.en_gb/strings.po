@@ -843,3 +843,27 @@ msgstr ""
 msgctxt "#30264"
 msgid "Filters matched nothing - showing all sources"
 msgstr ""
+
+msgctxt "#30313"
+msgid "New Episodes"
+msgstr ""
+
+msgctxt "#30314"
+msgid "Show New Episodes"
+msgstr ""
+
+msgctxt "#30315"
+msgid "%d new episode ready to watch"
+msgstr ""
+
+msgctxt "#30316"
+msgid "%d new episodes ready to watch"
+msgstr ""
+
+msgctxt "#30317"
+msgid "New episodes"
+msgstr ""
+
+msgctxt "#30318"
+msgid "NEW"
+msgstr ""

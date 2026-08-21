@@ -843,3 +843,27 @@ msgstr "已被过滤器隐藏 %d 个来源"
 msgctxt "#30264"
 msgid "Filters matched nothing - showing all sources"
 msgstr "过滤器未匹配任何结果，显示全部来源"
+
+msgctxt "#30313"
+msgid "New Episodes"
+msgstr "新剧集"
+
+msgctxt "#30314"
+msgid "Show New Episodes"
+msgstr "显示新剧集"
+
+msgctxt "#30315"
+msgid "%d new episode ready to watch"
+msgstr "%d 集新剧集可观看"
+
+msgctxt "#30316"
+msgid "%d new episodes ready to watch"
+msgstr "%d 集新剧集可观看"
+
+msgctxt "#30317"
+msgid "New episodes"
+msgstr "新剧集"
+
+msgctxt "#30318"
+msgid "NEW"
+msgstr "新"
