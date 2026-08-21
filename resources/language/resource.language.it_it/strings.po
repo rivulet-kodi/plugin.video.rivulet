@@ -872,13 +872,7 @@ msgctxt "#30280"
 msgid "Hide adult content"
 msgstr "Nascondi i contenuti per adulti"
 
-msgctxt "#30333"
-msgid "Browse addon marketplace"
-msgstr "Sfoglia il marketplace degli addon"
 
-msgctxt "#30334"
-msgid "Discover and install addons published by your other addons"
-msgstr "Scopri e installa addon pubblicati dai tuoi altri addon"
 
 msgctxt "#30335"
 msgid "Installed"
@@ -913,8 +907,40 @@ msgid "Install this addon?"
 msgstr "Installare questo addon?"
 
 msgctxt "#30343"
-msgid "Marketplace"
-msgstr "Mercato"
+msgid "Addon catalogs"
+msgstr "Cataloghi di addon"
+
+msgctxt "#30344"
+msgid "Browse addon catalogs"
+msgstr "Sfoglia i cataloghi di addon"
+
+msgctxt "#30345"
+msgid "Install from URL"
+msgstr "Installa da URL"
+
+msgctxt "#30346"
+msgid "Search addon catalogs"
+msgstr "Cerca nei cataloghi di addon"
+
+msgctxt "#30347"
+msgid "Clear search"
+msgstr "Cancella ricerca"
+
+msgctxt "#30348"
+msgid "Showing %d of %d"
+msgstr "Visualizzati %d di %d"
+
+msgctxt "#30349"
+msgid "No addons match your search"
+msgstr "Nessun addon corrisponde alla ricerca"
+
+msgctxt "#30350"
+msgid "Add addons"
+msgstr "Aggiungi addon"
+
+msgctxt "#30351"
+msgid "Browse catalogs, or install from a manifest URL"
+msgstr "Sfoglia i cataloghi o installa da un URL manifest"
 
 msgctxt "#30360"
 msgid "New episodes: %d"

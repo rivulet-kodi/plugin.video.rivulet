@@ -872,13 +872,7 @@ msgctxt "#30280"
 msgid "Hide adult content"
 msgstr "إخفاء المحتوى للبالغين"
 
-msgctxt "#30333"
-msgid "Browse addon marketplace"
-msgstr "تصفح متجر الإضافات"
 
-msgctxt "#30334"
-msgid "Discover and install addons published by your other addons"
-msgstr "اكتشف وثبّت إضافات تنشرها إضافاتك الأخرى"
 
 msgctxt "#30335"
 msgid "Installed"
@@ -913,8 +907,40 @@ msgid "Install this addon?"
 msgstr "هل تريد تثبيت هذه الإضافة؟"
 
 msgctxt "#30343"
-msgid "Marketplace"
-msgstr "المتجر"
+msgid "Addon catalogs"
+msgstr "كتالوجات الإضافات"
+
+msgctxt "#30344"
+msgid "Browse addon catalogs"
+msgstr "استعراض كتالوجات الإضافات"
+
+msgctxt "#30345"
+msgid "Install from URL"
+msgstr "التثبيت من رابط"
+
+msgctxt "#30346"
+msgid "Search addon catalogs"
+msgstr "البحث في كتالوجات الإضافات"
+
+msgctxt "#30347"
+msgid "Clear search"
+msgstr "مسح البحث"
+
+msgctxt "#30348"
+msgid "Showing %d of %d"
+msgstr "المعروض: %d من %d"
+
+msgctxt "#30349"
+msgid "No addons match your search"
+msgstr "لا توجد إضافات مطابقة للبحث"
+
+msgctxt "#30350"
+msgid "Add addons"
+msgstr "إضافة إضافات"
+
+msgctxt "#30351"
+msgid "Browse catalogs, or install from a manifest URL"
+msgstr "استعرض الكتالوجات أو ثبّت من رابط ملف manifest"
 
 msgctxt "#30360"
 msgid "New episodes: %d"

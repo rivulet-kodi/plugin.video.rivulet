@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
-<!-- MarketWindow: browse/install addons from other addons' addon_catalog
-     resources (lib/ui/marketwindow.py). One flat list, mirroring
+<!-- AddonCatalogWindow: browse/install addons from other addons' addon_catalog
+     resources (lib/ui/addoncatalogwindow.py). One flat list, mirroring
      AddonsWindow.xml's own list layout byte-for-byte apart from the
      added per-row logo image and the state suffix folded into Label1.
 
