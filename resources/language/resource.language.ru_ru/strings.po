@@ -843,3 +843,27 @@ msgstr "Скрыто фильтрами: %d"
 msgctxt "#30264"
 msgid "Filters matched nothing - showing all sources"
 msgstr "По заданным фильтрам ничего не найдено — показаны все источники"
+
+msgctxt "#30313"
+msgid "New Episodes"
+msgstr "Новые эпизоды"
+
+msgctxt "#30314"
+msgid "Show New Episodes"
+msgstr "Показывать новые эпизоды"
+
+msgctxt "#30315"
+msgid "%d new episode ready to watch"
+msgstr "%d новый эпизод доступен"
+
+msgctxt "#30316"
+msgid "%d new episodes ready to watch"
+msgstr "%d новых эпизода доступно"
+
+msgctxt "#30317"
+msgid "New episodes"
+msgstr "Новые эпизоды"
+
+msgctxt "#30318"
+msgid "NEW"
+msgstr "НОВОЕ"

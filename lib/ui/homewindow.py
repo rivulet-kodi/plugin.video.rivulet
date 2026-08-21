@@ -9,7 +9,17 @@ close it once their own selection chain reaches playback (see
 playback path of its own, so Home always stays open behind it (see
 `_open_addons`). Settings opens Kodi's own native settings dialog,
 which is not worth replacing.
+
+The "New Episodes" row (`_open_new_episodes`) is the odd one out: it is
+computed fresh on every `onInit()` rather than gated by a cheap local
+check like `mystuff.has_content()`, because the row's very visibility
+IS "did the computation find anything" - see `_new_episode_items()`.
+Picking a row marks the episode seen (`_mark_episode_seen`) and opens
+it through the same `lib.ui.detailwindow.open_detail()` path every
+other Home row's selection chain already ends at.
 """
+import datetime
+
 import xbmcgui
 
 from lib.ui.dependencies import get_store
@@ -75,6 +85,7 @@ def _remainder_types(available):
 #: library alongside the resumable titles.
 _MENU = (
     (30241, 'mystuff'),
+    (30313, 'new_episodes'),
     (30213, 'movies'),
     (30214, 'series'),
     (30215, 'anime'),
@@ -88,6 +99,10 @@ _MENU = (
 #: (action -> localized-string id) for HomeWindow.xml's dimmer second
 #: label per row - localized via L(), not plain literals, so it follows
 #: Kodi's language setting the same as every other row's main label.
+#:
+#: `new_episodes` has no entry here on purpose: unlike every other row,
+#: its subtitle carries a live count ("3 new episodes"), so `_menu_items()`
+#: builds it via `_new_episodes_subtitle()` instead of this fixed lookup.
 _SUBTITLES = {
     'mystuff': 30232,
     'movies': 30216,
@@ -131,7 +146,7 @@ def _type_row_enabled(action, available):
     return setting_bool(setting_id, True)
 
 
-def _menu_items(show_mystuff, addons=None):
+def _menu_items(show_mystuff, addons=None, new_episode_count=0):
     from lib.ui.compat import L, addon_media_path
 
     available = _available_types(addons or [])
@@ -139,16 +154,113 @@ def _menu_items(show_mystuff, addons=None):
     for string_id, action in _MENU:
         if action == 'mystuff' and not show_mystuff:
             continue
+        # Never an empty row: `new_episode_count` is 0 both when the
+        # setting is off and when the computation genuinely found
+        # nothing (see `_new_episode_items()`) - either way there is
+        # nothing useful behind this row, so it is left out entirely,
+        # the same rule every other Home row already follows.
+        if action == 'new_episodes' and not new_episode_count:
+            continue
         if action in TYPE_ROW_TYPES and not _type_row_enabled(action, available):
             continue
         item = xbmcgui.ListItem(L(string_id))
+        subtitle = (
+            _new_episodes_subtitle(new_episode_count) if action == 'new_episodes'
+            else L(_SUBTITLES[action])
+        )
         # One setProperties() call instead of two setProperty() calls
         # (action, subtitle) - setArt() stays separate, a distinct Kodi
         # API that setProperties() cannot batch into.
-        item.setProperties({'action': action, 'subtitle': L(_SUBTITLES[action])})
+        item.setProperties({'action': action, 'subtitle': subtitle})
         item.setArt({'icon': addon_media_path('%s.png' % action)})
         items.append(item)
     return items
+
+
+def _new_episodes_subtitle(count):
+    """'%d new episode(s) ready to watch' for the New Episodes row's
+    dimmer second label - singular/plural like `lib.ui.detailwindow`'s
+    season/episode readouts (`_SEASON_STRING_ID`/`_SEASONS_STRING_ID`
+    there). `count` is always >= 1 here: `_menu_items()` never calls
+    this for a zero count, it omits the row instead."""
+    from lib.ui.compat import L
+
+    return (L(30315) if count == 1 else L(30316)) % count
+
+
+def _followed_series(store):
+    """Series the New Episodes row treats as "followed": every series
+    with at least one local playback-progress entry, reduced to the one
+    entry `lib.ui.mystuff.latest_by_title()` keeps per series (most
+    recently updated) - the same signal `lib.ui.mystuff`'s own NEXT_UP
+    band already treats as "the user cares about this show". That
+    reduction conveniently doubles as the last-watched-episode pointer
+    `lib.newepisodes.new_episodes()` needs.
+
+    Deliberately local-progress-only, not the Stremio account library: a
+    library entry carries no last-watched pointer of its own (nothing to
+    compare a candidate episode against), and this way the row works
+    fully offline and logged out too, like every other locally-sourced
+    Home row.
+    """
+    from lib.ui.mystuff import latest_by_title
+
+    return [
+        {'type': entry['type'], 'id': entry['id'], 'video_id': entry.get('video_id')}
+        for entry in latest_by_title(store.get_progress_entries())
+        if entry.get('type') == 'series'
+    ]
+
+
+def _fetch_series_metas(series_items):
+    """One full meta (with `videos`) per followed series, fetched the
+    same bounded-fan-out way `lib.ui.mystuff._enrich()` fetches next-up
+    metas: `views._fetch_meta()` sits behind `lib.ui.metacache`'s
+    short-TTL disk cache, so a Home render that already computed this
+    recently costs a handful of disk reads, not a fresh addon
+    round-trip per followed series."""
+    from lib.ui import views
+
+    if not series_items:
+        return {}
+    fetched = views._map_addons(
+        lambda item: views._fetch_meta(item['type'], item['id']), series_items,
+    )
+    return {item['id']: meta for item, meta in zip(series_items, fetched) if meta}
+
+
+def _new_episode_items(store):
+    """New-episode candidates across every followed series (see
+    `_followed_series()`), computed fresh on this Home render - the same
+    render-path-not-a-poll-loop design `lib.ui.mystuff`'s "My Stuff" row
+    already uses (see the module docstring), and required here: unlike
+    that row's cheap `has_content()` gate, this row's very visibility is
+    "did we actually find one", so the real computation cannot be
+    deferred to the click handler the way mystuff's enrichment is.
+
+    Any failure - a store I/O error, or anything an addon fan-out raised
+    that `views._fetch_meta()`'s own per-addon guard did not already
+    catch - degrades to an empty list rather than taking down Home's
+    render, the same defensiveness `_notify_if_updated()` applies to its
+    own store read.
+    """
+    import xbmc
+
+    from lib.newepisodes import new_episodes
+    from lib.ui.compat import log
+
+    try:
+        series_items = _followed_series(store)
+        if not series_items:
+            return []
+        metas = _fetch_series_metas(series_items)
+        if not metas:
+            return []
+        seen = store.get_seen_episodes()
+        return new_episodes(series_items, metas, seen, datetime.datetime.utcnow())
+    except Exception as exc:
+        log('homewindow: new-episodes computation failed: %r' % (exc,), xbmc.LOGWARNING)
+        return []
 
 
 def _status_text(auth):
@@ -182,6 +294,18 @@ class HomeWindow(BaseWindow):
         # disappears the moment the first title is played or the user logs
         # in, without restarting the addon.
         show_mystuff = setting_bool('home_show_mystuff', True) and has_content(store)
+        # Unlike `show_mystuff`, there is no cheap local-only gate for
+        # this row: its visibility IS "did the computation find a new
+        # episode" (see `_new_episode_items()`), so the setting alone
+        # only controls whether the (potentially addon-fetching)
+        # computation runs at all.
+        new_episode_items = (
+            _new_episode_items(store) if setting_bool('home_show_new_episodes', True) else []
+        )
+        # Stashed for `_open_new_episodes()`: the row was already computed
+        # once for this render, so a click reuses it instead of re-running
+        # the same addon fan-out a second time.
+        self._new_episode_items = new_episode_items
         self.getControl(BACKGROUND).setImage(addon_fanart())
         control = self.getControl(LIST)
         # reset() before addItems(): onInit() runs again when
@@ -192,7 +316,9 @@ class HomeWindow(BaseWindow):
         # an addon that publishes a new type) is reflected on the way back
         # here without restarting the addon.
         control.reset()
-        control.addItems(_menu_items(show_mystuff, store.get_enabled_addons()))
+        control.addItems(
+            _menu_items(show_mystuff, store.get_enabled_addons(), len(new_episode_items))
+        )
         self.getControl(STATUS_LABEL).setLabel(_status_text(auth))
         self.setFocusId(LIST)
 
@@ -211,6 +337,58 @@ def _open_mystuff(window):
     from lib.ui.mystuff import open_my_stuff
     if open_my_stuff():
         window.close()
+
+
+def _open_new_episodes(window):
+    """Open the borrowed-band grid (`gridwindow.NEW_EPISODES_BAND`) over
+    the items `HomeWindow.onInit()` already computed and stashed on
+    `window`. Marks the picked episode seen BEFORE opening its detail
+    screen - "acted on", not "rendered", is the seen-set's own rule (see
+    `lib.newepisodes.mark_seen`'s docstring) - then hands off to
+    `lib.ui.detailwindow.open_detail()`, the same path every other Home
+    row's selection chain ends at."""
+    import xbmc
+
+    from lib.ui.compat import L, log, notify
+
+    items = list(getattr(window, '_new_episode_items', None) or [])
+    if not items:
+        return
+    try:
+        from lib.ui.gridwindow import NEW_EPISODES_BAND, open_grid
+        selected = open_grid(
+            [(NEW_EPISODES_BAND, items)], heading=L(30313), labels={NEW_EPISODES_BAND: 30317},
+        )
+    except Exception as exc:  # a skin/UI failure must surface, not vanish
+        log('homewindow: new-episodes grid failed to open: %r' % (exc,), xbmc.LOGERROR)
+        notify(L(30032))
+        return
+    if not selected:
+        return
+    _mark_episode_seen(selected)
+    from lib.ui.detailwindow import open_detail
+    if open_detail(selected.get('type'), selected.get('id')):
+        window.close()
+
+
+def _mark_episode_seen(episode):
+    """Persist that `episode` (one of `_new_episode_items()`'s dicts) has
+    been acted on, so it never reappears in the row - see
+    `lib.newepisodes.mark_seen`'s "acted on, not rendered" rule.
+
+    Best-effort: a store I/O failure here must not stop the user reaching
+    the detail screen they just picked; it only means the same episode
+    might resurface once more."""
+    import xbmc
+
+    from lib.newepisodes import mark_seen
+    from lib.ui.compat import log
+
+    store = get_store()
+    try:
+        store.set_seen_episodes(mark_seen(store.get_seen_episodes(), [episode]))
+    except Exception as exc:
+        log('homewindow: failed to mark episode seen: %r' % (exc,), xbmc.LOGWARNING)
 
 
 def _open_type_row(window, action):
@@ -249,6 +427,7 @@ L_FOR_ACTION = {action: string_id for string_id, action in _MENU}
 
 _ACTIONS = {
     'mystuff': _open_mystuff,
+    'new_episodes': _open_new_episodes,
     'movies': lambda window: _open_type_row(window, 'movies'),
     'series': lambda window: _open_type_row(window, 'series'),
     'anime': lambda window: _open_type_row(window, 'anime'),

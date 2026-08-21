@@ -843,3 +843,27 @@ msgstr "フィルターにより %d 件のソースが非表示"
 msgctxt "#30264"
 msgid "Filters matched nothing - showing all sources"
 msgstr "フィルター条件に一致するものがありません。すべてのソースを表示します"
+
+msgctxt "#30313"
+msgid "New Episodes"
+msgstr "新しいエピソード"
+
+msgctxt "#30314"
+msgid "Show New Episodes"
+msgstr "新しいエピソードを表示"
+
+msgctxt "#30315"
+msgid "%d new episode ready to watch"
+msgstr "%d件の新しいエピソード"
+
+msgctxt "#30316"
+msgid "%d new episodes ready to watch"
+msgstr "%d件の新しいエピソード"
+
+msgctxt "#30317"
+msgid "New episodes"
+msgstr "新しいエピソード"
+
+msgctxt "#30318"
+msgid "NEW"
+msgstr "新着"

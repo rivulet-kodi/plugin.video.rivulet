@@ -54,6 +54,15 @@ BAND_ROWS = {
     'library': (30032, 30137),
 }
 
+#: Reused by `lib.ui.homewindow`'s "New Episodes" Home row for its own,
+#: standalone single-band GridWindow session - that session never runs
+#: alongside "My Stuff"'s four real bands, so borrowing the 'library'
+#: row's (list, header) control ids for it is safe. The skin has no 5th
+#: pair to give a genuinely new band, which the no-new-skin-XML rule
+#: forbids adding; `open_grid()`'s `labels=` overrides that row's header
+#: text away from "Your library" for the borrowing session.
+NEW_EPISODES_BAND = 'library'
+
 #: The band whose row is focused when the screen opens - the first one
 #: with anything in it, in `mystuff.BAND_ORDER`.
 LIST = BAND_ROWS['resume'][0]
@@ -198,15 +207,24 @@ class GridWindow(BaseWindow):
         super().__init__(*args, **kwargs)
         self.bands = []
         self.heading = ''
+        self.labels = None
         self.selected = None
 
-    def start(self, bands, heading=''):
+    def start(self, bands, heading='', labels=None):
         """doModal() with `bands` (a `[(band, [item, ...]), ...]` list, as
         `mystuff.group_by_band()` returns) filling one row each. Returns
         the item picked, or None if the user backed out without picking
-        one."""
+        one.
+
+        `labels` optionally overrides one or more rows' own header text
+        (`{band: string_id}`), for a caller reusing an existing band's
+        control ids for an unrelated single-band screen - see
+        `NEW_EPISODES_BAND` and `lib.ui.homewindow._open_new_episodes()`,
+        which needs the borrowed 'library' row to say "New episodes"
+        rather than "Your library" for its own session."""
         self.bands = [(band, list(items)) for band, items in bands or [] if items]
         self.heading = heading or ''
+        self.labels = labels or None
         self.selected = None
         if not self.bands:
             return None
@@ -229,13 +247,20 @@ class GridWindow(BaseWindow):
         # previous pass would both double its items and keep a band on
         # screen that the merge no longer produces.
         filled = dict(self.bands)
+        # `self.labels` overrides BAND_HEADINGS only for THIS instance/
+        # session (never mutates the shared dict), so a caller borrowing
+        # a row's control ids (see `start()`'s docstring) never affects
+        # any other GridWindow session's rendering of that same band.
+        headings = dict(BAND_HEADINGS)
+        if self.labels:
+            headings.update(self.labels)
         for band, (list_id, label_id) in BAND_ROWS.items():
             control = self.getControl(list_id)
             control.reset()
             items = filled.get(band) or []
             if items:
                 control.addItems([make_list_item(item) for item in items])
-            self.getControl(label_id).setLabel(L(BAND_HEADINGS[band]).upper() if items else '')
+            self.getControl(label_id).setLabel(L(headings[band]).upper() if items else '')
             # Drives both the header's and the row's visibility. The
             # obvious condition - Integer.IsGreater(Container(id).NumItems,0)
             # - cannot be used: NumItems still reads 0 in this same pass
@@ -310,11 +335,12 @@ class GridWindow(BaseWindow):
         self.close()
 
 
-def open_grid(bands, heading=''):
+def open_grid(bands, heading='', labels=None):
     """Build and run a GridWindow over `bands` (as
     `mystuff.group_by_band()` returns); returns the selected item dict, or
     None if the user closed it without picking one (or `bands` was
-    empty).
+    empty). `labels` is forwarded to `GridWindow.start()` - see its
+    docstring.
 
     The caller (`lib.ui.mystuff.open_my_stuff()`) wraps this in its own
     try/except and logs+notifies on failure, so an exception from
@@ -323,7 +349,7 @@ def open_grid(bands, heading=''):
     e.g. if onInit() or a mid-modal callback raised)."""
     win = open_window(GridWindow, 'GridWindow.xml')
     try:
-        return win.start(bands, heading=heading)
+        return win.start(bands, heading=heading, labels=labels)
     finally:
         try:
             win.close()

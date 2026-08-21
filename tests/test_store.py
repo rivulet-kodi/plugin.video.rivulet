@@ -1145,3 +1145,44 @@ def test_atomic_write_matches_pure_python_json_dump_byte_for_byte(tmp_path):
         with open(actual_path, "rb") as fh:
             actual_bytes = fh.read()
         assert actual_bytes == expected_bytes
+
+
+# --- seen episodes (lib.newepisodes new-episode dismissal) -----------------
+
+
+def test_get_seen_episodes_returns_empty_dict_when_never_set(tmp_path):
+    store = make_store(tmp_path)
+    assert store.get_seen_episodes() == {}
+
+
+def test_set_and_get_seen_episodes_round_trip(tmp_path):
+    store = make_store(tmp_path)
+    seen = {"series\x1ftt1\x1ftt1:1:2": True}
+    store.set_seen_episodes(seen)
+    assert store.get_seen_episodes() == seen
+
+
+def test_seen_episodes_persists_across_store_instances(tmp_path):
+    data_dir = tmp_path / "addon_data"
+    seen = {"series\x1ftt1\x1ftt1:1:1": True}
+    Store(str(data_dir)).set_seen_episodes(seen)
+    assert Store(str(data_dir)).get_seen_episodes() == seen
+
+
+def test_corrupt_seen_episodes_json_returns_empty_dict_without_raising(tmp_path):
+    data_dir = tmp_path / "addon_data"
+    data_dir.mkdir()
+    (data_dir / "seen_episodes.json").write_text("{not valid json")
+    store = Store(str(data_dir))
+    assert store.get_seen_episodes() == {}  # must not raise
+
+
+def test_seen_episodes_cache_is_invalidated_after_write(tmp_path):
+    """`get_seen_episodes()` is served from `_cached_read`'s per-instance
+    memoisation; a `set_seen_episodes()` on the SAME instance must not
+    leave a stale empty result cached from the read before it."""
+    store = make_store(tmp_path)
+    assert store.get_seen_episodes() == {}  # populates the read cache
+    seen = {"series\x1ftt1\x1ftt1:1:3": True}
+    store.set_seen_episodes(seen)
+    assert store.get_seen_episodes() == seen

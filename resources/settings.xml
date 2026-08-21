@@ -8,6 +8,11 @@
                     <default>true</default>
                     <control type="toggle"/>
                 </setting>
+                <setting id="home_show_new_episodes" type="boolean" label="30314">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
                 <setting id="home_show_movies" type="boolean" label="30220">
                     <level>0</level>
                     <default>true</default>
