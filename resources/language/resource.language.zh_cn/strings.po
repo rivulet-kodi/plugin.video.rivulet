@@ -743,3 +743,15 @@ msgstr "已禁用"
 msgctxt "#30252"
 msgid "Enabled"
 msgstr "已启用"
+
+msgctxt "#30270"
+msgid "Move up"
+msgstr "上移"
+
+msgctxt "#30271"
+msgid "Move down"
+msgstr "下移"
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr "插件已不存在"

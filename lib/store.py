@@ -1130,6 +1130,48 @@ class Store:
 
         self.update_addons(_set_disabled)
 
+    def move_addon(self, transport_url, delta):
+        """Move the addon at ``transport_url`` by ``delta`` positions
+        within the installed list.
+
+        List order is not cosmetic: `lib.ui.views` fans catalog/meta/
+        stream requests out across `get_enabled_addons()` in list order,
+        so moving an addon earlier moves it earlier in every such
+        fan-out too. ``delta`` is directional -- negative moves the
+        addon toward index 0, positive moves it toward the end -- and
+        the target index is clamped to ``[0, len(addons) - 1]``, so a
+        move already pointed past a boundary (e.g. moving the first
+        addon up) resolves to the same index it started at. That
+        resolves-to-same-index case returns ``addons`` unchanged (the
+        very same list object), which :meth:`update_addons` recognises
+        as "nothing to write" -- a boundary move is a genuine no-op, not
+        a silently-discarded intent that still rewrites the file.
+
+        Raises :class:`ValueError` if ``transport_url`` is not
+        installed, the same shape as :meth:`remove_addon`'s
+        protected-addon refusal -- unlike removal/disable there is no
+        sensible "not installed" position to move to, so this does not
+        silently no-op.
+
+        Safe against a concurrent ``default.py`` process modifying
+        addons.json at the same time -- see :meth:`update_addons`.
+        """
+        def _move(addons):
+            index = next(
+                (i for i, a in enumerate(addons) if a.get("transportUrl") == transport_url),
+                None,
+            )
+            if index is None:
+                raise ValueError("addon not installed: %s" % transport_url)
+            target = max(0, min(len(addons) - 1, index + delta))
+            if target == index:
+                return addons
+            new_addons = list(addons)
+            new_addons.insert(target, new_addons.pop(index))
+            return new_addons
+
+        self.update_addons(_move)
+
     # -- auth --------------------------------------------------------------
 
     def get_auth(self):

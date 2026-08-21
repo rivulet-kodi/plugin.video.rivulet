@@ -743,3 +743,15 @@ msgstr "معطّل"
 msgctxt "#30252"
 msgid "Enabled"
 msgstr "مفعّل"
+
+msgctxt "#30270"
+msgid "Move up"
+msgstr "نقل للأعلى"
+
+msgctxt "#30271"
+msgid "Move down"
+msgstr "نقل للأسفل"
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr "لم تعد الإضافة مثبتة"

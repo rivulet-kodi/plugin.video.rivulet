@@ -743,3 +743,15 @@ msgstr "Uitgeschakeld"
 msgctxt "#30252"
 msgid "Enabled"
 msgstr "Ingeschakeld"
+
+msgctxt "#30270"
+msgid "Move up"
+msgstr "Omhoog verplaatsen"
+
+msgctxt "#30271"
+msgid "Move down"
+msgstr "Omlaag verplaatsen"
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr "Add-on is niet meer geïnstalleerd"

@@ -743,3 +743,15 @@ msgstr "사용 안 함"
 msgctxt "#30252"
 msgid "Enabled"
 msgstr "사용 중"
+
+msgctxt "#30270"
+msgid "Move up"
+msgstr "위로 이동"
+
+msgctxt "#30271"
+msgid "Move down"
+msgstr "아래로 이동"
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr "애드온이 더 이상 설치되어 있지 않습니다"

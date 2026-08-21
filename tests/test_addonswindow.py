@@ -36,15 +36,17 @@ _RELOAD_MODULE_NAMES = (
 
 class _FakeStore:
     """Fake `lib.store.Store`: tracks `get_addons()`'s backing list plus
-    every `install_addon`/`remove_addon`/`set_addon_disabled` call, and
-    reproduces `remove_addon`'s real protected-addon `ValueError`
-    refusal."""
+    every `install_addon`/`remove_addon`/`set_addon_disabled`/
+    `move_addon` call, and reproduces `remove_addon`'s real
+    protected-addon `ValueError` refusal and `move_addon`'s real
+    not-installed `ValueError` refusal plus boundary clamping."""
 
     def __init__(self, addons=None):
         self.addons = list(addons or [])
         self.installed = []
         self.removed = []
         self.disable_calls = []
+        self.move_calls = []
 
     def get_addons(self):
         return self.addons
@@ -73,6 +75,16 @@ class _FakeStore:
         else:
             flags.pop('disabled', None)
         target['flags'] = flags
+
+    def move_addon(self, transport_url, delta):
+        self.move_calls.append((transport_url, delta))
+        index = next((i for i, a in enumerate(self.addons) if a.get('transportUrl') == transport_url), None)
+        if index is None:
+            raise ValueError('addon not installed: %s' % transport_url)
+        target = max(0, min(len(self.addons) - 1, index + delta))
+        if target == index:
+            return
+        self.addons.insert(target, self.addons.pop(index))
 
     def get_auth(self):
         return None
@@ -267,6 +279,58 @@ def test_onclick_addon_row_opens_action_menu_with_enable_row_when_disabled(load_
     assert captured == [('Addon A', ['STR30249', 'STR30250'])]
 
 
+def test_onclick_first_addon_menu_omits_move_up(load_addonswindow, monkeypatch):
+    """The first addon's action menu must not offer "Move up" - it would
+    be an inert entry on a remote-control menu."""
+    first = _descriptor(transport='https://a.example/manifest.json', name='Addon A')
+    second = _descriptor(transport='https://b.example/manifest.json', name='Addon B')
+    ctx = load_addonswindow()
+    captured = []
+    _stub_choose(monkeypatch, ctx, -1, capture=captured)
+    _wire_store(ctx.addonswindow, _FakeStore(addons=[first, second]))
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    win.getControl(ctx.addonswindow.LIST).selected_index = 1  # first addon row
+
+    win.onClick(ctx.addonswindow.LIST)
+
+    assert captured == [('Addon A', ['STR30248', 'STR30250', 'STR30271'])]
+
+
+def test_onclick_last_addon_menu_omits_move_down(load_addonswindow, monkeypatch):
+    """The last addon's action menu must not offer "Move down"."""
+    first = _descriptor(transport='https://a.example/manifest.json', name='Addon A')
+    second = _descriptor(transport='https://b.example/manifest.json', name='Addon B')
+    ctx = load_addonswindow()
+    captured = []
+    _stub_choose(monkeypatch, ctx, -1, capture=captured)
+    _wire_store(ctx.addonswindow, _FakeStore(addons=[first, second]))
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2  # second addon row
+
+    win.onClick(ctx.addonswindow.LIST)
+
+    assert captured == [('Addon B', ['STR30248', 'STR30250', 'STR30270'])]
+
+
+def test_onclick_middle_addon_menu_offers_both_move_directions(load_addonswindow, monkeypatch):
+    first = _descriptor(transport='https://a.example/manifest.json', name='Addon A')
+    middle = _descriptor(transport='https://b.example/manifest.json', name='Addon B')
+    last = _descriptor(transport='https://c.example/manifest.json', name='Addon C')
+    ctx = load_addonswindow()
+    captured = []
+    _stub_choose(monkeypatch, ctx, -1, capture=captured)
+    _wire_store(ctx.addonswindow, _FakeStore(addons=[first, middle, last]))
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2  # middle addon row
+
+    win.onClick(ctx.addonswindow.LIST)
+
+    assert captured == [('Addon B', ['STR30248', 'STR30250', 'STR30270', 'STR30271'])]
+
+
 def test_onclick_dismissed_action_menu_mutates_nothing(load_addonswindow, monkeypatch):
     descriptor = _descriptor()
     ctx = load_addonswindow()
@@ -357,6 +421,126 @@ def test_onclick_toggle_never_calls_sync_addons(load_addonswindow, monkeypatch):
     win.onClick(ctx.addonswindow.LIST)
 
     assert sync_calls == []
+
+
+def test_onclick_move_up_row_reorders_list_and_keeps_focus_on_moved_addon(load_addonswindow, monkeypatch):
+    first = _descriptor(transport='https://a.example/manifest.json', name='Addon A')
+    middle = _descriptor(transport='https://b.example/manifest.json', name='Addon B')
+    last = _descriptor(transport='https://c.example/manifest.json', name='Addon C')
+    ctx = load_addonswindow()
+    _stub_choose(monkeypatch, ctx, 2)  # "Move up" - 3rd row of the middle addon's 4-row menu
+    store = _FakeStore(addons=[first, middle, last])
+    _wire_store(ctx.addonswindow, store)
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2  # middle addon row (Addon B)
+
+    win.onClick(ctx.addonswindow.LIST)
+
+    assert store.move_calls == [('https://b.example/manifest.json', -1)]
+    assert [a['transportUrl'] for a in store.addons] == [
+        'https://b.example/manifest.json', 'https://a.example/manifest.json', 'https://c.example/manifest.json',
+    ]
+    control = win.getControl(ctx.addonswindow.LIST)
+    assert control.items[1].getLabel().startswith('Addon B')  # Addon B is now first
+    assert control.selected_index == 1  # focus follows Addon B to its new row
+
+
+def test_onclick_move_down_row_reorders_list_and_pushes_sync(load_addonswindow, monkeypatch):
+    """Unlike `_toggle`'s local-only `disabled` flag, list order is part
+    of the synced addon-collection shape, so a move must push like
+    install/remove."""
+    first = _descriptor(transport='https://a.example/manifest.json', name='Addon A')
+    second = _descriptor(transport='https://b.example/manifest.json', name='Addon B')
+    ctx = load_addonswindow()
+    _stub_choose(monkeypatch, ctx, 2)  # "Move down" - 3rd row of the first addon's 3-row menu
+    store = _FakeStore(addons=[first, second])
+    _wire_store(ctx.addonswindow, store)
+    sync_calls = []
+    monkeypatch.setattr(ctx.views, '_sync_addons_if_logged_in', lambda s: sync_calls.append(s))
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    win.getControl(ctx.addonswindow.LIST).selected_index = 1  # first addon row (Addon A)
+
+    win.onClick(ctx.addonswindow.LIST)
+
+    assert store.move_calls == [('https://a.example/manifest.json', 1)]
+    assert sync_calls == [store]
+    assert [a['transportUrl'] for a in store.addons] == [
+        'https://b.example/manifest.json', 'https://a.example/manifest.json',
+    ]
+    control = win.getControl(ctx.addonswindow.LIST)
+    assert control.selected_index == 2  # Addon A followed its move to the second row
+
+
+def test_onclick_move_concurrent_update_notifies_and_reloads_instead_of_raising(load_addonswindow, monkeypatch):
+    """Same guard as toggle/remove - a losing CAS race on `move_addon()`
+    must notify + reload rather than raise out of `_move()`."""
+    first = _descriptor(transport='https://a.example/manifest.json', name='Addon A')
+    second = _descriptor(transport='https://b.example/manifest.json', name='Addon B')
+    ctx = load_addonswindow()
+    _stub_choose(monkeypatch, ctx, 2)  # "Move down" on the first addon
+    store = _FakeStore(addons=[first, second])
+
+    def _raise(transport_url, delta):
+        raise ConcurrentUpdateError('addons.json changed underneath us')
+
+    monkeypatch.setattr(store, 'move_addon', _raise)
+    _wire_store(ctx.addonswindow, store)
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    reload_calls = []
+    original_reload = win._reload
+
+    def _counting_reload(*args, **kwargs):
+        reload_calls.append(True)
+        original_reload(*args, **kwargs)
+
+    monkeypatch.setattr(win, '_reload', _counting_reload)
+
+    win.onClick(ctx.addonswindow.LIST)  # must not raise ConcurrentUpdateError
+
+    assert ctx.env.notifications == [('Rivulet', 'STR30032', 'info', 4000)]
+    assert reload_calls == [True]
+
+
+def test_onclick_move_store_raises_valueerror_notifies_without_reload(load_addonswindow, monkeypatch):
+    """`_guard_mutation()` only catches `ConcurrentUpdateError` - if a
+    concurrent `default.py` process removes the addon while
+    `dialogs.choose()`'s action menu is still open (it blocks), `Store.
+    move_addon()`'s own not-installed `ValueError` refusal must still
+    propagate to `_move()`'s own handler, notifying the refusal string
+    WITHOUT the extra `_reload()` a concurrent-update failure would
+    trigger - same shape as `_remove()`'s protected-addon `ValueError`
+    guard."""
+    first = _descriptor(transport='https://a.example/manifest.json', name='Addon A')
+    second = _descriptor(transport='https://b.example/manifest.json', name='Addon B')
+    ctx = load_addonswindow()
+    _stub_choose(monkeypatch, ctx, 2)  # "Move down" on the first addon
+    store = _FakeStore(addons=[first, second])
+
+    def _raise(transport_url, delta):
+        raise ValueError('addon not installed: %s' % transport_url)
+
+    monkeypatch.setattr(store, 'move_addon', _raise)
+    _wire_store(ctx.addonswindow, store)
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    reload_calls = []
+    original_reload = win._reload
+
+    def _counting_reload(*args, **kwargs):
+        reload_calls.append(True)
+        original_reload(*args, **kwargs)
+
+    monkeypatch.setattr(win, '_reload', _counting_reload)
+
+    win.onClick(ctx.addonswindow.LIST)  # must not raise ValueError
+
+    assert ctx.env.notifications == [('Rivulet', 'STR30272', 'info', 4000)]
+    assert reload_calls == []
 
 
 # ---------------------------------------------------------------------------

@@ -743,3 +743,15 @@ msgstr "Disabilitato"
 msgctxt "#30252"
 msgid "Enabled"
 msgstr "Abilitato"
+
+msgctxt "#30270"
+msgid "Move up"
+msgstr "Sposta su"
+
+msgctxt "#30271"
+msgid "Move down"
+msgstr "Sposta giù"
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr "L'add-on non è più installato"

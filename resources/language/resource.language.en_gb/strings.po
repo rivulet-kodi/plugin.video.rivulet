@@ -743,3 +743,15 @@ msgstr ""
 msgctxt "#30252"
 msgid "Enabled"
 msgstr ""
+
+msgctxt "#30270"
+msgid "Move up"
+msgstr ""
+
+msgctxt "#30271"
+msgid "Move down"
+msgstr ""
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr ""

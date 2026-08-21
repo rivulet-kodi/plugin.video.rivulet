@@ -743,3 +743,15 @@ msgstr "Wyłączony"
 msgctxt "#30252"
 msgid "Enabled"
 msgstr "Włączony"
+
+msgctxt "#30270"
+msgid "Move up"
+msgstr "Przesuń w górę"
+
+msgctxt "#30271"
+msgid "Move down"
+msgstr "Przesuń w dół"
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr "Dodatek nie jest już zainstalowany"

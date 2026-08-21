@@ -1,9 +1,10 @@
 """AddonsWindow: a vertical list of every installed addon - Rivulet's
 add-on manager. Row 0 installs a new addon from a manifest URL; every
-other row opens an action menu (disable/enable, remove) for that addon -
-removal is refused for protected/official addons, disabling is not
-(it is reversible local state, never pushed to Stremio). Built/run via
-`open_addons()`.
+other row opens an action menu (disable/enable, remove, move up/down)
+for that addon - removal is refused for protected/official addons,
+disabling is not (it is reversible local state, never pushed to
+Stremio), and moving reorders the list every catalog/stream fan-out
+call site walks in order. Built/run via `open_addons()`.
 """
 import xbmcgui
 
@@ -15,6 +16,11 @@ LIST = 30002
 #: strings.po id for the removal refusal shown for protected/official
 #: addons.
 _PROTECTED_MESSAGE_STRING_ID = 30191
+
+#: strings.po id for the move refusal shown when a concurrent process
+#: removed the addon while its action menu was open (`move_addon()`
+#: raises `ValueError` for a `transportUrl` that is no longer installed).
+_NOT_INSTALLED_MESSAGE_STRING_ID = 30272
 
 
 def _clean_description(text):
@@ -38,7 +44,7 @@ class AddonsWindow(BaseWindow):
     def onInit(self):
         self._reload()
 
-    def _reload(self):
+    def _reload(self, focus_transport_url=None):
         self.store = get_store()
         self.addons = self.store.get_addons()
 
@@ -46,6 +52,18 @@ class AddonsWindow(BaseWindow):
         control.reset()
         control.addItems(self._build_items())
         self.setFocusId(LIST)
+        if focus_transport_url is None:
+            return
+        # Control position 0 is the "install" row ahead of every addon
+        # row, so an addon's list position is its addons-list index + 1.
+        # A move that loses the user's place is unusable on a remote
+        # control - see the move-up/down entries in _open_actions().
+        index = next(
+            (i for i, a in enumerate(self.addons) if a.get('transportUrl') == focus_transport_url),
+            None,
+        )
+        if index is not None:
+            control.selectItem(index + 1)
 
     def _build_items(self):
         from lib.ui.compat import L
@@ -76,7 +94,8 @@ class AddonsWindow(BaseWindow):
         if position == 'install':
             self._install()
             return
-        self._open_actions(self.addons[int(position)])
+        index = int(position)
+        self._open_actions(self.addons[index], index)
 
     def _guard_mutation(self, mutate):
         """Run a store mutation that goes through the CAS `update_addons()`
@@ -175,7 +194,7 @@ class AddonsWindow(BaseWindow):
         notify(L(30013))
         self._reload()
 
-    def _open_actions(self, descriptor):
+    def _open_actions(self, descriptor, index):
         from lib.ui import dialogs
         from lib.ui.compat import L
 
@@ -183,11 +202,20 @@ class AddonsWindow(BaseWindow):
         flags = descriptor.get('flags') or {}
         disabled = bool(flags.get('disabled'))
         rows = [L(30249) if disabled else L(30248), L(30250)]
+        actions = [self._toggle, self._remove]
+        # Omit rather than show a move entry that would be a no-op at the
+        # boundary it points toward - an inert "Move up" on the first
+        # addon is just noise on a remote-control menu.
+        if index > 0:
+            rows.append(L(30270))
+            actions.append(lambda d: self._move(d, -1))
+        if index < len(self.addons) - 1:
+            rows.append(L(30271))
+            actions.append(lambda d: self._move(d, 1))
         picked = dialogs.choose(manifest.get('name', '?'), rows)
-        if picked == 0:
-            self._toggle(descriptor)
-        elif picked == 1:
-            self._remove(descriptor)
+        if not 0 <= picked < len(actions):
+            return
+        actions[picked](descriptor)
 
     def _toggle(self, descriptor):
         from lib.ui.compat import L, notify
@@ -201,6 +229,36 @@ class AddonsWindow(BaseWindow):
         # here - toggling must never cost a network call.
         notify(L(30252) if disabled else L(30251))
         self._reload()
+
+    def _move(self, descriptor, delta):
+        """Reorder ``descriptor`` by ``delta`` positions via the CAS
+        `Store.move_addon()` and reload the list keeping focus on it -
+        a reorder tool that loses your place on a remote control is
+        unusable. Pushed to the Stremio account like install/remove
+        (unlike `_toggle`'s local-only `disabled` flag): list order is
+        part of the synced addon-collection shape, not presentation
+        state.
+
+        `dialogs.choose()` blocks while the action menu is open, and Kodi
+        runs `default.py` as concurrent OS processes, so another process
+        can remove this very addon while the menu sits open; `move_addon()`
+        then raises `ValueError` for the now-uninstalled `transportUrl`.
+        Handled exactly like `_remove()`'s protected-addon `ValueError`:
+        notify and return without reloading - nothing here has mutated
+        the in-memory list, so it is still coherent as-is.
+        """
+        from lib.ui.compat import L, notify
+        from lib.ui.views import _sync_addons_if_logged_in
+
+        transport_url = descriptor.get('transportUrl')
+        try:
+            if not self._guard_mutation(lambda: self.store.move_addon(transport_url, delta)):
+                return
+        except ValueError:
+            notify(L(_NOT_INSTALLED_MESSAGE_STRING_ID))
+            return
+        _sync_addons_if_logged_in(self.store)
+        self._reload(focus_transport_url=transport_url)
 
 
 def open_addons():

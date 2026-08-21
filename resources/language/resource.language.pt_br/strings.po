@@ -743,3 +743,15 @@ msgstr "Desativado"
 msgctxt "#30252"
 msgid "Enabled"
 msgstr "Ativado"
+
+msgctxt "#30270"
+msgid "Move up"
+msgstr "Mover para cima"
+
+msgctxt "#30271"
+msgid "Move down"
+msgstr "Mover para baixo"
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr "O complemento não está mais instalado"

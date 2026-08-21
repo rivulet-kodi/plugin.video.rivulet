@@ -743,3 +743,15 @@ msgstr "Devre Dışı"
 msgctxt "#30252"
 msgid "Enabled"
 msgstr "Etkinleştirildi"
+
+msgctxt "#30270"
+msgid "Move up"
+msgstr "Yukarı taşı"
+
+msgctxt "#30271"
+msgid "Move down"
+msgstr "Aşağı taşı"
+
+msgctxt "#30272"
+msgid "Addon no longer installed"
+msgstr "Eklenti artık yüklü değil"
