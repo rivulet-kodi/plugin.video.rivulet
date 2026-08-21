@@ -799,22 +799,90 @@ def _wait_for_playback_end(player=None, monitor=None, start_timeout=20.0, tick=0
         return False, False
 
 
+#: Cap on how many failing addons the aggregate WARNING below names by
+#: addon+category. This is the fix for issue #34: a stale debrid key
+#: surfaced in a user's log as nothing but "3 addon(s) failed", because
+#: the per-addon detail that would explain WHICH addon and WHY is
+#: logged at LOGDEBUG, and that user's own log showed "Disabled debug
+#: logging due to GUI setting" - true of every default-settings bug
+#: reporter. Naming every failure is fine for a handful of addons, but
+#: a genuinely broken install (40 stale/dead addons) must not turn this
+#: into one unbounded line - so this caps how many are spelled out by
+#: name; anything past the cap is still counted, just folded into a
+#: trailing '+N more'.
+_MAX_NAMED_ADDON_FAILURES = 8
+
+
+def _safe_failure_reason(exc):
+    """The short, safe-to-log-at-default-level piece of an `AddonError`
+    the aggregate WARNING below can name a failing addon by, without
+    repeating `_query_addon_streams()`'s own fuller per-addon DEBUG
+    detail: `exc.category` - safe-by-construction ONLY for `AddonError`,
+    see that class's own docstring in lib/stremio/addons.py: `category`
+    is populated exclusively by `_request_error_category()` or a fixed
+    literal at `AddonError` raise sites, so it can never be `str(exc)`
+    or a url.
+
+    This function is deliberately typed to `AddonError` alone, and
+    callers MUST only reach it from an `except AddonError` branch where
+    that guarantee actually holds - never via `hasattr(exc, 'category')`
+    duck-typing on an arbitrary exception. A bare attribute check is NOT
+    the same contract: any other exception type (a parsing error today,
+    anything third-party tomorrow) could carry a `category` attribute
+    of its own for unrelated reasons, and nothing stops that value from
+    being as sensitive as a credential - exactly the leak this WARNING
+    exists to avoid. Every other exception must use its own bare type
+    name (e.g. 'ConnectionError') instead, computed directly at the
+    call site rather than through this function - see
+    `_query_addon_streams()`'s generic `except Exception` branch below."""
+    return exc.category or type(exc).__name__
+
+
+def _summarize_addon_failures(failures):
+    """Render `failures` (an ordered `[(addon_name, reason), ...]` list
+    built by a `consume_next()` closure in both `_fetch_stream_pairs()`
+    and `open_streams()`) into the single WARNING-level line that is
+    the ONLY failure detail visible to a user on Kodi's default log
+    level (issue #34: their log had nothing but the bare count, because
+    the per-addon DEBUG lines that would name the cause are silenced by
+    "Disabled debug logging due to GUI setting" for every such user).
+    Caps the named addons at `_MAX_NAMED_ADDON_FAILURES`; anything past
+    the cap is folded into one trailing '+N more' instead of growing
+    this single log line without bound."""
+    named = failures[:_MAX_NAMED_ADDON_FAILURES]
+    detail = ', '.join('%s (%s)' % (addon_name, reason) for addon_name, reason in named)
+    remaining = len(failures) - len(named)
+    if remaining:
+        detail = '%s, +%d more' % (detail, remaining)
+    return '%d addon(s) failed: %s' % (len(failures), detail)
+
+
 def _query_addon_streams(client, transport_url, addon_name, stype, sid):
     """Fetch+parse one addon's own streams for (stype, sid) - the unit
     of work every fan-out below submits CONCURRENTLY (see
     `_MAX_STREAM_ADDON_WORKERS`) instead of the old serial `for` loop's
     one-at-a-time calls (see the module docstring for the measured
-    5.0s/27.6s cost that caused). Returns a `(pairs, failed)` tuple;
-    `failed` is True on failure, already logged here (an `AddonError` at
-    DEBUG, anything unexpected at ERROR) with the addon's NAME plus only
-    `safe_url_for_log()`'s safe scheme+host and `addon_error_detail()`'s
-    type-plus-safe-category summary (e.g. "AddonError (HTTP 401)") -
-    never the raw url or exception text, which may embed
-    credentials/paths/queries - so a caller can aggregate a single
-    WARNING across every addon's own outcome without re-deriving this
-    per-addon detail itself. The name matters: the aggregate is only a
-    count, so without it a user reporting "addon X's streams never
-    appear" (issue #32) leaves no way to tell WHICH addon dropped out.
+    5.0s/27.6s cost that caused). Returns a `(pairs, failed, reason)`
+    tuple; `failed` is True on failure, already logged here (an
+    `AddonError` at DEBUG, anything unexpected at ERROR) with the
+    addon's NAME plus only `safe_url_for_log()`'s safe scheme+host and
+    `addon_error_detail()`'s type-plus-safe-category summary (e.g.
+    "AddonError (HTTP 401)") - never the raw url or exception text,
+    which may embed credentials/paths/queries - so a caller can
+    aggregate a single WARNING across every addon's own outcome
+    without re-deriving this per-addon detail itself. The name
+    matters: the aggregate is only a count, so without it a user
+    reporting "addon X's streams never appear" (issue #32) leaves no
+    way to tell WHICH addon dropped out. `reason` is the same safe
+    detail in short form: `_safe_failure_reason()`'s `AddonError`
+    category for the first branch below, or, for any other exception,
+    its own bare type name computed directly at that branch (never
+    duck-typed through `_safe_failure_reason()` - see that function's
+    own docstring for why) - `None` on success - so
+    `_summarize_addon_failures()` can name each failing
+    addon in the one aggregate line visible at Kodi's default log
+    level, where debug logging (and this function's own per-addon
+    line) is off (issue #34).
 
     Parsing runs inside the same guard as the fetch. A stream resource
     is arbitrary third-party JSON: a body that is a bare list rather
@@ -835,12 +903,12 @@ def _query_addon_streams(client, transport_url, addon_name, stype, sid):
     except AddonError as exc:
         log('streamswindow: %s (%s) failed: %s' % (
             addon_name, safe_url_for_log(transport_url), addon_error_detail(exc)), xbmc.LOGDEBUG)
-        return [], True
+        return [], True, _safe_failure_reason(exc)
     except Exception as exc:  # noqa: BLE001 - see docstring: a worker thread that dies here wedges its consumer
         log('streamswindow: %s (%s) raised %s' % (
             addon_name, safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGERROR)
-        return [], True
-    return pairs, False
+        return [], True, type(exc).__name__
+    return pairs, False, None
 
 
 def _supported_stream_addons(stype, sid):
@@ -870,7 +938,9 @@ def _start_stream_fetch_workers(stype, sid, addons):
     """Fan `_query_addon_streams()` out across a small, genuinely BOUNDED
     pool of raw daemon threads fed by a `queue.Queue` work queue, and
     return the results `Queue` they feed into as `(addon_name, pairs,
-    failed)` tuples. Exactly `min(len(addons), _MAX_STREAM_ADDON_WORKERS)`
+    failed, reason)` tuples (`reason` is `None` on success - see
+    `_query_addon_streams()`'s own docstring). Exactly
+    `min(len(addons), _MAX_STREAM_ADDON_WORKERS)`
     threads are started, each looping `work.get_nowait()` until the work
     queue is empty - bounding BOTH the thread count and the number of
     concurrent addon HTTP calls in flight, unlike spawning one thread per
@@ -900,8 +970,9 @@ def _start_stream_fetch_workers(stype, sid, addons):
                 transport_url, addon_name = work.get_nowait()
             except queue.Empty:
                 return
-            addon_pairs, failed = _query_addon_streams(client, transport_url, addon_name, stype, sid)
-            results.put((addon_name, addon_pairs, failed))
+            addon_pairs, failed, reason = _query_addon_streams(
+                client, transport_url, addon_name, stype, sid)
+            results.put((addon_name, addon_pairs, failed, reason))
 
     for _ in range(min(len(addons), _MAX_STREAM_ADDON_WORKERS)):
         threading.Thread(target=_worker, daemon=True).start()
@@ -909,8 +980,8 @@ def _start_stream_fetch_workers(stype, sid, addons):
 
 
 def _await_stream_result(results):
-    """Block for the next worker's own `(addon_name, pairs, failed)`
-    tuple - in short `_STREAM_RESULT_POLL_SECONDS` slices via a retried
+    """Block for the next worker's own `(addon_name, pairs, failed,
+    reason)` tuple - in short `_STREAM_RESULT_POLL_SECONDS` slices via a retried
     `Queue.get(timeout=...)` rather than one indefinite `get()`, so a
     caller looping on this (`_fetch_stream_pairs()`/`open_streams()`
     below) keeps re-checking its own `dialog.iscanceled()` between polls
@@ -947,7 +1018,7 @@ def _fetch_stream_pairs(stype, sid):
 
     addons = _supported_stream_addons(stype, sid)
     pairs = []
-    failed_addons = 0
+    failures = []
     if not addons:
         return pairs
 
@@ -957,15 +1028,18 @@ def _fetch_stream_pairs(stype, sid):
 
     def consume_next():
         """Advance by one addon's own answer, folding its pairs/failure
-        into the running totals above. Returns that addon's own `(name,
+        into the running totals above (`failures` collects each failing
+        addon's own `(name, reason)` pair for `_summarize_addon_failures()`
+        below - see `_query_addon_streams()`'s docstring for why `reason`
+        is already safe to log). Returns that addon's own `(name,
         pairs)`, or None once every addon has answered."""
-        nonlocal failed_addons, completed
+        nonlocal completed
         if completed >= total:
             return None
-        addon_name, addon_pairs, failed = _await_stream_result(results)
+        addon_name, addon_pairs, failed, reason = _await_stream_result(results)
         completed += 1
         if failed:
-            failed_addons += 1
+            failures.append((addon_name, reason))
         else:
             pairs.extend(addon_pairs)
         return addon_name, addon_pairs
@@ -980,8 +1054,8 @@ def _fetch_stream_pairs(stype, sid):
             addon_name, _addon_pairs = result
             dialog.update(int(completed * 100 / total), L(30187) % addon_name)
 
-    if failed_addons:
-        log('streamswindow: %d addon(s) failed' % failed_addons, xbmc.LOGWARNING)
+    if failures:
+        log('streamswindow: %s' % _summarize_addon_failures(failures), xbmc.LOGWARNING)
     return pairs
 
 
@@ -1235,20 +1309,23 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
     results = _start_stream_fetch_workers(stype, sid, addons)
     total = len(addons)
     pairs = []
-    failed_addons = 0
+    failures = []
     consumed = 0
 
     def consume_next():
         """Advance by one addon's own answer, folding its pairs/failure
-        into the running totals above. Returns that addon's own `(name,
+        into the running totals above (`failures` collects each failing
+        addon's own `(name, reason)` pair for `_summarize_addon_failures()`
+        below - see `_query_addon_streams()`'s docstring for why `reason`
+        is already safe to log). Returns that addon's own `(name,
         pairs)`, or None once every addon has answered."""
-        nonlocal failed_addons, consumed
+        nonlocal consumed
         if consumed >= total:
             return None
-        addon_name, addon_pairs, failed = _await_stream_result(results)
+        addon_name, addon_pairs, failed, reason = _await_stream_result(results)
         consumed += 1
         if failed:
-            failed_addons += 1
+            failures.append((addon_name, reason))
         else:
             pairs.extend(addon_pairs)
         return addon_name, addon_pairs
@@ -1264,8 +1341,8 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
             dialog.update(int(consumed * 100 / total), L(30187) % addon_name)
 
     if not pairs:
-        if failed_addons:
-            log('streamswindow: %d addon(s) failed' % failed_addons, xbmc.LOGWARNING)
+        if failures:
+            log('streamswindow: %s' % _summarize_addon_failures(failures), xbmc.LOGWARNING)
         notify(L(30030))
         return False
 
@@ -1289,16 +1366,16 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
         finally:
             if not stop_event.is_set():
                 feed.mark_done()
-            if failed_addons:
-                log('streamswindow: %d addon(s) failed' % failed_addons, xbmc.LOGWARNING)
+            if failures:
+                log('streamswindow: %s' % _summarize_addon_failures(failures), xbmc.LOGWARNING)
 
     still_loading = consumed < total
     if still_loading:
         threading.Thread(target=drain_remaining, daemon=True).start()
     else:
         feed.mark_done()
-        if failed_addons:
-            log('streamswindow: %d addon(s) failed' % failed_addons, xbmc.LOGWARNING)
+        if failures:
+            log('streamswindow: %s' % _summarize_addon_failures(failures), xbmc.LOGWARNING)
 
     log('streamswindow: opening StreamsWindow (%d streams so far)' % len(pairs), xbmc.LOGINFO)
     live = True

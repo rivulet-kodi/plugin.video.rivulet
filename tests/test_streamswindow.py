@@ -105,6 +105,19 @@ class _FakeAddonClient:
         return result
 
 
+class _SpoofedCategoryError(Exception):
+    """A non-`AddonError` exception that happens to carry a `category`
+    attribute of its own - standing in for some future/third-party
+    exception type outside `AddonError`'s safe-by-construction contract
+    (see `_safe_failure_reason()`'s docstring in lib/ui/streamswindow.py).
+    Used below to prove that contract is never extended to an arbitrary
+    exception via `hasattr(exc, 'category')` duck-typing."""
+
+    def __init__(self, message, category):
+        super().__init__(message)
+        self.category = category
+
+
 @pytest.fixture
 def load_streamswindow():
     """Factory fixture: `load_streamswindow(addon_info=None)` installs fresh
@@ -1286,7 +1299,7 @@ def test_open_streams_addonerror_is_logged_and_skipped_not_fatal(load_streamswin
     assert not any('upstream down' in msg or 'manifest.json' in msg for msg in debug_msgs)
     warnings = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGWARNING]
     assert len(warnings) == 1
-    assert 'streamswindow: 1 addon(s) failed' in warnings[0]
+    assert warnings[0] == '[plugin.video.rivulet] streamswindow: 1 addon(s) failed: Failing (AddonError)'
 
 
 def test_query_addon_streams_logs_addon_error_category_at_debug(load_streamswindow):
@@ -1305,13 +1318,76 @@ def test_query_addon_streams_logs_addon_error_category_at_debug(load_streamswind
         transport: AddonError('GET %s failed: HTTP 401' % transport, category='HTTP 401'),
     })
 
-    pairs, failed = sw._query_addon_streams(client, transport, 'TorBox', 'movie', 'tt1')
+    pairs, failed, reason = sw._query_addon_streams(client, transport, 'TorBox', 'movie', 'tt1')
 
     assert failed is True
+    assert reason == 'HTTP 401'
     assert pairs == []
     debug_msgs = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGDEBUG]
     assert any('TorBox' in msg and 'stremio.torbox.app' in msg and 'HTTP 401' in msg for msg in debug_msgs)
     assert not any('manifest.json' in msg for msg in debug_msgs)
+
+
+def test_query_addon_streams_never_trusts_a_category_attribute_off_a_non_addonerror_exception(
+    load_streamswindow,
+):
+    """The safe-category contract documented on `_safe_failure_reason()`
+    holds ONLY for `AddonError.category` - it is populated exclusively
+    by `_request_error_category()`/fixed literals at `AddonError` raise
+    sites, never by arbitrary code. A `category` attribute on any OTHER
+    exception type carries no such guarantee: nothing stops it from
+    being a live credential. `_query_addon_streams()` must fall back to
+    the exception's bare type name for such an exception instead of
+    duck-typing on `hasattr(exc, 'category')`, and that fallback must
+    never touch the log at any level."""
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    transport = 'https://evil.example/manifest.json'
+    secret = 'sk_live_51H8xJ2eZvKYlo2C'
+    client = _FakeAddonClient({
+        transport: _SpoofedCategoryError('boom', category=secret),
+    })
+
+    pairs, failed, reason = sw._query_addon_streams(client, transport, 'Spoofed', 'movie', 'tt1')
+
+    assert failed is True
+    assert pairs == []
+    assert reason == '_SpoofedCategoryError'
+    all_messages = ' '.join(msg for msg, _level in ctx.env.log_calls)
+    assert secret not in all_messages
+
+
+def test_open_streams_aggregate_warning_names_a_spoofed_category_addon_by_type_not_by_secret(
+    load_streamswindow, monkeypatch,
+):
+    """End-to-end companion to the unit test above: the aggregate
+    WARNING - the ONLY failure detail a default-log-level user ever
+    sees - must name a failing addon by its exception's bare type name
+    when that exception is not an `AddonError`, never by a `category`
+    attribute duck-typed off it, even when that attribute holds a
+    credential-shaped secret."""
+    ctx = load_streamswindow()
+    import xbmc
+    sw = ctx.streamswindow
+    transport = 'https://evil.example/manifest.json'
+    secret = 'sk_live_51H8xJ2eZvKYlo2C'
+    addon = {
+        'transportUrl': transport,
+        'manifest': {'name': 'Spoofed', 'resources': ['stream'], 'types': ['movie']},
+    }
+    client = _FakeAddonClient({transport: _SpoofedCategoryError('boom', category=secret)})
+    _wire_data_layer(sw, _FakeStore(addons=[addon]), client)
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: (False, False))
+
+    result = sw.open_streams('movie', 'tt1')
+
+    assert result is False  # the only addon failed -> no streams at all
+    all_messages = ' '.join(msg for msg, _level in ctx.env.log_calls)
+    assert secret not in all_messages
+    warnings = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGWARNING]
+    assert warnings == [
+        '[plugin.video.rivulet] streamswindow: 1 addon(s) failed: Spoofed (_SpoofedCategoryError)',
+    ]
 
 
 def test_open_streams_multiple_addon_failures_still_log_a_single_aggregate_warning(
@@ -1357,7 +1433,10 @@ def test_open_streams_multiple_addon_failures_still_log_a_single_aggregate_warni
     assert not any('boom a' in msg or 'boom b' in msg for msg in debug_msgs)
     warnings = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGWARNING]
     assert len(warnings) == 1
-    assert 'streamswindow: 2 addon(s) failed' in warnings[0]
+    warning = warnings[0]
+    assert warning.startswith('[plugin.video.rivulet] streamswindow: 2 addon(s) failed: ')
+    assert 'FailA (AddonError)' in warning
+    assert 'FailB (AddonError)' in warning
     assert not [lvl for _msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGERROR]
 
 
@@ -1411,7 +1490,7 @@ def test_open_streams_survives_an_addon_whose_payload_breaks_parsing(
     assert any('Bad' in msg and 'bad.example' in msg and 'TypeError' in msg for msg in errors)
     assert not any('hostile payload' in msg or 'manifest.json' in msg for msg in errors)
     warnings = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGWARNING]
-    assert len(warnings) == 1 and 'streamswindow: 1 addon(s) failed' in warnings[0]
+    assert len(warnings) == 1 and warnings[0] == '[plugin.video.rivulet] streamswindow: 1 addon(s) failed: Bad (TypeError)'
 
 
 
@@ -1436,9 +1515,112 @@ def test_open_streams_addon_failure_log_never_leaks_credentials_path_or_query(lo
     assert 'hunter2' not in all_messages
     assert 'token=abc123' not in all_messages
     assert '/private/path' not in all_messages
+    warnings = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGWARNING]
+    assert warnings == ['[plugin.video.rivulet] streamswindow: 1 addon(s) failed: Failing (AddonError)']
     debug_msgs = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGDEBUG]
     assert any('evil.example:8443' in msg for msg in debug_msgs)
     assert all('\n' not in msg and '\r' not in msg for msg in debug_msgs)
+
+
+
+def test_open_streams_aggregate_warning_names_each_failing_addon_with_its_safe_category(
+    load_streamswindow, monkeypatch,
+):
+    """The visibility fix for issue #34: a user on Kodi's default log
+    level never sees the per-addon DEBUG lines at all (their own log
+    showed "Disabled debug logging due to GUI setting"), so this
+    single WARNING line is the ONLY failure detail such a user can
+    ever hand a maintainer - it must name each failing addon plus its
+    safe category/exception type, not just a bare count."""
+    ctx = load_streamswindow()
+    import xbmc
+    sw = ctx.streamswindow
+    torbox_transport = 'https://torbox.example/manifest.json'
+    torrentio_transport = 'https://torrentio.example/manifest.json'
+    local_transport = 'https://local.example/manifest.json'
+    torbox = {
+        'transportUrl': torbox_transport,
+        'manifest': {'name': 'TorBox', 'resources': ['stream'], 'types': ['movie']},
+    }
+    torrentio = {
+        'transportUrl': torrentio_transport,
+        'manifest': {'name': 'Torrentio PM', 'resources': ['stream'], 'types': ['movie']},
+    }
+    local = {
+        'transportUrl': local_transport,
+        'manifest': {'name': 'Local Files', 'resources': ['stream'], 'types': ['movie']},
+    }
+    client = _FakeAddonClient({
+        torbox_transport: AddonError(
+            'GET %s failed: HTTP 401' % torbox_transport, category='HTTP 401'),
+        torrentio_transport: AddonError(
+            'GET %s failed: HTTP 403' % torrentio_transport, category='HTTP 403'),
+        local_transport: ConnectionError('refused'),
+    })
+    _wire_data_layer(sw, _FakeStore(addons=[torbox, torrentio, local]), client)
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: (False, False))
+
+    result = sw.open_streams('movie', 'tt1')
+
+    assert result is False  # every addon failed -> no streams at all
+    warnings = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGWARNING]
+    assert len(warnings) == 1
+    warning = warnings[0]
+    assert warning.startswith('[plugin.video.rivulet] streamswindow: 3 addon(s) failed: ')
+    assert 'TorBox (HTTP 401)' in warning
+    assert 'Torrentio PM (HTTP 403)' in warning
+    assert 'Local Files (ConnectionError)' in warning
+
+
+def test_summarize_addon_failures_caps_named_addons_and_folds_the_remainder(load_streamswindow):
+    """More failing addons than `_MAX_NAMED_ADDON_FAILURES` must not
+    grow the single aggregate WARNING line without bound (a user with
+    a genuinely broken install could have dozens of dead addons) - the
+    remainder past the cap is folded into one trailing '+N more'."""
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    cap = sw._MAX_NAMED_ADDON_FAILURES
+    failures = [('Addon%02d' % i, 'HTTP 500') for i in range(cap + 2)]
+
+    summary = sw._summarize_addon_failures(failures)
+
+    assert summary.startswith('%d addon(s) failed: ' % len(failures))
+    assert summary.endswith(', +2 more')
+    assert summary.count('(HTTP 500)') == cap  # only the cap's worth are named individually
+
+
+def test_open_streams_aggregate_warning_caps_named_addons_when_more_fail_than_the_cap(
+    load_streamswindow, monkeypatch,
+):
+    """Same cap, exercised end to end through `open_streams()`'s own
+    fan-out rather than calling the summarizer directly."""
+    ctx = load_streamswindow()
+    import xbmc
+    sw = ctx.streamswindow
+    cap = sw._MAX_NAMED_ADDON_FAILURES
+    addon_count = cap + 2
+    addons = []
+    stream_results = {}
+    for i in range(addon_count):
+        transport = 'https://fail%02d.example/manifest.json' % i
+        addons.append({
+            'transportUrl': transport,
+            'manifest': {'name': 'Addon%02d' % i, 'resources': ['stream'], 'types': ['movie']},
+        })
+        stream_results[transport] = AddonError('boom', category='HTTP 500')
+    client = _FakeAddonClient(stream_results)
+    _wire_data_layer(sw, _FakeStore(addons=addons), client)
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: (False, False))
+
+    result = sw.open_streams('movie', 'tt1')
+
+    assert result is False
+    warnings = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGWARNING]
+    assert len(warnings) == 1
+    warning = warnings[0]
+    assert warning.startswith('[plugin.video.rivulet] streamswindow: %d addon(s) failed: ' % addon_count)
+    assert warning.endswith(', +2 more')
+    assert warning.count('(HTTP 500)') == cap
 
 
 def test_open_streams_no_results_notifies_and_returns_false_without_building_a_window(
@@ -2133,7 +2315,7 @@ def test_fetch_stream_pairs_aggregates_every_addon_and_logs_a_single_warning_on_
     assert [s for _info, s in pairs] == [ok_stream]
     assert sorted(call[0] for call in client.calls) == [failing_transport, ok_transport]
     warnings = [msg for msg, lvl in ctx.env.log_calls if lvl == xbmc.LOGWARNING]
-    assert len(warnings) == 1 and 'streamswindow: 1 addon(s) failed' in warnings[0]
+    assert warnings == ['[plugin.video.rivulet] streamswindow: 1 addon(s) failed: Failing (AddonError)']
 
 
 # ---------------------------------------------------------------------------
