@@ -755,3 +755,43 @@ msgstr "Переместить вниз"
 msgctxt "#30272"
 msgid "Addon no longer installed"
 msgstr "Дополнение больше не установлено"
+
+msgctxt "#30293"
+msgid "Add to library"
+msgstr "Добавить в библиотеку"
+
+msgctxt "#30294"
+msgid "Remove from library"
+msgstr "Удалить из библиотеки"
+
+msgctxt "#30295"
+msgid "Mark as watched"
+msgstr "Отметить как просмотренное"
+
+msgctxt "#30296"
+msgid "Mark as unwatched"
+msgstr "Отметить как непросмотренное"
+
+msgctxt "#30297"
+msgid "Added to library"
+msgstr "Добавлено в библиотеку"
+
+msgctxt "#30298"
+msgid "Removed from library"
+msgstr "Удалено из библиотеки"
+
+msgctxt "#30299"
+msgid "Marked as watched"
+msgstr "Отмечено как просмотренное"
+
+msgctxt "#30300"
+msgid "Marked as unwatched"
+msgstr "Отмечено как непросмотренное"
+
+msgctxt "#30301"
+msgid "Failed to update library"
+msgstr "Не удалось обновить библиотеку"
+
+msgctxt "#30302"
+msgid "Failed to check library status"
+msgstr "Не удалось проверить состояние библиотеки"

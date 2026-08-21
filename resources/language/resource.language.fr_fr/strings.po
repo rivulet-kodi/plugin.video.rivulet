@@ -755,3 +755,43 @@ msgstr "Descendre"
 msgctxt "#30272"
 msgid "Addon no longer installed"
 msgstr "L'extension n'est plus installée"
+
+msgctxt "#30293"
+msgid "Add to library"
+msgstr "Ajouter à la bibliothèque"
+
+msgctxt "#30294"
+msgid "Remove from library"
+msgstr "Retirer de la bibliothèque"
+
+msgctxt "#30295"
+msgid "Mark as watched"
+msgstr "Marquer comme vu"
+
+msgctxt "#30296"
+msgid "Mark as unwatched"
+msgstr "Marquer comme non vu"
+
+msgctxt "#30297"
+msgid "Added to library"
+msgstr "Ajouté à la bibliothèque"
+
+msgctxt "#30298"
+msgid "Removed from library"
+msgstr "Retiré de la bibliothèque"
+
+msgctxt "#30299"
+msgid "Marked as watched"
+msgstr "Marqué comme vu"
+
+msgctxt "#30300"
+msgid "Marked as unwatched"
+msgstr "Marqué comme non vu"
+
+msgctxt "#30301"
+msgid "Failed to update library"
+msgstr "Impossible de mettre à jour la bibliothèque"
+
+msgctxt "#30302"
+msgid "Failed to check library status"
+msgstr "Impossible de vérifier l'état de la bibliothèque"

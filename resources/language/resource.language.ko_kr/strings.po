@@ -755,3 +755,43 @@ msgstr "아래로 이동"
 msgctxt "#30272"
 msgid "Addon no longer installed"
 msgstr "애드온이 더 이상 설치되어 있지 않습니다"
+
+msgctxt "#30293"
+msgid "Add to library"
+msgstr "라이브러리에 추가"
+
+msgctxt "#30294"
+msgid "Remove from library"
+msgstr "라이브러리에서 제거"
+
+msgctxt "#30295"
+msgid "Mark as watched"
+msgstr "시청함으로 표시"
+
+msgctxt "#30296"
+msgid "Mark as unwatched"
+msgstr "시청 안 함으로 표시"
+
+msgctxt "#30297"
+msgid "Added to library"
+msgstr "라이브러리에 추가됨"
+
+msgctxt "#30298"
+msgid "Removed from library"
+msgstr "라이브러리에서 제거됨"
+
+msgctxt "#30299"
+msgid "Marked as watched"
+msgstr "시청함으로 표시됨"
+
+msgctxt "#30300"
+msgid "Marked as unwatched"
+msgstr "시청 안 함으로 표시됨"
+
+msgctxt "#30301"
+msgid "Failed to update library"
+msgstr "라이브러리를 업데이트하지 못했습니다"
+
+msgctxt "#30302"
+msgid "Failed to check library status"
+msgstr "라이브러리 상태를 확인하지 못했습니다"

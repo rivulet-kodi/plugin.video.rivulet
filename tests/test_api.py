@@ -309,6 +309,84 @@ def test_datastore_meta_error_raises_api_error():
         api.datastore_meta("bad-token")
 
 
+# --- get_library_item ---------------------------------------------------
+
+
+def test_get_library_item_posts_single_id_lookup():
+    item = {"_id": "tt1", "removed": False}
+    api = make_api()
+    api.session = FakeSession(responses=[_ok({"result": [item]})])
+    result = api.get_library_item("tok-123", "tt1")
+
+    call = api.session.calls[0]
+    assert call["url"] == API_BASE + "/api/datastoreGet"
+    body = call["kwargs"]["json"]
+    assert body["authKey"] == "tok-123"
+    assert body["collection"] == "libraryItem"
+    assert body["ids"] == ["tt1"]
+    assert body["all"] is False
+    assert result == item
+
+
+def test_get_library_item_returns_none_when_account_has_no_record():
+    api = make_api()
+    api.session = FakeSession(responses=[_ok({"result": []})])
+    assert api.get_library_item("tok-123", "tt1") is None
+
+
+def test_get_library_item_honors_explicit_collection():
+    api = make_api()
+    api.session = FakeSession(responses=[_ok({"result": []})])
+    api.get_library_item("tok-123", "tt1", collection="other")
+
+    body = api.session.calls[0]["kwargs"]["json"]
+    assert body["collection"] == "other"
+
+
+def test_get_library_item_error_raises_api_error():
+    api = make_api()
+    api.session = FakeSession(
+        responses=[_ok({"error": {"message": "Unauthorized", "code": 1}})]
+    )
+    with pytest.raises(ApiError):
+        api.get_library_item("bad-token", "tt1")
+
+
+# --- put_library_item ----------------------------------------------------
+
+
+def test_put_library_item_posts_single_change_wrapped_in_a_list():
+    item = {"_id": "tt1", "removed": True}
+    api = make_api()
+    api.session = FakeSession(responses=[_ok({"result": {"success": True}})])
+    api.put_library_item("tok-123", item)
+
+    call = api.session.calls[0]
+    assert call["url"] == API_BASE + "/api/datastorePut"
+    body = call["kwargs"]["json"]
+    assert body["authKey"] == "tok-123"
+    assert body["collection"] == "libraryItem"
+    assert body["changes"] == [item]
+
+
+def test_put_library_item_honors_explicit_collection():
+    api = make_api()
+    api.session = FakeSession(responses=[_ok({"result": {"success": True}})])
+    api.put_library_item("tok-123", {"_id": "tt1"}, collection="other")
+
+    body = api.session.calls[0]["kwargs"]["json"]
+    assert body["collection"] == "other"
+
+
+def test_put_library_item_error_raises_api_error():
+    api = make_api()
+    api.session = FakeSession(
+        responses=[_ok({"error": {"message": "Unauthorized", "code": 1}})]
+    )
+    with pytest.raises(ApiError):
+        api.put_library_item("bad-token", {"_id": "tt1"})
+
+
 # --- helpers -----------------------------------------------------------
 
 

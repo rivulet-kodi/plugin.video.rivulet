@@ -755,3 +755,43 @@ msgstr "Omlaag verplaatsen"
 msgctxt "#30272"
 msgid "Addon no longer installed"
 msgstr "Add-on is niet meer geïnstalleerd"
+
+msgctxt "#30293"
+msgid "Add to library"
+msgstr "Toevoegen aan bibliotheek"
+
+msgctxt "#30294"
+msgid "Remove from library"
+msgstr "Verwijderen uit bibliotheek"
+
+msgctxt "#30295"
+msgid "Mark as watched"
+msgstr "Markeren als bekeken"
+
+msgctxt "#30296"
+msgid "Mark as unwatched"
+msgstr "Markeren als niet bekeken"
+
+msgctxt "#30297"
+msgid "Added to library"
+msgstr "Toegevoegd aan bibliotheek"
+
+msgctxt "#30298"
+msgid "Removed from library"
+msgstr "Verwijderd uit bibliotheek"
+
+msgctxt "#30299"
+msgid "Marked as watched"
+msgstr "Gemarkeerd als bekeken"
+
+msgctxt "#30300"
+msgid "Marked as unwatched"
+msgstr "Gemarkeerd als niet bekeken"
+
+msgctxt "#30301"
+msgid "Failed to update library"
+msgstr "Bibliotheek kon niet worden bijgewerkt"
+
+msgctxt "#30302"
+msgid "Failed to check library status"
+msgstr "Bibliotheekstatus kon niet worden gecontroleerd"

@@ -755,3 +755,43 @@ msgstr ""
 msgctxt "#30272"
 msgid "Addon no longer installed"
 msgstr ""
+
+msgctxt "#30293"
+msgid "Add to library"
+msgstr ""
+
+msgctxt "#30294"
+msgid "Remove from library"
+msgstr ""
+
+msgctxt "#30295"
+msgid "Mark as watched"
+msgstr ""
+
+msgctxt "#30296"
+msgid "Mark as unwatched"
+msgstr ""
+
+msgctxt "#30297"
+msgid "Added to library"
+msgstr ""
+
+msgctxt "#30298"
+msgid "Removed from library"
+msgstr ""
+
+msgctxt "#30299"
+msgid "Marked as watched"
+msgstr ""
+
+msgctxt "#30300"
+msgid "Marked as unwatched"
+msgstr ""
+
+msgctxt "#30301"
+msgid "Failed to update library"
+msgstr ""
+
+msgctxt "#30302"
+msgid "Failed to check library status"
+msgstr ""

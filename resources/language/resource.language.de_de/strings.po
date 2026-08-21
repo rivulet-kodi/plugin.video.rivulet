@@ -755,3 +755,43 @@ msgstr "Nach unten verschieben"
 msgctxt "#30272"
 msgid "Addon no longer installed"
 msgstr "Addon ist nicht mehr installiert"
+
+msgctxt "#30293"
+msgid "Add to library"
+msgstr "Zur Bibliothek hinzufügen"
+
+msgctxt "#30294"
+msgid "Remove from library"
+msgstr "Aus Bibliothek entfernen"
+
+msgctxt "#30295"
+msgid "Mark as watched"
+msgstr "Als gesehen markieren"
+
+msgctxt "#30296"
+msgid "Mark as unwatched"
+msgstr "Als ungesehen markieren"
+
+msgctxt "#30297"
+msgid "Added to library"
+msgstr "Zur Bibliothek hinzugefügt"
+
+msgctxt "#30298"
+msgid "Removed from library"
+msgstr "Aus Bibliothek entfernt"
+
+msgctxt "#30299"
+msgid "Marked as watched"
+msgstr "Als gesehen markiert"
+
+msgctxt "#30300"
+msgid "Marked as unwatched"
+msgstr "Als ungesehen markiert"
+
+msgctxt "#30301"
+msgid "Failed to update library"
+msgstr "Bibliothek konnte nicht aktualisiert werden"
+
+msgctxt "#30302"
+msgid "Failed to check library status"
+msgstr "Bibliotheksstatus konnte nicht überprüft werden"

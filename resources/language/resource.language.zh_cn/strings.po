@@ -755,3 +755,43 @@ msgstr "下移"
 msgctxt "#30272"
 msgid "Addon no longer installed"
 msgstr "插件已不存在"
+
+msgctxt "#30293"
+msgid "Add to library"
+msgstr "添加到媒体库"
+
+msgctxt "#30294"
+msgid "Remove from library"
+msgstr "从媒体库中移除"
+
+msgctxt "#30295"
+msgid "Mark as watched"
+msgstr "标记为已观看"
+
+msgctxt "#30296"
+msgid "Mark as unwatched"
+msgstr "标记为未观看"
+
+msgctxt "#30297"
+msgid "Added to library"
+msgstr "已添加到媒体库"
+
+msgctxt "#30298"
+msgid "Removed from library"
+msgstr "已从媒体库中移除"
+
+msgctxt "#30299"
+msgid "Marked as watched"
+msgstr "已标记为已观看"
+
+msgctxt "#30300"
+msgid "Marked as unwatched"
+msgstr "已标记为未观看"
+
+msgctxt "#30301"
+msgid "Failed to update library"
+msgstr "无法更新媒体库"
+
+msgctxt "#30302"
+msgid "Failed to check library status"
+msgstr "无法检查媒体库状态"

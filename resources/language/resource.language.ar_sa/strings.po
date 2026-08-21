@@ -755,3 +755,43 @@ msgstr "نقل للأسفل"
 msgctxt "#30272"
 msgid "Addon no longer installed"
 msgstr "لم تعد الإضافة مثبتة"
+
+msgctxt "#30293"
+msgid "Add to library"
+msgstr "إضافة إلى المكتبة"
+
+msgctxt "#30294"
+msgid "Remove from library"
+msgstr "إزالة من المكتبة"
+
+msgctxt "#30295"
+msgid "Mark as watched"
+msgstr "وضع علامة كمُشاهَد"
+
+msgctxt "#30296"
+msgid "Mark as unwatched"
+msgstr "وضع علامة كغير مُشاهَد"
+
+msgctxt "#30297"
+msgid "Added to library"
+msgstr "تمت الإضافة إلى المكتبة"
+
+msgctxt "#30298"
+msgid "Removed from library"
+msgstr "تمت الإزالة من المكتبة"
+
+msgctxt "#30299"
+msgid "Marked as watched"
+msgstr "تم وضع علامة كمُشاهَد"
+
+msgctxt "#30300"
+msgid "Marked as unwatched"
+msgstr "تم وضع علامة كغير مُشاهَد"
+
+msgctxt "#30301"
+msgid "Failed to update library"
+msgstr "فشل تحديث المكتبة"
+
+msgctxt "#30302"
+msgid "Failed to check library status"
+msgstr "فشل التحقق من حالة المكتبة"

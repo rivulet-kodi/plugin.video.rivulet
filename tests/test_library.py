@@ -341,3 +341,121 @@ def test_merge_playback_tolerates_item_with_no_state_key_at_all():
     merged = library.merge_playback(item, 1000, 90000, video_id="tt1", now=NOW)
     assert merged["state"]["timeOffset"] == 1000
     assert merged["state"]["duration"] == 90000
+
+
+# --- library_add_payload --------------------------------------------------
+
+
+def test_library_add_payload_matches_build_library_item_with_removed_and_temp_false():
+    """The ONLY difference from `build_library_item()` is the two flags
+    that flip a transient "recently watched" record into a real,
+    permanent library entry."""
+    built = library.build_library_item(_meta(), now=NOW)
+    added = library.library_add_payload(_meta(), now=NOW)
+    assert added == dict(built, removed=False, temp=False)
+
+
+def test_library_add_payload_carries_poster_and_behavior_hints():
+    added = library.library_add_payload(
+        _meta(poster="https://example.com/p.jpg", behaviorHints={"defaultVideoId": "tt1:1:1"}),
+        now=NOW,
+    )
+    assert added["poster"] == "https://example.com/p.jpg"
+    assert added["behaviorHints"]["defaultVideoId"] == "tt1:1:1"
+
+
+def test_library_add_payload_does_not_mutate_meta():
+    meta = _meta()
+    snapshot = dict(meta)
+    library.library_add_payload(meta, now=NOW)
+    assert meta == snapshot
+
+
+# --- library_remove_payload -------------------------------------------------
+
+
+def test_library_remove_payload_flags_removed_and_bumps_mtime():
+    item = library.build_library_item(_meta(), now=NOW)
+    removed = library.library_remove_payload(item, now=LATER)
+    assert removed["removed"] is True
+    assert removed["_mtime"] == LATER_ISO
+
+
+def test_library_remove_payload_preserves_every_unrelated_field():
+    """A tombstone MUST NOT disturb `temp`, `state`, name/poster/etc -
+    only `removed`/`_mtime` may differ, so an already-explicit library
+    entry (temp=False) stays temp=False after removal rather than
+    looking like it was never really added."""
+    item = library.library_add_payload(_meta(poster="https://example.com/p.jpg"), now=NOW)
+    item = library.merge_playback(item, 5000, 90000, video_id="tt1", now=NOW)
+    removed = library.library_remove_payload(item, now=LATER)
+    for key, value in item.items():
+        if key in ("removed", "_mtime"):
+            continue
+        assert removed[key] == value
+    assert removed["temp"] is False
+    assert removed["state"] == item["state"]
+
+
+def test_library_remove_payload_does_not_mutate_input_item():
+    item = library.build_library_item(_meta(), now=NOW)
+    snapshot = dict(item)
+    library.library_remove_payload(item, now=LATER)
+    assert item == snapshot
+
+
+# --- mark_watched_payload ----------------------------------------------------
+
+
+def test_mark_watched_payload_sets_flagged_watched_and_increments_counter():
+    item = library.build_library_item(_meta(), now=NOW)
+    watched = library.mark_watched_payload(item, True, now=LATER)
+    assert watched["state"]["flaggedWatched"] == 1
+    assert watched["state"]["timesWatched"] == 1
+    assert watched["_mtime"] == LATER_ISO
+
+
+def test_mark_watched_payload_unwatched_clears_flag_without_touching_counter():
+    item = library.build_library_item(_meta(), now=NOW)
+    watched = library.mark_watched_payload(item, True, now=NOW)
+    unwatched = library.mark_watched_payload(watched, False, now=LATER)
+    assert unwatched["state"]["flaggedWatched"] == 0
+    assert unwatched["state"]["timesWatched"] == 1  # history is never erased by un-marking
+
+
+def test_mark_watched_payload_idempotent_across_repeated_calls():
+    """Feeding the previous call's own output back in with the same
+    `watched` value must not double-count `timesWatched`."""
+    item = library.build_library_item(_meta(), now=NOW)
+    once = library.mark_watched_payload(item, True, now=NOW)
+    twice = library.mark_watched_payload(once, True, now=LATER)
+    thrice = library.mark_watched_payload(twice, True, now=LATER)
+    assert once["state"]["timesWatched"] == 1
+    assert twice["state"]["timesWatched"] == 1
+    assert thrice["state"]["timesWatched"] == 1
+
+
+def test_mark_watched_payload_never_touches_watched_bitfield():
+    """CRITICAL invariant shared with `merge_playback()`: the per-episode
+    stremio-watched-bitfield is carried over byte-for-byte, never
+    synthesised."""
+    item = library.build_library_item(_meta(), now=NOW)
+    item["state"]["watched"] = "eJwDAAAAAAE="
+    watched = library.mark_watched_payload(item, True, now=NOW)
+    assert watched["state"]["watched"] == "eJwDAAAAAAE="
+
+
+def test_mark_watched_payload_tolerates_item_with_no_state_key_at_all():
+    item = {"_id": "tt1", "name": "n", "type": "movie", "behaviorHints": {}}
+    watched = library.mark_watched_payload(item, True, now=NOW)
+    assert watched["state"]["flaggedWatched"] == 1
+    assert watched["state"]["timesWatched"] == 1
+
+
+def test_mark_watched_payload_does_not_mutate_input_item():
+    item = library.build_library_item(_meta(), now=NOW)
+    snapshot = dict(item)
+    state_snapshot = dict(item["state"])
+    library.mark_watched_payload(item, True, now=LATER)
+    assert item == snapshot
+    assert item["state"] == state_snapshot

@@ -171,3 +171,30 @@ class StremioAPI:
         """
         result = self._call("datastoreMeta", {"authKey": auth_key, "collection": collection})
         return result if isinstance(result, list) else []
+
+    def get_library_item(self, auth_key, item_id, collection="libraryItem"):
+        """Fetch exactly one `collection` record by id, or `None` when the
+        account has no record for it yet (never watched, never added).
+
+        Thin wrapper over `datastore_get(all=False)`'s single-id shape --
+        the same `ids=[...]`/`all=False` call `lib.service_runner` already
+        builds inline (to seed a merge before its own `datastore_put`);
+        factored out here so a single-item read site (this method's other
+        caller, `lib.ui.detailwindow`'s library context menu, which needs
+        to know the CURRENT state before offering "Add"/"Remove" wording)
+        doesn't re-write that same list-then-index dance.
+        """
+        items = self.datastore_get(auth_key, collection=collection, ids=[item_id], all=False)
+        return items[0] if items else None
+
+    def put_library_item(self, auth_key, item, collection="libraryItem"):
+        """Push exactly one already-built LibraryItem (see
+        `lib.library.build_library_item`/`library_add_payload`/
+        `library_remove_payload`/`mark_watched_payload`).
+
+        Thin wrapper over `datastore_put`'s `[changes]` list shape for the
+        single-item write path -- `lib.ui.detailwindow`'s Add/Remove
+        library and Mark (un)watched actions each push exactly one
+        record at a time, never a batch.
+        """
+        self.datastore_put(auth_key, [item], collection=collection)

@@ -755,3 +755,43 @@ msgstr "下に移動"
 msgctxt "#30272"
 msgid "Addon no longer installed"
 msgstr "アドオンはもうインストールされていません"
+
+msgctxt "#30293"
+msgid "Add to library"
+msgstr "ライブラリに追加"
+
+msgctxt "#30294"
+msgid "Remove from library"
+msgstr "ライブラリから削除"
+
+msgctxt "#30295"
+msgid "Mark as watched"
+msgstr "視聴済みにする"
+
+msgctxt "#30296"
+msgid "Mark as unwatched"
+msgstr "未視聴にする"
+
+msgctxt "#30297"
+msgid "Added to library"
+msgstr "ライブラリに追加しました"
+
+msgctxt "#30298"
+msgid "Removed from library"
+msgstr "ライブラリから削除しました"
+
+msgctxt "#30299"
+msgid "Marked as watched"
+msgstr "視聴済みにしました"
+
+msgctxt "#30300"
+msgid "Marked as unwatched"
+msgstr "未視聴にしました"
+
+msgctxt "#30301"
+msgid "Failed to update library"
+msgstr "ライブラリを更新できませんでした"
+
+msgctxt "#30302"
+msgid "Failed to check library status"
+msgstr "ライブラリの状態を確認できませんでした"
