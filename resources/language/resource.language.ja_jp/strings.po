@@ -849,8 +849,8 @@ msgid "New Episodes"
 msgstr "新しいエピソード"
 
 msgctxt "#30314"
-msgid "Show New Episodes"
-msgstr "新しいエピソードを表示"
+msgid "Show new episodes under Series"
+msgstr "シリーズに新しいエピソードを表示"
 
 msgctxt "#30315"
 msgid "%d new episode ready to watch"
@@ -915,3 +915,7 @@ msgstr "このアドオンをインストールしますか？"
 msgctxt "#30343"
 msgid "Marketplace"
 msgstr "マーケット"
+
+msgctxt "#30360"
+msgid "New episodes: %d"
+msgstr "新しいエピソード: %d"

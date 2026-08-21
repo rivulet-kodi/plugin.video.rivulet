@@ -849,8 +849,8 @@ msgid "New Episodes"
 msgstr "حلقات جديدة"
 
 msgctxt "#30314"
-msgid "Show New Episodes"
-msgstr "إظهار الحلقات الجديدة"
+msgid "Show new episodes under Series"
+msgstr "إظهار الحلقات الجديدة ضمن المسلسلات"
 
 msgctxt "#30315"
 msgid "%d new episode ready to watch"
@@ -915,3 +915,7 @@ msgstr "هل تريد تثبيت هذه الإضافة؟"
 msgctxt "#30343"
 msgid "Marketplace"
 msgstr "المتجر"
+
+msgctxt "#30360"
+msgid "New episodes: %d"
+msgstr "حلقات جديدة: %d"

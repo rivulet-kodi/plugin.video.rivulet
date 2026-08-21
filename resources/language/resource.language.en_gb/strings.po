@@ -849,7 +849,7 @@ msgid "New Episodes"
 msgstr ""
 
 msgctxt "#30314"
-msgid "Show New Episodes"
+msgid "Show new episodes under Series"
 msgstr ""
 
 msgctxt "#30315"
@@ -914,4 +914,8 @@ msgstr ""
 
 msgctxt "#30343"
 msgid "Marketplace"
+msgstr ""
+
+msgctxt "#30360"
+msgid "New episodes: %d"
 msgstr ""

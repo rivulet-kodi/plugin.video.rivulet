@@ -849,8 +849,8 @@ msgid "New Episodes"
 msgstr "Nowe odcinki"
 
 msgctxt "#30314"
-msgid "Show New Episodes"
-msgstr "Pokaż nowe odcinki"
+msgid "Show new episodes under Series"
+msgstr "Pokaż nowe odcinki w sekcji Seriale"
 
 msgctxt "#30315"
 msgid "%d new episode ready to watch"
@@ -915,3 +915,7 @@ msgstr "Zainstalować ten dodatek?"
 msgctxt "#30343"
 msgid "Marketplace"
 msgstr "Rynek"
+
+msgctxt "#30360"
+msgid "New episodes: %d"
+msgstr "Nowe odcinki: %d"
