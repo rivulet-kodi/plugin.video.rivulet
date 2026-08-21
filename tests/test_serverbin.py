@@ -507,3 +507,75 @@ def test_verify_executable_forwards_no_window_kwargs_on_windows_only(monkeypatch
     assert win_kwargs["timeout"] == posix_kwargs["timeout"]
     assert win_kwargs["creationflags"] == 0x08000000  # CREATE_NO_WINDOW
     assert win_kwargs["startupinfo"].wShowWindow == 0  # SW_HIDE
+
+
+# --- SERVER_TAG stamp ------------------------------------------------------
+
+
+def _install_ok(tmp_path, monkeypatch, fake_requests):
+    """Drive one successful install_binary() into `tmp_path`."""
+    _set_platform(monkeypatch, "Linux", "x86_64")
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
+    archive_bytes = _make_tar_gz({"stremio-server": b"binary"})
+    monkeypatch.setitem(
+        PINNED_SHA256, ("Linux", "x86_64"), hashlib.sha256(archive_bytes).hexdigest())
+    fake_requests.queue_get(_StreamResponse(archive_bytes))
+    return install_binary(str(tmp_path))
+
+
+def test_install_binary_stamps_the_server_tag_it_installed(tmp_path, monkeypatch, fake_requests):
+    """Without the stamp there is no way to tell a binary installed under
+    an older SERVER_TAG from a current one, so a tag bump could never be
+    delivered to an existing install."""
+    _install_ok(tmp_path, monkeypatch, fake_requests)
+
+    assert (tmp_path / serverbin.TAG_STAMP_NAME).read_text() == SERVER_TAG
+    assert serverbin.installed_tag(str(tmp_path)) == SERVER_TAG
+
+
+def test_installed_tag_is_none_when_never_installed(tmp_path):
+    assert serverbin.installed_tag(str(tmp_path)) is None
+
+
+@pytest.mark.parametrize("contents", ["", "   \n"])
+def test_installed_tag_is_none_for_an_empty_stamp(tmp_path, contents):
+    (tmp_path / serverbin.TAG_STAMP_NAME).write_text(contents)
+    assert serverbin.installed_tag(str(tmp_path)) is None
+
+
+def test_installed_tag_strips_surrounding_whitespace(tmp_path):
+    (tmp_path / serverbin.TAG_STAMP_NAME).write_text("v0.9.0\n")
+    assert serverbin.installed_tag(str(tmp_path)) == "v0.9.0"
+
+
+def test_installed_tag_is_none_when_the_stamp_cannot_be_read(tmp_path):
+    """A directory where the stamp file should be stands in for any OSError
+    out of the read -- unknown must degrade to None, never propagate."""
+    (tmp_path / serverbin.TAG_STAMP_NAME).mkdir()
+    assert serverbin.installed_tag(str(tmp_path)) is None
+
+
+def test_install_binary_succeeds_even_when_the_stamp_cannot_be_written(
+        tmp_path, monkeypatch, fake_requests):
+    """The binary is installed and verified before the stamp is written --
+    losing the stamp must cost at most a redundant reinstall later, never
+    fail an otherwise-working install."""
+    (tmp_path / serverbin.TAG_STAMP_NAME).mkdir()
+
+    result_path = _install_ok(tmp_path, monkeypatch, fake_requests)
+
+    assert os.path.isfile(result_path)
+    assert serverbin.installed_tag(str(tmp_path)) is None
+
+
+def test_install_binary_does_not_stamp_a_refused_download(tmp_path, monkeypatch, fake_requests):
+    """A checksum mismatch installs nothing, so it must not leave a stamp
+    claiming SERVER_TAG is installed."""
+    _set_platform(monkeypatch, "Linux", "x86_64")
+    monkeypatch.setitem(PINNED_SHA256, ("Linux", "x86_64"), "0" * 64)
+    fake_requests.queue_get(_StreamResponse(_make_tar_gz({"stremio-server": b"binary"})))
+
+    with pytest.raises(DownloadError):
+        install_binary(str(tmp_path))
+
+    assert serverbin.installed_tag(str(tmp_path)) is None

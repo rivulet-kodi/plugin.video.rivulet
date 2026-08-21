@@ -46,6 +46,13 @@ VERIFY_TIMEOUT = 15
 _APPLE_MOBILE_PLATFORMS = ("ios", "ipados", "tvos")
 _APPLE_MOBILE_MODEL_PREFIXES = ("iphone", "ipad", "ipod", "appletv")
 
+#: Where install_binary() records the SERVER_TAG it installed, next to the
+#: binary itself so the two cannot be separated. Dot-prefixed to keep it
+#: out of the way of resolve_binary()'s lookup.
+TAG_STAMP_NAME = ".server-tag"
+#: Enough for any plausible tag; a bound so a corrupt/huge stamp file can
+#: never be slurped whole.
+TAG_STAMP_READ_LIMIT = 64
 # SHA-256 digests for every stremio-server-go SERVER_TAG release asset,
 # hand-verified against that tag's GitHub release page + checksums.txt on
 # 2026-08-14 and committed here instead of being re-fetched at runtime.
@@ -404,4 +411,37 @@ def install_binary(dest_dir, progress_cb=None):
     if os_name != "Windows":
         os.chmod(final_path, 0o755)
     verify_executable(final_path)
+    _write_tag_stamp(dest_dir)
     return final_path
+
+
+def installed_tag(dest_dir):
+    """Return the SERVER_TAG the binary currently in `dest_dir` was
+    installed from, or None when unknown.
+
+    None covers three cases callers must treat identically -- "not the
+    current tag": no stamp file (installed before stamping existed, or the
+    write failed), an unreadable one, and an empty one.
+    """
+    try:
+        with open(os.path.join(dest_dir, TAG_STAMP_NAME)) as fh:
+            return fh.read(TAG_STAMP_READ_LIMIT).strip() or None
+    except OSError:
+        return None
+
+
+def _write_tag_stamp(dest_dir):
+    """Record SERVER_TAG next to the binary just installed into `dest_dir`.
+
+    Best-effort on purpose: the binary is already installed and verified
+    by the time this runs, so failing the whole install over a stamp
+    write would turn a working server into a user-visible error. A
+    missing stamp only costs `installed_tag()` reporting None, which
+    callers treat as "not the current tag" -- i.e. one redundant
+    reinstall attempt, not a broken install.
+    """
+    try:
+        with open(os.path.join(dest_dir, TAG_STAMP_NAME), "w") as fh:
+            fh.write(SERVER_TAG)
+    except OSError:
+        pass
