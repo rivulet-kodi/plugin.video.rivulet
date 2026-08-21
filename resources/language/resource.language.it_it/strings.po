@@ -795,3 +795,51 @@ msgstr "Impossibile aggiornare la libreria"
 msgctxt "#30302"
 msgid "Failed to check library status"
 msgstr "Impossibile verificare lo stato della libreria"
+
+msgctxt "#30253"
+msgid "Minimum quality"
+msgstr "Qualità minima"
+
+msgctxt "#30254"
+msgid "Any"
+msgstr "Qualsiasi"
+
+msgctxt "#30255"
+msgid "480p"
+msgstr "480p"
+
+msgctxt "#30256"
+msgid "720p"
+msgstr "720p"
+
+msgctxt "#30257"
+msgid "1080p"
+msgstr "1080p"
+
+msgctxt "#30258"
+msgid "2160p"
+msgstr "2160p"
+
+msgctxt "#30259"
+msgid "Maximum size (GB, 0 = unlimited)"
+msgstr "Dimensione massima (GB, 0 = illimitata)"
+
+msgctxt "#30260"
+msgid "Exclude CAM/TS sources"
+msgstr "Escludi fonti CAM/TS"
+
+msgctxt "#30261"
+msgid "Cached only"
+msgstr "Solo nella cache"
+
+msgctxt "#30262"
+msgid "%d source hidden by filters"
+msgstr "%d fonte nascosta dai filtri"
+
+msgctxt "#30263"
+msgid "%d sources hidden by filters"
+msgstr "%d fonti nascoste dai filtri"
+
+msgctxt "#30264"
+msgid "Filters matched nothing - showing all sources"
+msgstr "Nessun risultato per i filtri: vengono mostrate tutte le fonti"

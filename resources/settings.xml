@@ -147,6 +147,45 @@
                         <popup>false</popup>
                     </control>
                 </setting>
+                <setting id="playback_min_quality" type="string" label="30253">
+                    <level>0</level>
+                    <default>any</default>
+                    <constraints>
+                        <options>
+                            <option label="30254">any</option>
+                            <option label="30255">480p</option>
+                            <option label="30256">720p</option>
+                            <option label="30257">1080p</option>
+                            <option label="30258">2160p</option>
+                        </options>
+                        <allowempty>false</allowempty>
+                    </constraints>
+                    <control type="list" format="string">
+                        <heading>30253</heading>
+                    </control>
+                </setting>
+                <setting id="playback_max_size_gb" type="integer" label="30259">
+                    <level>0</level>
+                    <default>0</default>
+                    <constraints>
+                        <minimum>0</minimum>
+                        <step>1</step>
+                        <maximum>200</maximum>
+                    </constraints>
+                    <control type="slider" format="integer">
+                        <popup>false</popup>
+                    </control>
+                </setting>
+                <setting id="playback_exclude_cam" type="boolean" label="30260">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="playback_cached_only" type="boolean" label="30261">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
             </group>
         </category>
         <category id="server_bittorrent" label="30110">

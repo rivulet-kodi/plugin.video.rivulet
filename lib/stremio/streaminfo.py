@@ -1097,3 +1097,101 @@ def sort_streams(pairs, key='quality'):
         )
 
     return sorted(pairs, key=quality_key)
+
+
+# ---------------------------------------------------------------------------
+# filter_streams
+# ---------------------------------------------------------------------------
+
+# `_RESOLUTION_PATTERNS`' four tags as plain heights, so `filter_streams()`'s
+# `min_height` can compare numerically without re-parsing the "NNNp"
+# string. Kept as its own table (not derived by stripping a trailing
+# 'p') so a future resolution tag can't silently start comparing as a
+# height just because it happens to end in digits followed by 'p'.
+_RESOLUTION_HEIGHT = {'2160p': 2160, '1080p': 1080, '720p': 720, '480p': 480}
+
+# Word-boundary CAM/TS/telesync/screener detector for `filter_streams()`'s
+# `exclude_cam` - deliberately its OWN pattern, not a reuse of
+# `_SOURCE_PATTERNS`'s 'CAM' tag: that one's `\b(hdcam|hdts|cam|ts)\b` is
+# built to TAG a release's primary source, and its bare `\bcam\b` does
+# NOT match "CAMRip" (there is no word break between the 'm' and the
+# 'R' that follows it in a real release name) - it would silently let
+# the single most common CAM-release naming pattern straight through
+# this filter. The three-alternatives-first block below (`hd-?cam-?rip`,
+# `hd-?ts-?rip`, `cam-?rip`, `ts-?rip`) exists for exactly that reason,
+# extended to the compound release tokens that hit the identical
+# no-word-break problem: "HDCAMRip" and "HDTSRip" (the "HD" source
+# prefix run straight into "CAMRip"/"TSRip" with no break before the
+# following "Rip"), and bare "TSRip" (no break between "TS" and "Rip"
+# either). Each compound is tried as ONE unit so the match spans the
+# whole token; the bare "hd-?cam"/"hd-?ts"/"cam"/"ts" alternatives
+# still require their own trailing word boundary, so "Camelot" or
+# "Batman" never false-positive on the fragment they happen to contain.
+_CAM_FILTER_RE = re.compile(
+    r'\b(?:hd-?cam-?rip|hd-?ts-?rip|cam-?rip|ts-?rip|hd-?cam|hd-?ts'
+    r'|tele-?sync|screener|scr|cam|ts)\b',
+    re.I,
+)
+
+
+def filter_streams(entries, min_height=0, max_size_bytes=0, exclude_cam=False, cached_only=False):
+    """Return the subset of `entries` (``(info, stream)`` pairs, the same
+    shape `sort_streams()` takes/returns) that pass every ACTIVE filter,
+    order preserved. Each argument's falsy value (0/False) means "no
+    filtering on that axis" - a settings-driven caller can pass every
+    default straight through without a `filter_streams(...) if
+    anything_set else entries` branch of its own; this function is that
+    branch, once, here.
+
+    `min_height`/`max_size_bytes` only ever drop an entry whose value is
+    KNOWN and out of range. A stream `parse_stream()` could not read a
+    resolution/size out of (an addon whose title our heuristics don't
+    recognise, not necessarily a low-quality/oversized one) is always
+    KEPT - hiding it would turn a parser gap into an invisible stream,
+    silently indistinguishable from "the filter is working as
+    designed", which is a correctness bug wearing a filter's clothes.
+
+    `cached_only` is the one asymmetric axis: an entry with no cache
+    verdict (`info['cached'] is None` - most non-debrid addons never
+    report one) is DROPPED, not kept, because "only show me sources I
+    know are cached" has no honest "unknown, keep it anyway" reading
+    the way an unparsed resolution/size does.
+    """
+    entries = list(entries or [])
+    if not (min_height or max_size_bytes or exclude_cam or cached_only):
+        return entries
+
+    kept = []
+    for pair in entries:
+        info, _stream = pair
+        info = info or {}
+        if min_height:
+            height = _RESOLUTION_HEIGHT.get(info.get('resolution') or '')
+            if height is not None and height < min_height:
+                continue
+        if max_size_bytes:
+            size_bytes = info.get('size_bytes')
+            if size_bytes is not None and size_bytes > max_size_bytes:
+                continue
+        if exclude_cam and _CAM_FILTER_RE.search(info.get('raw') or ''):
+            continue
+        if cached_only and info.get('cached') is not True:
+            continue
+        kept.append(pair)  # the ORIGINAL pair object, not a rebuilt tuple -
+        # streamswindow.py's own append-only render fast path tells
+        # kept-vs-hidden apart by object identity (see `_rebuild_list()`).
+    return kept
+
+
+def filter_summary(total, kept):
+    """``(total, hidden_count)`` for the streams-view status line -
+    `hidden_count` is how many of `total` entries `filter_streams()`
+    dropped (`kept` is its result COUNT, i.e. ``len(filter_streams(...))``,
+    not the list itself). Its own tiny function, rather than a
+    `total - kept` one-liner inlined at each call site, so a UI caller
+    and this module's own tests can never drift on what "hidden" means.
+    Clamped at 0 rather than allowed to go negative - `kept` can never
+    exceed `total` in real use, but a UI status line has no sane
+    negative reading if it ever did.
+    """
+    return total, max(total - kept, 0)

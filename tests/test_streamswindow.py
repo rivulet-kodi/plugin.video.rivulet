@@ -330,6 +330,142 @@ def test_oninit_addons_count_label_singular_vs_plural(load_streamswindow, addon_
     assert win.getControl(ctx.streamswindow.ADDONS_COUNT).label == expected
 
 
+# ---------------------------------------------------------------------------
+# StreamsWindow: 'playback_*' stream filtering (_stream_filter_view()/
+# _rebuild_list()) - filtering is applied at RENDER time against
+# `self.pairs`, never mutating it, so `_apply_pending()`'s focus-by-
+# identity restore and position-property lookups keep working unchanged
+# (see `_rebuild_list()`'s own docstring).
+# ---------------------------------------------------------------------------
+
+
+def test_rebuild_list_hides_stream_excluded_by_max_size_and_shrinks_counts(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    ctx.env.addon.settings['playback_max_size_gb'] = '1'  # 1 GiB cap
+    # Single addon throughout so line1's single-provider dedupe stays
+    # stable (include_addon=False) and each row falls back to its plain
+    # 'raw' text - see _rebuild_list()'s own single_provider comment.
+    kept = {'addon': 'AddonA', 'raw': 'Kept', 'size_bytes': 500 * 1024 * 1024, 'cached': True}
+    big = {'addon': 'AddonA', 'raw': 'Big', 'size_bytes': 5 * 1024 ** 3, 'cached': True}
+    win.pairs = [(kept, {}), (big, {})]
+
+    win.onInit()
+
+    items = win.getControl(ctx.streamswindow.LIST).items
+    assert [item.getLabel() for item in items] == ['Kept']
+    # position stays a self.pairs index, not a display-list index, so
+    # _apply_pending()'s focus-by-identity restore keeps working.
+    assert items[0].getProperty('position') == '0'
+    assert win.getControl(ctx.streamswindow.SOURCES_COUNT).label == '1 SOURCE'
+    assert win.getControl(ctx.streamswindow.ADDONS_COUNT).label == '1 ADDON'
+    assert win.getControl(ctx.streamswindow.INFO_PANEL).text == 'via AddonA\n1 source hidden by filters'
+
+
+def test_rebuild_list_hidden_count_is_plural_for_more_than_one(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    ctx.env.addon.settings['playback_max_size_gb'] = '1'
+    kept = {'addon': 'AddonA', 'raw': 'Kept', 'size_bytes': 500 * 1024 * 1024}
+    big_a = {'addon': 'AddonA', 'raw': 'BigA', 'size_bytes': 5 * 1024 ** 3}
+    big_b = {'addon': 'AddonA', 'raw': 'BigB', 'size_bytes': 5 * 1024 ** 3}
+    win.pairs = [(kept, {}), (big_a, {}), (big_b, {})]
+
+    win.onInit()
+
+    assert win.getControl(ctx.streamswindow.INFO_PANEL).text == 'via AddonA\n2 sources hidden by filters'
+
+
+def test_rebuild_list_falls_back_to_showing_everything_when_filters_match_nothing(load_streamswindow):
+    # A misconfigured filter (here: minimum quality above anything an
+    # addon actually found) must never look identical to open_streams()'s
+    # own "no sources found" empty-result path - see _stream_filter_view()'s
+    # docstring. Both entries share one addon and both carry a real
+    # 'resolution' (needed to trigger the min-quality filter), so
+    # format_label() renders them identically - the assertions below
+    # check row COUNT/position, not label text, to stay independent of
+    # that.
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    ctx.env.addon.settings['playback_min_quality'] = '2160p'
+    pairs = [
+        ({'addon': 'AddonA', 'raw': 'A', 'resolution': '1080p'}, {}),
+        ({'addon': 'AddonA', 'raw': 'B', 'resolution': '1080p'}, {}),
+    ]
+    win.pairs = list(pairs)
+
+    win.onInit()
+
+    items = win.getControl(ctx.streamswindow.LIST).items
+    assert [item.getProperty('position') for item in items] == ['0', '1']
+    assert win.getControl(ctx.streamswindow.SOURCES_COUNT).label == '2 SOURCES'
+    notice = 'via AddonA\nSTR%d' % ctx.streamswindow._FILTERS_MATCHED_NOTHING_STRING_ID
+    assert win.getControl(ctx.streamswindow.INFO_PANEL).text == notice
+
+
+def test_rebuild_list_no_filters_configured_hides_nothing(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = [({'addon': 'AddonA', 'raw': 'A'}, {}), ({'addon': 'AddonA', 'raw': 'B'}, {})]
+
+    win.onInit()
+
+    items = win.getControl(ctx.streamswindow.LIST).items
+    assert [item.getLabel() for item in items] == ['A', 'B']
+    assert win.getControl(ctx.streamswindow.INFO_PANEL).text == 'via AddonA'
+
+
+def test_rebuild_list_skips_a_filtered_entry_without_disturbing_surrounding_order(load_streamswindow):
+    # filter_streams() drops the excluded pair in place - the two
+    # survivors either side of it must keep their RELATIVE order, exactly
+    # as if the excluded pair had never been in self.pairs at all.
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    ctx.env.addon.settings['playback_max_size_gb'] = '1'
+    first = {'addon': 'AddonA', 'raw': 'First', 'size_bytes': 500 * 1024 * 1024}
+    excluded = {'addon': 'AddonA', 'raw': 'Excluded', 'size_bytes': 5 * 1024 ** 3}
+    last = {'addon': 'AddonA', 'raw': 'Last', 'size_bytes': 500 * 1024 * 1024}
+    win.pairs = [(first, {}), (excluded, {}), (last, {})]
+
+    win.onInit()
+
+    items = win.getControl(ctx.streamswindow.LIST).items
+    assert [item.getLabel() for item in items] == ['First', 'Last']
+    # positions are still real self.pairs indices (0 and 2) - the skipped
+    # middle index is never renumbered away.
+    assert [item.getProperty('position') for item in items] == ['0', '2']
+
+
+def test_read_stream_filters_maps_quality_setting_to_height_and_gb_to_bytes(load_streamswindow):
+    ctx = load_streamswindow()
+    ctx.env.addon.settings['playback_min_quality'] = '720p'
+    ctx.env.addon.settings['playback_max_size_gb'] = '2'
+    ctx.env.addon.settings['playback_exclude_cam'] = 'true'
+    ctx.env.addon.settings['playback_cached_only'] = 'true'
+
+    filters = ctx.streamswindow._read_stream_filters()
+
+    assert filters == {
+        'min_height': 720,
+        'max_size_bytes': 2 * 1024 ** 3,
+        'exclude_cam': True,
+        'cached_only': True,
+    }
+
+
+def test_read_stream_filters_defaults_to_no_filtering(load_streamswindow):
+    ctx = load_streamswindow()
+
+    filters = ctx.streamswindow._read_stream_filters()
+
+    assert filters == {
+        'min_height': 0,
+        'max_size_bytes': 0,
+        'exclude_cam': False,
+        'cached_only': False,
+    }
+
+
 @pytest.mark.parametrize('poster,expect_fanart', [
     ('https://x/poster.jpg', False),
     (None, True),
@@ -1774,6 +1910,146 @@ def test_apply_pending_batch_interleaving_existing_rows_falls_back_to_full_rebui
     focused = win.getControl(sw.LIST).getSelectedItem()
     focused_pair = win.pairs[int(focused.getProperty('position'))]
     assert focused_pair[1] is stream_a  # focus followed the original row to its new position
+
+
+def test_apply_pending_batch_flipping_matched_nothing_to_false_drops_stale_fallback_row(
+    load_streamswindow,
+):
+    """Regression: `_stream_filter_view()`'s "filters matched nothing"
+    fallback shows every pair, UNFILTERED, when the active filter would
+    hide everything (see that method's own docstring). If a later batch
+    then gives the filter something real to keep, `single_provider`
+    stays put and the old raw prefix is still an identity prefix of the
+    re-sorted `self.pairs` - the two checks `_append_prefix_length()`
+    used to run - but the fallback row the OLD prefix was showing is
+    now something the SAME active filter must hide. The append-only
+    fast path must not leave it on screen just because nothing "moved"."""
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    win = _make_window(sw)
+    ctx.env.addon.settings['playback_exclude_cam'] = 'true'
+    cam_info = {'addon': 'A', 'raw': 'Movie.2020.CAMRip.x264'}
+    cam_stream = {'url': 'https://a.example/cam.mp4'}
+    win.start([(cam_info, cam_stream)], 'movie', 'tt1')
+    win.onInit()
+
+    # Fallback kicked in: the lone pair is a CAM release the active
+    # filter would hide, so _stream_filter_view() shows it anyway.
+    assert [i.getLabel() for i in win.getControl(sw.LIST).items] == ['Movie.2020.CAMRip.x264']
+
+    clean_info = {'addon': 'A', 'raw': 'Movie.2020.WEB-DL.x264'}
+    clean_stream = {'url': 'https://a.example/clean.mp4'}
+    win.add_pairs([(clean_info, clean_stream)])
+    win.onAction(_FakeBackAction(-1))
+
+    # self.pairs itself is untouched by filtering - both raw pairs stay.
+    assert [s for _i, s in win.pairs] == [cam_stream, clean_stream]
+    # LIST must show exactly the real filtered subset now - the stale
+    # CAM fallback row must be gone, not merely appended past.
+    items = win.getControl(sw.LIST).items
+    assert [i.getLabel() for i in items] == ['Movie.2020.WEB-DL.x264']
+
+
+def test_apply_pending_full_rebuild_selects_visible_index_not_raw_index_when_a_filtered_pair_precedes_focus(
+    load_streamswindow, monkeypatch,
+):
+    """Regression: `_apply_pending()`'s full-rebuild fallback used to
+    re-find the focused pair's RAW `self.pairs` index and hand it
+    straight to `selectItem()`, even though LIST only ever holds
+    `display_pairs` (the FILTERED view - see `_stream_filter_view()`).
+    A newly-arrived cam release sorted ahead of the already-focused row
+    is filtered out, so the focused row's raw index (1) and its actual
+    on-screen row (0, the only visible item) diverge - selectItem() must
+    get the latter."""
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    win = _make_window(sw)
+    target_info = {'addon': 'A', 'raw': 'Target.WEB-DL.x264'}
+    target_stream = {'url': 'https://a.example/target.mp4'}
+    win.start([(target_info, target_stream)], 'movie', 'tt1')
+    win.onInit()
+    win.getControl(sw.LIST).selected_index = 0  # focus the only (visible) row
+
+    ctx.env.addon.settings['playback_exclude_cam'] = 'true'
+    cam_info = {'addon': 'A', 'raw': 'Movie.2020.CAMRip.x264'}
+    cam_stream = {'url': 'https://a.example/cam.mp4'}
+
+    def fake_sort_streams(pairs, key='quality'):
+        # Sorts the newly-arrived (soon-to-be-filtered) cam pair AHEAD
+        # of the already-focused row, so the old rendered prefix is no
+        # longer a prefix of the re-sorted self.pairs - forcing the
+        # full-rebuild fallback with a FILTERED pair now preceding the
+        # focused one at the raw self.pairs level.
+        return sorted(pairs, key=lambda pair: pair[1] is target_stream)
+
+    monkeypatch.setattr(streaminfo, 'sort_streams', fake_sort_streams)
+    win.add_pairs([(cam_info, cam_stream)])
+    win.onAction(_FakeBackAction(-1))
+
+    assert [s for _i, s in win.pairs] == [cam_stream, target_stream]  # cam is raw index 0, target is raw index 1
+    control = win.getControl(sw.LIST)
+    assert [item.getLabel() for item in control.items] == ['Target.WEB-DL.x264']  # cam row hidden by the filter
+    assert control.selected_index == 0  # the pair's VISIBLE index, not its raw index (1)
+    focused = control.getSelectedItem()
+    assert win.pairs[int(focused.getProperty('position'))][1] is target_stream
+
+
+def test_apply_pending_full_rebuild_clamps_selection_when_the_focused_pair_itself_is_filtered_out(
+    load_streamswindow, monkeypatch,
+):
+    """Regression: when the row the user is ON gets hidden by a filter
+    change (e.g. the user opened Settings and flipped 'exclude CAM'
+    while a background batch was still landing), the focused pair is
+    simply gone from the new visible list - there is no "correct" row
+    to land on. `_apply_pending()` falls back to the pair's old NUMERIC
+    row position, clamped to the NEW (shorter) VISIBLE list, rather
+    than the old buggy clamp against `len(self.pairs)` - which counts
+    every hidden row LIST never had, so it does not shrink at all here
+    (a second, also-filtered cam pair grows `self.pairs` right alongside
+    the visible list shrinking) and would select a row past the end of
+    the actual on-screen list."""
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    win = _make_window(sw)
+    other1_info = {'addon': 'A', 'raw': 'Other1.WEB-DL.x264'}
+    other1_stream = {'url': 'https://a.example/other1.mp4'}
+    other2_info = {'addon': 'A', 'raw': 'Other2.WEB-DL.x264'}
+    other2_stream = {'url': 'https://a.example/other2.mp4'}
+    cam_info = {'addon': 'A', 'raw': 'Movie.2020.CAMRip.x264'}
+    cam_stream = {'url': 'https://a.example/cam.mp4'}
+    win.start(
+        [(other1_info, other1_stream), (other2_info, other2_stream), (cam_info, cam_stream)], 'movie', 'tt1',
+    )
+    win.onInit()
+    assert [item.getLabel() for item in win.getControl(sw.LIST).items] == [
+        'Other1.WEB-DL.x264', 'Other2.WEB-DL.x264', 'Movie.2020.CAMRip.x264',
+    ]
+    win.getControl(sw.LIST).selected_index = 2  # focus the cam row (last) - no filter active yet
+
+    # Simulate the user opening Settings and enabling exclude-CAM while
+    # this picker stays open, then a second cam batch landing.
+    ctx.env.addon.settings['playback_exclude_cam'] = 'true'
+    new_cam_info = {'addon': 'A', 'raw': 'Movie.2021.CAMRip.x264'}
+    new_cam_stream = {'url': 'https://a.example/new_cam.mp4'}
+
+    def fake_sort_streams(pairs, key='quality'):
+        return pairs  # keep insertion order - the new pair lands strictly at the end
+
+    monkeypatch.setattr(streaminfo, 'sort_streams', fake_sort_streams)
+    win.add_pairs([(new_cam_info, new_cam_stream)])
+    win.onAction(_FakeBackAction(-1))
+
+    assert [s for _i, s in win.pairs] == [
+        other1_stream, other2_stream, cam_stream, new_cam_stream,
+    ]  # 4 raw pairs - self.pairs kept growing
+    control = win.getControl(sw.LIST)
+    # Both cam rows (the previously-focused one included) are now hidden -
+    # the visible list SHRANK to 2 while self.pairs grew to 4.
+    assert [item.getLabel() for item in control.items] == ['Other1.WEB-DL.x264', 'Other2.WEB-DL.x264']
+    # Clamped to the last valid visible row (old numeric position 2,
+    # new visible length 2), not left at the old raw-length clamp of 2.
+    assert control.selected_index == 1
+    assert control.getSelectedItem() is not None  # would IndexError against the old len(self.pairs) clamp
 
 
 def test_apply_pending_fast_path_and_full_rebuild_produce_identical_final_list_contents(

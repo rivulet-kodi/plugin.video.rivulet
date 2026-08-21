@@ -20,6 +20,8 @@ from lib.stremio.streaminfo import (
     _scan_languages,
     _segment_after,
     clean_text,
+    filter_streams,
+    filter_summary,
     format_details,
     format_label,
     format_plot,
@@ -1101,6 +1103,136 @@ def test_sort_streams_seeders_key_descending_none_last():
 
 def test_sort_streams_empty_list():
     assert sort_streams([], key="quality") == []
+
+
+# --- filter_streams / filter_summary ------------------------------------
+
+
+def test_filter_streams_min_height_drops_below_threshold():
+    pairs = [(_info("480p"), "low"), (_info("1080p"), "high")]
+    result = filter_streams(pairs, min_height=720)
+    assert [p[1] for p in result] == ["high"]
+
+
+def test_filter_streams_min_height_keeps_unknown_resolution():
+    # An entry parse_stream() could not read a resolution out of is a
+    # parser gap, not necessarily a low-quality stream - hiding it would
+    # turn "we don't know" into "we hid it", the exact bug min_height's
+    # contract rules out.
+    pairs = [(_info(""), "unknown"), (_info("480p"), "low")]
+    result = filter_streams(pairs, min_height=1080)
+    assert [p[1] for p in result] == ["unknown"]
+
+
+def test_filter_streams_max_size_drops_above_threshold():
+    pairs = [
+        (_info(size_bytes=1_000_000_000), "small"),
+        (_info(size_bytes=5_000_000_000), "big"),
+    ]
+    result = filter_streams(pairs, max_size_bytes=2_000_000_000)
+    assert [p[1] for p in result] == ["small"]
+
+
+def test_filter_streams_max_size_keeps_unknown_size():
+    pairs = [(_info(size_bytes=None), "unknown"), (_info(size_bytes=5_000_000_000), "big")]
+    result = filter_streams(pairs, max_size_bytes=1_000_000_000)
+    assert [p[1] for p in result] == ["unknown"]
+
+
+def test_filter_streams_exclude_cam_drops_camrip_word_boundary():
+    pairs = [(_info(raw="Movie.2020.CAMRip.x264"), "cam")]
+    assert filter_streams(pairs, exclude_cam=True) == []
+
+
+def test_filter_streams_exclude_cam_keeps_camelot_not_a_cam_source():
+    # "Camelot" contains "cam" but is not word-bounded as a release tag -
+    # must survive the filter untouched.
+    pairs = [(_info(raw="Camelot.2017.1080p.BluRay"), "camelot")]
+    result = filter_streams(pairs, exclude_cam=True)
+    assert [p[1] for p in result] == ["camelot"]
+
+
+def test_filter_streams_exclude_cam_drops_hdcamrip_compound_token():
+    # "HDCAMRip" runs the "HD" source prefix straight into "CAMRip" with
+    # no word break before the trailing "Rip" - the same no-word-break
+    # gap that motivated `cam-?rip` above, just one prefix over.
+    pairs = [(_info(raw="Movie.2020.HDCAMRip.x264"), "hdcamrip")]
+    assert filter_streams(pairs, exclude_cam=True) == []
+
+
+def test_filter_streams_exclude_cam_drops_hdtsrip_compound_token():
+    pairs = [(_info(raw="Movie.2020.HDTSRip.x264"), "hdtsrip")]
+    assert filter_streams(pairs, exclude_cam=True) == []
+
+
+def test_filter_streams_exclude_cam_drops_tsrip_compound_token():
+    pairs = [(_info(raw="Movie.2020.TSRip.x264"), "tsrip")]
+    assert filter_streams(pairs, exclude_cam=True) == []
+
+
+def test_filter_streams_exclude_cam_keeps_batman_not_a_cam_source():
+    # "Batman" contains neither "cam" nor "ts" as a bounded token -
+    # regression guard alongside the "Camelot" case above.
+    pairs = [(_info(raw="Batman.2022.2160p.UHD.BluRay"), "batman")]
+    result = filter_streams(pairs, exclude_cam=True)
+    assert [p[1] for p in result] == ["batman"]
+
+
+def test_filter_streams_cached_only_keeps_true_drops_unknown_and_false():
+    pairs = [
+        (_info(cached=True), "cached"),
+        (_info(cached=False), "uncached"),
+        (_info(cached=None), "unknown"),
+    ]
+    result = filter_streams(pairs, cached_only=True)
+    assert [p[1] for p in result] == ["cached"]
+
+
+def test_filter_streams_all_zero_args_returns_input_unchanged_order_preserved():
+    pairs = [(_info("480p"), "a"), (_info("2160p"), "b"), (_info(""), "c")]
+    result = filter_streams(pairs)
+    assert [p[1] for p in result] == ["a", "b", "c"]
+
+
+def test_filter_streams_combined_axes():
+    pairs = [
+        (_info("2160p", size_bytes=1_000_000_000, cached=True, raw="Great.Movie.2160p"), "keep"),
+        (_info("480p", size_bytes=1_000_000_000, cached=True, raw="Low.Res.480p"), "low_res"),
+        (_info("2160p", size_bytes=9_000_000_000, cached=True, raw="Huge.File.2160p"), "too_big"),
+        (_info("2160p", size_bytes=1_000_000_000, cached=False, raw="Not.Cached.2160p"), "not_cached"),
+        (_info("2160p", size_bytes=1_000_000_000, cached=True, raw="Movie.2160p.CAMRip"), "cam"),
+    ]
+    result = filter_streams(
+        pairs, min_height=1080, max_size_bytes=2_000_000_000, exclude_cam=True, cached_only=True,
+    )
+    assert [p[1] for p in result] == ["keep"]
+
+
+def test_filter_summary_reports_total_and_hidden_count():
+    assert filter_summary(10, 7) == (10, 3)
+
+
+def test_filter_summary_hidden_never_negative():
+    # kept can never exceed total in real use, but the helper still
+    # shouldn't hand a UI a negative "hidden" count if it ever did.
+    assert filter_summary(5, 8) == (5, 0)
+
+
+def test_filter_streams_then_sort_streams_excluded_stream_does_not_disturb_order():
+    # filter_streams() must be a clean per-entry drop with no side effect
+    # on the RELATIVE order sort_streams() gives the survivors -
+    # streamswindow.py relies on filtering before sorting without the
+    # two steps fighting over row order. "too_big" outranks both
+    # survivors on seeders alone, so if it were not excluded before the
+    # sort it would land first.
+    pairs = [
+        (_info("1080p", seeders=5, size_bytes=1_000_000_000), "keep_a"),
+        (_info("1080p", seeders=50, size_bytes=9_000_000_000), "too_big"),
+        (_info("1080p", seeders=20, size_bytes=1_000_000_000), "keep_b"),
+    ]
+    filtered = filter_streams(pairs, max_size_bytes=2_000_000_000)
+    result = sort_streams(filtered, key="quality")
+    assert [p[1] for p in result] == ["keep_b", "keep_a"]
 
 
 # --- lib.ui.playbackmeta: pure OSD metadata formatting/parsing helpers -----

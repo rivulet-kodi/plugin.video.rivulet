@@ -795,3 +795,51 @@ msgstr "无法更新媒体库"
 msgctxt "#30302"
 msgid "Failed to check library status"
 msgstr "无法检查媒体库状态"
+
+msgctxt "#30253"
+msgid "Minimum quality"
+msgstr "最低画质"
+
+msgctxt "#30254"
+msgid "Any"
+msgstr "任意"
+
+msgctxt "#30255"
+msgid "480p"
+msgstr "480p"
+
+msgctxt "#30256"
+msgid "720p"
+msgstr "720p"
+
+msgctxt "#30257"
+msgid "1080p"
+msgstr "1080p"
+
+msgctxt "#30258"
+msgid "2160p"
+msgstr "2160p"
+
+msgctxt "#30259"
+msgid "Maximum size (GB, 0 = unlimited)"
+msgstr "最大大小（GB，0 = 无限制）"
+
+msgctxt "#30260"
+msgid "Exclude CAM/TS sources"
+msgstr "排除 CAM/TS 来源"
+
+msgctxt "#30261"
+msgid "Cached only"
+msgstr "仅显示已缓存"
+
+msgctxt "#30262"
+msgid "%d source hidden by filters"
+msgstr "已被过滤器隐藏 %d 个来源"
+
+msgctxt "#30263"
+msgid "%d sources hidden by filters"
+msgstr "已被过滤器隐藏 %d 个来源"
+
+msgctxt "#30264"
+msgid "Filters matched nothing - showing all sources"
+msgstr "过滤器未匹配任何结果，显示全部来源"

@@ -135,6 +135,31 @@ _CACHED_STRING_ID = 30208
 #: same id DetailWindow and the coverflow hero use.
 _NOW_STRING_ID = 30234
 
+#: resources/settings.xml keys for the four 'playback_*' stream-filter
+#: controls (see that file's 'playback' category). Read fresh on every
+#: `_rebuild_list()` call by `_read_stream_filters()` below rather than
+#: cached anywhere on the window - Kodi's Settings dialog is its own
+#: modal the user can open and change these in without ever closing
+#: this picker first.
+_MIN_QUALITY_SETTING = 'playback_min_quality'
+_MAX_SIZE_GB_SETTING = 'playback_max_size_gb'
+_EXCLUDE_CAM_SETTING = 'playback_exclude_cam'
+_CACHED_ONLY_SETTING = 'playback_cached_only'
+
+#: `playback_min_quality`'s select values -> `streaminfo.filter_streams()`'s
+#: `min_height`. 'any' (and anything unrecognised, e.g. a stale value
+#: left over from a settings.xml downgrade) maps to 0, filter_streams()'s
+#: own "no filtering on this axis" sentinel.
+_MIN_QUALITY_HEIGHTS = {'480p': 480, '720p': 720, '1080p': 1080, '2160p': 2160}
+
+#: strings.po ids for the INFO_PANEL's "N hidden by filters" line and the
+#: "filters matched nothing" fallback notice - see `_rebuild_list()`'s
+#: filtering step. Singular/plural picked the same way as
+#: `_SOURCE_STRING_ID`/`_SOURCES_STRING_ID` above.
+_HIDDEN_STRING_ID = 30262
+_HIDDEN_PLURAL_STRING_ID = 30263
+_FILTERS_MATCHED_NOTHING_STRING_ID = 30264
+
 #: Brief settle pause before reopening the picker after playback ends -
 #: gives Kodi's player teardown a moment to finish before a fresh modal
 #: window is drawn on top of it. Also reused as the settle pause after
@@ -156,6 +181,24 @@ _BINGE_COUNTDOWN_MIN_SECONDS = 3
 #: seconds are part of the sentence.
 _BINGE_DIALOG_HEADING_STRING_ID = 30182
 _BINGE_DIALOG_MESSAGE_STRING_ID = 30183
+
+
+def _read_stream_filters():
+    """Read the four 'playback_*' settings into
+    `streaminfo.filter_streams()`'s kwargs (see the constants above).
+    `playback_max_size_gb` is a GB slider - a human picks a size in GB,
+    not bytes - converted here to the byte unit `filter_streams()`/
+    `parse_stream()`'s own `size_bytes` already uses."""
+    from lib.ui.compat import ADDON, setting_bool, setting_int
+
+    min_quality = ADDON.getSetting(_MIN_QUALITY_SETTING) or 'any'
+    max_size_gb = setting_int(_MAX_SIZE_GB_SETTING, 0, minimum=0)
+    return {
+        'min_height': _MIN_QUALITY_HEIGHTS.get(min_quality, 0),
+        'max_size_bytes': max_size_gb * 1024 ** 3,
+        'exclude_cam': setting_bool(_EXCLUDE_CAM_SETTING, False),
+        'cached_only': setting_bool(_CACHED_ONLY_SETTING, False),
+    }
 
 
 class StreamsWindow(BaseWindow):
@@ -204,6 +247,17 @@ class StreamsWindow(BaseWindow):
         #: `_append_prefix_length()` must catch that even when every
         #: pair's own identity is unchanged.
         self._rendered_single_provider = None
+        #: The `display_pairs` sequence (by OBJECT IDENTITY, in
+        #: `self.pairs` order) `_rebuild_list()` last actually put into
+        #: LIST - a strict superset check against `self._rendered_pairs`
+        #: above is not enough: a pending batch can flip
+        #: `_stream_filter_view()`'s "filters matched nothing" fallback
+        #: from true to false (the batch gives a previously-starved
+        #: filter something real to keep), which changes which of the
+        #: OLD prefix's rows are still visible even though none of them
+        #: moved and `single_provider` didn't change either -
+        #: `_append_prefix_length()` compares against this to catch it.
+        self._rendered_visible_pairs = []
 
     def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
         """doModal() showing `pairs` (a list of `(info, stream)` as
@@ -305,19 +359,24 @@ class StreamsWindow(BaseWindow):
         `_append_prefix_length()`) whenever the previously-rendered rows
         are still an untouched PREFIX of the freshly re-sorted
         `self.pairs` - the common case, since a fast addon landing after
-        a slow one usually sorts after what is already on screen. That
-        path never moves the focused row (nothing before `start` moved),
-        so it goes straight to the same numeric-position restore the
-        full-rebuild path below falls back to. Otherwise (a re-sort
-        interleaved a new row somewhere inside the already-rendered
-        range, or flipped the single-provider addon-name dedupe - see
-        `_rebuild_list()`) falls back to the old full reset()+rebuild,
-        re-finding the focused row by OBJECT IDENTITY (`is`, not `==` -
-        two different streams can compare equal as `(info, stream)`
-        tuples) so a re-sort never yanks the cursor out from under a
-        user about to click. Falls back to the same numeric position
-        (clamped to the new length) when the previously-focused pair is
-        no longer in the list at all."""
+        a slow one usually sorts after what is already on screen.
+
+        Either way, the focused row is re-found by OBJECT IDENTITY (`is`,
+        not `==` - two different streams can compare equal as `(info,
+        stream)` tuples) in `self._rendered_visible_pairs` - the VISIBLE
+        list `_rebuild_list()` just built into LIST - never in raw
+        `self.pairs`: a filter can hide any number of pairs ahead of the
+        focused one, so a `self.pairs` index and LIST's row index are not
+        the same number, and passing the former to `selectItem()` picks
+        the wrong row (or one past the end of LIST) the moment filtering
+        is involved. Falls back to the same numeric ROW position
+        (clamped to the new, possibly-shorter, visible list) when the
+        previously-focused pair is no longer visible at all - a filter
+        change hid it, or there was no focused pair to begin with -
+        since landing on whatever now occupies that slot keeps the
+        cursor in a stable spot on screen, rather than jumping to some
+        unrelated stream elsewhere in the list just because it happens
+        to share the old raw index."""
         control = self.getControl(LIST)
         focused = control.getSelectedItem()
         focus_index = control.getSelectedPosition()
@@ -335,40 +394,89 @@ class StreamsWindow(BaseWindow):
 
         start = self._append_prefix_length()
         self._rebuild_list(0 if start is None else start)
-        if not self.pairs:
+        visible = self._rendered_visible_pairs
+        if not visible:
             return
-        if start is None and focus_pair is not None:
-            for index, pair in enumerate(self.pairs):
+        if focus_pair is not None:
+            for index, pair in enumerate(visible):
                 if pair is focus_pair:
                     control.selectItem(index)
                     return
-        control.selectItem(min(max(focus_index, 0), len(self.pairs) - 1))
+        control.selectItem(min(max(focus_index, 0), len(visible) - 1))
+
+    def _stream_filter_view(self):
+        """`(matched_nothing, display_pairs, hidden_count,
+        single_provider, provider_count)` for `self.pairs` and the
+        CURRENT 'playback_*' filter settings - shared by
+        `_rebuild_list()` (which renders `display_pairs`) and
+        `_append_prefix_length()` (which must invalidate its append-only
+        fast path the instant filtering changes which addon(s) drive
+        the single-provider dedupe, exactly like a raw addon batch
+        arriving already does). Computed fresh every call, never cached
+        on the window - see `_read_stream_filters()`'s own docstring
+        for why.
+
+        `matched_nothing` is true only when the filtered result is
+        EMPTY but `self.pairs` itself is not - the "misconfigured
+        filter" escape hatch: `display_pairs` then falls back to every
+        pair, UNFILTERED, rather than an empty list, so a filter that
+        happens to match nothing (e.g. 'minimum quality 2160p' against
+        an addon that only found 1080p) can never look indistinguishable
+        from `open_streams()`'s own "no sources found" empty-result
+        path. `hidden_count` is 0 in that case too - nothing was
+        actually left out of what's shown."""
+        filters = _read_stream_filters()
+        kept_pairs = streaminfo.filter_streams(self.pairs, **filters)
+        matched_nothing = bool(self.pairs) and not kept_pairs
+        display_pairs = self.pairs if matched_nothing else kept_pairs
+        hidden_count = 0
+        if not matched_nothing:
+            _total, hidden_count = streaminfo.filter_summary(len(self.pairs), len(kept_pairs))
+        providers = {info.get('addon') for info, _stream in display_pairs if info.get('addon')}
+        single_provider = next(iter(providers)) if len(providers) == 1 else None
+        return matched_nothing, display_pairs, hidden_count, single_provider, len(providers)
 
     def _append_prefix_length(self):
         """Returns how many of `self.pairs`, counted from the front, are
         the SAME already-rendered run `_rebuild_list()` last built into
         LIST - safe for `_apply_pending()` to leave untouched and only
         append past - or `None` if a full reset()+rebuild is required.
-        Two things invalidate the prefix: (1) the re-sort moved one of
+        Three things invalidate the prefix: (1) the re-sort moved one of
         those pairs (checked by OBJECT IDENTITY, `is` - pairs are reused
         across a merge, never rebuilt, see `_merge_pending()`, so an
         unmoved row is still the exact same tuple at the exact same
-        index), or (2) the single-provider addon-name dedupe
+        index), (2) the single-provider addon-name dedupe
         (`_rebuild_list()`'s `single_provider`) flipped - that changes
         line 1 of every ALREADY-rendered row too, e.g. the picker
         opening on one addon's own results (no addon segment shown) and
         a second addon's batch then arriving (now shown on every row,
-        including the ones already on screen)."""
+        including the ones already on screen) - or (3) which of the OLD
+        prefix's pairs `_stream_filter_view()` actually DISPLAYS
+        changed, even though none of them moved and `single_provider`
+        stayed put: its "filters matched nothing" fallback can flip from
+        true to false the instant this same batch gives a previously-
+        starved filter something real to keep, which means some rows
+        the fallback was showing unfiltered a moment ago are now hidden
+        by the very filter that just started matching. Appending only
+        the new suffix in that case would leave those stale fallback
+        rows on screen forever, since nothing past `start` ever gets
+        re-examined - see `self._rendered_visible_pairs`."""
         prev = self._rendered_pairs
         if not prev or len(prev) > len(self.pairs):
             return None
         for old, new in zip(prev, self.pairs):
             if old is not new:
                 return None
-        providers = {info.get('addon') for info, _stream in self.pairs if info.get('addon')}
-        single_provider = next(iter(providers)) if len(providers) == 1 else None
+        _matched_nothing, display_pairs, _hidden_count, single_provider, _n = self._stream_filter_view()
         if single_provider != self._rendered_single_provider:
             return None
+        prev_ids = {id(pair) for pair in prev}
+        visible_prefix = [pair for pair in display_pairs if id(pair) in prev_ids]
+        if len(visible_prefix) != len(self._rendered_visible_pairs):
+            return None
+        for old, new in zip(self._rendered_visible_pairs, visible_prefix):
+            if old is not new:
+                return None
         return len(prev)
 
     def _rebuild_list(self, start=0):
@@ -398,13 +506,28 @@ class StreamsWindow(BaseWindow):
         layout reads column-by-column; the packed pair is the skin's own
         fallback for a row with no discretely parsed quality/source/
         addon. Never touches focus - callers position the cursor
-        themselves once this returns."""
-        providers = {info.get('addon') for info, _stream in self.pairs if info.get('addon')}
-        single_provider = next(iter(providers)) if len(providers) == 1 else None
+        themselves once this returns.
+
+        Rows for a pair `streaminfo.filter_streams()` (via
+        `_stream_filter_view()`) drops for the user's 'playback_*'
+        settings are skipped here rather than removed from `self.pairs`
+        itself - `position` stays a `self.pairs` index either way, so
+        `_apply_pending()`'s focus-by-identity restore and this
+        method's own append-only fast path both keep working exactly
+        as if filtering didn't exist. When the filtered result would be
+        EMPTY but `self.pairs` is not, `_stream_filter_view()` falls
+        back to showing every pair unfiltered instead - a misconfigured
+        filter must never look identical to `open_streams()`'s own "no
+        sources found" empty-result path."""
+        matched_nothing, display_pairs, hidden_count, single_provider, provider_count = self._stream_filter_view()
+        kept_ids = {id(pair) for pair in display_pairs}
 
         items = []
         for index in range(start, len(self.pairs)):
-            info, _stream = self.pairs[index]
+            pair = self.pairs[index]
+            if id(pair) not in kept_ids:
+                continue
+            info, _stream = pair
             # Multi-provider rows show the addon as a gray tail segment on
             # line 1 (format_label's own include_addon=True rendering);
             # once every pair is the SAME addon it's redundant there and
@@ -439,6 +562,7 @@ class StreamsWindow(BaseWindow):
         control.addItems(items)
         self._rendered_pairs = list(self.pairs)
         self._rendered_single_provider = single_provider
+        self._rendered_visible_pairs = list(display_pairs)
 
         from lib.ui.compat import L
         from lib.ui.playbackmeta import year_range
@@ -460,6 +584,10 @@ class StreamsWindow(BaseWindow):
             lines.append(' / '.join(genres))
         if single_provider:
             lines.append('via %s' % single_provider)
+        if matched_nothing:
+            lines.append(L(_FILTERS_MATCHED_NOTHING_STRING_ID))
+        elif hidden_count:
+            lines.append(L(_HIDDEN_STRING_ID if hidden_count == 1 else _HIDDEN_PLURAL_STRING_ID) % hidden_count)
         if self._loading:
             lines.append(L(_LOADING_STRING_ID))
         self.getControl(INFO_PANEL).setText('\n'.join(lines))
@@ -468,13 +596,14 @@ class StreamsWindow(BaseWindow):
         # 'NN ADDONS' / 'NN CACHED' lines) - their own labels, not more
         # INFO_PANEL text, since INFO_PANEL is a textbox (one font/colour
         # for its whole content) and CACHED needs its own green tint.
-        # `providers` is the same ephemeral set already built above for
-        # the single-provider dedupe. Singular/plural msgstr picked per
-        # count - '1 ADDONS' is wrong in English, and worse once
-        # translated, since most locales don't pluralize like English.
-        cached_count = sum(1 for info, _stream in self.pairs if info.get('cached') is True)
-        source_count = len(self.pairs)
-        addon_count = len(providers)
+        # `provider_count` is the distinct-addon count already computed
+        # by `_stream_filter_view()` above for the single-provider
+        # dedupe. Singular/plural msgstr picked per count - '1 ADDONS'
+        # is wrong in English, and worse once translated, since most
+        # locales don't pluralize like English.
+        cached_count = sum(1 for info, _stream in display_pairs if info.get('cached') is True)
+        source_count = len(display_pairs)
+        addon_count = provider_count
         self.getControl(SOURCES_COUNT).setLabel(
             L(_SOURCE_STRING_ID if source_count == 1 else _SOURCES_STRING_ID) % source_count
         )

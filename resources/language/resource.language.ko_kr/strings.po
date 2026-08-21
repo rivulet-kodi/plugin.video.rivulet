@@ -795,3 +795,51 @@ msgstr "라이브러리를 업데이트하지 못했습니다"
 msgctxt "#30302"
 msgid "Failed to check library status"
 msgstr "라이브러리 상태를 확인하지 못했습니다"
+
+msgctxt "#30253"
+msgid "Minimum quality"
+msgstr "최소 화질"
+
+msgctxt "#30254"
+msgid "Any"
+msgstr "모두"
+
+msgctxt "#30255"
+msgid "480p"
+msgstr "480p"
+
+msgctxt "#30256"
+msgid "720p"
+msgstr "720p"
+
+msgctxt "#30257"
+msgid "1080p"
+msgstr "1080p"
+
+msgctxt "#30258"
+msgid "2160p"
+msgstr "2160p"
+
+msgctxt "#30259"
+msgid "Maximum size (GB, 0 = unlimited)"
+msgstr "최대 크기 (GB, 0 = 무제한)"
+
+msgctxt "#30260"
+msgid "Exclude CAM/TS sources"
+msgstr "CAM/TS 소스 제외"
+
+msgctxt "#30261"
+msgid "Cached only"
+msgstr "캐시된 항목만"
+
+msgctxt "#30262"
+msgid "%d source hidden by filters"
+msgstr "필터로 인해 소스 %d개 숨김"
+
+msgctxt "#30263"
+msgid "%d sources hidden by filters"
+msgstr "필터로 인해 소스 %d개 숨김"
+
+msgctxt "#30264"
+msgid "Filters matched nothing - showing all sources"
+msgstr "필터와 일치하는 항목이 없어 모든 소스를 표시합니다"
