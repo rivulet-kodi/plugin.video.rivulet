@@ -51,6 +51,7 @@ Reuses `lib.stremio.addons`' HTTP/error/timeout/logging conventions
 hierarchy, so every call site that already catches `AddonError` from
 `AddonClient` catches this module's errors too.
 """
+import heapq
 import threading
 import time
 
@@ -218,6 +219,41 @@ _CATALOG_CACHE_TTL_SECONDS = 300
 _catalog_cache = {}  # type: dict
 _catalog_cache_lock = threading.Lock()
 
+#: Backstop cap on `_catalog_cache`'s size, independent of the TTL above.
+#: In any ONE snapshot the key set is bounded and small - installed
+#: addons times each addon's declared `addonCatalogs` entries - which is
+#: why `fetch_addon_catalog_cached()` below evicts only the single key
+#: it just found expired rather than sweeping the whole dict on every
+#: call (see that function's docstring). But a long-lived Kodi session
+#: can install and remove addons repeatedly, and a removed addon's key
+#: is never read again to let the TTL path above evict it, so the dict
+#: is only *practically* bounded, not formally. Mirrors
+#: `lib.store.MAX_PROGRESS_ENTRIES`: a fixed-count backstop with oldest
+#: entries evicted first, rather than inventing an LRU this cache has
+#: no other need for. 64 is generous headroom over any real install
+#: (Cinemeta alone declares 2 collapsed catalog ids per
+#: `iter_unique_addon_catalogs()`'s own docstring) while still bounding
+#: memory if a user churns through many addons in one session.
+_MAX_CATALOG_CACHE_ENTRIES = 64
+
+
+def _evict_oldest_catalog_cache_entries():
+    """Trim `_catalog_cache` down to `_MAX_CATALOG_CACHE_ENTRIES`,
+    dropping the oldest-`fetched_at` entries first - same eviction order
+    as `lib.store._prune_progress` (oldest-first by timestamp), since
+    entries nobody has re-read in a while are the ones most likely to
+    belong to an addon that is no longer installed. Caller MUST hold
+    `_catalog_cache_lock`.
+    """
+    overflow = len(_catalog_cache) - _MAX_CATALOG_CACHE_ENTRIES
+    if overflow <= 0:
+        return
+    oldest_keys = heapq.nsmallest(
+        overflow, _catalog_cache, key=lambda key: _catalog_cache[key][0]
+    )
+    for key in oldest_keys:
+        del _catalog_cache[key]
+
 
 def fetch_addon_catalog_cached(client_or_session, transport_url, type_, id_):
     """`fetch_addon_catalog()`, served from `_catalog_cache` when a prior
@@ -225,16 +261,30 @@ def fetch_addon_catalog_cached(client_or_session, transport_url, type_, id_):
     `_CATALOG_CACHE_TTL_SECONDS` ago - see that constant's docstring for
     why this is an in-process dict rather than a disk cache. A cache hit
     issues zero HTTP requests.
+
+    An expired entry is evicted here (not merely bypassed): each entry's
+    `addons_list` is a FULL fetched catalog - ~95 entries each carrying a
+    complete manifest for a community catalog per the module docstring's
+    live census - so leaving stale entries in the dict would keep that
+    memory alive for the rest of the process's life for no benefit.
+    Evicting just THIS key (not sweeping `_catalog_cache` for every other
+    expired entry too) is deliberate: see `_MAX_CATALOG_CACHE_ENTRIES`'s
+    docstring for why the key set is small enough that a full sweep would
+    be bookkeeping this cache does not need - every live key gets re-read
+    on the next browse and self-evicts here when it goes stale.
     """
     key = (transport_url, type_, id_)
     now = time.monotonic()
     with _catalog_cache_lock:
         cached = _catalog_cache.get(key)
-    if cached is not None and now - cached[0] < _CATALOG_CACHE_TTL_SECONDS:
-        return cached[1]
+        if cached is not None:
+            if now - cached[0] < _CATALOG_CACHE_TTL_SECONDS:
+                return cached[1]
+            del _catalog_cache[key]
     addons_list = fetch_addon_catalog(client_or_session, transport_url, type_, id_)
     with _catalog_cache_lock:
         _catalog_cache[key] = (now, addons_list)
+        _evict_oldest_catalog_cache_entries()
     return addons_list
 
 

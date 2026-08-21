@@ -31,7 +31,13 @@ has actually been built into a page - a row nobody has scrolled to yet
 never gets Kodi's own async texture loader queued against it. Without
 this, `addItems()` handing the list ~79 logo URLs in one call is what
 stalled the screen on the ARM/SD-card box this was measured on, before
-a single row had even painted.
+a single row had even painted. A re-render (a fresh `_reload()`, or
+just a filter change) can happen while a previous walker is still
+between pages; `_paging_generation` (see `_stop_paging()`/
+`_paging_worker()`) is what a worker rechecks right before appending, so
+a page is applied only if the render that produced it is still current
+- otherwise it lands on the wrong list, or indexes a `self.entries` that
+has since shrunk.
 
 In-memory search. ~100 rows is unusable one-row-at-a-time on a remote,
 so the "Search addon catalogs" row (`_search_row()`) opens a plain
@@ -117,7 +123,20 @@ class AddonCatalogWindow(BaseWindow):
         #: set by `_stop_paging()`/`close()` to tell a running walker to
         #: stop between pages - polled rather than relied on to already
         #: have stopped, since the worker may be mid-`waitForAbort()`.
+        #: This is a best-effort early-exit only: `_stop_paging()`
+        #: replaces this Event with a brand new one, and a worker reads
+        #: it as `self._paging_stopped` (not a value captured at spawn),
+        #: so a worker already past its last check would otherwise see
+        #: the *new*, unset Event and never notice. `_paging_generation`
+        #: below is what actually enforces correctness.
         self._paging_stopped = threading.Event()
+        #: bumped every time `_stop_paging()` runs (from `_render()` or
+        #: `close()`). A worker captures the generation in effect when
+        #: `_spawn_paging()` started it and rechecks it, under
+        #: `_paging_lock`, immediately before appending a page - see
+        #: `_paging_worker()`. INVARIANT: a page is applied only if the
+        #: render that produced it is still current.
+        self._paging_generation = 0
 
     def onInit(self):
         self._reload()
@@ -307,24 +326,51 @@ class AddonCatalogWindow(BaseWindow):
     def _stop_paging(self):
         """Stop any walker from a previous `_render()` and clear
         whatever it had queued - a stale page from before a re-filter
-        must never land on the new list."""
+        must never land on the new list.
+
+        Setting/replacing `_paging_stopped` is only a best-effort nudge
+        for a worker that is about to check it anyway - see the
+        docstring on that attribute in `_reset_paging_state()`. Bumping
+        `_paging_generation` is what actually enforces the invariant: a
+        page is applied only if the render that produced it is still
+        current, checked by `_paging_worker()` under `_paging_lock`
+        right before it would append."""
         self._paging_stopped.set()
         with self._paging_lock:
             self._pending_pages = []
         self._paging_stopped = threading.Event()
+        self._paging_generation += 1
 
     def _spawn_paging(self, pages):
         """Walk `pages` (a list of index chunks past the first) on a
         daemon thread, queueing each for the UI thread - see
-        `_reset_paging_state()`."""
-        thread = threading.Thread(target=self._paging_worker, args=(pages,), daemon=True)
+        `_reset_paging_state()`. Captures the current
+        `_paging_generation` now, at spawn time, so the worker can tell
+        later whether the render it was built for is still the one on
+        screen - see `_paging_worker()`."""
+        generation = self._paging_generation
+        thread = threading.Thread(target=self._paging_worker, args=(pages, generation), daemon=True)
         thread.start()
 
-    def _paging_worker(self, pages):
+    def _paging_worker(self, pages, generation):
         """Append `pages` to `_pending_pages` one at a time,
         `_PAGE_PACE_SECS` apart, waking the UI thread after each so
         `_apply_pending_pages()` drains it - see the module docstring
-        for why the pacing lives here rather than in `_render()`."""
+        for why the pacing lives here rather than in `_render()`.
+
+        `generation` is the render generation this worker was spawned
+        for (`_spawn_paging()` captures it from `_paging_generation`).
+        `_render()`/`close()` never mutate a running worker's `Event()`
+        in place: each installs a brand new one via `_stop_paging()`, so
+        a worker already past its `_paging_stopped` check for this pass
+        would otherwise read that unset replacement and wrongly
+        conclude it was never stopped. Rechecking `generation` against
+        `self._paging_generation` under `_paging_lock`, immediately
+        before appending, is what actually enforces the invariant: a
+        page is applied only if the render that produced it is still
+        current. A stale generation stops the walk outright - every
+        later page in this batch belongs to a render that is gone
+        too."""
         import xbmc
 
         monitor = xbmc.Monitor()
@@ -339,6 +385,8 @@ class AddonCatalogWindow(BaseWindow):
                 if not page:
                     continue
                 with self._paging_lock:
+                    if generation != self._paging_generation:
+                        return  # a newer render/close made this batch stale
                     self._pending_pages.append(list(page))
                 xbmc.executebuiltin('Action(noop)')
         except Exception:
@@ -403,8 +451,10 @@ class AddonCatalogWindow(BaseWindow):
 
     def close(self):
         # Any exit path must not leave a paging walker running for a
-        # window nobody is looking at.
-        self._paging_stopped.set()
+        # window nobody is looking at, and must not let one already
+        # mid-page apply it after teardown - `_stop_paging()` bumps
+        # `_paging_generation`, which covers both (see its docstring).
+        self._stop_paging()
         super().close()
 
     def onClick(self, control_id):

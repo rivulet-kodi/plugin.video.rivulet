@@ -447,7 +447,7 @@ def test_appending_a_page_neither_resets_the_control_nor_loses_focus(load_addonc
     control.selected_index = 3  # focus a mid-first-page row
     focused_before = control.items[3]
 
-    win._paging_worker(spawned[0])  # synchronous, on the test thread
+    win._paging_worker(spawned[0], win._paging_generation)  # synchronous, on the test thread
 
     import xbmcgui
     win.onAction(xbmcgui.Action(0))  # drains _pending_pages, as the real noop wake-up would
@@ -473,6 +473,7 @@ def test_paging_worker_stops_once_the_window_closed(load_addoncatalogwindow, mon
     win = _make_window(ctx.addoncatalogwindow)
     win.onInit()
     remaining_pages = spawned[0]
+    generation = win._paging_generation  # captured at spawn time, like the real worker would
 
     win.close()
     consumed = []
@@ -482,10 +483,102 @@ def test_paging_worker_stops_once_the_window_closed(load_addoncatalogwindow, mon
             consumed.append(page)
             yield page
 
-    win._paging_worker(_pages())
+    win._paging_worker(_pages(), generation)
 
     assert consumed == [remaining_pages[0]]  # first page already "in flight"; no more walked
     assert win._pending_pages == []
+
+
+def test_stale_worker_page_from_before_a_refilter_is_discarded_not_applied(
+    load_addoncatalogwindow, monkeypatch,
+):
+    """Regression for the render-generation race: `_render()` (here,
+    triggered by narrowing the filter) replaces `_paging_stopped` with a
+    fresh, unset `Event()` while the previous render's walker is still
+    alive between pages. That worker reads `self._paging_stopped` as an
+    attribute rather than a value captured at spawn, so it observes the
+    NEW event, sees it unset, and (pre-fix) appends its stale page onto
+    the list the new, filtered render just built - a page that belongs
+    to the old, unfiltered list. `_paging_generation` closes that hole:
+    the worker also carries the generation it was spawned for and
+    rechecks it, under `_paging_lock`, immediately before appending."""
+    ctx = load_addoncatalogwindow(dialog_inputs=['addon 3'])
+    page_size = ctx.addoncatalogwindow._PAGE_SIZE
+    total = page_size + 5
+    store = _FakeStore(addons=[_source_addon()])
+    client = _FakeClient(session=FakeSession(responses=[FakeResponse(_many_addons_envelope(total))]))
+    _wire_store(ctx.addoncatalogwindow, store)
+    _wire_client(ctx.addoncatalogwindow, client)
+    spawned = _capture_spawn_paging(monkeypatch, ctx.addoncatalogwindow)
+
+    win = _make_window(ctx.addoncatalogwindow)
+    win.onInit()
+    stale_pages = spawned[0]  # indices page_size..total-1, from the unfiltered render
+    stale_generation = win._paging_generation
+
+    # A search that matches exactly one entry ("Addon 3", not "Addon 13"/
+    # "Addon 23" - the needle includes the space) re-renders with a
+    # single-row visible set, small enough that _render() spawns no new
+    # walker at all - the only pages in flight are the stale ones above.
+    win._open_search()
+    assert win._paging_generation == stale_generation + 1
+
+    # The old walker, still holding the generation it was spawned under,
+    # wakes up now (mid new render) and tries to contribute its page.
+    win._paging_worker(stale_pages, stale_generation)
+    assert win._pending_pages == []  # discarded - pre-fix this queued the stale page
+
+    import xbmcgui
+    win.onAction(xbmcgui.Action(0))  # drains _pending_pages, as the real noop wake-up would
+
+    control = win.getControl(ctx.addoncatalogwindow.LIST)
+    entry_rows = [item for item in control.items if item.getProperty('position').isdigit()]
+    assert len(entry_rows) == 1
+    assert entry_rows[0].getProperty('position') == '3'
+
+
+def test_stale_worker_page_cannot_indexerror_against_a_reload_shrunk_entries_list(
+    load_addoncatalogwindow, monkeypatch,
+):
+    """Regression: `_reload()` (e.g. after a successful install) can
+    replace `self.entries` with a SHORTER list. A walker spawned before
+    that reload holds page indices into the OLD, longer list; without
+    the generation recheck, `_apply_pending_pages()` -> `_page_items()`
+    would index `self.entries` out of range and raise `IndexError`."""
+    ctx = load_addoncatalogwindow()
+    page_size = ctx.addoncatalogwindow._PAGE_SIZE
+    total = page_size + 5
+    store = _FakeStore(addons=[_source_addon()])
+    client = _FakeClient(session=FakeSession(responses=[FakeResponse(_many_addons_envelope(total))]))
+    _wire_store(ctx.addoncatalogwindow, store)
+    _wire_client(ctx.addoncatalogwindow, client)
+    spawned = _capture_spawn_paging(monkeypatch, ctx.addoncatalogwindow)
+
+    win = _make_window(ctx.addoncatalogwindow)
+    win.onInit()
+    stale_pages = spawned[0]  # every index here is >= page_size
+    stale_generation = win._paging_generation
+
+    # Force a fresh fetch (bypassing the TTL cache) that returns FEWER
+    # entries than the stale walker's page indices - every one of them
+    # is now out of range for the new self.entries.
+    addoncatalogs._catalog_cache.clear()
+    shorter_total = page_size
+    assert shorter_total <= min(index for page in stale_pages for index in page)
+    client.session = FakeSession(responses=[FakeResponse(_many_addons_envelope(shorter_total))])
+    win._reload()
+    assert len(win.entries) == shorter_total
+    assert win._paging_generation == stale_generation + 1
+
+    win._paging_worker(stale_pages, stale_generation)  # must not raise IndexError
+    assert win._pending_pages == []
+
+    import xbmcgui
+    win.onAction(xbmcgui.Action(0))  # would IndexError pre-fix if the stale page had landed
+
+    control = win.getControl(ctx.addoncatalogwindow.LIST)
+    entry_rows = [item for item in control.items if item.getProperty('position').isdigit()]
+    assert sorted(int(item.getProperty('position')) for item in entry_rows) == list(range(shorter_total))
 
 
 # ---------------------------------------------------------------------------

@@ -455,6 +455,63 @@ def test_fetch_addon_catalog_cached_keys_are_specific_to_transport_url_type_and_
     assert len(session.calls) == 2
 
 
+def test_fetch_addon_catalog_cached_evicts_expired_entry_even_if_refetch_fails(monkeypatch):
+    """The bug this guards against: an expired entry was treated as a
+    miss and refetched, but the stale `(fetched_at, addons_list)` tuple
+    itself was never removed from `_catalog_cache` - only ever
+    overwritten if the refetch happened to succeed. If the source
+    addon's transportUrl went dead in the meantime, the stale entry
+    (and its full addons_list, ~95 manifests for a community catalog)
+    sat alive forever. Proven by making the refetch itself fail and
+    asserting the expired key is gone anyway."""
+    session = FakeSession(responses=[FakeResponse(ENVELOPE)])
+    client = _FakeClient(session)
+    url = "https://cache-eviction.example/manifest.json"
+    key = (url, "movie", "top")
+    start = 1000.0
+
+    monkeypatch.setattr(addoncatalogs.time, "monotonic", lambda: start)
+    fetch_addon_catalog_cached(client, url, "movie", "top")
+    assert key in addoncatalogs._catalog_cache
+
+    monkeypatch.setattr(
+        addoncatalogs.time, "monotonic",
+        lambda: start + addoncatalogs._CATALOG_CACHE_TTL_SECONDS + 1,
+    )
+    monkeypatch.setattr(
+        addoncatalogs, "fetch_addon_catalog",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AddonError("dead")),
+    )
+
+    with pytest.raises(AddonError):
+        fetch_addon_catalog_cached(client, url, "movie", "top")
+
+    assert key not in addoncatalogs._catalog_cache
+
+
+def test_fetch_addon_catalog_cached_evicts_oldest_entries_over_cap(monkeypatch):
+    """`_MAX_CATALOG_CACHE_ENTRIES` is a size backstop independent of the
+    TTL, for keys that stop being read entirely (their addon got
+    removed) so the TTL path never gets a chance to evict them. Proven
+    by lowering the cap, filling one entry past it, and checking the
+    documented eviction order: oldest-`fetched_at` first, newest kept."""
+    monkeypatch.setattr(addoncatalogs, "_MAX_CATALOG_CACHE_ENTRIES", 3)
+    session = FakeSession(responses=[FakeResponse(ENVELOPE) for _ in range(4)])
+    client = _FakeClient(session)
+    times = iter([1000.0, 1001.0, 1002.0, 1003.0])
+    monkeypatch.setattr(addoncatalogs.time, "monotonic", lambda: next(times))
+
+    for id_ in ("a", "b", "c", "d"):
+        fetch_addon_catalog_cached(client, "https://cap.example/manifest.json", "movie", id_)
+
+    remaining = set(addoncatalogs._catalog_cache)
+    assert len(remaining) == 3
+    assert ("https://cap.example/manifest.json", "movie", "a") not in remaining
+    assert remaining == {
+        ("https://cap.example/manifest.json", "movie", x) for x in ("b", "c", "d")
+    }
+
+
 # ---------------------------------------------------------------------------
 # Kodi-independence
 # ---------------------------------------------------------------------------
