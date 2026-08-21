@@ -145,6 +145,19 @@ def _search_catalog_descriptor(transport, name='Addon'):
     }
 
 
+def _adult_search_catalog_descriptor(transport, name='Adult Addon'):
+    """Same shape as `_search_catalog_descriptor()`, but the catalog's
+    own id/name carry an adult marker (`xxx`, matching
+    tests/test_views.py's `_ADULT_CATALOG`) - flags it adult by itself,
+    independent of any meta it returns."""
+    return {
+        'transportUrl': transport,
+        'manifest': {'name': name, 'catalogs': [
+            {'type': 'movie', 'id': 'xxx-list', 'name': 'XXX Movies', 'extra': [{'name': 'search'}]},
+        ]},
+    }
+
+
 # ---------------------------------------------------------------------------
 # SearchWindow.onInit() / _reload() - item building
 # ---------------------------------------------------------------------------
@@ -349,6 +362,68 @@ def test_run_query_sends_no_request_to_a_disabled_search_capable_addon(load_sear
 
 
 # ---------------------------------------------------------------------------
+# run_query() - home_hide_adult filtering (reuses lib.stremio.contentrating,
+# same policy as lib.ui.views.iter_catalog_pages()).
+# ---------------------------------------------------------------------------
+
+
+def test_run_query_never_fetches_an_adult_catalog_by_default(load_searchwindow):
+    """home_hide_adult defaults to True - an adult-flagged catalog
+    declared by a search-capable addon must never be fetched: not one
+    HTTP request is made for it."""
+    ctx = load_searchwindow()
+    transport = 'https://a.example/manifest.json'
+    store = _FakeStore(addons=[_adult_search_catalog_descriptor(transport)])
+    client = _FakeAddonClient(catalog_results={transport: [{'id': 'ttx', 'name': 'Adult'}]})
+
+    result = ctx.searchwindow.run_query(store, client, 'batman')
+
+    assert client.calls == []
+    assert result == []
+
+
+def test_run_query_fetches_and_keeps_an_adult_catalog_when_setting_is_off(load_searchwindow):
+    ctx = load_searchwindow(settings={'home_hide_adult': 'false'})
+    transport = 'https://a.example/manifest.json'
+    store = _FakeStore(addons=[_adult_search_catalog_descriptor(transport)])
+    metas = [{'id': 'ttx', 'name': 'Adult', 'type': 'movie'}]
+    client = _FakeAddonClient(catalog_results={transport: metas})
+
+    result = ctx.searchwindow.run_query(store, client, 'batman')
+
+    assert [call[0] for call in client.calls] == [transport]
+    assert result == metas
+
+
+def test_run_query_drops_adult_flagged_metas_from_an_ordinary_catalog_by_default(load_searchwindow):
+    """The catalog itself isn't adult, but one returned meta is flagged
+    `adult: True` - it must be dropped, the rest kept."""
+    ctx = load_searchwindow()
+    transport = 'https://a.example/manifest.json'
+    store = _FakeStore(addons=[_search_catalog_descriptor(transport)])
+    metas = [{'id': 'tt1', 'name': 'Batman', 'type': 'movie'},
+             {'id': 'tt2', 'name': 'Adult One', 'type': 'movie', 'adult': True}]
+    client = _FakeAddonClient(catalog_results={transport: metas})
+
+    result = ctx.searchwindow.run_query(store, client, 'batman')
+
+    assert [m['id'] for m in result] == ['tt1']
+
+
+def test_run_query_keeps_adult_flagged_metas_when_setting_is_off(load_searchwindow):
+    ctx = load_searchwindow(settings={'home_hide_adult': 'false'})
+    transport = 'https://a.example/manifest.json'
+    store = _FakeStore(addons=[_search_catalog_descriptor(transport)])
+    metas = [{'id': 'tt1', 'name': 'Batman', 'type': 'movie'},
+             {'id': 'tt2', 'name': 'Adult One', 'type': 'movie', 'adult': True}]
+    client = _FakeAddonClient(catalog_results={transport: metas})
+
+    result = ctx.searchwindow.run_query(store, client, 'batman')
+
+    assert {m['id'] for m in result} == {'tt1', 'tt2'}
+
+
+# ---------------------------------------------------------------------------
 # _rank_by_credit() - moved from the deleted lib.ui.views.search(); applied
 # inside run_query() to every collected meta before it is returned.
 # ---------------------------------------------------------------------------
@@ -529,6 +604,30 @@ def test_run_search_no_results_notifies_and_does_not_open_the_coverflow(load_sea
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas, catalog_title=None: opened.append(metas))
 
     win._run_search('nomatch')
+
+    assert opened == []
+    assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
+    assert win.closed is False
+
+
+def test_run_search_all_adult_results_filtered_out_hits_the_same_no_results_path(load_searchwindow, monkeypatch):
+    """Filtering must not make a populated result set look like a failed
+    search with a blank coverflow - when every returned meta is adult and
+    home_hide_adult is on, the window must take its existing no-results
+    branch (notify + no coverflow), exactly like a genuinely empty
+    search."""
+    ctx = load_searchwindow()
+    transport = 'https://a.example/manifest.json'
+    store = _FakeStore(addons=[_search_catalog_descriptor(transport)])
+    _wire_store(ctx.searchwindow, store)
+    metas = [{'id': 'tt1', 'name': 'Adult One', 'type': 'movie', 'adult': True}]
+    _wire_client(ctx.searchwindow, _FakeAddonClient(catalog_results={transport: metas}))
+    win = _make_window(ctx.searchwindow)
+    win.onInit()
+    opened = []
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: opened.append(m))
+
+    win._run_search('batman')
 
     assert opened == []
     assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]

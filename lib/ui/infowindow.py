@@ -781,6 +781,7 @@ def open_credits_picker(store, client, meta):
 
     if kind == 'discover':
         from lib.stremio.addons import AddonError, addon_error_detail, safe_url_for_log
+        from lib.stremio.contentrating import filter_metas, is_adult_catalog
 
         installed = {descriptor.get('transportUrl') for descriptor in store.get_enabled_addons()}
         # SECURITY: an addon-supplied discover link's transport_url must
@@ -792,13 +793,26 @@ def open_credits_picker(store, client, meta):
         if parsed['transport_url'] not in installed:
             log('infowindow: discover link transport not installed: %s' % safe_url_for_log(parsed['transport_url']), xbmc.LOGWARNING)
             return
-        from lib.ui.views import _fetch_catalog
+        from lib.ui.views import _adult_filtering_enabled, _fetch_catalog
+
+        # Same home_hide_adult policy as lib.ui.views.iter_catalog_pages()
+        # and searchwindow.run_query(): a meta's embedded "more like
+        # this"/genre discover link can point straight at an
+        # adult-flagged catalog, so it needs the identical two-layer
+        # check - skip the fetch entirely for a catalog that is itself
+        # adult, else filter adult metas from what it returns.
+        hide_adult = _adult_filtering_enabled()
+        if hide_adult and is_adult_catalog({'id': parsed['catalog_id'], 'type': parsed['type']}):
+            _open_results([])
+            return
         try:
             metas = _fetch_catalog(parsed['transport_url'], parsed['type'], parsed['catalog_id'], extra=parsed['extra'])
         except AddonError as exc:
             log('infowindow: discover fetch %s failed: %s' % (safe_url_for_log(parsed['transport_url']), addon_error_detail(exc)), xbmc.LOGERROR)
             notify(L(30032))
             return
+        if hide_adult:
+            metas = filter_metas(metas)
         _open_results(metas)
         return
 

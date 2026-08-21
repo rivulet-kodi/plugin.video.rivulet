@@ -867,3 +867,7 @@ msgstr "Yeni bölümler"
 msgctxt "#30318"
 msgid "NEW"
 msgstr "YENİ"
+
+msgctxt "#30280"
+msgid "Hide adult content"
+msgstr "Yetişkinlere yönelik içeriği gizle"

@@ -867,3 +867,7 @@ msgstr ""
 msgctxt "#30318"
 msgid "NEW"
 msgstr ""
+
+msgctxt "#30280"
+msgid "Hide adult content"
+msgstr ""

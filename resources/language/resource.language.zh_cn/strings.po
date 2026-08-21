@@ -867,3 +867,7 @@ msgstr "新剧集"
 msgctxt "#30318"
 msgid "NEW"
 msgstr "新"
+
+msgctxt "#30280"
+msgid "Hide adult content"
+msgstr "隐藏成人内容"

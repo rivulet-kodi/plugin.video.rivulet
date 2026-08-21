@@ -280,14 +280,28 @@ def run_query(store, client, query):
     second caller. Writes no history, opens no coverflow - callers own
     both.
 
+    When resources/settings.xml's home_hide_adult setting is on (the
+    default, same toggle `lib.ui.views.iter_catalog_pages()` reads): a
+    catalog that itself looks adult (`lib.stremio.contentrating.
+    is_adult_catalog()`) is skipped before spending a request on it, and
+    every adult-flagged meta is dropped from the aggregate afterwards
+    (`filter_metas()`) - the same two-layer policy `iter_catalog_pages()`
+    applies, reused rather than reinvented. No separate "results
+    exhausted by filtering" path is needed: an all-adult query already
+    falls out as an empty `metas` list, which `_run_search()`'s existing
+    `if not metas: notify(L(30030))` treats as an ordinary no-results
+    search.
+
     The collected metas are deduplicated (`_dedupe()`) and then ordered
     by how well each title matches the query (`_rank_by_title()`), after
     the existing credit ranking. Both callers want that: a person
     dispatch from `open_credits_picker()` fans out the same way and gets
     the same duplicates back."""
     from lib.stremio.addons import AddonError, addon_error_detail, iter_catalogs, safe_url_for_log
-    from lib.ui.compat import L, log
+    from lib.stremio.contentrating import filter_metas, is_adult_catalog
+    from lib.ui.compat import L, log, setting_bool
 
+    hide_adult = setting_bool('home_hide_adult', True)
     metas = []
     catalogs = list(iter_catalogs(store.get_enabled_addons(), extra_required='search'))
     total_catalogs = len(catalogs)
@@ -295,6 +309,8 @@ def run_query(store, client, query):
         for index, (transport_url, manifest, cat) in enumerate(catalogs):
             if dialog.iscanceled():
                 break
+            if hide_adult and is_adult_catalog(cat, manifest):
+                continue
             percent = int(index * 100 / total_catalogs) if total_catalogs else 0
             dialog.update(percent, L(30186) % (manifest.get('name') or '?'))
             try:
@@ -305,6 +321,8 @@ def run_query(store, client, query):
             for meta_obj in results or []:
                 meta_obj['type'] = meta_obj.get('type') or cat.get('type')
                 metas.append(meta_obj)
+    if hide_adult:
+        metas = filter_metas(metas)
     return _rank_by_title(_dedupe(_rank_by_credit(metas, query)), query, _feed_index(store, client))
 
 

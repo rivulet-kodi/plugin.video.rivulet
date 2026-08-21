@@ -33,6 +33,11 @@
                     <default>true</default>
                     <control type="toggle"/>
                 </setting>
+                <setting id="home_hide_adult" type="boolean" label="30280">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
                 <setting id="startup_autoload" type="boolean" label="30230">
                     <level>0</level>
                     <default>false</default>

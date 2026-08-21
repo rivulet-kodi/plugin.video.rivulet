@@ -237,7 +237,7 @@ class CatalogPickerWindow(BaseWindow):
         # addon serving 20 at a time would otherwise hold a 400-title
         # list behind a spinner for a minute before showing anything.
         pages = iter_catalog_pages(
-            transport_url, ctype, catalog.get('id'), extra=extra, catalog=catalog,
+            transport_url, ctype, catalog.get('id'), extra=extra, catalog=catalog, manifest=manifest,
         )
         try:
             with busy_dialog(L(30033)):

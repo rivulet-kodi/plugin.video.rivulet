@@ -867,3 +867,7 @@ msgstr "Nuevos episodios"
 msgctxt "#30318"
 msgid "NEW"
 msgstr "NUEVO"
+
+msgctxt "#30280"
+msgid "Hide adult content"
+msgstr "Ocultar contenido para adultos"
