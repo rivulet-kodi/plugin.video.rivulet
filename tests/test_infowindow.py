@@ -70,10 +70,11 @@ def load_infowindow(monkeypatch):
     `ctx.real_spawn_enrich` and joins the thread it starts.
     """
     with contextlib.ExitStack() as stack:
-        def _load(addon_info=None):
+        def _load(addon_info=None, settings=None):
             ctx = stack.enter_context(install_kodi_stubs(
                 reload=_RELOAD_MODULE_NAMES,
                 addon_info=addon_info,
+                settings=settings,
             ))
             ctx.real_spawn_enrich = ctx.infowindow.ShowcaseWindow._spawn_enrich
             monkeypatch.setattr(
@@ -1461,6 +1462,97 @@ def test_context_menu_genre_entry_with_installed_transport_fetches_catalog_and_o
 
     assert fetch_calls == [(transport, 'movie', 'top', [('genre', 'Drama')])]
     assert opened == [genre_metas]
+
+
+def test_context_menu_genre_entry_never_fetches_an_adult_catalog_by_default(
+    load_infowindow, monkeypatch,
+):
+    """Same home_hide_adult policy as lib.ui.views.iter_catalog_pages()
+    and searchwindow.run_query(): a discover link naming an
+    adult-flagged catalog (id/type here) must never be fetched, and the
+    picker must fall through to the ordinary no-results path."""
+    from urllib.parse import quote
+
+    ctx = load_infowindow()
+    transport = 'https://a.example/manifest.json'
+    url = 'stremio:///discover/%s/xxx/top?genre=Drama' % quote(transport, safe='')
+    full_meta = {'id': 'tt1', 'type': 'movie', 'links': [_link('Drama', 'Genres', url)]}
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: full_meta)
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: _Store([{'transportUrl': transport}]))
+    monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
+    _stub_choose(monkeypatch, ctx, answers=[0])
+    fetch_calls = []
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda *a, **k: fetch_calls.append((a, k)) or [])
+    opened = []
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas) or None)
+    win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
+
+    _fire_context_menu(win, ctx)
+
+    assert fetch_calls == []
+    assert opened == []
+    assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
+
+
+def test_context_menu_genre_entry_fetches_an_adult_catalog_when_setting_is_off(
+    load_infowindow, monkeypatch,
+):
+    from urllib.parse import quote
+
+    ctx = load_infowindow(settings={'home_hide_adult': 'false'})
+    transport = 'https://a.example/manifest.json'
+    url = 'stremio:///discover/%s/xxx/top?genre=Drama' % quote(transport, safe='')
+    full_meta = {'id': 'tt1', 'type': 'movie', 'links': [_link('Drama', 'Genres', url)]}
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: full_meta)
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: _Store([{'transportUrl': transport}]))
+    monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
+    _stub_choose(monkeypatch, ctx, answers=[0])
+    genre_metas = [{'id': 'tt9', 'name': 'Some XXX', 'type': 'xxx'}]
+    fetch_calls = []
+
+    def _fetch_catalog(transport_url, ctype, cid, extra=None):
+        fetch_calls.append((transport_url, ctype, cid, extra))
+        return genre_metas
+
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', _fetch_catalog)
+    opened = []
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas) or None)
+    win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
+
+    _fire_context_menu(win, ctx)
+
+    assert fetch_calls == [(transport, 'xxx', 'top', [('genre', 'Drama')])]
+    assert opened == [genre_metas]
+
+
+def test_context_menu_genre_entry_drops_adult_flagged_metas_from_an_ordinary_catalog(
+    load_infowindow, monkeypatch,
+):
+    """The catalog itself isn't adult, but one returned meta is flagged
+    `adult: True` - it must be dropped, the rest kept."""
+    from urllib.parse import quote
+
+    ctx = load_infowindow()
+    transport = 'https://a.example/manifest.json'
+    url = 'stremio:///discover/%s/movie/top?genre=Drama' % quote(transport, safe='')
+    full_meta = {'id': 'tt1', 'type': 'movie', 'links': [_link('Drama', 'Genres', url)]}
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: full_meta)
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: _Store([{'transportUrl': transport}]))
+    monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
+    _stub_choose(monkeypatch, ctx, answers=[0])
+    genre_metas = [
+        {'id': 'tt9', 'name': 'Some Drama', 'type': 'movie'},
+        {'id': 'tt10', 'name': 'Adult One', 'type': 'movie', 'adult': True},
+    ]
+    monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda *a, **k: genre_metas)
+    opened = []
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas) or None)
+    win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
+
+    _fire_context_menu(win, ctx)
+
+    assert len(opened) == 1
+    assert [m['id'] for m in opened[0]] == ['tt9']
 
 
 def test_context_menu_genre_entry_with_uninstalled_transport_is_skipped_and_logged(
