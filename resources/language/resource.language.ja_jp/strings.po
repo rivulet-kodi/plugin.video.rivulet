@@ -867,3 +867,7 @@ msgstr "新しいエピソード"
 msgctxt "#30318"
 msgid "NEW"
 msgstr "新着"
+
+msgctxt "#30280"
+msgid "Hide adult content"
+msgstr "アダルトコンテンツを非表示にする"

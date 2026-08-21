@@ -30,6 +30,7 @@ from lib.stremio.addons import (
     validate_transport_url,
 )
 from lib.stremio.api import ApiError, StremioAPI
+from lib.stremio.contentrating import filter_metas, is_adult_catalog
 from lib.ui import compat, dialogs, router, urlutil
 from lib.ui.compat import L, log, notify
 from lib.ui.dependencies import get_client, get_store
@@ -240,6 +241,16 @@ def _fetch_catalog(transport, ctype, cid, extra=None):
     return client.catalog(transport, ctype, cid, extra=extra)
 
 
+def _adult_filtering_enabled():
+    """Whether resources/settings.xml's home_hide_adult toggle (default
+    True - the only defensible default for a living-room client, whose
+    audience skews younger than the household member who configures
+    addons) should suppress adult-flagged catalogs and metas. Read at
+    call time, never cached, so a mid-session settings change takes
+    effect on the very next fetch."""
+    return compat.setting_bool('home_hide_adult', True)
+
+
 def iter_catalog_pages(transport, ctype, cid, extra=None, catalog=None):
     """Yield a catalog's pages, following the protocol's `skip` paging
     until the addon runs out of items.
@@ -293,8 +304,26 @@ def iter_catalog_pages(transport, ctype, cid, extra=None, catalog=None):
 
     Consumers may stop early (the coverflow closing mid-walk does), in
     which case no further request is made.
+
+    When resources/settings.xml's home_hide_adult setting is on (the
+    default): a whole `catalog` that itself looks adult
+    (`lib.stremio.contentrating.is_adult_catalog()`) is never even
+    fetched - not one request is made, and the generator yields a
+    single empty page instead, which existing callers already treat
+    as an ordinary empty result (catalogpicker._fetch_and_show()'s
+    "no results" notify), never as a load failure. Otherwise, each
+    page's metas are run through `filter_metas()` before being
+    yielded - but the PRE-filter page is still what the skip/
+    short-page bookkeeping above counts, so adult content vanishing
+    from a page can never desync `skip` from what the addon actually
+    served.
     """
     from lib.stremio.addons import catalog_supports_extra
+
+    hide_adult = _adult_filtering_enabled()
+    if hide_adult and is_adult_catalog(catalog if catalog is not None else {'type': ctype}):
+        yield []
+        return
 
     base_extra = list(extra or [])
     first = _fetch_catalog(transport, ctype, cid, extra=base_extra or None)
@@ -302,7 +331,13 @@ def iter_catalog_pages(transport, ctype, cid, extra=None, catalog=None):
     seen = set()
 
     def _dedupe(page):
-        """This page's not-yet-seen metas, in order."""
+        """This page's not-yet-seen metas, in order (`fresh`), and that
+        same list with adult-flagged metas additionally dropped when
+        `hide_adult` is on (`filtered` - what callers actually see).
+        Kept separate so a page that IS new but happens to be entirely
+        adult content is not mistaken for the addon re-serving an
+        already-seen window (see the loop's `if not fresh` check
+        below, which must see the PRE-filter freshness)."""
         fresh = []
         for meta_obj in page:
             key = meta_obj.get('id') if isinstance(meta_obj, dict) else None
@@ -311,9 +346,11 @@ def iter_catalog_pages(transport, ctype, cid, extra=None, catalog=None):
                     continue
                 seen.add(key)
             fresh.append(meta_obj)
-        return fresh
+        filtered = filter_metas(fresh) if hide_adult else fresh
+        return fresh, filtered
 
-    yield _dedupe(first)
+    _, filtered_first = _dedupe(first)
+    yield filtered_first
 
     if not first or not catalog_supports_extra(catalog, 'skip'):
         return
@@ -342,14 +379,16 @@ def iter_catalog_pages(transport, ctype, cid, extra=None, catalog=None):
         if not page:
             return
         served += len(page)
-        fresh = _dedupe(page)
+        fresh, filtered = _dedupe(page)
         # A page with nothing new means the addon is ignoring `skip` and
         # re-serving the same window - stop rather than loop to the cap.
+        # Judged on `fresh` (pre-filter): a page that IS new but entirely
+        # adult content must keep paging, not look like a stuck addon.
         if not fresh:
             log('views.iter_catalog_pages: %s page %d added nothing new - stopping'
                 % (safe_url_for_log(transport), page_index), xbmc.LOGINFO)
             return
-        yield fresh
+        yield filtered
         if len(page) < page_size:
             return
 

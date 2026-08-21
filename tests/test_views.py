@@ -960,6 +960,89 @@ def test_fetch_catalog_pages_keeps_metas_without_an_id(load_views):
 
 
 # ---------------------------------------------------------------------------
+# home_hide_adult - adult catalogs/metas filtered out of catalog results
+# ---------------------------------------------------------------------------
+
+#: A catalog whose id/name/type flag it as adult by itself - must never
+#: be fetched at all when home_hide_adult is on.
+_ADULT_CATALOG = {'id': 'xxx-list', 'type': 'movie', 'name': 'XXX Movies',
+                   'extra': [{'name': 'skip'}]}
+
+
+def test_fetch_catalog_pages_never_fetches_an_adult_catalog_by_default(load_views):
+    """home_hide_adult defaults to True - an adult catalog descriptor
+    must never reach the addon: not one HTTP request is made."""
+    ctx = load_views()
+    views = ctx.views
+    client = FakePagingClient([_metas(0, 5)])
+    _wire_data_layer(views, FakeStore(), client)
+
+    metas = views.fetch_catalog_pages('t1', 'movie', 'xxx-list', catalog=_ADULT_CATALOG)
+
+    assert metas == []
+    assert client.calls == []
+
+
+def test_fetch_catalog_pages_fetches_an_adult_catalog_when_setting_is_off(load_views):
+    ctx = load_views(settings={'home_hide_adult': 'false'})
+    views = ctx.views
+    client = FakePagingClient([_metas(0, 5)])
+    _wire_data_layer(views, FakeStore(), client)
+
+    metas = views.fetch_catalog_pages('t1', 'movie', 'xxx-list', catalog=_ADULT_CATALOG)
+
+    assert len(metas) == 5
+    assert client.calls  # the request was actually made
+
+
+def test_fetch_catalog_pages_filters_adult_metas_out_of_an_ordinary_catalog_by_default(load_views):
+    """The catalog itself isn't flagged, but one item in it is - that
+    item must be dropped from the results by default, the rest kept."""
+    ctx = load_views()
+    views = ctx.views
+    page = _metas(0, 3) + [{'id': 'ttx', 'name': 'Adult One', 'adult': True}]
+    client = FakePagingClient([page])
+    _wire_data_layer(views, FakeStore(), client)
+
+    metas = views.fetch_catalog_pages('t1', 'movie', 'list', catalog=_PAGED_CATALOG)
+
+    assert [m['id'] for m in metas] == ['tt0', 'tt1', 'tt2']
+
+
+def test_fetch_catalog_pages_keeps_adult_metas_when_setting_is_off(load_views):
+    ctx = load_views(settings={'home_hide_adult': 'false'})
+    views = ctx.views
+    page = _metas(0, 3) + [{'id': 'ttx', 'name': 'Adult One', 'adult': True}]
+    client = FakePagingClient([page])
+    _wire_data_layer(views, FakeStore(), client)
+
+    metas = views.fetch_catalog_pages('t1', 'movie', 'list', catalog=_PAGED_CATALOG)
+
+    assert 'ttx' in [m['id'] for m in metas]
+    assert len(metas) == 4
+
+
+def test_fetch_catalog_pages_keeps_paging_past_a_page_that_is_entirely_adult(load_views):
+    """A page that is entirely new content, but all of it adult, must not
+    be mistaken for an addon ignoring `skip` and re-serving an
+    already-seen window (test_fetch_catalog_pages_stops_when_the_addon_
+    ignores_skip above) - paging must continue to the next page, and the
+    `skip` sent for it must still count the filtered-out items as served."""
+    ctx = load_views()
+    views = ctx.views
+    all_adult_page = [{'id': 'tt%d' % n, 'name': 'Adult %d' % n, 'adult': True}
+                       for n in range(20, 40)]
+    client = FakePagingClient([_metas(0, 20), all_adult_page, _metas(40, 5)])
+    _wire_data_layer(views, FakeStore(), client)
+
+    metas = views.fetch_catalog_pages('t1', 'movie', 'list', catalog=_PAGED_CATALOG)
+
+    assert len(metas) == 25  # 20 + 0 (filtered) + 5
+    assert not any(m.get('adult') for m in metas)
+    assert client.calls == [None, [('skip', 20)], [('skip', 40)]]
+
+
+# ---------------------------------------------------------------------------
 # login() / logout()
 # ---------------------------------------------------------------------------
 
