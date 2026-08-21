@@ -40,6 +40,12 @@ DOWNLOAD_CHUNK_SIZE = 64 * 1024
 REQUEST_TIMEOUT = 30
 VERIFY_TIMEOUT = 15
 
+#: `sys.platform` values CPython reports on Apple's mobile systems, and the
+#: `platform.machine()` hardware-model prefixes real iOS/tvOS devices
+#: report -- see `_apple_mobile_os()` for why both are needed.
+_APPLE_MOBILE_PLATFORMS = ("ios", "ipados", "tvos")
+_APPLE_MOBILE_MODEL_PREFIXES = ("iphone", "ipad", "ipod", "appletv")
+
 # SHA-256 digests for every stremio-server-go SERVER_TAG release asset,
 # hand-verified against that tag's GitHub release page + checksums.txt on
 # 2026-08-14 and committed here instead of being re-fetched at runtime.
@@ -75,33 +81,51 @@ class NoAssetError(DownloadError):
 class UnsupportedPlatformError(DownloadError):
     """Raised when this platform cannot run a downloaded server binary at all.
 
-    Kodi 19+ targets Android API >= 29, where Android 10+ enforces W^X:
-    exec() of any file under the app's writable home directory -- where
-    addon_data lives -- is blocked outright, so an installed binary could
-    never be launched there regardless of which release asset matched.
-    addon_data on Android also lives on emulated external storage, where
-    os.chmod(0o755) is a silent no-op. Confirmed by the identical failure
-    in elgatito/plugin.video.elementum#669 ([Errno 13] Permission denied).
-    The only remedy is pointing Settings -> Streaming server -> Server URL
-    at a server running elsewhere.
+    Two families of platform qualify, both for the same reason -- the OS
+    refuses to exec() a file the app itself wrote:
+
+    - Android. Kodi 19+ targets Android API >= 29, where Android 10+
+      enforces W^X: exec() of any file under the app's writable home
+      directory -- where addon_data lives -- is blocked outright, so an
+      installed binary could never be launched there regardless of which
+      release asset matched. addon_data on Android also lives on emulated
+      external storage, where os.chmod(0o755) is a silent no-op. Confirmed
+      by the identical failure in elgatito/plugin.video.elementum#669
+      ([Errno 13] Permission denied).
+    - iOS/iPadOS/tvOS. The sandbox forbids spawning arbitrary executables,
+      and unsigned Mach-O cannot be loaded by dyld at all -- so even a
+      correctly-built binary is unrunnable. Upstream publishes no
+      ios/tvos asset either: the Darwin assets are macOS Mach-O
+      (PLATFORM_MACOS), which those systems reject outright.
+
+    In both cases the only remedy is pointing Settings -> Streaming server
+    -> Server URL at a server running elsewhere.
     """
 
 
 def platform_key():
     """Return (os_name, arch) matching the goreleaser archive naming.
 
-    os_name is one of {"Linux", "Darwin", "Windows", "Android"}; arch is one
-    of {"x86_64", "arm64", "armv7"} (or the raw `platform.machine()` value
-    when it doesn't match a known mapping). Android runs a Linux kernel, so
-    platform.system() alone can't tell it apart from desktop Linux -- Kodi
-    sets ANDROID_ROOT/ANDROID_STORAGE in its process environment there, and
-    some Android Python builds also report "android" via sys.platform.
+    os_name is one of {"Linux", "Darwin", "Windows", "Android", "iOS",
+    "tvOS"}; arch is one of {"x86_64", "arm64", "armv7"} (or the raw
+    `platform.machine()` value when it doesn't match a known mapping).
+    Android runs a Linux kernel, so platform.system() alone can't tell it
+    apart from desktop Linux -- Kodi sets ANDROID_ROOT/ANDROID_STORAGE in
+    its process environment there, and some Android Python builds also
+    report "android" via sys.platform. The Apple mobile systems report
+    "Darwin" for the same reason (see `_apple_mobile_os`).
+
+    Only Linux/Darwin/Windows have pinned assets; the Android and
+    iOS/tvOS values exist so callers can report what was actually
+    detected, and so install_binary() can refuse before touching the
+    network.
     """
     if _is_android():
         os_name = "Android"
     else:
         system = platform.system()
-        os_name = {"Linux": "Linux", "Darwin": "Darwin", "Windows": "Windows"}.get(system, system)
+        os_name = _apple_mobile_os() or {
+            "Linux": "Linux", "Darwin": "Darwin", "Windows": "Windows"}.get(system, system)
 
     machine = (platform.machine() or "").lower()
     if machine in ("x86_64", "amd64"):
@@ -125,6 +149,32 @@ def _is_android():
     if os.environ.get("ANDROID_ROOT") or os.environ.get("ANDROID_STORAGE"):
         return True
     return "android" in sys.platform.lower()
+
+
+def _apple_mobile_os():
+    """Return "tvOS"/"iOS" on an Apple mobile system, else None.
+
+    Kodi's iOS/tvOS builds embed a CPython configured for Darwin, so
+    `platform.system()` reports plain "Darwin" there exactly as it does on
+    macOS -- indistinguishable without a second signal. Two are used:
+
+    - `platform.machine()`. Unlike macOS, where it is the CPU
+      architecture, on real iOS/tvOS hardware `utsname.machine` is the
+      hardware model ("iPhone14,5", "AppleTV11,1"), which also tells iOS
+      and tvOS apart. (Simulators report "arm64"/"x86_64" instead, and are
+      not a Kodi target.)
+    - `sys.platform`. CPython's own iOS support (3.13+) reports
+      "ios"/"tvos" here, so a future Kodi built against it is covered
+      without relying on the model string.
+    """
+    machine = (platform.machine() or "").lower()
+    sys_platform = sys.platform.lower()
+    if not (sys_platform in _APPLE_MOBILE_PLATFORMS
+            or machine.startswith(_APPLE_MOBILE_MODEL_PREFIXES)):
+        return None
+    if sys_platform == "tvos" or machine.startswith("appletv"):
+        return "tvOS"
+    return "iOS"
 
 
 def _asset_name(os_name, arch):
@@ -298,18 +348,26 @@ def install_binary(dest_dir, progress_cb=None):
     run, with no integrity check at all.
 
     Raises UnsupportedPlatformError (a DownloadError subclass) immediately,
-    before any network request, when running under Android: Android 10+'s
-    W^X enforcement blocks exec() of anything under the app's writable
-    home directory, so a downloaded binary could never run there no matter
-    which asset matched. Also raises NoAssetError (a DownloadError
-    subclass), before any network request, when this platform/arch has no
-    pinned SERVER_TAG asset. Raises DownloadError on any other failure.
+    before any network request, on Android and on iOS/iPadOS/tvOS: neither
+    can exec() a binary the addon downloaded into its own writable data
+    directory, so there is nothing to gain by fetching one (see that
+    exception's docstring for the per-platform reasons). Also raises
+    NoAssetError (a DownloadError subclass), before any network request,
+    when this platform/arch has no pinned SERVER_TAG asset. Raises
+    DownloadError on any other failure.
     """
     if _is_android():
         raise UnsupportedPlatformError(
             "Android blocks executing downloaded binaries (W^X); point "
             "Settings -> Streaming server -> Server URL at a server "
             "running elsewhere instead")
+
+    apple_mobile = _apple_mobile_os()
+    if apple_mobile:
+        raise UnsupportedPlatformError(
+            "%s sandboxing blocks executing downloaded binaries; point "
+            "Settings -> Streaming server -> Server URL at a server "
+            "running elsewhere instead" % apple_mobile)
 
     os_name, arch = platform_key()
     asset = select_asset(os_name, arch)
