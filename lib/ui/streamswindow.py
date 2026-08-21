@@ -247,6 +247,17 @@ class StreamsWindow(BaseWindow):
         #: `_append_prefix_length()` must catch that even when every
         #: pair's own identity is unchanged.
         self._rendered_single_provider = None
+        #: The `display_pairs` sequence (by OBJECT IDENTITY, in
+        #: `self.pairs` order) `_rebuild_list()` last actually put into
+        #: LIST - a strict superset check against `self._rendered_pairs`
+        #: above is not enough: a pending batch can flip
+        #: `_stream_filter_view()`'s "filters matched nothing" fallback
+        #: from true to false (the batch gives a previously-starved
+        #: filter something real to keep), which changes which of the
+        #: OLD prefix's rows are still visible even though none of them
+        #: moved and `single_provider` didn't change either -
+        #: `_append_prefix_length()` compares against this to catch it.
+        self._rendered_visible_pairs = []
 
     def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
         """doModal() showing `pairs` (a list of `(info, stream)` as
@@ -424,25 +435,42 @@ class StreamsWindow(BaseWindow):
         the SAME already-rendered run `_rebuild_list()` last built into
         LIST - safe for `_apply_pending()` to leave untouched and only
         append past - or `None` if a full reset()+rebuild is required.
-        Two things invalidate the prefix: (1) the re-sort moved one of
+        Three things invalidate the prefix: (1) the re-sort moved one of
         those pairs (checked by OBJECT IDENTITY, `is` - pairs are reused
         across a merge, never rebuilt, see `_merge_pending()`, so an
         unmoved row is still the exact same tuple at the exact same
-        index), or (2) the single-provider addon-name dedupe
+        index), (2) the single-provider addon-name dedupe
         (`_rebuild_list()`'s `single_provider`) flipped - that changes
         line 1 of every ALREADY-rendered row too, e.g. the picker
         opening on one addon's own results (no addon segment shown) and
         a second addon's batch then arriving (now shown on every row,
-        including the ones already on screen)."""
+        including the ones already on screen) - or (3) which of the OLD
+        prefix's pairs `_stream_filter_view()` actually DISPLAYS
+        changed, even though none of them moved and `single_provider`
+        stayed put: its "filters matched nothing" fallback can flip from
+        true to false the instant this same batch gives a previously-
+        starved filter something real to keep, which means some rows
+        the fallback was showing unfiltered a moment ago are now hidden
+        by the very filter that just started matching. Appending only
+        the new suffix in that case would leave those stale fallback
+        rows on screen forever, since nothing past `start` ever gets
+        re-examined - see `self._rendered_visible_pairs`."""
         prev = self._rendered_pairs
         if not prev or len(prev) > len(self.pairs):
             return None
         for old, new in zip(prev, self.pairs):
             if old is not new:
                 return None
-        _matched_nothing, _display_pairs, _hidden_count, single_provider, _n = self._stream_filter_view()
+        _matched_nothing, display_pairs, _hidden_count, single_provider, _n = self._stream_filter_view()
         if single_provider != self._rendered_single_provider:
             return None
+        prev_ids = {id(pair) for pair in prev}
+        visible_prefix = [pair for pair in display_pairs if id(pair) in prev_ids]
+        if len(visible_prefix) != len(self._rendered_visible_pairs):
+            return None
+        for old, new in zip(self._rendered_visible_pairs, visible_prefix):
+            if old is not new:
+                return None
         return len(prev)
 
     def _rebuild_list(self, start=0):
@@ -528,6 +556,7 @@ class StreamsWindow(BaseWindow):
         control.addItems(items)
         self._rendered_pairs = list(self.pairs)
         self._rendered_single_provider = single_provider
+        self._rendered_visible_pairs = list(display_pairs)
 
         from lib.ui.compat import L
         from lib.ui.playbackmeta import year_range

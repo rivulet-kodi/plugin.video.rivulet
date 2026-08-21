@@ -834,11 +834,11 @@ msgstr "Только кешированные"
 
 msgctxt "#30262"
 msgid "%d source hidden by filters"
-msgstr "%d источник скрыт фильтрами"
+msgstr "Скрыто фильтрами: %d"
 
 msgctxt "#30263"
 msgid "%d sources hidden by filters"
-msgstr "%d источников скрыто фильтрами"
+msgstr "Скрыто фильтрами: %d"
 
 msgctxt "#30264"
 msgid "Filters matched nothing - showing all sources"

@@ -834,11 +834,11 @@ msgstr "Tylko z pamięci podręcznej"
 
 msgctxt "#30262"
 msgid "%d source hidden by filters"
-msgstr "%d źródło ukryte przez filtry"
+msgstr "Ukryte przez filtry: %d"
 
 msgctxt "#30263"
 msgid "%d sources hidden by filters"
-msgstr "%d źródeł ukrytych przez filtry"
+msgstr "Ukryte przez filtry: %d"
 
 msgctxt "#30264"
 msgid "Filters matched nothing - showing all sources"

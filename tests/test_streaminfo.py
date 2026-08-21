@@ -1152,6 +1152,32 @@ def test_filter_streams_exclude_cam_keeps_camelot_not_a_cam_source():
     assert [p[1] for p in result] == ["camelot"]
 
 
+def test_filter_streams_exclude_cam_drops_hdcamrip_compound_token():
+    # "HDCAMRip" runs the "HD" source prefix straight into "CAMRip" with
+    # no word break before the trailing "Rip" - the same no-word-break
+    # gap that motivated `cam-?rip` above, just one prefix over.
+    pairs = [(_info(raw="Movie.2020.HDCAMRip.x264"), "hdcamrip")]
+    assert filter_streams(pairs, exclude_cam=True) == []
+
+
+def test_filter_streams_exclude_cam_drops_hdtsrip_compound_token():
+    pairs = [(_info(raw="Movie.2020.HDTSRip.x264"), "hdtsrip")]
+    assert filter_streams(pairs, exclude_cam=True) == []
+
+
+def test_filter_streams_exclude_cam_drops_tsrip_compound_token():
+    pairs = [(_info(raw="Movie.2020.TSRip.x264"), "tsrip")]
+    assert filter_streams(pairs, exclude_cam=True) == []
+
+
+def test_filter_streams_exclude_cam_keeps_batman_not_a_cam_source():
+    # "Batman" contains neither "cam" nor "ts" as a bounded token -
+    # regression guard alongside the "Camelot" case above.
+    pairs = [(_info(raw="Batman.2022.2160p.UHD.BluRay"), "batman")]
+    result = filter_streams(pairs, exclude_cam=True)
+    assert [p[1] for p in result] == ["batman"]
+
+
 def test_filter_streams_cached_only_keeps_true_drops_unknown_and_false():
     pairs = [
         (_info(cached=True), "cached"),

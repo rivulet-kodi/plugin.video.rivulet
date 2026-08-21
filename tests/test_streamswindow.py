@@ -1912,6 +1912,44 @@ def test_apply_pending_batch_interleaving_existing_rows_falls_back_to_full_rebui
     assert focused_pair[1] is stream_a  # focus followed the original row to its new position
 
 
+def test_apply_pending_batch_flipping_matched_nothing_to_false_drops_stale_fallback_row(
+    load_streamswindow,
+):
+    """Regression: `_stream_filter_view()`'s "filters matched nothing"
+    fallback shows every pair, UNFILTERED, when the active filter would
+    hide everything (see that method's own docstring). If a later batch
+    then gives the filter something real to keep, `single_provider`
+    stays put and the old raw prefix is still an identity prefix of the
+    re-sorted `self.pairs` - the two checks `_append_prefix_length()`
+    used to run - but the fallback row the OLD prefix was showing is
+    now something the SAME active filter must hide. The append-only
+    fast path must not leave it on screen just because nothing "moved"."""
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    win = _make_window(sw)
+    ctx.env.addon.settings['playback_exclude_cam'] = 'true'
+    cam_info = {'addon': 'A', 'raw': 'Movie.2020.CAMRip.x264'}
+    cam_stream = {'url': 'https://a.example/cam.mp4'}
+    win.start([(cam_info, cam_stream)], 'movie', 'tt1')
+    win.onInit()
+
+    # Fallback kicked in: the lone pair is a CAM release the active
+    # filter would hide, so _stream_filter_view() shows it anyway.
+    assert [i.getLabel() for i in win.getControl(sw.LIST).items] == ['Movie.2020.CAMRip.x264']
+
+    clean_info = {'addon': 'A', 'raw': 'Movie.2020.WEB-DL.x264'}
+    clean_stream = {'url': 'https://a.example/clean.mp4'}
+    win.add_pairs([(clean_info, clean_stream)])
+    win.onAction(_FakeBackAction(-1))
+
+    # self.pairs itself is untouched by filtering - both raw pairs stay.
+    assert [s for _i, s in win.pairs] == [cam_stream, clean_stream]
+    # LIST must show exactly the real filtered subset now - the stale
+    # CAM fallback row must be gone, not merely appended past.
+    items = win.getControl(sw.LIST).items
+    assert [i.getLabel() for i in items] == ['Movie.2020.WEB-DL.x264']
+
+
 def test_apply_pending_fast_path_and_full_rebuild_produce_identical_final_list_contents(
     load_streamswindow,
 ):

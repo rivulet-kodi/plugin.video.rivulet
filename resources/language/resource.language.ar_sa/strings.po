@@ -834,11 +834,11 @@ msgstr "المخزّن مؤقتًا فقط"
 
 msgctxt "#30262"
 msgid "%d source hidden by filters"
-msgstr "تم إخفاء %d مصدر بواسطة الفلاتر"
+msgstr "عدد المصادر المخفية بواسطة الفلاتر: %d"
 
 msgctxt "#30263"
 msgid "%d sources hidden by filters"
-msgstr "تم إخفاء %d مصادر بواسطة الفلاتر"
+msgstr "عدد المصادر المخفية بواسطة الفلاتر: %d"
 
 msgctxt "#30264"
 msgid "Filters matched nothing - showing all sources"

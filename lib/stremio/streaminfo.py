@@ -1117,12 +1117,20 @@ _RESOLUTION_HEIGHT = {'2160p': 2160, '1080p': 1080, '720p': 720, '480p': 480}
 # NOT match "CAMRip" (there is no word break between the 'm' and the
 # 'R' that follows it in a real release name) - it would silently let
 # the single most common CAM-release naming pattern straight through
-# this filter. `cam-?rip` is tried first so the whole "CAMRip"/
-# "CAM-Rip" token matches as one unit; the bare "cam"/"ts" alternatives
-# still require their own word boundaries, so "Camelot" or "Batman"
-# never false-positive on the fragment they happen to contain.
+# this filter. The three-alternatives-first block below (`hd-?cam-?rip`,
+# `hd-?ts-?rip`, `cam-?rip`, `ts-?rip`) exists for exactly that reason,
+# extended to the compound release tokens that hit the identical
+# no-word-break problem: "HDCAMRip" and "HDTSRip" (the "HD" source
+# prefix run straight into "CAMRip"/"TSRip" with no break before the
+# following "Rip"), and bare "TSRip" (no break between "TS" and "Rip"
+# either). Each compound is tried as ONE unit so the match spans the
+# whole token; the bare "hd-?cam"/"hd-?ts"/"cam"/"ts" alternatives
+# still require their own trailing word boundary, so "Camelot" or
+# "Batman" never false-positive on the fragment they happen to contain.
 _CAM_FILTER_RE = re.compile(
-    r'\b(?:cam-?rip|hd-?cam|hd-?ts|tele-?sync|screener|scr|cam|ts)\b', re.I
+    r'\b(?:hd-?cam-?rip|hd-?ts-?rip|cam-?rip|ts-?rip|hd-?cam|hd-?ts'
+    r'|tele-?sync|screener|scr|cam|ts)\b',
+    re.I,
 )
 
 
