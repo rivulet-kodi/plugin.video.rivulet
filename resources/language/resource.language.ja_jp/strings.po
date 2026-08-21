@@ -854,11 +854,11 @@ msgstr "新しいエピソードを表示"
 
 msgctxt "#30315"
 msgid "%d new episode ready to watch"
-msgstr "%d件の新しいエピソード"
+msgstr "%d件の新しいエピソードを視聴できます"
 
 msgctxt "#30316"
 msgid "%d new episodes ready to watch"
-msgstr "%d件の新しいエピソード"
+msgstr "%d件の新しいエピソードを視聴できます"
 
 msgctxt "#30317"
 msgid "New episodes"

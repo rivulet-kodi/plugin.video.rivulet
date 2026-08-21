@@ -858,7 +858,7 @@ msgstr "%d yeni bölüm izlemeye hazır"
 
 msgctxt "#30316"
 msgid "%d new episodes ready to watch"
-msgstr "%d yeni bölümler izlemeye hazır"
+msgstr "%d yeni bölüm izlemeye hazır"
 
 msgctxt "#30317"
 msgid "New episodes"

@@ -343,6 +343,37 @@ def test_new_episodes_subtitle_uses_the_plural_form_for_a_count_above_one(load_h
 
 
 # ---------------------------------------------------------------------------
+# _followed_series()
+# ---------------------------------------------------------------------------
+
+
+def test_followed_series_caps_the_number_of_candidates_fetched(load_homewindow):
+    """Bounds `_fetch_series_metas()`'s fan-out to `MAX_NEW_EPISODE_SERIES`
+    series per render, regardless of how many series `progress.json` has
+    accumulated - see `MAX_NEW_EPISODE_SERIES`'s docstring for the cold-
+    metacache render-blocking risk this guards against."""
+    ctx = load_homewindow()
+    cap = ctx.homewindow.MAX_NEW_EPISODE_SERIES
+    total = cap + 10
+    entries = [
+        {
+            'type': 'series', 'id': 'tt%d' % i, 'video_id': None,
+            'position_ms': 500, 'duration_ms': 1000,
+            'updated_at': '2026-08-%02dT00:00:00Z' % (i + 1),
+        }
+        for i in range(total)
+    ]
+    store = _FakeStore(progress_entries=entries)
+
+    series = ctx.homewindow._followed_series(store)
+
+    assert len(series) == cap
+    # latest_by_title() already sorts most-recently-updated first - the
+    # slice must keep that end of the list, not an arbitrary cap.
+    assert {s['id'] for s in series} == {'tt%d' % i for i in range(10, total)}
+
+
+# ---------------------------------------------------------------------------
 # _status_text()
 # ---------------------------------------------------------------------------
 

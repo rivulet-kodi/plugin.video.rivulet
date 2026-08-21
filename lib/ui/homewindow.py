@@ -188,6 +188,22 @@ def _new_episodes_subtitle(count):
     return (L(30315) if count == 1 else L(30316)) % count
 
 
+#: Hard cap on how many followed series `_new_episode_items()` will fetch
+#: a meta for on a single Home render. `onInit()` re-runs on every return
+#: from a nested modal, and each candidate costs its own
+#: `views._fetch_meta()` fan-out (with its own addon-count-many 15s
+#: timeouts) on a cold `metacache` -- unbounded, a large `progress.json`
+#: (`lib.store.MAX_PROGRESS_ENTRIES` allows up to 500 series) would block
+#: the render on the slowest of hundreds of fetches. Mirrors
+#: `lib.ui.mystuff.MAX_PLAYED_ITEMS`'s reasoning exactly (that module's
+#: own docstring: "the same reason `lib.ui.continuewatching` capped its
+#: row at 15"). `_followed_series()` slices after filtering to type
+#: `series`, over a list `latest_by_title()` already sorts by
+#: `updated_at` descending, so the slice keeps the most recently active
+#: shows and drops the long tail.
+MAX_NEW_EPISODE_SERIES = 24
+
+
 def _followed_series(store):
     """Series the New Episodes row treats as "followed": every series
     with at least one local playback-progress entry, reduced to the one
@@ -202,14 +218,19 @@ def _followed_series(store):
     compare a candidate episode against), and this way the row works
     fully offline and logged out too, like every other locally-sourced
     Home row.
+
+    Capped at `MAX_NEW_EPISODE_SERIES`: `latest_by_title()` already
+    returns most-recently-updated first, so the slice below keeps
+    exactly the shows a viewer is most likely still watching.
     """
     from lib.ui.mystuff import latest_by_title
 
-    return [
+    series = [
         {'type': entry['type'], 'id': entry['id'], 'video_id': entry.get('video_id')}
         for entry in latest_by_title(store.get_progress_entries())
         if entry.get('type') == 'series'
     ]
+    return series[:MAX_NEW_EPISODE_SERIES]
 
 
 def _fetch_series_metas(series_items):

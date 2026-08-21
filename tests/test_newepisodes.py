@@ -115,6 +115,17 @@ def test_new_episodes_never_watched_series_has_no_lower_bound():
     assert {e['video_id'] for e in result} == {'s1e1', 's1e2'}
 
 
+def test_new_episodes_skips_a_series_whose_pointer_id_is_absent_from_videos():
+    # video_id is set (unlike the never-watched case above) but names an
+    # id this meta's videos no longer carries - addon id scheme changed,
+    # a season got trimmed, or a stale progress entry. Unresolvable must
+    # fail closed (skip the series), never fall through to "no lower
+    # bound" and re-offer episodes the user already watched.
+    meta = _meta(videos=[_video('s1e1', 1, 1, PAST), _video('s1e2', 1, 2, PAST)])
+    result = new_episodes([_series(video_id='does-not-exist')], {'tt1': meta}, {}, NOW)
+    assert result == []
+
+
 def test_new_episodes_excludes_a_special_when_not_already_watching_specials():
     meta = _meta(videos=[
         _video('s1e1', 1, 1, PAST), _video('s1e2', 1, 2, PAST), _video('special1', 0, 1, PAST),

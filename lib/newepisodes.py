@@ -151,7 +151,13 @@ def new_episodes(series_items, metas, seen, now):
       last-watched episode, so a rewatch or a gap in what was actually
       watched never re-surfaces older episodes as "new". A series with
       no last-watched pointer at all has no lower bound -- everything
-      aired and unseen qualifies.
+      aired and unseen qualifies. A series whose pointer is set but
+      resolves to no entry in ``videos`` at all (the addon changed its
+      id scheme, trimmed seasons, or the progress entry names an id
+      this meta no longer carries) contributes nothing rather than
+      being treated as "never watched" -- fail-closed, the same rule
+      :func:`_parse_release` documents for an unparseable date, since
+      guessing here would re-offer episodes already watched.
     * it is not Specials/season-0 (or missing season+episode info
       entirely, the same "unfit to judge" bucket :func:`_sort_key`
       gives it) UNLESS the last-watched episode was ALSO in that
@@ -191,6 +197,14 @@ def new_episodes(series_items, metas, seen, now):
                 if video.get("id") == last_watched_id:
                     last_watched_key = _sort_key(video)
                     break
+            if last_watched_key is None:
+                # The pointer exists but names an id absent from this
+                # meta's `videos` -- unlike "never watched" (no pointer
+                # at all), this is unresolvable, not absent. Skip the
+                # whole series rather than falling through to "no lower
+                # bound", which would re-offer every already-watched
+                # episode as new.
+                continue
         watching_specials = last_watched_key is not None and _is_special(last_watched_key)
 
         for video in ordered:

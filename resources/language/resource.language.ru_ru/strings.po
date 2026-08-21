@@ -858,7 +858,7 @@ msgstr "%d новый эпизод доступен"
 
 msgctxt "#30316"
 msgid "%d new episodes ready to watch"
-msgstr "%d новых эпизода доступно"
+msgstr "Новые эпизоды готовы к просмотру: %d"
 
 msgctxt "#30317"
 msgid "New episodes"
