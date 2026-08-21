@@ -871,3 +871,47 @@ msgstr "新"
 msgctxt "#30280"
 msgid "Hide adult content"
 msgstr "隐藏成人内容"
+
+msgctxt "#30333"
+msgid "Browse addon marketplace"
+msgstr "浏览插件市场"
+
+msgctxt "#30334"
+msgid "Discover and install addons published by your other addons"
+msgstr "发现并安装由您的其他插件发布的插件"
+
+msgctxt "#30335"
+msgid "Installed"
+msgstr "已安装"
+
+msgctxt "#30336"
+msgid "Update available"
+msgstr "有可用更新"
+
+msgctxt "#30337"
+msgid "Needs configuration"
+msgstr "需要配置"
+
+msgctxt "#30338"
+msgid "%s is already installed"
+msgstr "%s 已安装"
+
+msgctxt "#30339"
+msgid "No addon catalogs found. Install an addon that publishes one, such as Cinemeta."
+msgstr "未找到插件目录。请安装一个发布目录的插件，例如 Cinemeta。"
+
+msgctxt "#30340"
+msgid "Could not load %s's addon catalog"
+msgstr "无法加载 %s 的插件目录"
+
+msgctxt "#30341"
+msgid "%s needs configuration. Open %s in a browser, configure it, then paste the resulting manifest URL"
+msgstr "%s 需要配置。请在浏览器中打开 %s 进行配置，然后粘贴生成的清单 URL"
+
+msgctxt "#30342"
+msgid "Install this addon?"
+msgstr "要安装此插件吗？"
+
+msgctxt "#30343"
+msgid "Marketplace"
+msgstr "市场"

@@ -871,3 +871,47 @@ msgstr "جديد"
 msgctxt "#30280"
 msgid "Hide adult content"
 msgstr "إخفاء المحتوى للبالغين"
+
+msgctxt "#30333"
+msgid "Browse addon marketplace"
+msgstr "تصفح متجر الإضافات"
+
+msgctxt "#30334"
+msgid "Discover and install addons published by your other addons"
+msgstr "اكتشف وثبّت إضافات تنشرها إضافاتك الأخرى"
+
+msgctxt "#30335"
+msgid "Installed"
+msgstr "مثبَّت"
+
+msgctxt "#30336"
+msgid "Update available"
+msgstr "يتوفر تحديث"
+
+msgctxt "#30337"
+msgid "Needs configuration"
+msgstr "يتطلب إعدادًا"
+
+msgctxt "#30338"
+msgid "%s is already installed"
+msgstr "%s مثبَّت مسبقًا"
+
+msgctxt "#30339"
+msgid "No addon catalogs found. Install an addon that publishes one, such as Cinemeta."
+msgstr "لم يتم العثور على كتالوجات إضافات. ثبّت إضافة تنشر كتالوجًا، مثل Cinemeta."
+
+msgctxt "#30340"
+msgid "Could not load %s's addon catalog"
+msgstr "تعذّر تحميل كتالوج إضافات %s"
+
+msgctxt "#30341"
+msgid "%s needs configuration. Open %s in a browser, configure it, then paste the resulting manifest URL"
+msgstr "يتطلب %s إعدادًا. افتح %s في متصفح، واضبطه، ثم الصق رابط البيان الناتج"
+
+msgctxt "#30342"
+msgid "Install this addon?"
+msgstr "هل تريد تثبيت هذه الإضافة؟"
+
+msgctxt "#30343"
+msgid "Marketplace"
+msgstr "المتجر"

@@ -177,8 +177,8 @@ def test_oninit_builds_install_row_and_one_row_per_addon(load_addonswindow, monk
     win.onInit()
 
     items = win.getControl(ctx.addonswindow.LIST).items
-    assert len(items) == 2
-    install_item, addon_item = items
+    assert len(items) == 3
+    install_item, market_item, addon_item = items
     assert install_item.getLabel() == 'STR30010'
     assert install_item.getProperty('position') == 'install'
     assert addon_item.getLabel() == 'Addon A  \u00b7  v1.2.3'
@@ -199,7 +199,7 @@ def test_oninit_truncates_long_descriptions_to_one_line(load_addonswindow, monke
 
     win.onInit()
 
-    addon_item = win.getControl(ctx.addonswindow.LIST).items[1]
+    addon_item = win.getControl(ctx.addonswindow.LIST).items[2]
     assert len(addon_item.label2) <= 120
     assert addon_item.label2.endswith('...')
     assert '\n' not in addon_item.label2
@@ -217,7 +217,7 @@ def test_oninit_marks_disabled_addon_row_label(load_addonswindow, monkeypatch):
 
     win.onInit()
 
-    addon_item = win.getControl(ctx.addonswindow.LIST).items[1]
+    addon_item = win.getControl(ctx.addonswindow.LIST).items[2]
     assert addon_item.getLabel() == 'Addon A  \u00b7  v1.0  \u00b7  STR30251'
 
 
@@ -256,7 +256,7 @@ def test_onclick_addon_row_opens_action_menu_with_disable_and_remove_rows(load_a
     _wire_store(ctx.addonswindow, _FakeStore(addons=[descriptor]))
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2
 
     win.onClick(ctx.addonswindow.LIST)
 
@@ -272,7 +272,7 @@ def test_onclick_addon_row_opens_action_menu_with_enable_row_when_disabled(load_
     _wire_store(ctx.addonswindow, _FakeStore(addons=[descriptor]))
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2
 
     win.onClick(ctx.addonswindow.LIST)
 
@@ -339,7 +339,7 @@ def test_onclick_dismissed_action_menu_mutates_nothing(load_addonswindow, monkey
     _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2
 
     win.onClick(ctx.addonswindow.LIST)
 
@@ -356,13 +356,13 @@ def test_onclick_toggle_row_disables_addon_notifies_and_reloads(load_addonswindo
     _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2
 
     win.onClick(ctx.addonswindow.LIST)
 
     assert store.disable_calls == [(descriptor['transportUrl'], True)]
     assert ctx.env.notifications == [('Rivulet', 'STR30251', 'info', 4000)]
-    addon_item = win.getControl(ctx.addonswindow.LIST).items[1]
+    addon_item = win.getControl(ctx.addonswindow.LIST).items[2]
     assert addon_item.getLabel().endswith('STR30251')
 
 
@@ -375,13 +375,13 @@ def test_onclick_toggle_row_enables_addon_notifies_and_reloads(load_addonswindow
     _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2
 
     win.onClick(ctx.addonswindow.LIST)
 
     assert store.disable_calls == [(descriptor['transportUrl'], False)]
     assert ctx.env.notifications == [('Rivulet', 'STR30252', 'info', 4000)]
-    addon_item = win.getControl(ctx.addonswindow.LIST).items[1]
+    addon_item = win.getControl(ctx.addonswindow.LIST).items[2]
     assert addon_item.getLabel() == 'Addon A  \u00b7  v1.0'
 
 
@@ -395,7 +395,7 @@ def test_onclick_toggle_protected_addon_still_works(load_addonswindow, monkeypat
     _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2
 
     win.onClick(ctx.addonswindow.LIST)
 
@@ -416,7 +416,7 @@ def test_onclick_toggle_never_calls_sync_addons(load_addonswindow, monkeypatch):
     monkeypatch.setattr(ctx.views, '_sync_addons_if_logged_in', lambda s: sync_calls.append(s))
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2
 
     win.onClick(ctx.addonswindow.LIST)
 
@@ -606,8 +606,8 @@ def test_install_success_persists_notifies_and_reloads(load_addonswindow, monkey
     assert ctx.env.notifications == [('Rivulet', 'STR30012', 'info', 4000)]
     # _reload() re-populated the list with the freshly-installed addon.
     items = win.getControl(ctx.addonswindow.LIST).items
-    assert len(items) == 2
-    assert items[1].getLabel() == 'New Addon  \u00b7  v1.0'
+    assert len(items) == 3
+    assert items[2].getLabel() == 'New Addon  \u00b7  v1.0'
 
 
 # ---------------------------------------------------------------------------
@@ -633,7 +633,7 @@ def test_remove_confirmed_removes_notifies_and_reloads(load_addonswindow, monkey
     _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 1  # the addon row
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2  # the addon row
 
     win.onClick(ctx.addonswindow.LIST)
 
@@ -641,7 +641,7 @@ def test_remove_confirmed_removes_notifies_and_reloads(load_addonswindow, monkey
     assert ctx.env.notifications == [('Rivulet', 'STR30013', 'info', 4000)]
     assert captured == [('STR30011', 'Addon A', 'Yes', 'No')]
     items_after = win.getControl(ctx.addonswindow.LIST).items
-    assert len(items_after) == 1
+    assert len(items_after) == 2
     assert items_after[0].getProperty('position') == 'install'
 
 
@@ -654,7 +654,7 @@ def test_remove_declined_leaves_addon_untouched(load_addonswindow, monkeypatch):
     _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2
 
     win.onClick(ctx.addonswindow.LIST)
 
@@ -672,7 +672,7 @@ def test_remove_protected_addon_notifies_and_never_calls_remove(load_addonswindo
     _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2
 
     win.onClick(ctx.addonswindow.LIST)
 
@@ -700,7 +700,7 @@ def test_remove_store_raises_valueerror_notifies_protected(load_addonswindow, mo
     _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2
 
     win.onClick(ctx.addonswindow.LIST)
 
@@ -732,7 +732,7 @@ def test_onclick_toggle_concurrent_update_notifies_and_reloads_instead_of_raisin
     _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2
     reload_calls = []
     original_reload = win._reload
 
@@ -764,7 +764,7 @@ def test_remove_confirmed_concurrent_update_notifies_and_reloads_instead_of_rais
     _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2
     reload_calls = []
     original_reload = win._reload
 
@@ -824,7 +824,7 @@ def test_remove_store_raises_valueerror_is_not_caught_by_guard_mutation(load_add
     _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2
     reload_calls = []
     original_reload = win._reload
 

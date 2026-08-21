@@ -72,7 +72,9 @@ class AddonsWindow(BaseWindow):
             label=L(30010), label2=L(30192),
         )
         install_item.setProperty('position', 'install')
-        items = [install_item]
+        market_item = xbmcgui.ListItem(label=L(30333), label2=L(30334))
+        market_item.setProperty('position', 'market')
+        items = [install_item, market_item]
         for index, descriptor in enumerate(self.addons):
             manifest = descriptor.get('manifest') or {}
             flags = descriptor.get('flags') or {}
@@ -93,6 +95,9 @@ class AddonsWindow(BaseWindow):
         position = focused.getProperty('position')
         if position == 'install':
             self._install()
+            return
+        if position == 'market':
+            self._open_market()
             return
         index = int(position)
         self._open_actions(self.addons[index], index)
@@ -164,6 +169,16 @@ class AddonsWindow(BaseWindow):
             return
         _sync_addons_if_logged_in(self.store)
         notify(L(30012))
+        self._reload()
+
+    def _open_market(self):
+        """Row next to "Install addon from URL": browse/install addons
+        from other addons' own `addon_catalog` resources instead of
+        typing a manifest URL. `MarketWindow` may install/update addons
+        while open, so reload once it closes to reflect that."""
+        from lib.ui.marketwindow import open_market
+
+        open_market()
         self._reload()
 
     def _remove(self, descriptor):

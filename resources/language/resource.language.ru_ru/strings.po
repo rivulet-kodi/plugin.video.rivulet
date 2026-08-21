@@ -871,3 +871,47 @@ msgstr "НОВОЕ"
 msgctxt "#30280"
 msgid "Hide adult content"
 msgstr "Скрывать контент для взрослых"
+
+msgctxt "#30333"
+msgid "Browse addon marketplace"
+msgstr "Просмотреть маркет аддонов"
+
+msgctxt "#30334"
+msgid "Discover and install addons published by your other addons"
+msgstr "Находите и устанавливайте аддоны, опубликованные вашими другими аддонами"
+
+msgctxt "#30335"
+msgid "Installed"
+msgstr "Установлено"
+
+msgctxt "#30336"
+msgid "Update available"
+msgstr "Доступно обновление"
+
+msgctxt "#30337"
+msgid "Needs configuration"
+msgstr "Требуется настройка"
+
+msgctxt "#30338"
+msgid "%s is already installed"
+msgstr "%s уже установлен"
+
+msgctxt "#30339"
+msgid "No addon catalogs found. Install an addon that publishes one, such as Cinemeta."
+msgstr "Каталоги аддонов не найдены. Установите аддон, который публикует такой каталог, например Cinemeta."
+
+msgctxt "#30340"
+msgid "Could not load %s's addon catalog"
+msgstr "Не удалось загрузить каталог аддонов %s"
+
+msgctxt "#30341"
+msgid "%s needs configuration. Open %s in a browser, configure it, then paste the resulting manifest URL"
+msgstr "%s требует настройки. Откройте %s в браузере, настройте его, затем вставьте полученный URL манифеста"
+
+msgctxt "#30342"
+msgid "Install this addon?"
+msgstr "Установить этот аддон?"
+
+msgctxt "#30343"
+msgid "Marketplace"
+msgstr "Маркет"
