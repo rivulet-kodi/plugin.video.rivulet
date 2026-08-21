@@ -555,6 +555,63 @@ def test_installed_tag_is_none_when_the_stamp_cannot_be_read(tmp_path):
     assert serverbin.installed_tag(str(tmp_path)) is None
 
 
+def test_installed_tag_is_none_for_undecodable_stamp_bytes(tmp_path):
+    """A truncated/garbage stamp raises UnicodeDecodeError, not OSError --
+    and it is read from the service's supervision loop, which must not die
+    over it."""
+    (tmp_path / serverbin.TAG_STAMP_NAME).write_bytes(b"\xff\xfe\x00v0.9")
+    assert serverbin.installed_tag(str(tmp_path)) is None
+
+
+def test_install_binary_keeps_a_working_binary_when_the_new_one_fails_verification(
+        tmp_path, monkeypatch, fake_requests):
+    """The upgrade path reinstalls over a binary that is currently serving,
+    so a replacement that cannot be exec'd must not clobber it -- the
+    caller's "keep the installed one" fallback would otherwise hand back a
+    path pointing at the broken new file."""
+    existing = tmp_path / "stremio-server"
+    existing.write_bytes(b"the-binary-that-works")
+    (tmp_path / serverbin.TAG_STAMP_NAME).write_text("v0.9.0")
+
+    _set_platform(monkeypatch, "Linux", "x86_64")
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **kw: (_ for _ in ()).throw(OSError("ENOEXEC")))
+    archive_bytes = _make_tar_gz({"stremio-server": b"the-broken-new-binary"})
+    monkeypatch.setitem(
+        PINNED_SHA256, ("Linux", "x86_64"), hashlib.sha256(archive_bytes).hexdigest())
+    fake_requests.queue_get(_StreamResponse(archive_bytes))
+
+    with pytest.raises(UnsupportedPlatformError):
+        install_binary(str(tmp_path))
+
+    assert existing.read_bytes() == b"the-binary-that-works"
+    assert not (tmp_path / "stremio-server.part").exists()
+    # The stamp still describes what is actually installed.
+    assert serverbin.installed_tag(str(tmp_path)) == "v0.9.0"
+
+
+def test_install_binary_promotes_an_unverifiable_binary_when_nothing_was_installed(
+        tmp_path, monkeypatch, fake_requests):
+    """With nothing to protect there is nothing to lose, and leaving the
+    binary in place is what lets lib.service_runner's unsupported_platform
+    latch self-heal when the cause was a transient noexec/EACCES mount
+    rather than a permanent ban. It stays unstamped, so the next session
+    treats it as upgradable."""
+    _set_platform(monkeypatch, "Linux", "x86_64")
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **kw: (_ for _ in ()).throw(OSError("EACCES")))
+    archive_bytes = _make_tar_gz({"stremio-server": b"unverifiable"})
+    monkeypatch.setitem(
+        PINNED_SHA256, ("Linux", "x86_64"), hashlib.sha256(archive_bytes).hexdigest())
+    fake_requests.queue_get(_StreamResponse(archive_bytes))
+
+    with pytest.raises(UnsupportedPlatformError):
+        install_binary(str(tmp_path))
+
+    assert (tmp_path / "stremio-server").read_bytes() == b"unverifiable"
+    assert serverbin.installed_tag(str(tmp_path)) is None
+
+
 def test_install_binary_succeeds_even_when_the_stamp_cannot_be_written(
         tmp_path, monkeypatch, fake_requests):
     """The binary is installed and verified before the stamp is written --

@@ -357,6 +357,14 @@ def install_binary(dest_dir, progress_cb=None):
     shipping a backdoored binary that would otherwise install, and later
     run, with no integrity check at all.
 
+    The binary is chmod'd and verify_executable()'d while still under its
+    `.part` name, and only promoted over any existing one once that
+    passes: an install that turns out to be unrunnable must never take
+    down a binary that was already serving (see the upgrade caller in
+    lib.service_runner). The one exception is documented at that check.
+    A successful install records SERVER_TAG via `_write_tag_stamp` so a
+    later release bump can tell this binary is out of date.
+
     Raises UnsupportedPlatformError (a DownloadError subclass) immediately,
     before any network request, on Android and on iOS/iPadOS/tvOS: neither
     can exec() a binary the addon downloaded into its own writable data
@@ -402,15 +410,35 @@ def install_binary(dest_dir, progress_cb=None):
         tmp_binary_path = final_path + PART_SUFFIX
         try:
             _extract_binary(archive_path, asset_name, target_name, tmp_binary_path)
+            if os_name != "Windows":
+                os.chmod(tmp_binary_path, 0o755)
+            # Verify BEFORE promoting: this function is now also the
+            # upgrade path (see lib.service_runner's
+            # _upgrade_bundled_if_stale), so a replacement that cannot be
+            # exec'd must not be allowed to clobber a binary that was
+            # serving fine -- the caller's "keep the installed one"
+            # fallback would otherwise be handed a path pointing at the
+            # broken new file.
+            try:
+                verify_executable(tmp_binary_path)
+            except UnsupportedPlatformError:
+                # Nothing installed yet, so there is nothing to protect,
+                # and leaving the (chmod'd, correctly-hashed) binary in
+                # place is what lets the service's unsupported_platform
+                # latch self-heal if the cause was a transient
+                # noexec/EACCES condition rather than a permanent ban --
+                # resolve_binary() finding it later clears the latch.
+                # Unstamped on purpose: it is unverified, so the next
+                # session treats it as upgradable.
+                if not os.path.exists(final_path):
+                    os.replace(tmp_binary_path, final_path)
+                raise
             os.replace(tmp_binary_path, final_path)
         finally:
             _safe_remove(tmp_binary_path)
     finally:
         _safe_remove(archive_path)
 
-    if os_name != "Windows":
-        os.chmod(final_path, 0o755)
-    verify_executable(final_path)
     _write_tag_stamp(dest_dir)
     return final_path
 
@@ -419,14 +447,15 @@ def installed_tag(dest_dir):
     """Return the SERVER_TAG the binary currently in `dest_dir` was
     installed from, or None when unknown.
 
-    None covers three cases callers must treat identically -- "not the
-    current tag": no stamp file (installed before stamping existed, or the
-    write failed), an unreadable one, and an empty one.
+    None covers every case callers must treat identically -- "not the
+    current tag": no stamp file (installed before stamping existed, the
+    write failed, or the install was promoted unverified), an unreadable
+    one, one that is not decodable text, and an empty one.
     """
     try:
         with open(os.path.join(dest_dir, TAG_STAMP_NAME)) as fh:
             return fh.read(TAG_STAMP_READ_LIMIT).strip() or None
-    except OSError:
+    except (OSError, UnicodeError):
         return None
 
 

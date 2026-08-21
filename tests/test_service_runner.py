@@ -3090,6 +3090,32 @@ def test_main_never_replaces_a_binary_it_did_not_install(monkeypatch, tmp_path):
     assert [p.binary for p in spawned] == ['/usr/bin/stremio-server']
 
 
+def test_main_never_replaces_a_binary_the_server_binary_setting_points_at(monkeypatch, tmp_path):
+    """`server_binary` may name the bundled path itself -- someone who
+    dropped a hand-built binary exactly where we install ours.
+    resolve_binary() returns it from its explicit branch, so the path
+    alone cannot tell it apart from one we installed; the setting decides."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: _bundled(tmp_path))
+
+    def installed_tag_must_not_run(*args, **kwargs):
+        pytest.fail('installed_tag must not be consulted for a user-named binary')
+
+    def install_must_not_run(*args, **kwargs):
+        pytest.fail('install_binary must not replace a user-named binary')
+
+    monkeypatch.setattr(serverbin, 'installed_tag', installed_tag_must_not_run)
+    monkeypatch.setattr(serverbin, 'install_binary', install_must_not_run)
+    factory, spawned = _make_process_factory([])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    settings = {'server_enable': True, 'server_binary': _bundled(tmp_path)}
+    with _main_env(tmp_path, _scripted_wait([], [None]), settings=settings):
+        service_runner.main()
+
+    assert [p.binary for p in spawned] == [_bundled(tmp_path)]
+
+
 def test_main_failed_upgrade_still_starts_the_installed_binary(monkeypatch, tmp_path):
     """An offline user with a stale binary must still get a server. A
     failed upgrade falls back to the binary already on disk instead of
@@ -3153,8 +3179,19 @@ def test_main_upgrade_aborted_by_shutdown_unwinds_without_spawning(monkeypatch, 
     monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: _bundled(tmp_path))
     monkeypatch.setattr(serverbin, 'installed_tag', lambda dest_dir: 'v0.1.0')
 
+    progress_calls = []
+
     def fake_install_binary(dest_dir, progress_cb=None):
-        raise service_runner._AbortRequested()
+        """Abort the way the real download does: install_binary() itself
+        never raises _AbortRequested -- it is main()'s own progress
+        callback that does, once per chunk, when Kodi asks to shut down
+        mid-transfer. Raising directly here would keep passing even if the
+        upgrade call stopped handing over a progress_cb at all."""
+        progress_calls.append((dest_dir, progress_cb))
+        progress_cb(0, 1024)  # before the shutdown request: must not raise
+        sys.modules['xbmc'].Monitor.abortRequested = lambda self: True
+        progress_cb(512, 1024)
+        pytest.fail('progress_cb must raise _AbortRequested once abort is requested')
 
     monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
     factory, spawned = _make_process_factory([])
@@ -3164,6 +3201,8 @@ def test_main_upgrade_aborted_by_shutdown_unwinds_without_spawning(monkeypatch, 
         service_runner.main()
 
     assert spawned == []
+    assert len(progress_calls) == 1
+    assert progress_calls[0][1] is not None
     assert any(
         'upgrade aborted, shutting down' in msg
         for msg, level in ctx.env.log_calls if level == ctx.xbmc.LOGINFO
