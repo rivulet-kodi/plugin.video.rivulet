@@ -795,3 +795,51 @@ msgstr ""
 msgctxt "#30302"
 msgid "Failed to check library status"
 msgstr ""
+
+msgctxt "#30253"
+msgid "Minimum quality"
+msgstr ""
+
+msgctxt "#30254"
+msgid "Any"
+msgstr ""
+
+msgctxt "#30255"
+msgid "480p"
+msgstr ""
+
+msgctxt "#30256"
+msgid "720p"
+msgstr ""
+
+msgctxt "#30257"
+msgid "1080p"
+msgstr ""
+
+msgctxt "#30258"
+msgid "2160p"
+msgstr ""
+
+msgctxt "#30259"
+msgid "Maximum size (GB, 0 = unlimited)"
+msgstr ""
+
+msgctxt "#30260"
+msgid "Exclude CAM/TS sources"
+msgstr ""
+
+msgctxt "#30261"
+msgid "Cached only"
+msgstr ""
+
+msgctxt "#30262"
+msgid "%d source hidden by filters"
+msgstr ""
+
+msgctxt "#30263"
+msgid "%d sources hidden by filters"
+msgstr ""
+
+msgctxt "#30264"
+msgid "Filters matched nothing - showing all sources"
+msgstr ""

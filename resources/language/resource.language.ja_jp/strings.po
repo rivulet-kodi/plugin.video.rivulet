@@ -795,3 +795,51 @@ msgstr "ライブラリを更新できませんでした"
 msgctxt "#30302"
 msgid "Failed to check library status"
 msgstr "ライブラリの状態を確認できませんでした"
+
+msgctxt "#30253"
+msgid "Minimum quality"
+msgstr "最低画質"
+
+msgctxt "#30254"
+msgid "Any"
+msgstr "指定なし"
+
+msgctxt "#30255"
+msgid "480p"
+msgstr "480p"
+
+msgctxt "#30256"
+msgid "720p"
+msgstr "720p"
+
+msgctxt "#30257"
+msgid "1080p"
+msgstr "1080p"
+
+msgctxt "#30258"
+msgid "2160p"
+msgstr "2160p"
+
+msgctxt "#30259"
+msgid "Maximum size (GB, 0 = unlimited)"
+msgstr "最大サイズ (GB、0 = 無制限)"
+
+msgctxt "#30260"
+msgid "Exclude CAM/TS sources"
+msgstr "CAM/TS ソースを除外"
+
+msgctxt "#30261"
+msgid "Cached only"
+msgstr "キャッシュ済みのみ"
+
+msgctxt "#30262"
+msgid "%d source hidden by filters"
+msgstr "フィルターにより %d 件のソースが非表示"
+
+msgctxt "#30263"
+msgid "%d sources hidden by filters"
+msgstr "フィルターにより %d 件のソースが非表示"
+
+msgctxt "#30264"
+msgid "Filters matched nothing - showing all sources"
+msgstr "フィルター条件に一致するものがありません。すべてのソースを表示します"

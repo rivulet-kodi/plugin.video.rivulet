@@ -330,6 +330,142 @@ def test_oninit_addons_count_label_singular_vs_plural(load_streamswindow, addon_
     assert win.getControl(ctx.streamswindow.ADDONS_COUNT).label == expected
 
 
+# ---------------------------------------------------------------------------
+# StreamsWindow: 'playback_*' stream filtering (_stream_filter_view()/
+# _rebuild_list()) - filtering is applied at RENDER time against
+# `self.pairs`, never mutating it, so `_apply_pending()`'s focus-by-
+# identity restore and position-property lookups keep working unchanged
+# (see `_rebuild_list()`'s own docstring).
+# ---------------------------------------------------------------------------
+
+
+def test_rebuild_list_hides_stream_excluded_by_max_size_and_shrinks_counts(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    ctx.env.addon.settings['playback_max_size_gb'] = '1'  # 1 GiB cap
+    # Single addon throughout so line1's single-provider dedupe stays
+    # stable (include_addon=False) and each row falls back to its plain
+    # 'raw' text - see _rebuild_list()'s own single_provider comment.
+    kept = {'addon': 'AddonA', 'raw': 'Kept', 'size_bytes': 500 * 1024 * 1024, 'cached': True}
+    big = {'addon': 'AddonA', 'raw': 'Big', 'size_bytes': 5 * 1024 ** 3, 'cached': True}
+    win.pairs = [(kept, {}), (big, {})]
+
+    win.onInit()
+
+    items = win.getControl(ctx.streamswindow.LIST).items
+    assert [item.getLabel() for item in items] == ['Kept']
+    # position stays a self.pairs index, not a display-list index, so
+    # _apply_pending()'s focus-by-identity restore keeps working.
+    assert items[0].getProperty('position') == '0'
+    assert win.getControl(ctx.streamswindow.SOURCES_COUNT).label == '1 SOURCE'
+    assert win.getControl(ctx.streamswindow.ADDONS_COUNT).label == '1 ADDON'
+    assert win.getControl(ctx.streamswindow.INFO_PANEL).text == 'via AddonA\n1 source hidden by filters'
+
+
+def test_rebuild_list_hidden_count_is_plural_for_more_than_one(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    ctx.env.addon.settings['playback_max_size_gb'] = '1'
+    kept = {'addon': 'AddonA', 'raw': 'Kept', 'size_bytes': 500 * 1024 * 1024}
+    big_a = {'addon': 'AddonA', 'raw': 'BigA', 'size_bytes': 5 * 1024 ** 3}
+    big_b = {'addon': 'AddonA', 'raw': 'BigB', 'size_bytes': 5 * 1024 ** 3}
+    win.pairs = [(kept, {}), (big_a, {}), (big_b, {})]
+
+    win.onInit()
+
+    assert win.getControl(ctx.streamswindow.INFO_PANEL).text == 'via AddonA\n2 sources hidden by filters'
+
+
+def test_rebuild_list_falls_back_to_showing_everything_when_filters_match_nothing(load_streamswindow):
+    # A misconfigured filter (here: minimum quality above anything an
+    # addon actually found) must never look identical to open_streams()'s
+    # own "no sources found" empty-result path - see _stream_filter_view()'s
+    # docstring. Both entries share one addon and both carry a real
+    # 'resolution' (needed to trigger the min-quality filter), so
+    # format_label() renders them identically - the assertions below
+    # check row COUNT/position, not label text, to stay independent of
+    # that.
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    ctx.env.addon.settings['playback_min_quality'] = '2160p'
+    pairs = [
+        ({'addon': 'AddonA', 'raw': 'A', 'resolution': '1080p'}, {}),
+        ({'addon': 'AddonA', 'raw': 'B', 'resolution': '1080p'}, {}),
+    ]
+    win.pairs = list(pairs)
+
+    win.onInit()
+
+    items = win.getControl(ctx.streamswindow.LIST).items
+    assert [item.getProperty('position') for item in items] == ['0', '1']
+    assert win.getControl(ctx.streamswindow.SOURCES_COUNT).label == '2 SOURCES'
+    notice = 'via AddonA\nSTR%d' % ctx.streamswindow._FILTERS_MATCHED_NOTHING_STRING_ID
+    assert win.getControl(ctx.streamswindow.INFO_PANEL).text == notice
+
+
+def test_rebuild_list_no_filters_configured_hides_nothing(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = [({'addon': 'AddonA', 'raw': 'A'}, {}), ({'addon': 'AddonA', 'raw': 'B'}, {})]
+
+    win.onInit()
+
+    items = win.getControl(ctx.streamswindow.LIST).items
+    assert [item.getLabel() for item in items] == ['A', 'B']
+    assert win.getControl(ctx.streamswindow.INFO_PANEL).text == 'via AddonA'
+
+
+def test_rebuild_list_skips_a_filtered_entry_without_disturbing_surrounding_order(load_streamswindow):
+    # filter_streams() drops the excluded pair in place - the two
+    # survivors either side of it must keep their RELATIVE order, exactly
+    # as if the excluded pair had never been in self.pairs at all.
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    ctx.env.addon.settings['playback_max_size_gb'] = '1'
+    first = {'addon': 'AddonA', 'raw': 'First', 'size_bytes': 500 * 1024 * 1024}
+    excluded = {'addon': 'AddonA', 'raw': 'Excluded', 'size_bytes': 5 * 1024 ** 3}
+    last = {'addon': 'AddonA', 'raw': 'Last', 'size_bytes': 500 * 1024 * 1024}
+    win.pairs = [(first, {}), (excluded, {}), (last, {})]
+
+    win.onInit()
+
+    items = win.getControl(ctx.streamswindow.LIST).items
+    assert [item.getLabel() for item in items] == ['First', 'Last']
+    # positions are still real self.pairs indices (0 and 2) - the skipped
+    # middle index is never renumbered away.
+    assert [item.getProperty('position') for item in items] == ['0', '2']
+
+
+def test_read_stream_filters_maps_quality_setting_to_height_and_gb_to_bytes(load_streamswindow):
+    ctx = load_streamswindow()
+    ctx.env.addon.settings['playback_min_quality'] = '720p'
+    ctx.env.addon.settings['playback_max_size_gb'] = '2'
+    ctx.env.addon.settings['playback_exclude_cam'] = 'true'
+    ctx.env.addon.settings['playback_cached_only'] = 'true'
+
+    filters = ctx.streamswindow._read_stream_filters()
+
+    assert filters == {
+        'min_height': 720,
+        'max_size_bytes': 2 * 1024 ** 3,
+        'exclude_cam': True,
+        'cached_only': True,
+    }
+
+
+def test_read_stream_filters_defaults_to_no_filtering(load_streamswindow):
+    ctx = load_streamswindow()
+
+    filters = ctx.streamswindow._read_stream_filters()
+
+    assert filters == {
+        'min_height': 0,
+        'max_size_bytes': 0,
+        'exclude_cam': False,
+        'cached_only': False,
+    }
+
+
 @pytest.mark.parametrize('poster,expect_fanart', [
     ('https://x/poster.jpg', False),
     (None, True),

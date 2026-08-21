@@ -795,3 +795,51 @@ msgstr "فشل تحديث المكتبة"
 msgctxt "#30302"
 msgid "Failed to check library status"
 msgstr "فشل التحقق من حالة المكتبة"
+
+msgctxt "#30253"
+msgid "Minimum quality"
+msgstr "الحد الأدنى للجودة"
+
+msgctxt "#30254"
+msgid "Any"
+msgstr "أي"
+
+msgctxt "#30255"
+msgid "480p"
+msgstr "480p"
+
+msgctxt "#30256"
+msgid "720p"
+msgstr "720p"
+
+msgctxt "#30257"
+msgid "1080p"
+msgstr "1080p"
+
+msgctxt "#30258"
+msgid "2160p"
+msgstr "2160p"
+
+msgctxt "#30259"
+msgid "Maximum size (GB, 0 = unlimited)"
+msgstr "الحجم الأقصى (جيجابايت، 0 = بلا حدود)"
+
+msgctxt "#30260"
+msgid "Exclude CAM/TS sources"
+msgstr "استبعاد مصادر CAM/TS"
+
+msgctxt "#30261"
+msgid "Cached only"
+msgstr "المخزّن مؤقتًا فقط"
+
+msgctxt "#30262"
+msgid "%d source hidden by filters"
+msgstr "تم إخفاء %d مصدر بواسطة الفلاتر"
+
+msgctxt "#30263"
+msgid "%d sources hidden by filters"
+msgstr "تم إخفاء %d مصادر بواسطة الفلاتر"
+
+msgctxt "#30264"
+msgid "Filters matched nothing - showing all sources"
+msgstr "لم تطابق الفلاتر أي نتائج، يتم عرض جميع المصادر"
