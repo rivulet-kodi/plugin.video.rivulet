@@ -743,3 +743,11 @@ msgstr "Отключено"
 msgctxt "#30252"
 msgid "Enabled"
 msgstr "Включено"
+
+msgctxt "#30270"
+msgid "Move up"
+msgstr "Переместить вверх"
+
+msgctxt "#30271"
+msgid "Move down"
+msgstr "Переместить вниз"

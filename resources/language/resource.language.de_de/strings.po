@@ -743,3 +743,11 @@ msgstr "Deaktiviert"
 msgctxt "#30252"
 msgid "Enabled"
 msgstr "Aktiviert"
+
+msgctxt "#30270"
+msgid "Move up"
+msgstr "Nach oben verschieben"
+
+msgctxt "#30271"
+msgid "Move down"
+msgstr "Nach unten verschieben"

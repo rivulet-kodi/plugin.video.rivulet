@@ -743,3 +743,11 @@ msgstr "無効"
 msgctxt "#30252"
 msgid "Enabled"
 msgstr "有効"
+
+msgctxt "#30270"
+msgid "Move up"
+msgstr "上に移動"
+
+msgctxt "#30271"
+msgid "Move down"
+msgstr "下に移動"

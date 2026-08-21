@@ -230,6 +230,183 @@ def test_set_addon_disabled_goes_through_update_addons(tmp_path, monkeypatch):
     assert descriptor["flags"]["disabled"] is True
 
 
+
+# --- move_addon --------------------------------------------------------
+
+
+def test_move_addon_up_swaps_with_previous(tmp_path):
+    store = make_store(tmp_path)
+    store.install_addon("https://a.example/manifest.json", {"id": "a"})
+    store.install_addon("https://b.example/manifest.json", {"id": "b"})
+
+    store.move_addon("https://b.example/manifest.json", -1)
+
+    urls = [a["transportUrl"] for a in store.get_addons()]
+    assert urls[-2:] == ["https://b.example/manifest.json", "https://a.example/manifest.json"]
+
+
+def test_move_addon_down_swaps_with_next(tmp_path):
+    store = make_store(tmp_path)
+    store.install_addon("https://a.example/manifest.json", {"id": "a"})
+    store.install_addon("https://b.example/manifest.json", {"id": "b"})
+
+    store.move_addon("https://a.example/manifest.json", 1)
+
+    urls = [a["transportUrl"] for a in store.get_addons()]
+    assert urls[-2:] == ["https://b.example/manifest.json", "https://a.example/manifest.json"]
+
+
+def test_move_addon_delta_beyond_start_clamps_to_first_position(tmp_path):
+    store = make_store(tmp_path)
+    store.install_addon("https://a.example/manifest.json", {"id": "a"})
+    store.install_addon("https://b.example/manifest.json", {"id": "b"})
+    total = len(store.get_addons())
+
+    store.move_addon("https://b.example/manifest.json", -total)
+
+    urls = [a["transportUrl"] for a in store.get_addons()]
+    assert urls[0] == "https://b.example/manifest.json"
+
+
+def test_move_addon_delta_beyond_end_clamps_to_last_position(tmp_path):
+    store = make_store(tmp_path)
+    store.install_addon("https://a.example/manifest.json", {"id": "a"})
+    total = len(store.get_addons())
+
+    store.move_addon(DEFAULT_ADDONS[0]["transportUrl"], total)
+
+    urls = [a["transportUrl"] for a in store.get_addons()]
+    assert urls[-1] == DEFAULT_ADDONS[0]["transportUrl"]
+
+
+def test_move_addon_up_at_first_position_is_a_noop_and_skips_write(tmp_path, monkeypatch):
+    store = make_store(tmp_path)
+    addons = store.get_addons()  # seed
+    first_url = addons[0]["transportUrl"]
+
+    write_calls = []
+    real_atomic_write = store_module._atomic_write
+
+    def spy_atomic_write(path, data, compact=False):
+        write_calls.append(path)
+        return real_atomic_write(path, data, compact=compact)
+
+    monkeypatch.setattr(store_module, "_atomic_write", spy_atomic_write)
+
+    store.move_addon(first_url, -1)
+
+    assert write_calls == []
+    assert store.get_addons() == addons
+
+
+def test_move_addon_down_at_last_position_is_a_noop_and_skips_write(tmp_path, monkeypatch):
+    store = make_store(tmp_path)
+    addons = store.get_addons()  # seed
+    last_url = addons[-1]["transportUrl"]
+
+    write_calls = []
+    real_atomic_write = store_module._atomic_write
+
+    def spy_atomic_write(path, data, compact=False):
+        write_calls.append(path)
+        return real_atomic_write(path, data, compact=compact)
+
+    monkeypatch.setattr(store_module, "_atomic_write", spy_atomic_write)
+
+    store.move_addon(last_url, 1)
+
+    assert write_calls == []
+    assert store.get_addons() == addons
+
+
+def test_move_addon_unknown_transport_url_raises_valueerror(tmp_path):
+    store = make_store(tmp_path)
+    store.get_addons()  # seed
+    with pytest.raises(ValueError):
+        store.move_addon("https://does-not-exist.example/manifest.json", -1)
+
+
+def test_move_addon_preserves_disabled_and_protected_flags(tmp_path):
+    store = make_store(tmp_path)
+    url = "https://custom.example/manifest.json"
+    store.install_addon(url, {"id": "org.custom", "name": "Custom"})
+    store.set_addon_disabled(url, True)
+    protected_url = DEFAULT_ADDONS[0]["transportUrl"]
+
+    store.move_addon(url, -1)
+
+    moved = next(a for a in store.get_addons() if a["transportUrl"] == url)
+    assert moved["flags"]["disabled"] is True
+    protected = next(a for a in store.get_addons() if a["transportUrl"] == protected_url)
+    assert protected["flags"]["protected"] is True
+
+
+def test_move_addon_goes_through_update_addons(tmp_path, monkeypatch):
+    """The write must go through the compare-and-swap path (a fresh read
+    immediately before persisting), not a plain get_addons()+set_addons()
+    that could lose a concurrent writer's update."""
+    store = make_store(tmp_path)
+    store.install_addon("https://a.example/manifest.json", {"id": "a"})
+    store.install_addon("https://b.example/manifest.json", {"id": "b"})
+
+    real_read_raw = store_module._read_raw
+    calls = []
+
+    def spy_read_raw(path):
+        calls.append(path)
+        return real_read_raw(path)
+
+    monkeypatch.setattr(store_module, "_read_raw", spy_read_raw)
+
+    store.move_addon("https://b.example/manifest.json", -1)
+
+    monkeypatch.undo()  # stop faking reads before verifying the real on-disk result
+    assert len(calls) == 2  # baseline read + pre-write conflict check
+    urls = [a["transportUrl"] for a in store.get_addons()]
+    assert urls[-2:] == ["https://b.example/manifest.json", "https://a.example/manifest.json"]
+
+
+def test_move_addon_retries_and_reapplies_against_fresh_data_on_conflict(tmp_path, monkeypatch):
+    """A second `default.py` process installs a new addon and writes
+    addons.json in the gap between our baseline read and our pre-write
+    conflict check. The move must detect this, retry against the fresh
+    content, and persist BOTH changes -- never discard the other
+    process's write, and still apply our reorder against its result.
+    """
+    store = make_store(tmp_path)
+    store.install_addon("https://a.example/manifest.json", {"id": "a"})
+    store.install_addon("https://b.example/manifest.json", {"id": "b"})
+    baseline_raw = store_module._read_raw(store._addons_path)
+
+    concurrent_addons = json.loads(baseline_raw)
+    concurrent_addons.append(
+        {
+            "transportUrl": "https://other-process.example/manifest.json",
+            "manifest": {"id": "org.other"},
+            "flags": {},
+        }
+    )
+    concurrent_raw = json.dumps(concurrent_addons, indent=2)
+
+    calls = []
+
+    def fake_read_raw(path):
+        calls.append(path)
+        return baseline_raw if len(calls) == 1 else concurrent_raw
+
+    monkeypatch.setattr(store_module, "_read_raw", fake_read_raw)
+
+    store.move_addon("https://b.example/manifest.json", -1)
+
+    monkeypatch.undo()  # stop faking reads before verifying the real on-disk result
+    assert len(calls) == 4  # 2 reads/attempt x 2 attempts: one retry happened
+    urls = [a["transportUrl"] for a in store.get_addons()]
+    assert "https://other-process.example/manifest.json" in urls, (
+        "the concurrent process's install must survive our retried move"
+    )
+    assert urls.index("https://b.example/manifest.json") < urls.index("https://a.example/manifest.json")
+
+
 # --- auth ------------------------------------------------------------------
 
 
