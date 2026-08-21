@@ -59,11 +59,11 @@ _DEFAULT_LOCALIZED = {
     30207: '%d EPISODES',
     30208: '%d CACHED',
     30212: '%d%% WATCHED',
- '%d source hidden by filters',
- '%d sources hidden by filters',
- '%d new episode ready to watch',
- '%d new episodes ready to watch',
- '%s needs configuration. Open %s in a browser, configure it, then paste the resulting manifest URL',
+    30262: '%d source hidden by filters',
+    30263: '%d sources hidden by filters',
+    30315: '%d new episode ready to watch',
+    30316: '%d new episodes ready to watch',
+    30341: '%s needs configuration. Open %s in a browser, configure it, then paste the resulting manifest URL',
 }
 
 

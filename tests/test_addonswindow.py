@@ -290,7 +290,7 @@ def test_onclick_first_addon_menu_omits_move_up(load_addonswindow, monkeypatch):
     _wire_store(ctx.addonswindow, _FakeStore(addons=[first, second]))
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 1  # first addon row
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2  # first addon row
 
     win.onClick(ctx.addonswindow.LIST)
 
@@ -307,7 +307,7 @@ def test_onclick_last_addon_menu_omits_move_down(load_addonswindow, monkeypatch)
     _wire_store(ctx.addonswindow, _FakeStore(addons=[first, second]))
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 2  # second addon row
+    win.getControl(ctx.addonswindow.LIST).selected_index = 3  # second addon row
 
     win.onClick(ctx.addonswindow.LIST)
 
@@ -324,7 +324,7 @@ def test_onclick_middle_addon_menu_offers_both_move_directions(load_addonswindow
     _wire_store(ctx.addonswindow, _FakeStore(addons=[first, middle, last]))
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 2  # middle addon row
+    win.getControl(ctx.addonswindow.LIST).selected_index = 3  # middle addon row
 
     win.onClick(ctx.addonswindow.LIST)
 
@@ -433,7 +433,7 @@ def test_onclick_move_up_row_reorders_list_and_keeps_focus_on_moved_addon(load_a
     _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 2  # middle addon row (Addon B)
+    win.getControl(ctx.addonswindow.LIST).selected_index = 3  # middle addon row (Addon B)
 
     win.onClick(ctx.addonswindow.LIST)
 
@@ -442,8 +442,32 @@ def test_onclick_move_up_row_reorders_list_and_keeps_focus_on_moved_addon(load_a
         'https://b.example/manifest.json', 'https://a.example/manifest.json', 'https://c.example/manifest.json',
     ]
     control = win.getControl(ctx.addonswindow.LIST)
-    assert control.items[1].getLabel().startswith('Addon B')  # Addon B is now first
-    assert control.selected_index == 1  # focus follows Addon B to its new row
+    assert control.items[2].getLabel().startswith('Addon B')  # Addon B is now first
+    assert control.selected_index == 2  # focus follows Addon B to its new row
+
+
+def test_reload_focus_offset_is_derived_from_build_items_not_hardcoded(load_addonswindow, monkeypatch):
+    """Pins the seam between `_build_items()` and `_reload()`: the focus
+    offset after a move must equal `len(_build_items()) - len(addons)`,
+    recomputed here independently rather than hardcoded to today's two
+    static rows (install, market). If a third static row is ever
+    prepended without `_reload()` picking up the new count, this test's
+    independently-derived expectation and the control's actual
+    `selected_index` diverge and the test fails loudly, instead of the
+    user's focus silently landing one row off after a move."""
+    first = _descriptor(transport='https://a.example/manifest.json', name='Addon A')
+    second = _descriptor(transport='https://b.example/manifest.json', name='Addon B')
+    ctx = load_addonswindow()
+    store = _FakeStore(addons=[first, second])
+    _wire_store(ctx.addonswindow, store)
+    win = _make_window(ctx.addonswindow)
+    win.onInit()
+    static_row_count = len(win._build_items()) - len(store.addons)
+
+    win._reload(focus_transport_url='https://b.example/manifest.json')
+
+    control = win.getControl(ctx.addonswindow.LIST)
+    assert control.selected_index == 1 + static_row_count  # Addon B is addons-list index 1
 
 
 def test_onclick_move_down_row_reorders_list_and_pushes_sync(load_addonswindow, monkeypatch):
@@ -460,7 +484,7 @@ def test_onclick_move_down_row_reorders_list_and_pushes_sync(load_addonswindow, 
     monkeypatch.setattr(ctx.views, '_sync_addons_if_logged_in', lambda s: sync_calls.append(s))
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 1  # first addon row (Addon A)
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2  # first addon row (Addon A)
 
     win.onClick(ctx.addonswindow.LIST)
 
@@ -470,7 +494,7 @@ def test_onclick_move_down_row_reorders_list_and_pushes_sync(load_addonswindow, 
         'https://b.example/manifest.json', 'https://a.example/manifest.json',
     ]
     control = win.getControl(ctx.addonswindow.LIST)
-    assert control.selected_index == 2  # Addon A followed its move to the second row
+    assert control.selected_index == 3  # Addon A followed its move to the second row
 
 
 def test_onclick_move_concurrent_update_notifies_and_reloads_instead_of_raising(load_addonswindow, monkeypatch):
@@ -489,7 +513,7 @@ def test_onclick_move_concurrent_update_notifies_and_reloads_instead_of_raising(
     _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2
     reload_calls = []
     original_reload = win._reload
 
@@ -527,7 +551,7 @@ def test_onclick_move_store_raises_valueerror_notifies_without_reload(load_addon
     _wire_store(ctx.addonswindow, store)
     win = _make_window(ctx.addonswindow)
     win.onInit()
-    win.getControl(ctx.addonswindow.LIST).selected_index = 1
+    win.getControl(ctx.addonswindow.LIST).selected_index = 2
     reload_calls = []
     original_reload = win._reload
 
