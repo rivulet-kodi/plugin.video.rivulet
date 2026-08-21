@@ -780,7 +780,7 @@ def open_credits_picker(store, client, meta):
         return
 
     if kind == 'discover':
-        from lib.stremio.addons import AddonError, safe_url_for_log
+        from lib.stremio.addons import AddonError, addon_error_detail, safe_url_for_log
 
         installed = {descriptor.get('transportUrl') for descriptor in store.get_enabled_addons()}
         # SECURITY: an addon-supplied discover link's transport_url must
@@ -796,7 +796,7 @@ def open_credits_picker(store, client, meta):
         try:
             metas = _fetch_catalog(parsed['transport_url'], parsed['type'], parsed['catalog_id'], extra=parsed['extra'])
         except AddonError as exc:
-            log('infowindow: discover fetch %s failed: %s' % (safe_url_for_log(parsed['transport_url']), type(exc).__name__), xbmc.LOGERROR)
+            log('infowindow: discover fetch %s failed: %s' % (safe_url_for_log(parsed['transport_url']), addon_error_detail(exc)), xbmc.LOGERROR)
             notify(L(30032))
             return
         _open_results(metas)

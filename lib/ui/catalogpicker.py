@@ -8,6 +8,7 @@ import xbmcgui
 from lib.stremio.addons import (
     AddonError,
     _base_type,
+    addon_error_detail,
     catalog_extra_options,
     catalog_required_extra_names,
     safe_url_for_log,
@@ -242,7 +243,7 @@ class CatalogPickerWindow(BaseWindow):
             with busy_dialog(L(30033)):
                 metas = next(pages, [])
         except AddonError as exc:
-            log('catalogpicker: %s failed: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGERROR)
+            log('catalogpicker: %s failed: %s' % (safe_url_for_log(transport_url), addon_error_detail(exc)), xbmc.LOGERROR)
             notify(L(30032))
             return
         if not metas:

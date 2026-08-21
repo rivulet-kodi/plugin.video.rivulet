@@ -678,7 +678,8 @@ def _query_addon_streams(client, transport_url, addon_name, stype, sid):
     5.0s/27.6s cost that caused). Returns a `(pairs, failed)` tuple;
     `failed` is True on failure, already logged here (an `AddonError` at
     DEBUG, anything unexpected at ERROR) with the addon's NAME plus only
-    `safe_url_for_log()`'s safe scheme+host and the exception's TYPE -
+    `safe_url_for_log()`'s safe scheme+host and `addon_error_detail()`'s
+    type-plus-safe-category summary (e.g. "AddonError (HTTP 401)") -
     never the raw url or exception text, which may embed
     credentials/paths/queries - so a caller can aggregate a single
     WARNING across every addon's own outcome without re-deriving this
@@ -696,7 +697,7 @@ def _query_addon_streams(client, transport_url, addon_name, stype, sid):
     the consumer blocking forever on a result that will never arrive."""
     import xbmc
 
-    from lib.stremio.addons import AddonError, safe_url_for_log
+    from lib.stremio.addons import AddonError, addon_error_detail, safe_url_for_log
     from lib.ui.compat import log
 
     try:
@@ -704,7 +705,7 @@ def _query_addon_streams(client, transport_url, addon_name, stype, sid):
         pairs = [(streaminfo.parse_stream(stream, addon_name=addon_name), stream) for stream in results or []]
     except AddonError as exc:
         log('streamswindow: %s (%s) failed: %s' % (
-            addon_name, safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGDEBUG)
+            addon_name, safe_url_for_log(transport_url), addon_error_detail(exc)), xbmc.LOGDEBUG)
         return [], True
     except Exception as exc:  # noqa: BLE001 - see docstring: a worker thread that dies here wedges its consumer
         log('streamswindow: %s (%s) raised %s' % (

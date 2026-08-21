@@ -11,6 +11,7 @@ from lib.stremio.addons import (
     AddonError,
     _base_type,
     _catalog_extra_names,
+    addon_error_detail,
     addon_supports,
     build_resource_url,
     catalog_extra_options,
@@ -782,3 +783,69 @@ def test_addon_client_invalid_json_error_message_is_safe():
     message = str(exc_info.value)
     assert 'SECRET' not in message
     assert message == 'GET https://addon.example returned invalid JSON'
+
+
+# --- AddonError.category / addon_error_detail --------------------------------
+
+
+def test_get_json_http_error_attaches_http_status_category():
+    from tests.conftest import FakeResponse
+
+    client = AddonClient()
+    client.session = FakeSession(responses=[FakeResponse(status_code=404)])
+    with pytest.raises(AddonError) as exc_info:
+        client.manifest(MANIFEST_URL)
+    exc = exc_info.value
+    assert exc.category == 'HTTP 404'
+    assert str(exc) == 'GET https://addon.example failed: HTTP 404'
+
+
+def test_get_json_connection_error_attaches_exception_class_name_category():
+    import requests
+
+    client = AddonClient()
+    client.session = FakeSession(exc=requests.exceptions.ConnectionError('refused'))
+    with pytest.raises(AddonError) as exc_info:
+        client.manifest(MANIFEST_URL)
+    exc = exc_info.value
+    assert exc.category == 'ConnectionError'
+    assert str(exc) == 'GET https://addon.example failed: ConnectionError'
+
+
+def test_get_json_invalid_json_attaches_invalid_json_category():
+    client = AddonClient()
+    client.session = FakeSession(responses=[_invalid_json_response()])
+    with pytest.raises(AddonError) as exc_info:
+        client.manifest(MANIFEST_URL)
+    exc = exc_info.value
+    assert exc.category == 'invalid JSON'
+    assert str(exc) == 'GET https://addon.example returned invalid JSON'
+
+
+def test_addon_error_detail_includes_category_when_present():
+    exc = AddonError('irrelevant message text', category='HTTP 404')
+    assert addon_error_detail(exc) == 'AddonError (HTTP 404)'
+
+
+def test_addon_error_detail_plain_type_name_when_no_category():
+    assert addon_error_detail(AddonError('x')) == 'AddonError'
+
+
+def test_addon_error_detail_bare_class_name_for_non_addon_exception():
+    assert addon_error_detail(ValueError('boom')) == 'ValueError'
+
+
+def test_addon_error_detail_never_leaks_url_credentials_path_or_query():
+    secret_url = 'https://user:token@addon.example/manifest.json?api_key=SECRET-TOKEN'
+    client = AddonClient()
+    client.session = FakeSession(
+        exc=Exception('connection refused while fetching ' + secret_url)
+    )
+    with pytest.raises(Exception) as exc_info:
+        client.session.get(secret_url)
+    detail = addon_error_detail(exc_info.value)
+    assert 'SECRET-TOKEN' not in detail
+    assert 'api_key' not in detail
+    assert 'token@addon.example' not in detail
+    assert secret_url not in detail
+    assert detail == 'Exception'

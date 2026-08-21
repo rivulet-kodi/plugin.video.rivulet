@@ -285,7 +285,7 @@ def run_query(store, client, query):
     the existing credit ranking. Both callers want that: a person
     dispatch from `open_credits_picker()` fans out the same way and gets
     the same duplicates back."""
-    from lib.stremio.addons import AddonError, iter_catalogs, safe_url_for_log
+    from lib.stremio.addons import AddonError, addon_error_detail, iter_catalogs, safe_url_for_log
     from lib.ui.compat import L, log
 
     metas = []
@@ -300,7 +300,7 @@ def run_query(store, client, query):
             try:
                 results = client.catalog(transport_url, cat.get('type'), cat.get('id'), extra=[('search', query)])
             except AddonError as exc:
-                log('searchwindow: %s failed: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGERROR)
+                log('searchwindow: %s failed: %s' % (safe_url_for_log(transport_url), addon_error_detail(exc)), xbmc.LOGERROR)
                 continue
             for meta_obj in results or []:
                 meta_obj['type'] = meta_obj.get('type') or cat.get('type')

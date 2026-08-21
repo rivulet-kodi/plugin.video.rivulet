@@ -111,6 +111,7 @@ class AddonsWindow(BaseWindow):
 
         from lib.stremio.addons import (
             AddonError,
+            addon_error_detail,
             safe_url_for_log,
             validate_transport_url,
         )
@@ -130,7 +131,7 @@ class AddonsWindow(BaseWindow):
         try:
             manifest = get_client().manifest(transport_url)
         except AddonError as exc:
-            log('addonswindow: manifest fetch failed for %s: %s' % (safe_url_for_log(transport_url), type(exc).__name__), xbmc.LOGERROR)
+            log('addonswindow: manifest fetch failed for %s: %s' % (safe_url_for_log(transport_url), addon_error_detail(exc)), xbmc.LOGERROR)
             notify(L(30014))
             return
 
