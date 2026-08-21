@@ -359,19 +359,24 @@ class StreamsWindow(BaseWindow):
         `_append_prefix_length()`) whenever the previously-rendered rows
         are still an untouched PREFIX of the freshly re-sorted
         `self.pairs` - the common case, since a fast addon landing after
-        a slow one usually sorts after what is already on screen. That
-        path never moves the focused row (nothing before `start` moved),
-        so it goes straight to the same numeric-position restore the
-        full-rebuild path below falls back to. Otherwise (a re-sort
-        interleaved a new row somewhere inside the already-rendered
-        range, or flipped the single-provider addon-name dedupe - see
-        `_rebuild_list()`) falls back to the old full reset()+rebuild,
-        re-finding the focused row by OBJECT IDENTITY (`is`, not `==` -
-        two different streams can compare equal as `(info, stream)`
-        tuples) so a re-sort never yanks the cursor out from under a
-        user about to click. Falls back to the same numeric position
-        (clamped to the new length) when the previously-focused pair is
-        no longer in the list at all."""
+        a slow one usually sorts after what is already on screen.
+
+        Either way, the focused row is re-found by OBJECT IDENTITY (`is`,
+        not `==` - two different streams can compare equal as `(info,
+        stream)` tuples) in `self._rendered_visible_pairs` - the VISIBLE
+        list `_rebuild_list()` just built into LIST - never in raw
+        `self.pairs`: a filter can hide any number of pairs ahead of the
+        focused one, so a `self.pairs` index and LIST's row index are not
+        the same number, and passing the former to `selectItem()` picks
+        the wrong row (or one past the end of LIST) the moment filtering
+        is involved. Falls back to the same numeric ROW position
+        (clamped to the new, possibly-shorter, visible list) when the
+        previously-focused pair is no longer visible at all - a filter
+        change hid it, or there was no focused pair to begin with -
+        since landing on whatever now occupies that slot keeps the
+        cursor in a stable spot on screen, rather than jumping to some
+        unrelated stream elsewhere in the list just because it happens
+        to share the old raw index."""
         control = self.getControl(LIST)
         focused = control.getSelectedItem()
         focus_index = control.getSelectedPosition()
@@ -389,14 +394,15 @@ class StreamsWindow(BaseWindow):
 
         start = self._append_prefix_length()
         self._rebuild_list(0 if start is None else start)
-        if not self.pairs:
+        visible = self._rendered_visible_pairs
+        if not visible:
             return
-        if start is None and focus_pair is not None:
-            for index, pair in enumerate(self.pairs):
+        if focus_pair is not None:
+            for index, pair in enumerate(visible):
                 if pair is focus_pair:
                     control.selectItem(index)
                     return
-        control.selectItem(min(max(focus_index, 0), len(self.pairs) - 1))
+        control.selectItem(min(max(focus_index, 0), len(visible) - 1))
 
     def _stream_filter_view(self):
         """`(matched_nothing, display_pairs, hidden_count,

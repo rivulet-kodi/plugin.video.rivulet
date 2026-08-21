@@ -1950,6 +1950,108 @@ def test_apply_pending_batch_flipping_matched_nothing_to_false_drops_stale_fallb
     assert [i.getLabel() for i in items] == ['Movie.2020.WEB-DL.x264']
 
 
+def test_apply_pending_full_rebuild_selects_visible_index_not_raw_index_when_a_filtered_pair_precedes_focus(
+    load_streamswindow, monkeypatch,
+):
+    """Regression: `_apply_pending()`'s full-rebuild fallback used to
+    re-find the focused pair's RAW `self.pairs` index and hand it
+    straight to `selectItem()`, even though LIST only ever holds
+    `display_pairs` (the FILTERED view - see `_stream_filter_view()`).
+    A newly-arrived cam release sorted ahead of the already-focused row
+    is filtered out, so the focused row's raw index (1) and its actual
+    on-screen row (0, the only visible item) diverge - selectItem() must
+    get the latter."""
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    win = _make_window(sw)
+    target_info = {'addon': 'A', 'raw': 'Target.WEB-DL.x264'}
+    target_stream = {'url': 'https://a.example/target.mp4'}
+    win.start([(target_info, target_stream)], 'movie', 'tt1')
+    win.onInit()
+    win.getControl(sw.LIST).selected_index = 0  # focus the only (visible) row
+
+    ctx.env.addon.settings['playback_exclude_cam'] = 'true'
+    cam_info = {'addon': 'A', 'raw': 'Movie.2020.CAMRip.x264'}
+    cam_stream = {'url': 'https://a.example/cam.mp4'}
+
+    def fake_sort_streams(pairs, key='quality'):
+        # Sorts the newly-arrived (soon-to-be-filtered) cam pair AHEAD
+        # of the already-focused row, so the old rendered prefix is no
+        # longer a prefix of the re-sorted self.pairs - forcing the
+        # full-rebuild fallback with a FILTERED pair now preceding the
+        # focused one at the raw self.pairs level.
+        return sorted(pairs, key=lambda pair: pair[1] is target_stream)
+
+    monkeypatch.setattr(streaminfo, 'sort_streams', fake_sort_streams)
+    win.add_pairs([(cam_info, cam_stream)])
+    win.onAction(_FakeBackAction(-1))
+
+    assert [s for _i, s in win.pairs] == [cam_stream, target_stream]  # cam is raw index 0, target is raw index 1
+    control = win.getControl(sw.LIST)
+    assert [item.getLabel() for item in control.items] == ['Target.WEB-DL.x264']  # cam row hidden by the filter
+    assert control.selected_index == 0  # the pair's VISIBLE index, not its raw index (1)
+    focused = control.getSelectedItem()
+    assert win.pairs[int(focused.getProperty('position'))][1] is target_stream
+
+
+def test_apply_pending_full_rebuild_clamps_selection_when_the_focused_pair_itself_is_filtered_out(
+    load_streamswindow, monkeypatch,
+):
+    """Regression: when the row the user is ON gets hidden by a filter
+    change (e.g. the user opened Settings and flipped 'exclude CAM'
+    while a background batch was still landing), the focused pair is
+    simply gone from the new visible list - there is no "correct" row
+    to land on. `_apply_pending()` falls back to the pair's old NUMERIC
+    row position, clamped to the NEW (shorter) VISIBLE list, rather
+    than the old buggy clamp against `len(self.pairs)` - which counts
+    every hidden row LIST never had, so it does not shrink at all here
+    (a second, also-filtered cam pair grows `self.pairs` right alongside
+    the visible list shrinking) and would select a row past the end of
+    the actual on-screen list."""
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    win = _make_window(sw)
+    other1_info = {'addon': 'A', 'raw': 'Other1.WEB-DL.x264'}
+    other1_stream = {'url': 'https://a.example/other1.mp4'}
+    other2_info = {'addon': 'A', 'raw': 'Other2.WEB-DL.x264'}
+    other2_stream = {'url': 'https://a.example/other2.mp4'}
+    cam_info = {'addon': 'A', 'raw': 'Movie.2020.CAMRip.x264'}
+    cam_stream = {'url': 'https://a.example/cam.mp4'}
+    win.start(
+        [(other1_info, other1_stream), (other2_info, other2_stream), (cam_info, cam_stream)], 'movie', 'tt1',
+    )
+    win.onInit()
+    assert [item.getLabel() for item in win.getControl(sw.LIST).items] == [
+        'Other1.WEB-DL.x264', 'Other2.WEB-DL.x264', 'Movie.2020.CAMRip.x264',
+    ]
+    win.getControl(sw.LIST).selected_index = 2  # focus the cam row (last) - no filter active yet
+
+    # Simulate the user opening Settings and enabling exclude-CAM while
+    # this picker stays open, then a second cam batch landing.
+    ctx.env.addon.settings['playback_exclude_cam'] = 'true'
+    new_cam_info = {'addon': 'A', 'raw': 'Movie.2021.CAMRip.x264'}
+    new_cam_stream = {'url': 'https://a.example/new_cam.mp4'}
+
+    def fake_sort_streams(pairs, key='quality'):
+        return pairs  # keep insertion order - the new pair lands strictly at the end
+
+    monkeypatch.setattr(streaminfo, 'sort_streams', fake_sort_streams)
+    win.add_pairs([(new_cam_info, new_cam_stream)])
+    win.onAction(_FakeBackAction(-1))
+
+    assert [s for _i, s in win.pairs] == [
+        other1_stream, other2_stream, cam_stream, new_cam_stream,
+    ]  # 4 raw pairs - self.pairs kept growing
+    control = win.getControl(sw.LIST)
+    # Both cam rows (the previously-focused one included) are now hidden -
+    # the visible list SHRANK to 2 while self.pairs grew to 4.
+    assert [item.getLabel() for item in control.items] == ['Other1.WEB-DL.x264', 'Other2.WEB-DL.x264']
+    # Clamped to the last valid visible row (old numeric position 2,
+    # new visible length 2), not left at the old raw-length clamp of 2.
+    assert control.selected_index == 1
+    assert control.getSelectedItem() is not None  # would IndexError against the old len(self.pairs) clamp
+
+
 def test_apply_pending_fast_path_and_full_rebuild_produce_identical_final_list_contents(
     load_streamswindow,
 ):
