@@ -3005,3 +3005,166 @@ def test_setting_int_value_at_or_above_minimum_is_unclamped():
 def test_setting_int_never_raises_when_getsetting_raises():
     addon = _RawSettingAddon(raises=True)
     assert lib_settings.setting_int(addon, 'k', 42) == 42
+
+
+# --- SERVER_TAG upgrade of the bundled binary -------------------------------
+
+
+def _bundled(tmp_path):
+    return os.path.join(str(tmp_path), 'bin', service_runner.BINARY_NAME)
+
+
+def test_main_upgrades_a_bundled_binary_installed_under_an_older_server_tag(monkeypatch, tmp_path):
+    """install_binary() is otherwise only reachable when resolve_binary()
+    finds nothing, so a SERVER_TAG bump in a new addon release would never
+    reach anyone who already has a binary. Before spawning, a bundled
+    binary whose stamp disagrees with SERVER_TAG is reinstalled, and the
+    freshly-returned path -- not the stale one -- is what gets spawned."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: _bundled(tmp_path))
+    monkeypatch.setattr(serverbin, 'installed_tag', lambda dest_dir: 'v0.1.0')
+
+    install_calls = []
+    fresh = os.path.join(str(tmp_path), 'bin', 'freshly-installed')
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        install_calls.append(dest_dir)
+        return fresh
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
+    factory, spawned = _make_process_factory([])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    with _main_env(tmp_path, _scripted_wait([], [None]), settings={'server_enable': True}) as ctx:
+        service_runner.main()
+
+    assert install_calls == [os.path.join(str(tmp_path), 'bin')]
+    assert [p.binary for p in spawned] == [fresh]
+    assert [n for n in ctx.env.notifications if n[1] == 'STR30069']
+    assert any(
+        'upgrading stremio-server binary' in msg and serverbin.SERVER_TAG in msg
+        for msg, level in ctx.env.log_calls if level == ctx.xbmc.LOGINFO
+    )
+
+
+def test_main_does_not_reinstall_a_bundled_binary_already_at_the_current_tag(monkeypatch, tmp_path):
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: _bundled(tmp_path))
+    monkeypatch.setattr(serverbin, 'installed_tag', lambda dest_dir: serverbin.SERVER_TAG)
+
+    def install_must_not_run(*args, **kwargs):
+        pytest.fail('install_binary must not run for an up-to-date binary')
+
+    monkeypatch.setattr(serverbin, 'install_binary', install_must_not_run)
+    factory, spawned = _make_process_factory([])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    with _main_env(tmp_path, _scripted_wait([], [None]), settings={'server_enable': True}) as ctx:
+        service_runner.main()
+
+    assert [p.binary for p in spawned] == [_bundled(tmp_path)]
+    assert [n for n in ctx.env.notifications if n[1] == 'STR30069'] == []
+
+
+def test_main_never_replaces_a_binary_it_did_not_install(monkeypatch, tmp_path):
+    """An explicit `server_binary` setting or a PATH hit is the user's own
+    build: unstamped, so `installed_tag()` would report None and look
+    stale. It must not even be consulted, let alone overwritten."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: '/usr/bin/stremio-server')
+
+    def installed_tag_must_not_run(*args, **kwargs):
+        pytest.fail('installed_tag must not be consulted for a non-bundled binary')
+
+    def install_must_not_run(*args, **kwargs):
+        pytest.fail('install_binary must not replace a user-supplied binary')
+
+    monkeypatch.setattr(serverbin, 'installed_tag', installed_tag_must_not_run)
+    monkeypatch.setattr(serverbin, 'install_binary', install_must_not_run)
+    factory, spawned = _make_process_factory([])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    with _main_env(tmp_path, _scripted_wait([], [None]), settings={'server_enable': True}):
+        service_runner.main()
+
+    assert [p.binary for p in spawned] == ['/usr/bin/stremio-server']
+
+
+def test_main_failed_upgrade_still_starts_the_installed_binary(monkeypatch, tmp_path):
+    """An offline user with a stale binary must still get a server. A
+    failed upgrade falls back to the binary already on disk instead of
+    entering the missing-binary download backoff."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: _bundled(tmp_path))
+    monkeypatch.setattr(serverbin, 'installed_tag', lambda dest_dir: 'v0.1.0')
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        raise serverbin.DownloadError('github unreachable')
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
+    factory, spawned = _make_process_factory([])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    with _main_env(tmp_path, _scripted_wait([], [None]), settings={'server_enable': True}) as ctx:
+        service_runner.main()
+
+    assert [p.binary for p in spawned] == [_bundled(tmp_path)]
+    assert any(
+        'upgrade' in msg and 'keeping the installed one' in msg
+        for msg, level in ctx.env.log_calls if level == ctx.xbmc.LOGWARNING
+    )
+
+
+def test_main_attempts_the_upgrade_at_most_once_per_session(monkeypatch, tmp_path):
+    """The spawn path runs again on every failed start (5s apart), so
+    without the one-shot latch a GitHub outage would re-download the
+    archive on every retry."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: _bundled(tmp_path))
+    monkeypatch.setattr(serverbin, 'installed_tag', lambda dest_dir: 'v0.1.0')
+
+    install_calls = []
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        install_calls.append(dest_dir)
+        raise serverbin.DownloadError('github unreachable')
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
+    # Both spawns fail, so `proc` stays None and the binary is re-resolved
+    # on the next iteration -- the exact shape the latch has to survive.
+    factory, spawned = _make_process_factory([
+        {'start_exceptions': [OSError('boom')]},
+        {'start_exceptions': [OSError('boom')]},
+    ])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    with _main_env(tmp_path, _scripted_wait([], [None, None]), settings={'server_enable': True}):
+        service_runner.main()
+
+    assert len(spawned) == 2
+    assert len(install_calls) == 1
+
+
+def test_main_upgrade_aborted_by_shutdown_unwinds_without_spawning(monkeypatch, tmp_path):
+    """The upgrade download shares main()'s abort-aware progress callback:
+    a Kodi shutdown mid-transfer must unwind the loop rather than spawn a
+    server we are about to tear down."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: _bundled(tmp_path))
+    monkeypatch.setattr(serverbin, 'installed_tag', lambda dest_dir: 'v0.1.0')
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        raise service_runner._AbortRequested()
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
+    factory, spawned = _make_process_factory([])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    with _main_env(tmp_path, _scripted_wait([], [None]), settings={'server_enable': True}) as ctx:
+        service_runner.main()
+
+    assert spawned == []
+    assert any(
+        'upgrade aborted, shutting down' in msg
+        for msg, level in ctx.env.log_calls if level == ctx.xbmc.LOGINFO
+    )

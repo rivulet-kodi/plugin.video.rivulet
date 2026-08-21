@@ -267,6 +267,20 @@ def resolve_binary(explicit_path, addon_data_dir):
     return shutil.which(BINARY_NAME)
 
 
+def is_bundled_binary(path, addon_data_dir):
+    """True if `path` is the binary lib.serverbin.install_binary() manages.
+
+    An exact string comparison against the same two candidates
+    resolve_binary() builds, which is sound precisely because `path` is
+    expected to have come from resolve_binary() -- so it is either one of
+    those literals or something else entirely (the user's explicit
+    `server_binary` setting, or a PATH hit). Neither of those is ours to
+    replace, which is the whole point of asking.
+    """
+    bundled = os.path.join(addon_data_dir, "bin", BINARY_NAME)
+    return path in (bundled, bundled + ".exe")
+
+
 def probe_listening(server_url, timeout=PROBE_TIMEOUT):
     """Return True if something is already answering at server_url.
 
@@ -914,6 +928,73 @@ def main():
             return None, next_interval
         return candidate, HEALTHY_POLL_INTERVAL
 
+    def _abort_progress(done, total):
+        """Download progress callback for serverbin.install_binary(), which
+        forwards it to serverbin._download_to_file() -- called once per
+        chunk, so a multi-minute download notices a Kodi shutdown request
+        within one chunk instead of blocking abortRequested() from ever
+        being polled again until the transfer finishes on its own.
+
+        Shared by both callers that can start a download: the
+        missing-binary install below and _upgrade_bundled_if_stale().
+        """
+        if monitor.abortRequested():
+            raise _AbortRequested()
+
+    def _upgrade_bundled_if_stale(binary):
+        """Reinstall `binary` when SERVER_TAG has moved past the tag it was
+        installed from. Returns the path to use (the fresh one on success,
+        `binary` unchanged otherwise).
+
+        install_binary() only ever runs when resolve_binary() finds
+        nothing, so without this a SERVER_TAG bump in a new addon release
+        would never reach anyone who already has a binary installed --
+        they would keep running the old server forever, with a manual
+        Settings -> Download server (or deleting the file) as the only way
+        off it.
+
+        Three deliberate restrictions:
+          - Bundled binaries only. An explicit `server_binary` setting or
+            a PATH hit is the user's own build; we neither stamped it nor
+            get to replace it.
+          - Once per session (`upgrade_attempted`), so a failing download
+            cannot re-fetch on every 5s spawn retry.
+          - Failures are non-fatal: an offline user with a stale binary
+            must still get their server started, so anything short of a
+            shutdown request falls back to the existing path rather than
+            entering the download backoff state machine.
+
+        _AbortRequested propagates -- Kodi is shutting down, and the
+        caller unwinds the supervision loop instead of spawning.
+        """
+        nonlocal upgrade_attempted
+        if upgrade_attempted or not is_bundled_binary(binary, profile_dir):
+            return binary
+        upgrade_attempted = True
+
+        from lib import serverbin
+
+        bin_dir = os.path.join(profile_dir, "bin")
+        installed = serverbin.installed_tag(bin_dir)
+        if installed == serverbin.SERVER_TAG:
+            return binary
+
+        log(xbmc.LOGINFO,
+            f"upgrading stremio-server binary from {installed or 'an unstamped install'} "
+            f"to {serverbin.SERVER_TAG}")
+        xbmcgui.Dialog().notification(
+            addon.getAddonInfo("name"), addon.getLocalizedString(30069),
+        )
+        try:
+            return serverbin.install_binary(bin_dir, progress_cb=_abort_progress)
+        except _AbortRequested:
+            raise
+        except Exception as exc:  # noqa: BLE001 - a stale binary still works; never block the spawn
+            log(xbmc.LOGWARNING,
+                f"stremio-server binary upgrade to {serverbin.SERVER_TAG} failed: {exc}, "
+                f"keeping the installed one")
+            return binary
+
     monitor = ServiceMonitor()
     proc = None
     backoff_idx = 0
@@ -935,6 +1016,12 @@ def main():
     next_download_at = None
     download_attempt_notified = False
     download_failure_notified = False
+    # One-shot per session: see _upgrade_bundled_if_stale(). Deliberately
+    # NOT reset by onSettingsChanged() below -- a settings change is not
+    # new information about the release tag, and re-arming it there would
+    # let a user toggling settings during a GitHub outage re-download on
+    # every toggle.
+    upgrade_attempted = False
 
     while not monitor.abortRequested():
         try:
@@ -1033,17 +1120,6 @@ def main():
                         log(xbmc.LOGINFO, "auto-downloading stremio-server binary")
                         from lib import serverbin
 
-                        def _abort_progress(done, total):
-                            # install_binary() forwards this to
-                            # serverbin._download_to_file(), which calls it
-                            # once per chunk -- so a multi-minute download
-                            # notices a Kodi shutdown request within one
-                            # chunk instead of blocking abortRequested()
-                            # from ever being polled again until it finishes
-                            # on its own.
-                            if monitor.abortRequested():
-                                raise _AbortRequested()
-
                         try:
                             serverbin.install_binary(
                                 os.path.join(profile_dir, "bin"), progress_cb=_abort_progress,
@@ -1103,6 +1179,17 @@ def main():
                     next_download_at = None
                     download_attempt_notified = False
                     download_failure_notified = False
+                    # Before spawning: a binary installed under an older
+                    # SERVER_TAG is upgraded in place, since install_binary()
+                    # is otherwise only ever reached via the binary-is-None
+                    # branch above. Checked here rather than at startup so it
+                    # can never race a server we already have running.
+                    try:
+                        binary = _upgrade_bundled_if_stale(binary)
+                    except _AbortRequested:
+                        log(xbmc.LOGINFO,
+                            "stremio-server binary upgrade aborted, shutting down")
+                        break
                     proc, interval = _start_embedded_server(binary)
 
         # Autoload last, so it sees this iteration's computed `interval`
