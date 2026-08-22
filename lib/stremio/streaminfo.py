@@ -964,6 +964,15 @@ def format_label(info, include_addon=True):
 # never disagree about which colour a resolution gets. Only 2160p/1080p
 # get a distinct colour in the design; every other resolution (720p,
 # 480p, unknown) falls back to a dim neutral tint.
+#
+# The badge's OUTLINE (and the focused row's filled chip) takes this hex
+# straight through `colordiffuse`, which Kodi evaluates per list item. The
+# resolution TEXT inside the unfocused badge cannot: a <textcolor> is
+# resolved once per layout, so the skin stacks one fixed-colour label per
+# value below, gated on `String.IsEqual(ListItem.Property(quality_color),
+# <hex>)`. Adding a colour here means adding its label to
+# StreamsWindow.xml's itemlayout too, or that resolution's text silently
+# falls through to the neutral branch.
 _QUALITY_COLOR_HEX = {
     'gold': 'FFFFD700',
     'lime': 'FF4ADE80',
@@ -996,6 +1005,16 @@ def stream_fields(info):
 
     seeders = info.get('seeders')
     cached = info.get('cached')
+    # `cache_state` doubles as the skin's per-row colour selector: Kodi
+    # resolves a <textcolor> ONCE when it builds the layout, not per item,
+    # so `$INFO[ListItem.Property(cache_color)]` there would paint every
+    # visible row with whatever colour the current item happens to have.
+    # StreamsWindow.xml therefore stacks one fixed-colour label per state,
+    # each gated on `String.IsEqual(ListItem.Property(cache_state),...)`.
+    # Keep these three states and their colours in sync with that skin
+    # (the em-dash branch is the skin's `!CACHED + !DL` fallback), and keep
+    # the `cache_color` value below matching its label - the property stays
+    # for `colordiffuse` use, which IS evaluated per item.
     if cached is True:
         cache_state, cache_color = 'CACHED', 'FF4ADE80'
     elif cached is False:
@@ -1004,8 +1023,7 @@ def stream_fields(info):
         # Design line 280: no cache info renders a dim em-dash rather than
         # a blank cell, so the column stays visually aligned. Mono26
         # (NotoMono) carries U+2014 in its cmap, so this is safe to draw
-        # in that font. `cache_state` is therefore NEVER '' -- see the
-        # skin, which no longer guards this label's visibility.
+        # in that font. `cache_state` is therefore NEVER ''.
         cache_state, cache_color = '\u2014', '4DEEF3F6'
 
     resolution = info.get('resolution') or ''
