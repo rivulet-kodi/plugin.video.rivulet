@@ -480,6 +480,19 @@ def _textcolor_values(path):
     return found
 
 
+def _textcolor_offenders(path, values):
+    """The rejection rule itself, shared by the check over the shipped skin
+    and its regression test below - so the regression really exercises the
+    branch that rejects, rather than restating its predicate."""
+    return [
+        '%s: <control type="%s"> has <textcolor>%s</textcolor> - '
+        '<textcolor> is resolved once per layout, not per list item, '
+        'so every row renders the same colour' % (path, owner, value)
+        for owner, value in values
+        if value.startswith('$')
+    ]
+
+
 def test_skin_textcolor_is_never_a_listitem_binding():
     """The DL/CACHED "every row turns the same colour" bug.
 
@@ -500,14 +513,9 @@ def test_skin_textcolor_is_never_a_listitem_binding():
     offenders = []
     total = 0
     for path in _skin_files():
-        for owner, value in _textcolor_values(path):
-            total += 1
-            if value.startswith('$'):
-                offenders.append(
-                    '%s: <control type="%s"> has <textcolor>%s</textcolor> - '
-                    '<textcolor> is resolved once per layout, not per list item, '
-                    'so every row renders the same colour' % (path, owner, value)
-                )
+        values = _textcolor_values(path)
+        total += len(values)
+        offenders.extend(_textcolor_offenders(path, values))
     assert total, 'no <textcolor> tags found across %s - the check is not scanning anything' % _SKIN_DIR
     assert not offenders, 'per-item <textcolor> bindings:\n  ' + '\n  '.join(offenders)
 
@@ -523,6 +531,13 @@ def test_listitem_property_textcolor_is_rejected_regression(tmp_path):
         '</control></controls></window>',
         encoding='utf-8',
     )
-    ((owner, value),) = _textcolor_values(str(bad))
-    assert owner == 'label'
-    assert value.startswith('$')
+    values = _textcolor_values(str(bad))
+    assert values == [('label', '$INFO[ListItem.Property(cache_color)]')]
+
+    offenders = _textcolor_offenders(str(bad), values)
+    assert len(offenders) == 1
+    assert 'cache_color' in offenders[0]
+
+    # ...and the same detector leaves a literal colour alone, so the rule
+    # is shown to discriminate rather than flag every <textcolor>.
+    assert _textcolor_offenders('Fine.xml', [('label', 'FF4ADE80')]) == []
