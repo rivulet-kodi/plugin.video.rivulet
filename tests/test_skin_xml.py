@@ -581,15 +581,14 @@ def _mixed_font_rows(path):
     return groups
 
 
-def test_side_by_side_labels_of_different_font_sizes_are_centred():
-    """Kodi centres a label's text within its own box, so two labels that
-    sit at the same `<top>`/`<height>` but draw in different point sizes
-    only share a visual baseline when both say `aligny=center` - the
-    DetailWindow episode-row bug, where the Mono26 episode code rendered
-    lower than the font13 title beside it."""
+def _mixed_font_alignment_offenders(paths):
+    """`(offenders, groups_scanned)` for `paths` - every label sharing a box
+    with a differently-sized font while not saying `aligny=center`. Shared
+    by the skin-wide check and its regression twin so the regression runs
+    this exact branch, not a stand-in."""
     offenders = []
     total = 0
-    for path in _skin_files():
+    for path in paths:
         for path_, control_id, tag, top, height, members in _mixed_font_rows(path):
             total += 1
             for font, aligny in members:
@@ -598,6 +597,16 @@ def test_side_by_side_labels_of_different_font_sizes_are_centred():
                         '%s: control %s %s label <font>%s</font> at top=%s height=%s shares a box with a '
                         'different-sized font but has aligny=%r - the two render off-baseline'
                         % (path_, control_id, tag, font, top, height, aligny or 'unset'))
+    return offenders, total
+
+
+def test_side_by_side_labels_of_different_font_sizes_are_centred():
+    """Kodi centres a label's text within its own box, so two labels that
+    sit at the same `<top>`/`<height>` but draw in different point sizes
+    only share a visual baseline when both say `aligny=center` - the
+    DetailWindow episode-row bug, where the Mono26 episode code rendered
+    lower than the font13 title beside it."""
+    offenders, total = _mixed_font_alignment_offenders(_skin_files())
     assert total, 'no mixed-font same-box label groups found across %s - the check is not scanning anything' % _SKIN_DIR
     assert not offenders, 'off-baseline side-by-side labels:\n  ' + '\n  '.join(offenders)
 
@@ -617,3 +626,10 @@ def test_uncentred_mixed_font_labels_are_rejected_regression(tmp_path):
     ((_p, _cid, _tag, top, height, members),) = _mixed_font_rows(str(bad))
     assert (top, height) == (46, 36)
     assert sorted(members) == [('Mono26', ''), ('font13', '')]
+    # Run the real check over the fixture, so the `aligny != 'center'`
+    # branch the skin-wide test depends on is actually executed here -
+    # both labels are uncentred, so both are named.
+    offenders, total = _mixed_font_alignment_offenders([str(bad)])
+    assert total == 1
+    assert len(offenders) == 2
+    assert all("aligny='unset'" in o for o in offenders)
