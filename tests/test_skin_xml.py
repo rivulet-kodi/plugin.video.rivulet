@@ -541,3 +541,95 @@ def test_listitem_property_textcolor_is_rejected_regression(tmp_path):
     # ...and the same detector leaves a literal colour alone, so the rule
     # is shown to discriminate rather than flag every <textcolor>.
     assert _textcolor_offenders('Fine.xml', [('label', 'FF4ADE80')]) == []
+
+
+# ---------------------------------------------------------------------------
+# 8. side-by-side label baselines
+
+
+def _label_boxes(layout):
+    """`(font, top, height, aligny)` for every `<label>` control directly
+    inside one `itemlayout`/`focusedlayout`, skipping the ones with no
+    explicit geometry (a bare `<label>` inherits the layout box)."""
+    boxes = []
+    for control in layout.findall("control[@type='label']"):
+        font = control.findtext('font')
+        top = control.findtext('top')
+        height = control.findtext('height')
+        if font is None or top is None or height is None:
+            continue
+        boxes.append((font.strip(), int(top.strip()), int(height.strip()),
+                      (control.findtext('aligny') or '').strip()))
+    return boxes
+
+
+def _mixed_font_rows(path):
+    """Groups of same-box labels that draw in more than one font size, per
+    list layout - the shape that only lines up if the boxes match."""
+    groups = []
+    for control in ET.parse(path).iter('control'):
+        for tag in ('itemlayout', 'focusedlayout'):
+            layout = control.find(tag)
+            if layout is None:
+                continue
+            by_box = {}
+            for font, top, height, aligny in _label_boxes(layout):
+                by_box.setdefault((top, height), []).append((font, aligny))
+            for (top, height), members in by_box.items():
+                if len({_ESTUARY_FONT_SIZES.get(f) for f, _a in members}) > 1:
+                    groups.append((path, control.get('id'), tag, top, height, members))
+    return groups
+
+
+def _mixed_font_alignment_offenders(paths):
+    """`(offenders, groups_scanned)` for `paths` - every label sharing a box
+    with a differently-sized font while not saying `aligny=center`. Shared
+    by the skin-wide check and its regression twin so the regression runs
+    this exact branch, not a stand-in."""
+    offenders = []
+    total = 0
+    for path in paths:
+        for path_, control_id, tag, top, height, members in _mixed_font_rows(path):
+            total += 1
+            for font, aligny in members:
+                if aligny != 'center':
+                    offenders.append(
+                        '%s: control %s %s label <font>%s</font> at top=%s height=%s shares a box with a '
+                        'different-sized font but has aligny=%r - the two render off-baseline'
+                        % (path_, control_id, tag, font, top, height, aligny or 'unset'))
+    return offenders, total
+
+
+def test_side_by_side_labels_of_different_font_sizes_are_centred():
+    """Kodi centres a label's text within its own box, so two labels that
+    sit at the same `<top>`/`<height>` but draw in different point sizes
+    only share a visual baseline when both say `aligny=center` - the
+    DetailWindow episode-row bug, where the Mono26 episode code rendered
+    lower than the font13 title beside it."""
+    offenders, total = _mixed_font_alignment_offenders(_skin_files())
+    assert total, 'no mixed-font same-box label groups found across %s - the check is not scanning anything' % _SKIN_DIR
+    assert not offenders, 'off-baseline side-by-side labels:\n  ' + '\n  '.join(offenders)
+
+
+def test_uncentred_mixed_font_labels_are_rejected_regression(tmp_path):
+    """Regression: the exact pre-fix DetailWindow shape - a Mono26 code and
+    a font13 title in one box, neither centred - must be flagged."""
+    bad = tmp_path / 'Bad.xml'
+    bad.write_text(
+        '<window><controls>'
+        '<control type="list" id="1"><itemlayout height="132">'
+        '<control type="label"><top>46</top><height>36</height><font>Mono26</font></control>'
+        '<control type="label"><top>46</top><height>36</height><font>font13</font></control>'
+        '</itemlayout></control></controls></window>',
+        encoding='utf-8',
+    )
+    ((_p, _cid, _tag, top, height, members),) = _mixed_font_rows(str(bad))
+    assert (top, height) == (46, 36)
+    assert sorted(members) == [('Mono26', ''), ('font13', '')]
+    # Run the real check over the fixture, so the `aligny != 'center'`
+    # branch the skin-wide test depends on is actually executed here -
+    # both labels are uncentred, so both are named.
+    offenders, total = _mixed_font_alignment_offenders([str(bad)])
+    assert total == 1
+    assert len(offenders) == 2
+    assert all("aligny='unset'" in o for o in offenders)
