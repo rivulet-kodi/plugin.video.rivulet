@@ -464,3 +464,65 @@ def test_fractional_last_row_height_is_rejected_regression(tmp_path):
     )
     ((_control_id, own_height, item_height, _focused_height),) = _list_layout_rows(str(bad))
     assert int(own_height) % int(item_height) != 0
+
+
+# ---------------------------------------------------------------------------
+# 7. per-item <textcolor>
+
+
+def _textcolor_values(path):
+    """Every `<textcolor>` value in one file, as `(tag-path, value)`."""
+    found = []
+    for parent in ET.parse(path).iter():
+        for el in parent:
+            if el.tag == 'textcolor' and el.text:
+                found.append((parent.get('type') or parent.tag, el.text.strip()))
+    return found
+
+
+def test_skin_textcolor_is_never_a_listitem_binding():
+    """The DL/CACHED "every row turns the same colour" bug.
+
+    Kodi resolves `<textcolor>` ONCE, when it builds the layout - unlike
+    `colordiffuse`, which it re-evaluates per list item. So a
+    `<textcolor>$INFO[ListItem.Property(...)]</textcolor>` inside an
+    `<itemlayout>`/`<focusedlayout>` does not colour each row by its own
+    value: every visible row is painted with whatever the current item
+    resolved to, and the whole column changes colour together as the
+    selection moves. Nothing errors - it just looks wrong.
+
+    The fix, and the shape this check enforces: stack one fixed-colour
+    label per state, each gated by a `<visible>` condition (see
+    `StreamsWindow.xml`'s cache column and quality badge). A per-item
+    tint that really must be dynamic belongs on a texture's
+    `colordiffuse` instead.
+    """
+    offenders = []
+    total = 0
+    for path in _skin_files():
+        for owner, value in _textcolor_values(path):
+            total += 1
+            if value.startswith('$'):
+                offenders.append(
+                    '%s: <control type="%s"> has <textcolor>%s</textcolor> - '
+                    '<textcolor> is resolved once per layout, not per list item, '
+                    'so every row renders the same colour' % (path, owner, value)
+                )
+    assert total, 'no <textcolor> tags found across %s - the check is not scanning anything' % _SKIN_DIR
+    assert not offenders, 'per-item <textcolor> bindings:\n  ' + '\n  '.join(offenders)
+
+
+def test_listitem_property_textcolor_is_rejected_regression(tmp_path):
+    """Regression: the exact markup that shipped the DL/CACHED bug - a
+    `ListItem.Property` binding used as a `<textcolor>` - must be
+    flagged."""
+    bad = tmp_path / 'Bad.xml'
+    bad.write_text(
+        '<window><controls><control type="label">'
+        '<textcolor>$INFO[ListItem.Property(cache_color)]</textcolor>'
+        '</control></controls></window>',
+        encoding='utf-8',
+    )
+    ((owner, value),) = _textcolor_values(str(bad))
+    assert owner == 'label'
+    assert value.startswith('$')

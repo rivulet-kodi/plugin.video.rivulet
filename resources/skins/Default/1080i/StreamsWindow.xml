@@ -94,8 +94,20 @@
                     </control>
                     <control type="label">
                         <left>30</left><top>35</top><width>112</width><height>48</height>
-                        <font>Mono26</font><textcolor>$INFO[ListItem.Property(quality_color)]</textcolor><align>center</align><aligny>center</aligny>
-                        <visible>!String.IsEmpty(ListItem.Property(quality))</visible>
+                        <font>Mono26</font><textcolor>FFFFD700</textcolor><align>center</align><aligny>center</aligny>
+                        <visible>!String.IsEmpty(ListItem.Property(quality)) + String.IsEqual(ListItem.Property(quality_color),FFFFD700)</visible>
+                        <label>$INFO[ListItem.Property(quality)]</label>
+                    </control>
+                    <control type="label">
+                        <left>30</left><top>35</top><width>112</width><height>48</height>
+                        <font>Mono26</font><textcolor>FF4ADE80</textcolor><align>center</align><aligny>center</aligny>
+                        <visible>!String.IsEmpty(ListItem.Property(quality)) + String.IsEqual(ListItem.Property(quality_color),FF4ADE80)</visible>
+                        <label>$INFO[ListItem.Property(quality)]</label>
+                    </control>
+                    <control type="label">
+                        <left>30</left><top>35</top><width>112</width><height>48</height>
+                        <font>Mono26</font><textcolor>C7EEF3F6</textcolor><align>center</align><aligny>center</aligny>
+                        <visible>!String.IsEmpty(ListItem.Property(quality)) + !String.IsEqual(ListItem.Property(quality_color),FFFFD700) + !String.IsEqual(ListItem.Property(quality_color),FF4ADE80)</visible>
                         <label>$INFO[ListItem.Property(quality)]</label>
                     </control>
 
@@ -145,7 +157,20 @@
                     </control>
                     <control type="label">
                         <left>1152</left><top>0</top><width>130</width><height>118</height>
-                        <font>Mono26</font><textcolor>$INFO[ListItem.Property(cache_color)]</textcolor><align>right</align><aligny>center</aligny>
+                        <font>Mono26</font><textcolor>FF4ADE80</textcolor><align>right</align><aligny>center</aligny>
+                        <visible>String.IsEqual(ListItem.Property(cache_state),CACHED)</visible>
+                        <label>$INFO[ListItem.Property(cache_state)]</label>
+                    </control>
+                    <control type="label">
+                        <left>1152</left><top>0</top><width>130</width><height>118</height>
+                        <font>Mono26</font><textcolor>FFFB923C</textcolor><align>right</align><aligny>center</aligny>
+                        <visible>String.IsEqual(ListItem.Property(cache_state),DL)</visible>
+                        <label>$INFO[ListItem.Property(cache_state)]</label>
+                    </control>
+                    <control type="label">
+                        <left>1152</left><top>0</top><width>130</width><height>118</height>
+                        <font>Mono26</font><textcolor>4DEEF3F6</textcolor><align>right</align><aligny>center</aligny>
+                        <visible>!String.IsEqual(ListItem.Property(cache_state),CACHED) + !String.IsEqual(ListItem.Property(cache_state),DL)</visible>
                         <label>$INFO[ListItem.Property(cache_state)]</label>
                     </control>
                 </itemlayout>
@@ -211,7 +236,20 @@
                     </control>
                     <control type="label">
                         <left>1152</left><top>0</top><width>130</width><height>118</height>
-                        <font>Mono26</font><textcolor>$INFO[ListItem.Property(cache_color)]</textcolor><align>right</align><aligny>center</aligny>
+                        <font>Mono26</font><textcolor>FF4ADE80</textcolor><align>right</align><aligny>center</aligny>
+                        <visible>String.IsEqual(ListItem.Property(cache_state),CACHED)</visible>
+                        <label>$INFO[ListItem.Property(cache_state)]</label>
+                    </control>
+                    <control type="label">
+                        <left>1152</left><top>0</top><width>130</width><height>118</height>
+                        <font>Mono26</font><textcolor>FFFB923C</textcolor><align>right</align><aligny>center</aligny>
+                        <visible>String.IsEqual(ListItem.Property(cache_state),DL)</visible>
+                        <label>$INFO[ListItem.Property(cache_state)]</label>
+                    </control>
+                    <control type="label">
+                        <left>1152</left><top>0</top><width>130</width><height>118</height>
+                        <font>Mono26</font><textcolor>4DEEF3F6</textcolor><align>right</align><aligny>center</aligny>
+                        <visible>!String.IsEqual(ListItem.Property(cache_state),CACHED) + !String.IsEqual(ListItem.Property(cache_state),DL)</visible>
                         <label>$INFO[ListItem.Property(cache_state)]</label>
                     </control>
                 </focusedlayout>
