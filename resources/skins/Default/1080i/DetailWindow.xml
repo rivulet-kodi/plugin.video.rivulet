@@ -95,6 +95,20 @@
                 <onup>30007</onup>
                 <onleft>30002</onleft><onright>30002</onright>
                 <pagecontrol>30006</pagecontrol>
+                <!-- Row geometry (132 tall), shared by both layouts below.
+                     Kodi centres a label's text inside its own box, so two
+                     boxes at the same <top>/<height> but different font sizes
+                     do NOT share a baseline: the code (Mono26/26px) rendered
+                     visibly lower than the title (font13/30px) next to it.
+                     Code and title therefore get one identical box - same
+                     top 34, same height 36, both explicitly aligny=center -
+                     which puts both faces on one centre line whatever their
+                     size, and line2 (font10) sits directly under it at 70.
+                     That two-line text block spans 34..98, centre 66, which
+                     is exactly the thumb's centre (top 14 + 104/2) - so
+                     thumb, code, title and description all line up rather
+                     than the text block drifting 13px low as it did when the
+                     block ran 46..112 (centre 79) against a thumb at 66. -->
                 <itemlayout height="132">
                     <control type="image"><left>32</left><top>14</top><width>184</width><height>104</height><texture>$INFO[ListItem.Property(thumb)]</texture><aspectratio>scale</aspectratio></control>
                     <control type="progress">
@@ -104,13 +118,13 @@
                         <info>ListItem.PercentPlayed</info>
                         <visible>!String.IsEmpty(ListItem.Property(watched_percent))</visible>
                     </control>
-                    <control type="label"><left>244</left><top>46</top><width>110</width><height>36</height><font>Mono26</font><textcolor>B838BDF8</textcolor>
+                    <control type="label"><left>244</left><top>34</top><width>110</width><height>36</height><font>Mono26</font><textcolor>B838BDF8</textcolor><aligny>center</aligny>
                         <label>$INFO[ListItem.Property(code)]</label>
                     </control>
-                    <control type="label"><left>372</left><top>46</top><width>650</width><height>36</height><font>font13</font><textcolor>EBEEF3F6</textcolor>
+                    <control type="label"><left>372</left><top>34</top><width>650</width><height>36</height><font>font13</font><textcolor>EBEEF3F6</textcolor><aligny>center</aligny>
                         <label>$INFO[ListItem.Property(title)]</label>
                     </control>
-                    <control type="label"><left>244</left><top>84</top><width>778</width><height>28</height><font>font10</font><textcolor>6BEEF3F6</textcolor>
+                    <control type="label"><left>244</left><top>70</top><width>778</width><height>28</height><font>font10</font><textcolor>6BEEF3F6</textcolor><aligny>center</aligny>
                         <label>$INFO[ListItem.Property(line2)]</label>
                     </control>
                     <control type="label">
@@ -133,13 +147,13 @@
                         <info>ListItem.PercentPlayed</info>
                         <visible>!String.IsEmpty(ListItem.Property(watched_percent))</visible>
                     </control>
-                    <control type="label"><left>244</left><top>46</top><width>110</width><height>36</height><font>Mono26</font><textcolor>FF38BDF8</textcolor>
-                        <label>$INFO[ListItem.Property(code)]</label>
+                    <control type="label"><left>244</left><top>34</top><width>110</width><height>36</height><font>Mono26</font><textcolor>FF38BDF8</textcolor><aligny>center</aligny>
+                        <label>[B]$INFO[ListItem.Property(code)][/B]</label>
                     </control>
-                    <control type="label"><left>372</left><top>46</top><width>650</width><height>36</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
+                    <control type="label"><left>372</left><top>34</top><width>650</width><height>36</height><font>font13</font><textcolor>FFFFFFFF</textcolor><aligny>center</aligny>
                         <label>[B]$INFO[ListItem.Property(title)][/B]</label>
                     </control>
-                    <control type="label"><left>244</left><top>84</top><width>778</width><height>28</height><font>font10</font><textcolor>99EEF3F6</textcolor>
+                    <control type="label"><left>244</left><top>70</top><width>778</width><height>28</height><font>font10</font><textcolor>99EEF3F6</textcolor><aligny>center</aligny>
                         <label>$INFO[ListItem.Property(line2)]</label>
                     </control>
                     <control type="label">
