@@ -4,7 +4,7 @@
 
 Rivulet (`plugin.video.rivulet`) is a Kodi video addon implementing a **Stremio addon-protocol client**: it browses catalogs published by community Stremio addons, resolves streams, and plays them through an embedded or remote `stremio-server-go` streaming server. It ships its own 1920x1080 skin rather than drawing through the user's Kodi skin.
 
-Two independently versioned artifacts live here: the addon (`addon.xml`, currently 0.20.0) and the Kodi repository addon that delivers it (`repository.rivulet/addon.xml`, currently 1.0.2).
+Two independently versioned artifacts live here: the addon (`addon.xml`, currently 0.20.1) and the Kodi repository addon that delivers it (`repository.rivulet/addon.xml`, currently 1.0.2).
 
 ## Architecture & Data Flow
 
@@ -52,7 +52,7 @@ Browsing: `lib/ui/views.py` fans a request across installed addons -> `lib/strem
 **Prefer the uv invocations — they need no local setup and are what these gates were last verified with:**
 
 ```bash
-uvx --with-requirements requirements-dev.txt pytest tests/ -q          # 2095 passed, ~4.5s
+uvx --with-requirements requirements-dev.txt pytest tests/ -q          # 2099 passed, ~4.5s
 uvx --with-requirements requirements-dev.txt ruff check lib tests
 uvx --with-requirements requirements-dev.txt mypy
 uvx --with-requirements requirements-dev.txt pytest tests/ --cov --cov-report=term-missing
@@ -106,6 +106,8 @@ make parallel    # pytest -n auto
 - **Kodi parses `<width>` once at skin load**; a control cannot size itself to its text. Prefer one flowing label over fixed-width chips — see `lib/ui/infowindow.py:141-145` for the bug that taught this.
 - No `border-radius`, `box-shadow`, or ellipsis truncation exists in Kodi.
 - **The `Mono26` glyph trap.** Kodi's default skin maps every font except `Mono26` to NotoSans, and `Mono26` alone to NotoMono. `_SANS_ONLY = ↑ → ▲ ● ★` renders as **tofu** in a `Mono26` label; `_SAFE_ANYWHERE = ° · × – — • …` is fine in either. Any `Mono26` control that Python writes into must be registered in `_DECLARED_MONO_CONTROLS` (`tests/test_glyph_coverage.py:71`) or `test_python_populated_mono_controls_are_declared` fails. Note the failure mode: restyling a control's *font* breaks text that was fine for releases.
+- **`<textcolor>` is resolved once per layout, not per list item.** Unlike `colordiffuse`, which Kodi re-evaluates per item, a `<textcolor>$INFO[ListItem.Property(...)]</textcolor>` inside an `itemlayout`/`focusedlayout` paints *every* visible row with whatever the current item resolved to, so the whole column changes colour as the selection moves. Nothing errors — it just looks wrong, which is how it shipped in the DL/CACHED column. Stack one fixed-colour label per state, each gated by a `<visible>` condition. `tests/test_skin_xml.py` rule 7 rejects any `$`-bound `<textcolor>`.
+- **Same box + different font size needs an explicit `aligny=center` on both.** Kodi centres a label's text inside its own box, so two labels sharing a `<top>`/`<height>` but drawing at different point sizes do not share a baseline — the episode row's `Mono26` code rendered below the `font13` title beside it. `tests/test_skin_xml.py` rule 8 enforces this across the whole skin.
 
 ## Important Files
 
@@ -131,7 +133,7 @@ make parallel    # pytest -n auto
 
 ## Testing & QA
 
-pytest, **2095 tests, ~93% coverage against `fail_under = 90`** with branch coverage on. Roughly 4.5s for the full suite — there is no excuse for not running it.
+pytest, **2099 tests, ~93% coverage against `fail_under = 90`** with branch coverage on. Roughly 4.5s for the full suite — there is no excuse for not running it.
 
 - **Kodi is faked, not installed.** `tests/kodistubs/install.py` is a context manager that snapshots `sys.modules`, injects fresh fake `xbmc`/`xbmcgui`/`xbmcplugin`/`xbmcaddon`/`xbmcvfs` modules, re-imports the targets against them, and restores everything exactly on exit. Fakes are per-test, and `tests/kodistubs/fakes.py:Env` records every Kodi call for assertions.
 - **The fake `WindowXML` validates control ids against the real skin XML** (`tests/kodistubs/modules.py`), so a Python/skin mismatch fails in tests.
@@ -139,6 +141,6 @@ pytest, **2095 tests, ~93% coverage against `fail_under = 90`** with branch cove
 - **Warnings are errors**: `filterwarnings = ["error", ...]` (`pyproject.toml:12-16`). `ResourceWarning` therefore fails the suite — this is why `lib/service_runner.py` closes `HTTPError` responses inside its health-check loop, and why `PERF203` there is deliberate.
 - **Network is blocked at the socket level** by an autouse fixture in `tests/conftest.py`; use `FakeSession`/`FakeResponse` from there.
 - Windows are exercised by calling `onInit`/`onClick`/`onAction` directly, not through a Kodi event loop.
-- `tests/test_glyph_coverage.py` and `tests/test_skin_xml.py` need real Estuary fonts at `/usr/share/kodi/addons/skin.estuary/fonts`; they run locally on a machine with Kodi installed and skip in CI. Expect **2095 passed / 0 skipped** locally versus 2 skips on CI.
+- `tests/test_glyph_coverage.py` and `tests/test_skin_xml.py` need real Estuary fonts at `/usr/share/kodi/addons/skin.estuary/fonts`; they run locally on a machine with Kodi installed and skip in CI. Expect **2099 passed / 0 skipped** locally versus 2 skips on CI.
 
 CI gates every PR with six required checks: `build`, `lint-type`, `test (3.8)`, `test (3.11)`, `test (3.13)`, `compat-py38-requests`. `main` requires them plus conversation resolution and linear history; squash-merge only.
