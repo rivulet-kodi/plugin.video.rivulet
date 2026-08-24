@@ -93,18 +93,23 @@ POST_DOWNLOAD_RECHECK_INTERVAL = 0.5
 
 # Once install_binary() raises UnsupportedPlatformError, `unsupported_platform`
 # latches True for the rest of the session (see main()'s ServiceMonitor loop,
-# next to that flag's declaration, for the latch invariant). That single
-# exception cannot tell apart serverbin's two raise sites: the early
-# `_is_android()` check (serverbin.py), a genuinely permanent-for-the-session
-# platform property, from verify_executable() re-raising it for ANY OSError
-# out of the exec attempt -- its own docstring names "EACCES from a
-# noexec-mounted addon_data" as an intended trigger, an environment/mount
-# condition that can clear on its own, not necessarily permanent. So the
-# latch must NOT disable detection: a latched iteration keeps calling both
+# next to that flag's declaration, for the latch invariant). On Android that
+# exception now comes exclusively from verify_executable() re-raising an
+# OSError out of the exec attempt -- Android's own pre-network refusal is
+# gone; install_binary() always downloads there now and lets the real exec
+# attempt decide (see UnsupportedPlatformError's docstring). That single
+# exception still cannot tell apart the two things that can cause it there:
+# an SELinux-*enforcing* device's SDK>=29 W^X denial, a genuinely
+# permanent-for-the-session platform property, from install_dir() having
+# found no writable app-private /data candidate and fallen back to the
+# noexec-mounted profile dir -- an environment condition that, while
+# unlikely to change mid-session, is not architecturally guaranteed
+# permanent either. So the latch must NOT disable detection: a latched
+# iteration keeps calling both
 # probe_listening() (an external/manually-started server appearing at
 # server_url, the "only remedy" UnsupportedPlatformError's own docstring
-# points users at) and resolve_binary() (a binary appearing, or a noexec
-# mount clearing -- when nothing was installed yet, install_binary()
+# points users at) and resolve_binary() (a binary appearing, or the
+# transient cause clearing -- when nothing was installed yet, install_binary()
 # deliberately leaves the chmod'd binary at the exact bundled path
 # resolve_binary() checks even though verify_executable() rejected it, so a
 # now-runnable executable can already be sitting there when this exception
@@ -117,9 +122,9 @@ POST_DOWNLOAD_RECHECK_INTERVAL = 0.5
 # Android TV box where `server_enable` defaults on and the embedded server
 # can never run there. resolve_binary() finding a binary while latched
 # clears the latch immediately (see the branch below); if install work is
-# ever retried at that point and the raise site actually was the permanent
-# Android one, it just re-latches -- misclassifying the transient cause
-# only costs a 5s -> 300s slower rediscovery, never a stuck session.
+# ever retried at that point and the cause actually was the permanent
+# SELinux-enforcing one, it just re-latches -- misclassifying the transient
+# cause only costs a 5s -> 300s slower rediscovery, never a stuck session.
 # Deliberately coarser than EXTERNAL_RECHECK_INTERVAL since finding nothing
 # via either check is the common, unremarkable case while latched.
 UNSUPPORTED_PLATFORM_POLL_INTERVAL = 300.0
@@ -252,35 +257,62 @@ def http_port_from_url(server_url, default=DEFAULT_HTTP_PORT):
     return port if port is not None else default
 
 
+def _bundled_bin_dirs(addon_data_dir):
+    """Ordered, de-duplicated list of directories resolve_binary()/
+    is_bundled_binary() must treat as "ours": the plain `<addon_data_dir>/bin`
+    every platform used before Android support existed, and
+    serverbin.install_dir()'s pick for the current environment -- the
+    Android app-private location when applicable, or that exact same plain
+    directory everywhere else, in which case the dedup below collapses
+    this back to a single entry (an exact no-op on every non-Android
+    platform).
+    """
+    from lib import serverbin
+
+    plain = os.path.join(addon_data_dir, "bin")
+    preferred = serverbin.install_dir(addon_data_dir, ADDON_ID)
+    return [plain] if plain == preferred else [plain, preferred]
+
+
 def resolve_binary(explicit_path, addon_data_dir):
     """Resolve the stremio-server-go binary path.
 
-    Priority: explicit setting -> <addon_data_dir>/bin/stremio-server[.exe] ->
-    PATH lookup. Returns None when nothing usable is found.
+    Priority: explicit setting -> <addon_data_dir>/bin/stremio-server[.exe]
+    -> the Android app-private bin dir serverbin.install_dir() would target
+    for this addon_data_dir (see _bundled_bin_dirs() -- a no-op search on
+    every non-Android platform) -> PATH lookup. Returns None when nothing
+    usable is found.
     """
     if explicit_path and os.path.isfile(explicit_path) and os.access(explicit_path, os.X_OK):
         return explicit_path
 
-    bundled = os.path.join(addon_data_dir, "bin", BINARY_NAME)
-    for candidate in (bundled, bundled + ".exe"):
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
+    for bin_dir in _bundled_bin_dirs(addon_data_dir):
+        bundled = os.path.join(bin_dir, BINARY_NAME)
+        for candidate in (bundled, bundled + ".exe"):
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return candidate
 
     return shutil.which(BINARY_NAME)
 
 
 def is_bundled_binary(path, addon_data_dir):
-    """True if `path` is the binary lib.serverbin.install_binary() manages.
+    """True if `path` is one of the binaries lib.serverbin.install_binary()
+    manages for this addon_data_dir: `<addon_data_dir>/bin/stremio-server[.exe]`
+    and, on Android, the app-private location serverbin.install_dir() would
+    instead pick (see _bundled_bin_dirs()).
 
-    An exact string comparison against the same two candidates
-    resolve_binary() builds, which is sound precisely because `path` is
-    expected to have come from resolve_binary() -- so it is either one of
-    those literals or something else entirely (the user's explicit
-    `server_binary` setting, or a PATH hit). Neither of those is ours to
-    replace, which is the whole point of asking.
+    An exact string comparison against the same candidates resolve_binary()
+    builds, which is sound precisely because `path` is expected to have come
+    from resolve_binary() -- so it is either one of those literals or
+    something else entirely (the user's explicit `server_binary` setting, or
+    a PATH hit). Neither of those is ours to replace, which is the whole
+    point of asking.
     """
-    bundled = os.path.join(addon_data_dir, "bin", BINARY_NAME)
-    return path in (bundled, bundled + ".exe")
+    for bin_dir in _bundled_bin_dirs(addon_data_dir):
+        bundled = os.path.join(bin_dir, BINARY_NAME)
+        if path in (bundled, bundled + ".exe"):
+            return True
+    return False
 
 
 def probe_listening(server_url, timeout=PROBE_TIMEOUT):
@@ -982,7 +1014,7 @@ def main():
 
         from lib import serverbin
 
-        bin_dir = os.path.join(profile_dir, "bin")
+        bin_dir = serverbin.install_dir(profile_dir, ADDON_ID)
         installed = serverbin.installed_tag(bin_dir)
         if installed == serverbin.SERVER_TAG:
             return binary
@@ -1130,7 +1162,8 @@ def main():
 
                         try:
                             serverbin.install_binary(
-                                os.path.join(profile_dir, "bin"), progress_cb=_abort_progress,
+                                serverbin.install_dir(profile_dir, ADDON_ID),
+                                progress_cb=_abort_progress,
                             )
                         except _AbortRequested:
                             # Not a failure -- Kodi is shutting down. No

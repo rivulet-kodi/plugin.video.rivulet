@@ -164,25 +164,29 @@ def test_platform_key_macos_arm64_is_not_mistaken_for_apple_mobile(monkeypatch):
 
 # --- PINNED_SHA256 / select_asset -------------------------------------------
 
-# Exact digests reviewed against the v0.12.0 GitHub release page +
-# checksums.txt. Any drift here (wrong tag, tampered digest, added/removed
-# platform) must be a deliberate, reviewed edit to lib/serverbin.py.
+# Exact digests reviewed against the v0.12.1 GitHub release: computed
+# locally from the downloaded assets and cross-checked against that
+# release's checksums.txt. Any drift here (wrong tag, tampered digest,
+# added/removed platform) must be a deliberate, reviewed edit to
+# lib/serverbin.py.
 EXPECTED_PINNED_SHA256 = {
-    ("Darwin", "arm64"): "0efa6838193b8a1c7061da59e55f8548e7178e98bc92192fc89d8cebb451942d",
-    ("Darwin", "x86_64"): "1f2bb5ba83f00e43ce5551d67db103013e8ad7019dddaa91c07d6c281dd6efee",
-    ("Linux", "arm64"): "deb245a9ce1dd3e1090738dc86ae3bbded72acd86170ccaa76dc62d0b623a7d5",
-    ("Linux", "armv7"): "20bf3f9e7f33885312629eb4436ad3e4e935c4b5393bf36fb73c3731d9437676",
-    ("Linux", "x86_64"): "12ba364e1ee5ff53709a6c9ea324c94f339cf88eef50a47d08658572c84030c2",
-    ("Windows", "arm64"): "dc0a4ff038fa89b70dca5c70af64208aff2e6089594f46c9f2c49ee0e7a6ac84",
-    ("Windows", "x86_64"): "c5864989582784f65cde37fced5ca845d411937b0811fa4cbaebf644b98eb7f1",
+    ("Android", "arm64"): "c9b3dae133233cdd86c6a99ccaefacd9668ace372421d3def80acb468d9dc79f",
+    ("Android", "armv7"): "690a7cfcbcdba17248dd7eaa99e89147edc389999084d3916fd1b360e2f91a5e",
+    ("Darwin", "arm64"): "91e7888e1fc51ee638434f104fedaf84555f97eea679895ef7ecc9e325eb2722",
+    ("Darwin", "x86_64"): "40635226cd42924424c2e2484810f20e99db28df0248f16b0c9068a03edba367",
+    ("Linux", "arm64"): "0bec323c13d32228a6c6bcd6ff19d88181cd5c8294628b5ec1bd0fafb8d2d636",
+    ("Linux", "armv7"): "825246f90eaf27809d6f5a68ab5539df6d40b10210e6e8ed03d0b1a49a93c5ca",
+    ("Linux", "x86_64"): "bf07ece88ef0cdd5dc5c6b4ad8f6537bb15b4995790e975f57302b72268ffc83",
+    ("Windows", "arm64"): "68b9cf230aee7dc103b60cdaf9df3dec8a4bc4c0c8a3abc1e5a714db8da84415",
+    ("Windows", "x86_64"): "04fd3598be1b9c01f4934454488b25b4f64764f11188a580951daaeb651cb870",
 }
 
 
-def test_server_tag_is_pinned_to_v0_12_0():
-    assert SERVER_TAG == "v0.12.0"
+def test_server_tag_is_pinned_to_v0_12_1():
+    assert SERVER_TAG == "v0.12.1"
 
 
-def test_pinned_sha256_table_matches_reviewed_v0_12_0_digests_exactly():
+def test_pinned_sha256_table_matches_reviewed_v0_12_1_digests_exactly():
     assert PINNED_SHA256 == EXPECTED_PINNED_SHA256
 
 
@@ -194,6 +198,8 @@ def test_pinned_sha256_table_matches_reviewed_v0_12_0_digests_exactly():
     ("Darwin", "arm64", "stremio-server_Darwin_arm64.tar.gz"),
     ("Windows", "x86_64", "stremio-server_Windows_x86_64.zip"),
     ("Windows", "arm64", "stremio-server_Windows_arm64.zip"),
+    ("Android", "armv7", "stremio-server_Android_armv7.tar.gz"),
+    ("Android", "arm64", "stremio-server_Android_arm64.tar.gz"),
 ])
 def test_select_asset_returns_deterministic_name_url_and_pinned_digest(
         os_name, arch, expected_name):
@@ -201,7 +207,7 @@ def test_select_asset_returns_deterministic_name_url_and_pinned_digest(
     assert asset is not None
     assert asset["name"] == expected_name
     assert asset["url"] == (
-        "https://github.com/%s/releases/download/v0.12.0/%s" % (GITHUB_REPO, expected_name))
+        "https://github.com/%s/releases/download/v0.12.1/%s" % (GITHUB_REPO, expected_name))
     assert asset["sha256"] == EXPECTED_PINNED_SHA256[(os_name, arch)]
 
 
@@ -209,11 +215,34 @@ def test_select_asset_returns_deterministic_name_url_and_pinned_digest(
     ("Darwin", "armv7"),    # goreleaser ignores {goos: darwin, goarch: arm}
     ("Windows", "armv7"),   # goreleaser ignores {goos: windows, goarch: arm}
     ("Linux", "i386"),      # never built - goarch list is amd64/arm64/arm only
-    ("Android", "arm64"),   # Android has no pinned asset at all
-    ("Android", "x86_64"),
+    ("Android", "i386"),    # no pinned Android row, and no Linux/i386 fallback either
 ])
 def test_select_asset_returns_none_for_unpinned_combos(os_name, arch):
     assert select_asset(os_name, arch) is None
+
+
+def test_select_asset_falls_back_to_matching_linux_row_for_android():
+    """An Android arch upstream builds no asset for -- x86_64, as on an
+    Intel Android TV box -- must fall back to the ("Linux", arch) row
+    rather than refusing: that Linux binary is confirmed (empirically) to
+    exec() and serve correctly on Android once installed somewhere
+    exec-capable. It is pure-Go, so its DNS is broken there (see
+    select_asset()'s docstring), but a server that runs is still strictly
+    better than no server at all."""
+    assert ("Android", "x86_64") not in PINNED_SHA256
+    assert select_asset("Android", "x86_64") == select_asset("Linux", "x86_64")
+
+
+def test_select_asset_prefers_the_pinned_android_row_over_the_linux_fallback():
+    """The Android (CGO/NDK, bionic-linked) rows pinned as of v0.12.1 must
+    win over the same-arch Linux fallback -- that preference is the whole
+    point of pinning them, since only those builds resolve DNS on
+    Android."""
+    for arch in ("armv7", "arm64"):
+        asset = select_asset("Android", arch)
+        assert asset["name"] == "stremio-server_Android_%s.tar.gz" % arch
+        assert asset["sha256"] == EXPECTED_PINNED_SHA256[("Android", arch)]
+        assert asset != select_asset("Linux", arch)
 
 
 # --- install_binary --------------------------------------------------------
@@ -275,7 +304,7 @@ def test_install_binary_downloads_verifies_pinned_checksum_and_installs(
     assert progress_calls[-1][1] == len(archive_bytes)
     assert len(fake_requests.calls) == 1
     assert fake_requests.calls[0]["url"] == (
-        "https://github.com/%s/releases/download/v0.12.0/stremio-server_Linux_x86_64.tar.gz"
+        "https://github.com/%s/releases/download/v0.12.1/stremio-server_Linux_x86_64.tar.gz"
         % GITHUB_REPO)
     assert not (tmp_path / ".stremio-server.part").exists()
     assert not os.path.exists(result_path + ".part")
@@ -418,14 +447,56 @@ def test_unsupported_platform_error_is_not_a_no_asset_error_subclass():
     assert not issubclass(UnsupportedPlatformError, NoAssetError)
 
 
-def test_install_binary_raises_unsupported_platform_error_on_android_with_no_http_request(
+def test_install_binary_on_android_downloads_and_installs_instead_of_refusing(
         tmp_path, monkeypatch, fake_requests):
+    """Android no longer refuses before touching the network: a real exec
+    attempt (verify_executable(), faked here via subprocess.run) is what
+    decides now -- see UnsupportedPlatformError's docstring for the two
+    mechanisms that can still make that attempt fail on some devices."""
     _set_platform(monkeypatch, "Linux", "arm64", android_root="/system")
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
+    archive_bytes = _make_tar_gz({"stremio-server": b"binary"})
+    monkeypatch.setitem(
+        PINNED_SHA256, ("Android", "arm64"), hashlib.sha256(archive_bytes).hexdigest())
+    fake_requests.queue_get(_StreamResponse(archive_bytes))
+
+    result_path = install_binary(str(tmp_path))
+
+    assert result_path == str(tmp_path / "stremio-server")
+    assert os.path.isfile(result_path)
+    assert len(fake_requests.calls) == 1
+    # The archive downloaded is the pinned Android (cgo/bionic) asset, not
+    # the pure-Go Linux row select_asset() only falls back to for an arch
+    # upstream builds no Android binary for.
+    assert fake_requests.calls[0]["url"].endswith("stremio-server_Android_arm64.tar.gz")
+
+
+def test_install_binary_on_android_raises_unsupported_platform_error_when_exec_fails(
+        tmp_path, monkeypatch, fake_requests):
+    """On an enforcing-SELinux/SDK>=29 device (or a noexec fallback
+    install_dir), the real exec attempt fails post-network -- install_binary()
+    must still raise UnsupportedPlatformError and, since nothing was
+    installed yet, deliberately leave the chmod'd binary in place (see
+    install_binary()'s own docstring on the upgrade-safety exception)."""
+    _set_platform(monkeypatch, "Linux", "arm64", android_root="/system")
+
+    def _raise(*args, **kwargs):
+        raise OSError(13, "Permission denied")
+
+    monkeypatch.setattr(subprocess, "run", _raise)
+    archive_bytes = _make_tar_gz({"stremio-server": b"binary"})
+    monkeypatch.setitem(
+        PINNED_SHA256, ("Android", "arm64"), hashlib.sha256(archive_bytes).hexdigest())
+    fake_requests.queue_get(_StreamResponse(archive_bytes))
 
     with pytest.raises(UnsupportedPlatformError):
         install_binary(str(tmp_path))
 
-    assert fake_requests.calls == []
+    assert len(fake_requests.calls) == 1
+    final_path = tmp_path / "stremio-server"
+    assert final_path.exists()
+    assert stat.S_IMODE(os.stat(str(final_path)).st_mode) == 0o755
+    assert serverbin.installed_tag(str(tmp_path)) is None
 
 
 # --- verify_executable -------------------------------------------------
@@ -636,3 +707,72 @@ def test_install_binary_does_not_stamp_a_refused_download(tmp_path, monkeypatch,
         install_binary(str(tmp_path))
 
     assert serverbin.installed_tag(str(tmp_path)) is None
+
+
+# --- android_bin_dirs / install_dir -----------------------------------------
+
+
+def _android_profile_dir(pkg="org.xbmc.kodi", addon_id="plugin.video.rivulet"):
+    """A realistic Kodi-on-Android `special://profile/addon_data/<addon_id>`
+    path: `.../Android/data/<pkg>/files/.kodi/userdata/addon_data/<addon_id>/`."""
+    return (
+        "/storage/emulated/0/Android/data/%s/files/.kodi/userdata/"
+        "addon_data/%s/" % (pkg, addon_id)
+    )
+
+
+def test_android_bin_dirs_derives_candidates_from_realistic_kodi_profile_path(monkeypatch):
+    _set_platform(monkeypatch, "Linux", "armv8l", android_root="/system")
+    assert serverbin.android_bin_dirs(_android_profile_dir(), "plugin.video.rivulet") == [
+        "/data/user/0/org.xbmc.kodi/files/plugin.video.rivulet/bin",
+        "/data/data/org.xbmc.kodi/files/plugin.video.rivulet/bin",
+    ]
+
+
+def test_android_bin_dirs_empty_when_not_android(monkeypatch):
+    _set_platform(monkeypatch, "Linux", "x86_64")
+    assert serverbin.android_bin_dirs(_android_profile_dir(), "plugin.video.rivulet") == []
+
+
+def test_android_bin_dirs_empty_when_profile_dir_does_not_match_android_layout(monkeypatch):
+    _set_platform(monkeypatch, "Linux", "armv8l", android_root="/system")
+    assert serverbin.android_bin_dirs(
+        "/home/user/.kodi/userdata/addon_data/plugin.video.rivulet/", "plugin.video.rivulet") == []
+
+
+def test_install_dir_returns_plain_bin_when_not_android(monkeypatch):
+    _set_platform(monkeypatch, "Linux", "x86_64")
+    profile_dir = "/home/user/.kodi/userdata/addon_data/plugin.video.rivulet"
+    assert serverbin.install_dir(profile_dir, "plugin.video.rivulet") == os.path.join(profile_dir, "bin")
+
+
+def test_install_dir_returns_plain_bin_when_profile_dir_does_not_match_android_layout(monkeypatch):
+    _set_platform(monkeypatch, "Linux", "armv8l", android_root="/system")
+    profile_dir = "/home/user/.kodi/userdata/addon_data/plugin.video.rivulet"
+    assert serverbin.install_dir(profile_dir, "plugin.video.rivulet") == os.path.join(profile_dir, "bin")
+
+
+def test_install_dir_picks_first_writable_android_candidate(monkeypatch):
+    _set_platform(monkeypatch, "Linux", "armv8l", android_root="/system")
+    monkeypatch.setattr(os.path, "isdir", lambda p: True)
+    monkeypatch.setattr(os, "access", lambda p, mode: True)
+    assert serverbin.install_dir(_android_profile_dir(), "plugin.video.rivulet") == (
+        "/data/user/0/org.xbmc.kodi/files/plugin.video.rivulet/bin")
+
+
+def test_install_dir_falls_through_to_second_candidate_when_first_unwritable(monkeypatch):
+    """The /data/user/0 candidate's `files` ancestor exists but is not
+    writable (e.g. a locked-down OEM layout) -- install_dir() must fall
+    through to the /data/data candidate instead of giving up."""
+    _set_platform(monkeypatch, "Linux", "armv8l", android_root="/system")
+    monkeypatch.setattr(os.path, "isdir", lambda p: True)
+    monkeypatch.setattr(os, "access", lambda p, mode: "/data/data/" in p)
+    assert serverbin.install_dir(_android_profile_dir(), "plugin.video.rivulet") == (
+        "/data/data/org.xbmc.kodi/files/plugin.video.rivulet/bin")
+
+
+def test_install_dir_falls_back_to_plain_bin_when_no_android_candidate_usable(monkeypatch):
+    _set_platform(monkeypatch, "Linux", "armv8l", android_root="/system")
+    monkeypatch.setattr(os.path, "isdir", lambda p: False)
+    profile_dir = _android_profile_dir()
+    assert serverbin.install_dir(profile_dir, "plugin.video.rivulet") == os.path.join(profile_dir, "bin")

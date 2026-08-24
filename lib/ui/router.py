@@ -7,7 +7,6 @@ lives in views.py / player.py. Pure URL-building/stream-token logic
 lib.ui.urlutil instead; this module keeps only the mutable
 ADDON_HANDLE/BASE_URL dispatch state and the querystring parser.
 """
-import os
 import sys
 from urllib.parse import parse_qs
 
@@ -92,15 +91,17 @@ def run():
 
 def _download_server_binary():
     """Action 'server_download': fetch+install the stremio-server-go binary
-    into the location lib.service_runner.resolve_binary() already searches.
+    into the location lib.service_runner.resolve_binary() already searches
+    (serverbin.install_dir()'s pick -- the Android app-private bin dir when
+    applicable, else the plain addon_data bin dir).
     """
     import xbmc
 
     from lib import serverbin
-    from lib.ui.compat import L, addon_profile_dir, log, notify
+    from lib.ui.compat import ADDON_ID, L, addon_profile_dir, log, notify
     from lib.ui.dialogs import RivuletProgress
 
-    dest_dir = os.path.join(addon_profile_dir(), 'bin')
+    dest_dir = serverbin.install_dir(addon_profile_dir(), ADDON_ID)
 
     dialog = RivuletProgress()
     dialog.create(L(30061))

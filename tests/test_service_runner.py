@@ -136,6 +136,73 @@ def test_resolve_binary_returns_none_when_nothing_found(monkeypatch, tmp_path):
     assert service_runner.resolve_binary('', str(addon_data)) is None
 
 
+def test_resolve_binary_finds_the_android_private_dir_location(monkeypatch, tmp_path):
+    """serverbin.install_dir() may pick a location other than
+    <addon_data_dir>/bin (the Android app-private directory) --
+    resolve_binary() must still find a binary installed there even though
+    addon_data/bin itself has nothing."""
+    addon_data = tmp_path / 'addon_data'
+    private_dir = tmp_path / 'private' / 'bin'
+    private_dir.mkdir(parents=True)
+    bundled = private_dir / service_runner.BINARY_NAME
+    _make_executable(bundled)
+    monkeypatch.setattr(serverbin, 'install_dir', lambda profile_dir, addon_id: str(private_dir))
+    assert service_runner.resolve_binary('', str(addon_data)) == str(bundled)
+
+
+def test_resolve_binary_prefers_plain_bundled_dir_over_android_private_dir(monkeypatch, tmp_path):
+    """<addon_data_dir>/bin is checked before serverbin.install_dir()'s
+    pick -- a binary already sitting at the historical location wins."""
+    addon_data = tmp_path / 'addon_data'
+    bin_dir = addon_data / 'bin'
+    bin_dir.mkdir(parents=True)
+    plain_bundled = bin_dir / service_runner.BINARY_NAME
+    _make_executable(plain_bundled)
+
+    private_dir = tmp_path / 'private' / 'bin'
+    private_dir.mkdir(parents=True)
+    private_bundled = private_dir / service_runner.BINARY_NAME
+    _make_executable(private_bundled)
+
+    monkeypatch.setattr(serverbin, 'install_dir', lambda profile_dir, addon_id: str(private_dir))
+    assert service_runner.resolve_binary('', str(addon_data)) == str(plain_bundled)
+
+
+# ===========================================================================
+# is_bundled_binary
+# ===========================================================================
+
+
+def test_is_bundled_binary_true_for_the_plain_addon_data_bin_dir(tmp_path):
+    addon_data = tmp_path / 'addon_data'
+    bundled = os.path.join(str(addon_data), 'bin', service_runner.BINARY_NAME)
+    assert service_runner.is_bundled_binary(bundled, str(addon_data))
+
+
+def test_is_bundled_binary_true_for_the_plain_addon_data_bin_dir_exe_variant(tmp_path):
+    addon_data = tmp_path / 'addon_data'
+    bundled = os.path.join(str(addon_data), 'bin', service_runner.BINARY_NAME + '.exe')
+    assert service_runner.is_bundled_binary(bundled, str(addon_data))
+
+
+def test_is_bundled_binary_true_for_the_android_private_dir(monkeypatch, tmp_path):
+    addon_data = tmp_path / 'addon_data'
+    private_dir = tmp_path / 'private' / 'bin'
+    monkeypatch.setattr(serverbin, 'install_dir', lambda profile_dir, addon_id: str(private_dir))
+    bundled = os.path.join(str(private_dir), service_runner.BINARY_NAME)
+    assert service_runner.is_bundled_binary(bundled, str(addon_data))
+
+
+def test_is_bundled_binary_false_for_a_path_hit(tmp_path):
+    addon_data = tmp_path / 'addon_data'
+    assert not service_runner.is_bundled_binary('/usr/bin/' + service_runner.BINARY_NAME, str(addon_data))
+
+
+def test_is_bundled_binary_false_for_an_explicit_user_path(tmp_path):
+    addon_data = tmp_path / 'addon_data'
+    assert not service_runner.is_bundled_binary(str(tmp_path / 'my-own-server'), str(addon_data))
+
+
 # ===========================================================================
 # probe_listening
 # ===========================================================================
