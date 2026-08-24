@@ -258,20 +258,30 @@ def http_port_from_url(server_url, default=DEFAULT_HTTP_PORT):
 
 
 def _bundled_bin_dirs(addon_data_dir):
-    """Ordered, de-duplicated list of directories resolve_binary()/
+    """Yield, in order and de-duplicated, the directories resolve_binary()/
     is_bundled_binary() must treat as "ours": the plain `<addon_data_dir>/bin`
     every platform used before Android support existed, and
     serverbin.install_dir()'s pick for the current environment -- the
     Android app-private location when applicable, or that exact same plain
-    directory everywhere else, in which case the dedup below collapses
-    this back to a single entry (an exact no-op on every non-Android
-    platform).
+    directory everywhere else, in which case the dedup below yields
+    nothing further (an exact no-op on every non-Android platform).
+
+    A generator, and `lib.serverbin` is imported only after the plain
+    directory has been yielded, on purpose: both callers consume this
+    lazily and stop at their first hit, so the already-installed case --
+    every supervision-loop iteration in the nothing-of-ours-running
+    branch, not just startup -- never pays serverbin's module-scope
+    hashlib/tarfile/zipfile/subprocess imports. Same import-budget
+    discipline as probe_listening()'s deferred requests import.
     """
+    plain = os.path.join(addon_data_dir, "bin")
+    yield plain
+
     from lib import serverbin
 
-    plain = os.path.join(addon_data_dir, "bin")
     preferred = serverbin.install_dir(addon_data_dir, ADDON_ID)
-    return [plain] if plain == preferred else [plain, preferred]
+    if preferred != plain:
+        yield preferred
 
 
 def resolve_binary(explicit_path, addon_data_dir):
