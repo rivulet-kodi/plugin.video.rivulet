@@ -41,6 +41,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import hashlib
+          import re
           import shutil
           import subprocess
           import xml.etree.ElementTree as ET
@@ -65,7 +66,11 @@ jobs:
           ).stdout.split()
 
 
-          def newest_tag(addon_id, tags):
+          def newest_tag(addon_id, pattern):
+              # Matched strictly, because -v:refname sorts a prerelease above
+              # the release it precedes: a v0.22.0-rc.1 left on the repo would
+              # otherwise be published as the current package.
+              tags = [t for t in TAGS if re.fullmatch(pattern, t)]
               if not tags:
                   raise SystemExit("no release tag found for %s" % addon_id)
               return tags[0]
@@ -79,8 +84,7 @@ jobs:
                   "icon": "resources/icon.png",
                   "fanart": "resources/fanart.jpg",
                   "archive_ref": newest_tag(
-                      "plugin.video.rivulet",
-                      [t for t in TAGS if not t.endswith("-repo")],
+                      "plugin.video.rivulet", r"v\d+\.\d+\.\d+"
                   ),
                   "archive_paths": ["addon.xml", "default.py", "service.py", "resources", "lib", "LICENSE"],
               },
@@ -88,8 +92,7 @@ jobs:
                   "icon": "icon.png",
                   "fanart": "fanart.jpg",
                   "archive_ref": "%s:repository.rivulet" % newest_tag(
-                      "repository.rivulet",
-                      [t for t in TAGS if t.endswith("-repo")],
+                      "repository.rivulet", r"v\d+\.\d+\.\d+-repo"
                   ),
                   "archive_paths": [],
               },
