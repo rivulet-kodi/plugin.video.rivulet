@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.rivulet" name="Rivulet" version="0.20.1" provider-name="M0RF30">
+<addon id="plugin.video.rivulet" name="Rivulet" version="0.21.0" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" version="2.22.0"/>
@@ -12,7 +12,11 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse and search catalogs by type, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote stremio-server-go streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.20.1:
+    <news>v0.21.0:
+- New: on Android and Android TV, Rivulet now sets up its streaming server by itself. It used to refuse outright, saying the server was not supported, and the only way to watch anything from a torrent source was to run a server on another machine and point Rivulet at it. The refusal was too pessimistic: the problem was never Android as such, it was where the file was being put - Kodi's own data folder sits on a storage area Android will not run a program from under any circumstances. Rivulet now installs into its private application storage instead, which most boxes do allow, and simply tries to start it. Where the device's own security policy still forbids it - typically an untouched Android 10 or newer - it says so and goes on watching for a server elsewhere on your network, exactly as before, so nothing that used to work has changed.
+- New: the Android server is now a native build. The one Rivulet would have used could not look up any address, because Android does not provide the system file that kind of program reads its name servers from, so every tracker and peer lookup failed even though the server itself was running. The native builds ask Android itself, and no longer depend on a system library that no device ships. If you set up a server by hand to work around any of this, Rivulet will not touch it: an explicit server path or address still wins.
+- Improved: the bundled streaming server moves to 0.12.1 on every platform, installed in place on first run, keeping the working one if the update cannot be completed.
+v0.20.1:
 - Fix: in the sources list, the DL/CACHED column coloured every row the same, and the whole column changed colour as you moved the selection - land on a row that needs downloading and the already-cached rows turned orange with it, so the one column that tells you which sources will start instantly was telling you about whichever row you happened to be on. Each row is now coloured by its own state. The resolution badge on unfocused rows had the same fault and is fixed with it.
 - Fix: in a series' episode list, the thumbnail, episode number, title and description did not line up. The number sat visibly below the title beside it, because the two are drawn in different type sizes and Kodi centres each within its own space, and the whole block of text sat 13 pixels below the centre of the picture next to it. All four now line up, and the selected row shows its episode number in bold alongside the title, instead of emphasising only half of the row.
 v0.20.0:

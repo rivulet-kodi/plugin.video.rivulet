@@ -4,7 +4,7 @@
 
 Rivulet (`plugin.video.rivulet`) is a Kodi video addon implementing a **Stremio addon-protocol client**: it browses catalogs published by community Stremio addons, resolves streams, and plays them through an embedded or remote `stremio-server-go` streaming server. It ships its own 1920x1080 skin rather than drawing through the user's Kodi skin.
 
-Two independently versioned artifacts live here: the addon (`addon.xml`, currently 0.20.1) and the Kodi repository addon that delivers it (`repository.rivulet/addon.xml`, currently 1.0.2).
+Two independently versioned artifacts live here: the addon (`addon.xml`, currently 0.21.0) and the Kodi repository addon that delivers it (`repository.rivulet/addon.xml`, currently 1.0.2).
 
 ## Architecture & Data Flow
 
@@ -52,7 +52,7 @@ Browsing: `lib/ui/views.py` fans a request across installed addons -> `lib/strem
 **Prefer the uv invocations — they need no local setup and are what these gates were last verified with:**
 
 ```bash
-uvx --with-requirements requirements-dev.txt pytest tests/ -q          # 2099 passed, ~4.5s
+uvx --with-requirements requirements-dev.txt pytest tests/ -q          # 2118 passed, ~5s
 uvx --with-requirements requirements-dev.txt ruff check lib tests
 uvx --with-requirements requirements-dev.txt mypy
 uvx --with-requirements requirements-dev.txt pytest tests/ --cov --cov-report=term-missing
@@ -133,7 +133,7 @@ make parallel    # pytest -n auto
 
 ## Testing & QA
 
-pytest, **2099 tests, ~93% coverage against `fail_under = 90`** with branch coverage on. Roughly 4.5s for the full suite — there is no excuse for not running it.
+pytest, **2118 tests, ~92% coverage against `fail_under = 90`** with branch coverage on. Roughly 5s for the full suite — there is no excuse for not running it.
 
 - **Kodi is faked, not installed.** `tests/kodistubs/install.py` is a context manager that snapshots `sys.modules`, injects fresh fake `xbmc`/`xbmcgui`/`xbmcplugin`/`xbmcaddon`/`xbmcvfs` modules, re-imports the targets against them, and restores everything exactly on exit. Fakes are per-test, and `tests/kodistubs/fakes.py:Env` records every Kodi call for assertions.
 - **The fake `WindowXML` validates control ids against the real skin XML** (`tests/kodistubs/modules.py`), so a Python/skin mismatch fails in tests.
@@ -141,6 +141,6 @@ pytest, **2099 tests, ~93% coverage against `fail_under = 90`** with branch cove
 - **Warnings are errors**: `filterwarnings = ["error", ...]` (`pyproject.toml:12-16`). `ResourceWarning` therefore fails the suite — this is why `lib/service_runner.py` closes `HTTPError` responses inside its health-check loop, and why `PERF203` there is deliberate.
 - **Network is blocked at the socket level** by an autouse fixture in `tests/conftest.py`; use `FakeSession`/`FakeResponse` from there.
 - Windows are exercised by calling `onInit`/`onClick`/`onAction` directly, not through a Kodi event loop.
-- `tests/test_glyph_coverage.py` and `tests/test_skin_xml.py` need real Estuary fonts at `/usr/share/kodi/addons/skin.estuary/fonts`; they run locally on a machine with Kodi installed and skip in CI. Expect **2099 passed / 0 skipped** locally versus 2 skips on CI.
+- `tests/test_glyph_coverage.py` and `tests/test_skin_xml.py` need real Estuary fonts at `/usr/share/kodi/addons/skin.estuary/fonts`; they run locally on a machine with Kodi installed and skip in CI. Expect **2118 passed / 0 skipped** locally versus 2 skips on CI.
 
 CI gates every PR with six required checks: `build`, `lint-type`, `test (3.8)`, `test (3.11)`, `test (3.13)`, `compat-py38-requests`. `main` requires them plus conversation resolution and linear history; squash-merge only.
