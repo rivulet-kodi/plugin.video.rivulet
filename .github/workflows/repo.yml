@@ -213,13 +213,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ github.ref_name }}"
-          # Only the tag shapes the build step publishes from. Any other tag -
-          # a prerelease, say - still triggers this workflow, and releasing it
-          # would attach the current stable zips to a release named after a
-          # tree that was never published. github expressions cannot match a
-          # pattern, so the check lives here, next to the tag it guards.
-          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-repo)?$'; then
-            echo "$TAG is not a release tag; published nothing to release" >&2
+          # The build step publishes the NEWEST release tag, not this run's
+          # ref, so the two only agree when this run's tag is that newest one.
+          # Anything else - a prerelease, or an old tag re-run by hand after a
+          # newer release - would name a release after one tree and attach
+          # another's zips. Ask the built tree whether it carries this tag's
+          # version, which is the only thing that actually settles it.
+          case "$TAG" in
+            *-repo) ID=repository.rivulet ;;
+            *) ID=plugin.video.rivulet ;;
+          esac
+          VERSION="${TAG#v}"
+          VERSION="${VERSION%-repo}"
+          if [ ! -f "_repo/$ID/$ID-$VERSION.zip" ]; then
+            echo "$TAG is not what this run published; nothing to release" >&2
             exit 0
           fi
           ASSETS=(_repo/plugin.video.rivulet/plugin.video.rivulet-*.zip _repo/repository.rivulet/repository.rivulet-*.zip)
