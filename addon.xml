@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.rivulet" name="Rivulet" version="0.21.0" provider-name="M0RF30">
+<addon id="plugin.video.rivulet" name="Rivulet" version="0.21.1" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" version="2.22.0"/>
@@ -12,7 +12,9 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse and search catalogs by type, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote stremio-server-go streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.21.0:
+    <news>v0.21.1:
+- Fix: on a series' page, both the season bar and the episode list looked focused at once. The selected season pill stayed brightly filled while you were browsing episodes, and the current episode row kept its full highlight while you were picking a season, so nothing on the screen told you which of the two the remote was actually driving. Each list now shows its strong highlight only while it has focus, and marks its selection dimly otherwise.
+v0.21.0:
 - New: on Android and Android TV, Rivulet now sets up its streaming server by itself. It used to refuse outright, saying the server was not supported, and the only way to watch anything from a torrent source was to run a server on another machine and point Rivulet at it. The refusal was too pessimistic: the problem was never Android as such, it was where the file was being put - Kodi's own data folder sits on a storage area Android will not run a program from under any circumstances. Rivulet now installs into its private application storage instead, which most boxes do allow, and simply tries to start it. Where the device's own security policy still forbids it - typically an untouched Android 10 or newer - it says so and goes on watching for a server elsewhere on your network, exactly as before, so nothing that used to work has changed.
 - New: the Android server is now a native build. The one Rivulet would have used could not look up any address, because Android does not provide the system file that kind of program reads its name servers from, so every tracker and peer lookup failed even though the server itself was running. The native builds ask Android itself, and no longer depend on a system library that no device ships. If you set up a server by hand to work around any of this, Rivulet will not touch it: an explicit server path or address still wins.
 - Improved: the bundled streaming server moves to 0.12.1 on every platform, installed in place on first run, keeping the working one if the update cannot be completed.
