@@ -4,7 +4,7 @@
 
 Rivulet (`plugin.video.rivulet`) is a Kodi video addon implementing a **Stremio addon-protocol client**: it browses catalogs published by community Stremio addons, resolves streams, and plays them through an embedded or remote `stremio-server-go` streaming server. It ships its own 1920x1080 skin rather than drawing through the user's Kodi skin.
 
-Two independently versioned artifacts live here: the addon (`addon.xml`, currently 0.21.0) and the Kodi repository addon that delivers it (`repository.rivulet/addon.xml`, currently 1.0.2).
+Two independently versioned artifacts live here: the addon (`addon.xml`, currently 0.21.1) and the Kodi repository addon that delivers it (`repository.rivulet/addon.xml`, currently 1.0.2).
 
 ## Architecture & Data Flow
 
