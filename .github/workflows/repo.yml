@@ -31,29 +31,69 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # Tag-bound publishing needs the tag list, which a shallow clone
+          # does not carry: without this the newest-tag lookup below finds
+          # nothing and the run fails rather than silently publishing HEAD.
+          fetch-depth: 0
 
       - name: Build repository tree
         run: |
           python3 - <<'PY'
           import hashlib
+          import re
           import shutil
           import subprocess
           import xml.etree.ElementTree as ET
+          import zipfile
           from pathlib import Path
 
+          # What is published is the newest RELEASE TAG, never the commit that
+          # triggered this run. main pushes still refresh gh-pages - that is
+          # what the branch trigger exists for - but they used to rebuild
+          # plugin.video.rivulet-<version>.zip from HEAD, so the file served
+          # as "0.21.0" quietly absorbed every post-release commit while
+          # keeping the released version number. Kodi caches by version, so
+          # installed copies never saw those commits and only fresh installs
+          # got them: two different trees under one version string, and no way
+          # to tell which one a bug report ran. Tags are read from the tag list
+          # rather than from the trigger ref, so the branch run and the tag run
+          # of the same release publish identical bytes whichever wins the
+          # queue above.
+          TAGS = subprocess.run(
+              ["git", "tag", "--sort=-v:refname", "--list", "v*"],
+              capture_output=True, text=True, check=True,
+          ).stdout.split()
+
+
+          def newest_tag(addon_id, pattern):
+              # Matched strictly, because -v:refname sorts a prerelease above
+              # the release it precedes: a v0.22.0-rc.1 left on the repo would
+              # otherwise be published as the current package.
+              tags = [t for t in TAGS if re.fullmatch(pattern, t)]
+              if not tags:
+                  raise SystemExit("no release tag found for %s" % addon_id)
+              return tags[0]
+
+
+          # The repository addon is released on its own -repo tags and the
+          # addon on plain vX.Y.Z ones, so each is published from its own
+          # newest tag: releasing one must not republish the other's HEAD.
           ADDONS = {
               "plugin.video.rivulet": {
-                  "addon_xml": Path("addon.xml"),
-                  "icon": Path("resources/icon.png"),
-                  "fanart": Path("resources/fanart.jpg"),
-                  "archive_ref": "HEAD",
+                  "icon": "resources/icon.png",
+                  "fanart": "resources/fanart.jpg",
+                  "archive_ref": newest_tag(
+                      "plugin.video.rivulet", r"v\d+\.\d+\.\d+"
+                  ),
                   "archive_paths": ["addon.xml", "default.py", "service.py", "resources", "lib", "LICENSE"],
               },
               "repository.rivulet": {
-                  "addon_xml": Path("repository.rivulet/addon.xml"),
-                  "icon": Path("repository.rivulet/icon.png"),
-                  "fanart": Path("repository.rivulet/fanart.jpg"),
-                  "archive_ref": "HEAD:repository.rivulet",
+                  "icon": "icon.png",
+                  "fanart": "fanart.jpg",
+                  "archive_ref": "%s:repository.rivulet" % newest_tag(
+                      "repository.rivulet", r"v\d+\.\d+\.\d+-repo"
+                  ),
                   "archive_paths": [],
               },
           }
@@ -71,51 +111,62 @@ jobs:
               addon_dir = repo_dir / addon_id
               addon_dir.mkdir(parents=True)
 
-              tree = ET.parse(info["addon_xml"])
-              addon_el = tree.getroot()
-              version = addon_el.get("version")
-              addons_root.append(addon_el)
-
-              shutil.copyfile(info["addon_xml"], addon_dir / "addon.xml")
-              shutil.copyfile(info["icon"], addon_dir / "icon.png")
-              shutil.copyfile(info["fanart"], addon_dir / "fanart.jpg")
-
-              # Kodi resolves <assets> paths RELATIVE TO THE ADDON'S FOLDER IN
-              # THE REPOSITORY, and fetches them as loose files - it does not
-              # look inside the zip. addon.xml declares
-              # <icon>resources/icon.png</icon> plus four
-              # resources/screenshots/*.png, so publishing only the flat
-              # icon.png/fanart.jpg above left Kodi's add-on browser fetching
-              # .../plugin.video.rivulet/resources/icon.png and getting a 404:
-              # no icon, no fanart and an empty screenshot gallery for anyone
-              # installing from the repository. The flat copies stay for the
-              # older bare-icon.png convention; these are the declared ones.
-              source_root = info["addon_xml"].parent
-              metadata = addon_el.find("extension[@point='xbmc.addon.metadata']")
-              assets = metadata.find("assets") if metadata is not None else None
-              for asset in (list(assets) if assets is not None else []):
-                  rel = (asset.text or "").strip()
-                  if not rel:
-                      continue
-                  src = source_root / rel
-                  if not src.is_file():
-                      raise SystemExit(
-                          "%s declares asset %r but %s does not exist" % (addon_id, rel, src)
-                      )
-                  dest = addon_dir / rel
-                  dest.parent.mkdir(parents=True, exist_ok=True)
-                  shutil.copyfile(src, dest)
-
-              zip_path = addon_dir / f"{addon_id}-{version}.zip"
+              staged = addon_dir / "staged.zip"
               cmd = [
                   "git", "archive", "--format=zip",
                   f"--prefix={addon_id}/",
-                  "-o", str(zip_path),
+                  "-o", str(staged),
                   info["archive_ref"],
               ]
               if info["archive_paths"]:
                   cmd += ["--", *info["archive_paths"]]
               subprocess.run(cmd, check=True)
+
+              # Everything published is read back out of the zip that ships,
+              # not off the checkout, so the index, the artwork and the
+              # payload cannot disagree about which tree they came from.
+              with zipfile.ZipFile(staged) as zf:
+                  addon_el = ET.fromstring(zf.read("%s/addon.xml" % addon_id))
+                  version = addon_el.get("version")
+                  addons_root.append(addon_el)
+
+                  (addon_dir / "icon.png").write_bytes(
+                      zf.read("%s/%s" % (addon_id, info["icon"]))
+                  )
+                  (addon_dir / "fanart.jpg").write_bytes(
+                      zf.read("%s/%s" % (addon_id, info["fanart"]))
+                  )
+
+                  # Kodi resolves <assets> paths RELATIVE TO THE ADDON'S
+                  # FOLDER IN THE REPOSITORY, and fetches them as loose files
+                  # - it does not look inside the zip. addon.xml declares
+                  # <icon>resources/icon.png</icon> plus four
+                  # resources/screenshots/*.png, so publishing only the flat
+                  # icon.png/fanart.jpg above left Kodi's add-on browser
+                  # fetching .../plugin.video.rivulet/resources/icon.png and
+                  # getting a 404: no icon, no fanart and an empty screenshot
+                  # gallery for anyone installing from the repository. The
+                  # flat copies stay for the older bare-icon.png convention;
+                  # these are the declared ones.
+                  metadata = addon_el.find("extension[@point='xbmc.addon.metadata']")
+                  assets = metadata.find("assets") if metadata is not None else None
+                  for asset in (list(assets) if assets is not None else []):
+                      rel = (asset.text or "").strip()
+                      if not rel:
+                          continue
+                      try:
+                          payload = zf.read("%s/%s" % (addon_id, rel))
+                      except KeyError:
+                          raise SystemExit(
+                              "%s declares asset %r but %s does not carry it"
+                              % (addon_id, rel, info["archive_ref"])
+                          )
+                      dest = addon_dir / rel
+                      dest.parent.mkdir(parents=True, exist_ok=True)
+                      dest.write_bytes(payload)
+
+              zip_path = addon_dir / f"{addon_id}-{version}.zip"
+              staged.replace(zip_path)
 
               # GitHub Pages serves no directory autoindex, so
               # .../plugin.video.rivulet/ was a 404 and the way people
@@ -162,6 +213,22 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ github.ref_name }}"
+          # The build step publishes the NEWEST release tag, not this run's
+          # ref, so the two only agree when this run's tag is that newest one.
+          # Anything else - a prerelease, or an old tag re-run by hand after a
+          # newer release - would name a release after one tree and attach
+          # another's zips. Ask the built tree whether it carries this tag's
+          # version, which is the only thing that actually settles it.
+          case "$TAG" in
+            *-repo) ID=repository.rivulet ;;
+            *) ID=plugin.video.rivulet ;;
+          esac
+          VERSION="${TAG#v}"
+          VERSION="${VERSION%-repo}"
+          if [ ! -f "_repo/$ID/$ID-$VERSION.zip" ]; then
+            echo "$TAG is not what this run published; nothing to release" >&2
+            exit 0
+          fi
           ASSETS=(_repo/plugin.video.rivulet/plugin.video.rivulet-*.zip _repo/repository.rivulet/repository.rivulet-*.zip)
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release upload "$TAG" "${ASSETS[@]}" --repo "${{ github.repository }}" --clobber
