@@ -69,15 +69,40 @@
                     </control>
                 </itemlayout>
                 <focusedlayout width="220" height="60">
+                    <!-- Selected season keeps its own layout whether or not
+                         30007 itself has focus (Kodi applies focusedlayout
+                         to the list's selection, not to input focus), so
+                         the bright fill below is gated to when the bar is
+                         actually focused - otherwise it reads as "still
+                         choosing a season" even while browsing episodes. -->
                     <control type="image">
                         <width>220</width><height>60</height>
                         <texture colordiffuse="FF38BDF8">white.png</texture>
+                        <visible>Control.HasFocus(30007)</visible>
                     </control>
                     <control type="label">
                         <width>220</width><height>60</height>
                         <font>font27</font><textcolor>FF04222E</textcolor>
                         <align>center</align><aligny>center</aligny>
                         <label>[B]$INFO[ListItem.Label][/B]</label>
+                        <visible>Control.HasFocus(30007)</visible>
+                    </control>
+                    <control type="image">
+                        <width>220</width><height>60</height>
+                        <texture colordiffuse="2438BDF8">white.png</texture>
+                        <visible>!Control.HasFocus(30007)</visible>
+                    </control>
+                    <control type="image">
+                        <top>58</top><width>220</width><height>2</height>
+                        <texture colordiffuse="FF38BDF8">white.png</texture>
+                        <visible>!Control.HasFocus(30007)</visible>
+                    </control>
+                    <control type="label">
+                        <width>220</width><height>60</height>
+                        <font>font27</font><textcolor>A8EEF3F6</textcolor>
+                        <align>center</align><aligny>center</aligny>
+                        <label>$INFO[ListItem.Label]</label>
+                        <visible>!Control.HasFocus(30007)</visible>
                     </control>
                 </focusedlayout>
             </control>
@@ -137,8 +162,15 @@
                     <control type="image"><left>32</left><top>131</top><width>1230</width><height>1</height><texture colordiffuse="12FFFFFF">white.png</texture></control>
                 </itemlayout>
                 <focusedlayout height="132">
-                    <control type="image"><width>1294</width><height>132</height><texture colordiffuse="FF1B2126">white.png</texture></control>
-                    <control type="image"><width>6</width><height>132</height><texture colordiffuse="FF38BDF8">white.png</texture></control>
+                    <!-- As with SEASON_BAR's own focusedlayout above: this
+                         is the list's *selected* row, shown whether or not
+                         30002 itself has window focus, so the strong fill
+                         and edge bar are gated to actual focus - otherwise
+                         the current episode keeps reading as "focused"
+                         even while the season bar is what has focus. -->
+                    <control type="image"><width>1294</width><height>132</height><texture colordiffuse="FF1B2126">white.png</texture><visible>Control.HasFocus(30002)</visible></control>
+                    <control type="image"><width>6</width><height>132</height><texture colordiffuse="FF38BDF8">white.png</texture><visible>Control.HasFocus(30002)</visible></control>
+                    <control type="image"><width>2</width><height>132</height><texture colordiffuse="2438BDF8">white.png</texture><visible>!Control.HasFocus(30002)</visible></control>
                     <control type="image"><left>32</left><top>14</top><width>184</width><height>104</height><texture>$INFO[ListItem.Property(thumb)]</texture><aspectratio>scale</aspectratio></control>
                     <control type="progress">
                         <left>32</left><top>113</top><width>184</width><height>5</height>
@@ -149,12 +181,27 @@
                     </control>
                     <control type="label"><left>244</left><top>34</top><width>110</width><height>36</height><font>Mono26</font><textcolor>FF38BDF8</textcolor><aligny>center</aligny>
                         <label>[B]$INFO[ListItem.Property(code)][/B]</label>
+                        <visible>Control.HasFocus(30002)</visible>
                     </control>
                     <control type="label"><left>372</left><top>34</top><width>650</width><height>36</height><font>font13</font><textcolor>FFFFFFFF</textcolor><aligny>center</aligny>
                         <label>[B]$INFO[ListItem.Property(title)][/B]</label>
+                        <visible>Control.HasFocus(30002)</visible>
                     </control>
                     <control type="label"><left>244</left><top>70</top><width>778</width><height>28</height><font>font10</font><textcolor>99EEF3F6</textcolor><aligny>center</aligny>
                         <label>$INFO[ListItem.Property(line2)]</label>
+                        <visible>Control.HasFocus(30002)</visible>
+                    </control>
+                    <control type="label"><left>244</left><top>34</top><width>110</width><height>36</height><font>Mono26</font><textcolor>B838BDF8</textcolor><aligny>center</aligny>
+                        <label>$INFO[ListItem.Property(code)]</label>
+                        <visible>!Control.HasFocus(30002)</visible>
+                    </control>
+                    <control type="label"><left>372</left><top>34</top><width>650</width><height>36</height><font>font13</font><textcolor>EBEEF3F6</textcolor><aligny>center</aligny>
+                        <label>$INFO[ListItem.Property(title)]</label>
+                        <visible>!Control.HasFocus(30002)</visible>
+                    </control>
+                    <control type="label"><left>244</left><top>70</top><width>778</width><height>28</height><font>font10</font><textcolor>6BEEF3F6</textcolor><aligny>center</aligny>
+                        <label>$INFO[ListItem.Property(line2)]</label>
+                        <visible>!Control.HasFocus(30002)</visible>
                     </control>
                     <control type="label">
                         <left>1042</left><top>0</top><width>220</width><height>132</height>
