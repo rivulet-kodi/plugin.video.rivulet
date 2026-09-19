@@ -64,6 +64,21 @@ def test_corrupt_cache_file_is_a_miss(tmp_path):
     assert metacache.load_cached_meta(data_dir, 'movie', 'tt1') is None
 
 
+def test_non_dict_entry_value_is_a_miss_not_a_crash(tmp_path):
+    """A valid-JSON cache file whose entry value is not an object (e.g.
+    hand-edited or written by a future incompatible version) must be
+    treated as a miss, not raise AttributeError from `.get()` on a
+    non-dict - matching the never-crash contract `lib/store.py`'s
+    `get_progress_entries()` upholds with its own `isinstance` guard."""
+    data_dir = _data_dir(tmp_path)
+    with open(metacache._path(data_dir), 'w') as fh:
+        json.dump({'movie:tt1': 'garbage'}, fh)
+    assert metacache.load_cached_meta(data_dir, 'movie', 'tt1') is None
+    # A subsequent store must still succeed (eviction must not crash either).
+    metacache.store_cached_meta(data_dir, 'movie', 'tt2', {'name': 'X'})
+    assert metacache.load_cached_meta(data_dir, 'movie', 'tt2') == {'name': 'X'}
+
+
 def test_entries_evicted_past_max_cap(tmp_path, monkeypatch):
     data_dir = _data_dir(tmp_path)
     monkeypatch.setattr(metacache, 'MAX_ENTRIES', 3)

@@ -15,6 +15,7 @@ validate_transport_url, safe_url_for_log) - stay importable, and cheap to
 import, even where `requests` is missing; only constructing/using an
 AddonClient actually needs it.
 """
+import json
 from urllib.parse import quote, urlsplit, urlunsplit
 
 #: `requests` costs ~35ms and ~200 transitive modules to import - resolved
@@ -51,6 +52,16 @@ EXTRA_SAFE_CHARS = "-_.!~*'()"
 #: resource path (http_transport.rs); build_resource_url() strips it from a
 #: transport_url so callers can pass either form as `base`.
 MANIFEST_SUFFIX = '/manifest.json'
+
+#: Cap on any single addon-protocol HTTP response body. `_get_json()`
+#: streams the response via `iter_content()` instead of buffering
+#: `resp.json()` directly: a malicious/misbehaving third-party addon can
+#: serve a catalog or manifest of unbounded size, and unpacking it whole
+#: OOM-kills this addon's process on the ~1 GB-RAM ARM Kodi boxes (e.g. the
+#: Xiaomi Mi Box) this addon targets. 8 MiB is far above any legitimate
+#: manifest/catalog/meta/stream payload while staying well under what
+#: starts pressuring a 1 GB device.
+_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 
 def _encode_component(value):
@@ -259,18 +270,92 @@ class AddonClient:
         self.session = requests.Session()
 
     def _get_json(self, url):
+        """GET `url` and JSON-decode the body, capped at `_MAX_RESPONSE_BYTES`.
+
+        Streams via `iter_content()` and accumulates chunks itself rather
+        than calling `resp.json()`/`resp.content` directly: those buffer
+        the entire body in memory regardless of size, and a hostile or
+        just-huge third-party addon response used to OOM-kill this
+        addon's process on ~1 GB-RAM ARM Kodi boxes before any JSON
+        parsing even started. The `Content-Length` header is checked
+        first as a cheap short-circuit, but the chunk loop enforces the
+        cap unconditionally since a chunked/absent-length response can
+        still grow unbounded.
+        """
         url = validate_transport_url(url)
         safe = safe_url_for_log(url)
+        resp = None
         try:
-            resp = self.session.get(url, timeout=self.timeout)
+            resp = self.session.get(url, timeout=self.timeout, stream=True)
             resp.raise_for_status()
         except requests.RequestException as exc:
             category = _request_error_category(exc)
+            if resp is not None:
+                resp.close()
             raise AddonError('GET %s failed: %s' % (safe, category), category=category)
         try:
-            return resp.json()
-        except ValueError:
-            raise AddonError('GET %s returned invalid JSON' % safe, category='invalid JSON')
+            content_length = resp.headers.get('Content-Length')
+            if content_length is not None:
+                try:
+                    too_big = int(content_length) > _MAX_RESPONSE_BYTES
+                except (TypeError, ValueError):
+                    too_big = False
+                if too_big:
+                    raise AddonError(
+                        'GET %s response exceeds the %d byte limit' % (safe, _MAX_RESPONSE_BYTES),
+                        category='response too large',
+                    )
+            body = bytearray()
+            for chunk in resp.iter_content(chunk_size=65536):
+                if not chunk:
+                    continue
+                body += chunk
+                if len(body) > _MAX_RESPONSE_BYTES:
+                    raise AddonError(
+                        'GET %s response exceeds the %d byte limit' % (safe, _MAX_RESPONSE_BYTES),
+                        category='response too large',
+                    )
+            try:
+                return json.loads(bytes(body))
+            except ValueError:
+                raise AddonError('GET %s returned invalid JSON' % safe, category='invalid JSON')
+        finally:
+            resp.close()
+
+    def _get_field(self, url, field, kind):
+        """GET `url`, then extract `field` from the JSON envelope, enforcing
+        the shape catalog/meta/streams/subtitles callers rely on.
+
+        Mirrors `fetch_addon_catalog()`'s envelope check in
+        addoncatalogs.py: a non-`dict` envelope, or a field whose type
+        doesn't match `kind` ('list' or 'meta'), used to raise
+        `AttributeError`/silently cache a truthy non-dict `meta` instead
+        of the documented `AddonError` contract, because `.get()` was
+        called directly on whatever `_get_json()` returned. `kind='list'`
+        treats a missing/`None` field as `[]`; `kind='meta'` treats a
+        missing/`None` field as `None`.
+        """
+        safe = safe_url_for_log(url)
+        envelope = self._get_json(url)
+        if not isinstance(envelope, dict):
+            raise AddonError(
+                'GET %s returned a malformed %s envelope' % (safe, field), category='invalid JSON'
+            )
+        value = envelope.get(field)
+        if kind == 'list':
+            if value is None:
+                return []
+            if not isinstance(value, list):
+                raise AddonError(
+                    'GET %s returned a malformed %s envelope' % (safe, field),
+                    category='invalid JSON',
+                )
+            return value
+        if value is not None and not isinstance(value, dict):
+            raise AddonError(
+                'GET %s returned a malformed %s envelope' % (safe, field), category='invalid JSON'
+            )
+        return value
 
     def manifest(self, transport_url):
         """GET the addon manifest (transport_url normally ends in /manifest.json)."""
@@ -279,22 +364,22 @@ class AddonClient:
     def catalog(self, base, rtype, cid, extra=None):
         """GET a catalog resource -> list of meta preview objects (resp['metas'])."""
         url = build_resource_url(base, 'catalog', rtype, cid, extra)
-        return self._get_json(url).get('metas') or []
+        return self._get_field(url, 'metas', 'list')
 
     def meta(self, base, rtype, mid):
         """GET a meta resource -> the meta object (resp['meta'])."""
         url = build_resource_url(base, 'meta', rtype, mid)
-        return self._get_json(url).get('meta')
+        return self._get_field(url, 'meta', 'meta')
 
     def streams(self, base, rtype, sid):
         """GET a stream resource -> list of Stream objects (resp['streams'])."""
         url = build_resource_url(base, 'stream', rtype, sid)
-        return self._get_json(url).get('streams') or []
+        return self._get_field(url, 'streams', 'list')
 
     def subtitles(self, base, rtype, sid, extra=None):
         """GET a subtitles resource -> list of subtitle objects (resp['subtitles'])."""
         url = build_resource_url(base, 'subtitles', rtype, sid, extra)
-        return self._get_json(url).get('subtitles') or []
+        return self._get_field(url, 'subtitles', 'list')
 
 
 def _resource_entry(manifest, resource):

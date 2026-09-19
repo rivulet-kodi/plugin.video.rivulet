@@ -10,6 +10,7 @@ module-under-test's own namespace) therefore works uniformly regardless of
 which import style a given module uses.
 """
 import contextlib
+import json
 import socket
 import sys
 from pathlib import Path
@@ -43,16 +44,31 @@ def _block_real_network(monkeypatch):
 
 # --- fake requests plumbing --------------------------------------------------
 class FakeResponse:
-    """Stand-in for requests.Response."""
+    """Stand-in for requests.Response.
 
-    def __init__(self, json_data=None, status_code=200, text=""):
+    `headers`/`iter_content`/`close` exist so `AddonClient._get_json()`
+    (lib/stremio/addons.py), which streams the body itself to enforce a
+    response-size cap, works against this fake exactly like it does
+    against a real `requests.Response`; `json()` is kept too since
+    `addoncatalogs.fetch_addon_catalog()` still calls it directly.
+    """
+
+    def __init__(self, json_data=None, status_code=200, text="", headers=None):
         self._json = {} if json_data is None else json_data
         self.status_code = status_code
         self.ok = 200 <= status_code < 400
         self.text = text or ""
+        self.headers = {} if headers is None else headers
+        self.closed = False
 
     def json(self):
         return self._json
+
+    def iter_content(self, chunk_size=None):
+        yield json.dumps(self._json).encode('utf-8')
+
+    def close(self):
+        self.closed = True
 
     def raise_for_status(self):
         if not self.ok:
@@ -164,3 +180,56 @@ def kodi_stubs():
             return stack.enter_context(install_kodi_stubs(reload=reload, **config))
 
         yield _install
+
+
+# --- shared window-test helpers -----------------------------------------
+# Every WindowXBMCMixin subclass under test/ is constructed with an
+# identical 4-arg XML/skin signature and the XML filename is always the
+# class's own name; centralising that (rather than re-typing the same
+# constructor call in 6 test files) is what tests/test_*window*.py and
+# test_catalogpicker.py's own `_make_window(mod)` wrappers now delegate to.
+def make_window(window_cls, addon_path='/addon/path', skin='Default', res='1080i'):
+    return window_cls(f'{window_cls.__name__}.xml', addon_path, skin, res)
+
+
+def wire_store(module, store):
+    """Points `module.get_store` at a fake Store - shared by every window
+    test module that reads persisted state via `get_store()`."""
+    module.get_store = lambda: store
+
+
+def wire_client(module, client):
+    """Points `module.get_client` at a fake AddonClient - shared by every
+    window test module that talks to Stremio addons via `get_client()`."""
+    module.get_client = lambda: client
+
+
+def stub_confirm(monkeypatch, ctx, answer, capture=None):
+    """Patches `lib.ui.dialogs.confirm` directly (already exhaustively
+    covered by tests/test_dialogs.py) rather than driving a real
+    `doModal()` - shared by every window test that only needs to prove its
+    own confirm() call site passes the right heading/body/labels and
+    reacts correctly to the yes/no result."""
+    def _confirm(heading, body, yeslabel, nolabel):
+        if capture is not None:
+            capture.append((heading, body, yeslabel, nolabel))
+        return answer
+
+    monkeypatch.setattr(ctx.dialogs, 'confirm', _confirm)
+
+
+def stub_choose(monkeypatch, ctx, answers, capture=None):
+    """Patches `lib.ui.dialogs.choose` directly (already exhaustively
+    covered by tests/test_dialogs.py) rather than driving a real
+    `doModal()`. `answers` is either a single constant answer (every call
+    returns it) or a list consumed in call order, needed by callers whose
+    single onAction() can drive more than one choose() call (e.g. a
+    top-level actions menu that opens a nested picker)."""
+    remaining = list(answers) if isinstance(answers, (list, tuple)) else None
+
+    def _choose(heading, rows):
+        if capture is not None:
+            capture.append((heading, list(rows)))
+        return remaining.pop(0) if remaining is not None else answers
+
+    monkeypatch.setattr(ctx.dialogs, 'choose', _choose)

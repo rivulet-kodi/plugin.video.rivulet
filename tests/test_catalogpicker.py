@@ -24,6 +24,7 @@ import contextlib
 import pytest
 
 from lib.stremio.addons import AddonError
+from tests.conftest import make_window, stub_choose
 from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
@@ -86,20 +87,11 @@ def load_catalogpicker():
 
 
 def _make_window(catalogpicker_mod):
-    return catalogpicker_mod.CatalogPickerWindow('CatalogPickerWindow.xml', '/addon/path', 'Default', '1080i')
+    return make_window(catalogpicker_mod.CatalogPickerWindow)
 
 
 def _stub_choose(monkeypatch, ctx, answer, capture=None):
-    """Patches `lib.ui.dialogs.choose` directly (already exhaustively
-    covered by tests/test_dialogs.py) rather than driving a real
-    `doModal()` - this suite only needs to prove the genre-filter call
-    sites pass the right heading/rows and react correctly to the index."""
-    def _choose(heading, rows):
-        if capture is not None:
-            capture.append((heading, list(rows)))
-        return answer
-
-    monkeypatch.setattr(ctx.dialogs, 'choose', _choose)
+    stub_choose(monkeypatch, ctx, answer, capture=capture)
 
 
 # ---------------------------------------------------------------------------
@@ -1374,3 +1366,17 @@ def test_followed_series_caps_the_number_of_candidates_fetched(load_catalogpicke
     # latest_by_title() already sorts most-recently-updated first - the
     # slice must keep that end of the list, not an arbitrary cap.
     assert {s['id'] for s in series} == {'tt%d' % i for i in range(10, total)}
+
+
+def test_fetch_series_metas_drops_stragglers_map_addons_returns_as_none(load_catalogpicker, monkeypatch):
+    """`views._map_addons()` returns `None` for any item past its 4s soft
+    deadline (see its own docstring) - `_fetch_series_metas()` must drop
+    those stragglers rather than crash zipping a `None` into the
+    id-keyed result dict."""
+    ctx = load_catalogpicker()
+    series_items = [{'id': 'tt1', 'type': 'series'}, {'id': 'tt2', 'type': 'series'}]
+    monkeypatch.setattr(ctx.views, '_map_addons', lambda fn, items: [{'id': 'tt1'}, None])
+
+    metas = ctx.catalogpicker._fetch_series_metas(series_items)
+
+    assert metas == {'tt1': {'id': 'tt1'}}

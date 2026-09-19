@@ -34,7 +34,7 @@ import pytest
 import requests
 
 from lib.stremio import addoncatalogs
-from tests.conftest import FakeResponse, FakeSession
+from tests.conftest import FakeResponse, FakeSession, make_window, wire_client, wire_store
 from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
@@ -260,15 +260,15 @@ def load_addoncatalogwindow():
 
 
 def _make_window(addoncatalogwindow_mod):
-    return addoncatalogwindow_mod.AddonCatalogWindow('AddonCatalogWindow.xml', '/addon/path', 'Default', '1080i')
+    return make_window(addoncatalogwindow_mod.AddonCatalogWindow)
 
 
 def _wire_store(addoncatalogwindow_mod, store):
-    addoncatalogwindow_mod.get_store = lambda: store
+    wire_store(addoncatalogwindow_mod, store)
 
 
 def _wire_client(addoncatalogwindow_mod, client):
-    addoncatalogwindow_mod.get_client = lambda: client
+    wire_client(addoncatalogwindow_mod, client)
 
 
 def _select(win, addoncatalogwindow_mod, index):

@@ -35,9 +35,11 @@ Kodi-skin-engine-only and cannot be exercised by this test suite - see
 tests/test_gridwindow.py for what is covered here (the pure projection
 and the control wiring) and what a real device must confirm.
 """
+import xbmc
 import xbmcgui
 
-from lib.ui.uicommon import BaseWindow, open_window
+from lib.ui.compat import log
+from lib.ui.uicommon import BaseWindow, escape_label, open_window
 
 BACKGROUND = 30000
 ROWS = 30001
@@ -185,7 +187,7 @@ def make_list_item(item):
     without a window."""
     from lib.ui.mystuff import BAND_RECENT
 
-    list_item = xbmcgui.ListItem(label=item.get('name') or '')
+    list_item = xbmcgui.ListItem(label=escape_label(item.get('name') or ''))
     list_item.setProperties({
         'thumbnail': item.get('poster') or '',
         'badge': _badge(item),
@@ -308,8 +310,8 @@ class GridWindow(BaseWindow):
         item = self._focused_item()
         try:
             self.getControl(BACKGROUND).setImage((item or {}).get('background') or '')
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - a broken/partial skin must never crash navigation
+            log('gridwindow: setImage failed: %r' % (exc,), xbmc.LOGDEBUG)
 
     def onAction(self, action):
         """Close on a back action; otherwise refresh the hero and fanart,

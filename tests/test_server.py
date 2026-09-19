@@ -172,8 +172,6 @@ def test_resolve_stream_unknown_source_returns_none():
 @pytest.mark.parametrize("scheme,host_path", [
     ("http", "example.com/video.mp4"),
     ("https", "example.com/video.mp4"),
-    ("smb", "nas.local/share/movie.mkv"),
-    ("nfs", "nas.local/share/movie.mkv"),
     ("rtmp", "live.example.com/app/stream"),
     ("rtmps", "live.example.com/app/stream"),
     ("rtsp", "cam.example.com/stream1"),
@@ -193,6 +191,8 @@ def test_resolve_stream_allows_every_direct_network_media_scheme(scheme, host_pa
     "special://home/addons/evil",
     "file:///etc/passwd",
     "javascript:alert(1)",
+    "smb://nas.local/share/movie.mkv",
+    "nfs://nas.local/share/movie.mkv",
 ])
 def test_resolve_stream_rejects_kodi_control_and_local_schemes(url):
     client = make_client()
@@ -409,6 +409,16 @@ def test_create_engine_raises_server_error_on_connection_error():
     client.session = FakeSession(exc=requests.exceptions.ConnectionError("refused"))
     with pytest.raises(ServerError):
         client.create_engine("aa" * 20)
+
+
+def test_create_engine_error_message_never_leaks_base_url_credentials():
+    client = ServerClient("http://admin:" + "s3cr3t" + "@127.0.0.1:11470")
+    client.session = FakeSession(exc=requests.exceptions.ConnectionError("refused"))
+    with pytest.raises(ServerError) as excinfo:
+        client.create_engine("aa" * 20)
+    assert "s3cr3t" not in str(excinfo.value)
+    assert "admin" not in str(excinfo.value)
+    assert "http://127.0.0.1:11470/" + "aa" * 20 + "/create" in str(excinfo.value)
 
 
 def test_create_engine_raises_server_error_on_http_error():
@@ -866,6 +876,16 @@ def test_resolve_stream_archive_ftp_member_rewritten_through_ftp_create():
     assert _lz_payload(ftp_proxy_url) == {"ftpUrl": "ftp://ftp.example.com/path/movie.mkv"}
 
 
+def test_resolve_stream_archive_urls_capped_at_max_entries():
+    client = make_client()
+    stream = {"rarUrls": [["https://example.com/file%d.rar" % i] for i in range(50)]}
+    resolved = client.resolve_stream(stream)
+    payload = _lz_payload(resolved)
+    assert len(payload["urls"]) == 32
+    assert payload["urls"][0] == ["https://example.com/file0.rar"]
+    assert payload["urls"][-1] == ["https://example.com/file31.rar"]
+
+
 # --- nzb ---------------------------------------------------------------
 
 
@@ -894,6 +914,18 @@ def test_resolve_stream_nzb_multi_url():
         "nzbUrls": ["https://example.com/a.nzb", "https://example.com/b.nzb"],
         "servers": ["https://usenet1.example.com"],
     }
+
+
+def test_resolve_stream_nzb_urls_capped_at_max_entries():
+    client = make_client()
+    stream = {
+        "nzbUrls": ["https://example.com/%d.nzb" % i for i in range(50)],
+        "servers": ["https://usenet1.example.com"],
+    }
+    resolved = client.resolve_stream(stream)
+    payload = _lz_payload(resolved)
+    assert len(payload["nzbUrls"]) == 32
+    assert payload["nzbUrls"][-1] == "https://example.com/31.nzb"
 
 
 def test_resolve_stream_nzb_without_servers_returns_none():

@@ -32,7 +32,9 @@ time rather than cached.
 """
 import xbmcgui
 
-from lib.ui.uicommon import BACK_ACTIONS, ModalStackWindow, busy_dialog, open_window
+from lib.ui.playbackmeta import episode_code as _pm_episode_code
+from lib.ui.playbackmeta import resolve_art
+from lib.ui.uicommon import BACK_ACTIONS, ModalStackWindow, busy_dialog, escape_label, open_window
 
 BACKGROUND = 30000
 POSTER = 30004
@@ -105,14 +107,20 @@ def _episode_code(video):
     """'S01E03' - zero-padded season/episode (Specials as S00Exx), the
     mono/blue half of `_episode_label()` now split into its own
     ListItem `code` Property so the skin can style it apart from the
-    title."""
-    return 'S%02dE%02d' % (video.get('season') or 0, video.get('episode') or 0)
+    title. Delegates to `lib.ui.playbackmeta.episode_code()` (shared
+    with `lib.ui.mystuff`'s identical episode-code readout) so both
+    tolerate a string `season`/`episode` from an addon instead of
+    raising on `'%02d' % 'x'`."""
+    return _pm_episode_code(video.get('season'), video.get('episode'))
 
 
 def _episode_title(video):
     """title -> name -> id fallback chain - the other half of
-    `_episode_label()`, as its own ListItem `title` Property."""
-    return video.get('title') or video.get('name') or video.get('id') or ''
+    `_episode_label()`, as its own ListItem `title` Property. Escaped
+    via `escape_label()`: this text is addon-supplied and ends up in a
+    ListItem label/Property the skin renders verbatim."""
+    title = video.get('title') or video.get('name') or video.get('id') or ''
+    return escape_label(title)
 
 
 def _episode_label(video):
@@ -188,7 +196,7 @@ def _episode_properties(video):
     aired = released.split('T', 1)[0] if released else ''
     return {
         'thumb': video.get('thumbnail') or '',
-        'line2': line1 or aired or '',
+        'line2': escape_label(line1 or aired or ''),
         'code': _episode_code(video),
         'title': _episode_title(video),
     }
@@ -205,13 +213,16 @@ def _episode_heading(show_name, video):
 
 def _show_art(meta):
     """`art={'poster': ..., 'fanart': ...}` for StreamsWindow's
-    pre-agreed `art` kwarg, derived from a title's meta the same way
-    `DetailWindow.onInit()` resolves its own background image
-    (background > logo > poster)."""
-    meta = meta or {}
-    poster = meta.get('poster')
-    fanart = meta.get('background') or meta.get('logo') or poster
-    return {'poster': poster, 'fanart': fanart}
+    pre-agreed `art` kwarg - the poster/fanart fields of
+    `lib.ui.playbackmeta.resolve_art()`, the same background > logo >
+    poster fallback `DetailWindow.onInit()` uses for its own
+    background image, so both agree byte-for-byte instead of each
+    keeping its own copy of the fallback order. Only `poster`/`fanart`
+    are forwarded (never `resolve_art()`'s `icon`/`thumb` extras) to
+    keep StreamsWindow's pre-agreed `art` kwarg shape unchanged."""
+    resolved = resolve_art(None, meta)
+    poster = resolved.get('poster')
+    return {'poster': poster, 'fanart': resolved.get('fanart') or poster}
 
 
 def _metadata_line(meta, season_count):
@@ -241,7 +252,7 @@ def _metadata_line(meta, season_count):
         segments.append(L(_SEASON_STRING_ID if season_count == 1 else _SEASONS_STRING_ID) % season_count)
     rating = meta.get('imdbRating')
     if rating:
-        segments.append('[COLOR FF38BDF8]\u2605 %s[/COLOR]' % rating)
+        segments.append('[COLOR FF38BDF8]\u2605 %s[/COLOR]' % escape_label(str(rating)))
     return ' \u00b7 '.join(segments)
 
 
@@ -257,7 +268,7 @@ def _genres_line(meta):
     (GENRES_LINE/30102), capped at `_MAX_GENRES` genres - empty string,
     never a lone separator, when the meta carries no genres at all."""
     genres = ((meta or {}).get('genres') or [])[:_MAX_GENRES]
-    return ' \u00b7 '.join(genres)
+    return ' \u00b7 '.join(escape_label(genre) for genre in genres)
 
 
 def _watched_percent(progress):
@@ -373,10 +384,12 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         local cache, or a test with no real Kodi profile directory at
         all): mirrors `lib.ui.player._maybe_resume_offset_ms()`'s own
         defensive guard around the same call."""
+        from lib.ui.compat import log
         from lib.ui.dependencies import get_store
         try:
             return get_store().get_progress(stype, sid, video_id)
-        except Exception:
+        except Exception as exc:
+            log('detailwindow: get_progress failed for %r/%r/%r: %r' % (stype, sid, video_id, exc))
             return None
 
     def _populate_episode_list(self, videos):
@@ -446,7 +459,9 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         # label is always Python-set: any markup baked into the
         # <label> itself would just be overwritten the moment this
         # call runs.
-        self.getControl(HEADING).setLabel('[B]%s[/B]' % (self.meta.get('name') or self.meta.get('id') or '').upper())
+        self.getControl(HEADING).setLabel(
+            '[B]%s[/B]' % escape_label((self.meta.get('name') or self.meta.get('id') or '').upper()),
+        )
         self.getControl(METADATA_LINE).setLabel(_metadata_line(self.meta, _season_count(self.season_groups)))
         self.getControl(GENRES_LINE).setLabel(_genres_line(self.meta))
 

@@ -35,6 +35,46 @@ derived from one is parsed from the pre-``clean_text()`` text, not
 import re
 
 # ---------------------------------------------------------------------------
+# escape_label
+# ---------------------------------------------------------------------------
+
+#: Kodi label markup tags neutralised by `escape_label()`: colour/format
+#: tags with an optional `[/...]` closer, plus the bracketed `$…[` info
+#: labels that would otherwise be evaluated by the skin engine.
+_LABEL_TAG_RE = re.compile(
+    r'\[/?(?:B|I|COLOR[^\]]*|CR|UPPERCASE|LOWERCASE|CAPITALIZE|LIGHT|TABS)\]',
+    re.IGNORECASE,
+)
+_LABEL_INFO_RE = re.compile(r'\$(INFO|LOCALIZE|VAR|ESCINFO|ADDON|NUMBER)\[', re.IGNORECASE)
+
+
+def escape_label(text):
+    """Strip Kodi `ListItem`/skin label markup out of `text` before it is
+    shown as a plain label (an addon/catalog name, a manifest error
+    string, ...) coming from untrusted third-party JSON.
+
+    Kodi's skin engine evaluates `[B]`/`[COLOR ...]`/`[CR]`/... formatting
+    tags and `$INFO[...]`/`$LOCALIZE[...]`/`$VAR[...]`/`$ESCINFO[...]`/
+    `$ADDON[...]`/`$NUMBER[...]` info labels wherever a label is rendered,
+    not just in skin XML - a Stremio addon manifest whose `name` contains
+    e.g. `$INFO[System.ProfileName]` would otherwise get evaluated as a
+    live info label inside our own windows. Returns `''` for `None`/any
+    non-`str` input rather than raising, since manifest fields are
+    attacker-controlled and not guaranteed to be strings at all.
+
+    Lives here rather than in `lib.ui.uicommon` (which re-exports it for
+    backwards compatibility) because `format_label()`/`format_details()`
+    below need it too, and this module cannot import anything under
+    `lib.ui` - it is deliberately Kodi-independent (see module
+    docstring), while `lib.ui.uicommon` imports `xbmc`/`xbmcgui`.
+    """
+    if not isinstance(text, str):
+        return ''
+    text = _LABEL_TAG_RE.sub('', text)
+    text = _LABEL_INFO_RE.sub(lambda m: m.group(0)[1:], text)
+    return text
+
+# ---------------------------------------------------------------------------
 # clean_text
 # ---------------------------------------------------------------------------
 
@@ -823,7 +863,14 @@ def parse_stream(stream, addon_name=''):
     service, cached = _parse_cache_state(raw, pre_clean, name)
 
     return {
-        'addon': addon,
+        # `addon` is interpolated into `format_label()`'s OWN
+        # `[COLOR gray]...[/COLOR]` wrap (see there) - unlike every other
+        # field below (fixed-vocabulary tags, or plain text that
+        # `format_details()`'s callers blanket-escape externally), that
+        # wrap can't be escaped from outside without stripping its own
+        # markup along with it, so this is the one field that must be
+        # escaped here at parse time instead.
+        'addon': escape_label(addon),
         'title': display_title,
         'resolution': _match_first(_RESOLUTION_PATTERNS, raw),
         'source': _match_first(_SOURCE_PATTERNS, raw),

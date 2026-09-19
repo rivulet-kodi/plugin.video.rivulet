@@ -329,7 +329,13 @@ def _enrich(items):
         )
         return meta, bool(was_fresh)
 
-    fetched = views._map_addons(_fetch, needs_fetch)
+    # `_map_addons()` drops a None slot in place of the (meta, was_fresh)
+    # tuple for an addon call that missed the soft deadline - treat it the
+    # same as a failed fetch rather than crash unpacking None.
+    fetched = [
+        result if result is not None else (None, False)
+        for result in views._map_addons(_fetch, needs_fetch)
+    ]
 
     store = get_store()
     cache_dir = getattr(store, 'data_dir', None)
@@ -389,7 +395,8 @@ def _label_next_episodes(items):
         season, episode = video.get('season'), video.get('episode')
         if season is None or episode is None:
             continue
-        item['next_label'] = 'S%dE%d' % (season, episode)
+        from lib.ui.playbackmeta import episode_code
+        item['next_label'] = episode_code(season, episode)
 
 
 def open_my_stuff():

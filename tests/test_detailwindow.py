@@ -26,6 +26,7 @@ import types
 import pytest
 
 from lib.stremio.api import ApiError
+from tests.conftest import make_window, stub_choose
 from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
@@ -58,7 +59,7 @@ def load_detailwindow():
 
 
 def _make_window(detailwindow_mod):
-    return detailwindow_mod.DetailWindow('DetailWindow.xml', '/addon/path', 'Default', '1080i')
+    return make_window(detailwindow_mod.DetailWindow)
 
 
 def _window_with_focused_row(detailwindow_mod, meta, stype, row_id):
@@ -281,6 +282,17 @@ def test_episode_code_zero_pads_season_and_episode(load_detailwindow):
     assert ctx.detailwindow._episode_code({}) == 'S00E00'
 
 
+def test_episode_code_coerces_string_season_and_episode_from_addon(load_detailwindow):
+    """UD-3 regression: some Stremio addons send `season`/`episode` as
+    strings, which '%02d' formatting used to raise TypeError on
+    outright - `_episode_code()` now delegates to
+    `lib.ui.playbackmeta.episode_code()`, which int()-coerces both."""
+    ctx = load_detailwindow()
+
+    assert ctx.detailwindow._episode_code({'season': '1', 'episode': '3'}) == 'S01E03'
+    assert ctx.detailwindow._episode_code({'season': 'bad', 'episode': 'bad'}) == 'S00E00'
+
+
 def test_episode_title_falls_back_title_then_name_then_id(load_detailwindow):
     ctx = load_detailwindow()
 
@@ -445,6 +457,30 @@ def test_oninit_sets_heading_bold_and_left_column_metadata(load_detailwindow):
         '2023-2025 \u00b7 2 SEASONS \u00b7 [COLOR FF38BDF8]\u2605 7.6[/COLOR]'
     )
     assert win.getControl(picker.GENRES_LINE).label == 'Comedy \u00b7 Mystery \u00b7 Crime'
+
+
+def test_oninit_escapes_kodi_label_markup_in_addon_supplied_name_and_genres(load_detailwindow):
+    """TB-1 regression: an addon-supplied `name`/`genres` value carrying
+    Kodi label markup (or a `$INFO[`/`$LOCALIZE[` info label) must not
+    reach `setLabel()` unescaped - the skin would otherwise evaluate it
+    as real markup/an info label instead of showing it as plain text."""
+    ctx = load_detailwindow()
+    picker = ctx.detailwindow
+    win = _make_window(picker)
+    win.start({
+        'id': 'tt1', 'name': '[COLOR red]Evil[/COLOR] $INFO[Skin.String(hack)]',
+        'genres': ['[COLOR red]Comedy[/COLOR]'],
+        'videos': [],
+    }, 'series')
+
+    win.onInit()
+
+    heading = win.getControl(picker.HEADING).label
+    assert heading == '[B]EVIL INFO[SKIN.STRING(HACK)][/B]'
+    assert '[COLOR' not in heading
+    assert '$INFO[' not in heading
+    assert '[COLOR' not in win.getControl(picker.GENRES_LINE).label
+    assert 'Comedy' in win.getControl(picker.GENRES_LINE).label
 
 
 def test_oninit_left_column_metadata_shows_only_season_count_when_year_rating_and_genres_are_missing(
@@ -734,23 +770,7 @@ class _FakeLibraryApi:
 
 
 def _stub_choose(monkeypatch, ctx, answers, capture=None):
-    """Patches `lib.ui.dialogs.choose` directly (already exhaustively
-    covered by tests/test_dialogs.py) rather than driving a real
-    `doModal()` - mirrors tests/test_catalogpicker.py's own helper of
-    the same name. `answers` is either a single constant answer (every
-    call returns it - the shape every pre-existing caller of this
-    helper used) or a list consumed in call order, needed now that one
-    onAction() can drive TWO choose() calls (the top-level actions menu,
-    then _open_credits()'s own nested picker when 'Cast & Crew' is
-    picked)."""
-    remaining = list(answers) if isinstance(answers, (list, tuple)) else None
-
-    def _choose(heading, rows):
-        if capture is not None:
-            capture.append((heading, list(rows)))
-        return remaining.pop(0) if remaining is not None else answers
-
-    monkeypatch.setattr(ctx.dialogs, 'choose', _choose)
+    stub_choose(monkeypatch, ctx, answers, capture=capture)
 
 
 def _wire_library_deps(monkeypatch, ctx, auth=None, item=None, get_error=None, put_error=None):

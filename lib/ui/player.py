@@ -18,6 +18,7 @@ from lib.stremio.server import (
     ServerClient,
     UnsupportedStreamError,
     guess_file_idx,
+    normalize_info_hash,
 )
 from lib.stremio.subtitles import collect_subtitles, filter_subtitles
 from lib.ui.compat import (
@@ -400,7 +401,13 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
     if not buffer_enable:
         return True, url, None
 
-    info_hash = stream['infoHash']
+    # Normalize here too: the play-URL path already normalizes via
+    # normalize_info_hash (server.py:148), but this pre-buffer polling
+    # (create_engine/file_stats/etc.) used the raw stream value directly,
+    # so a base32 or whitespace-padded infoHash (both explicitly accepted
+    # by normalize_info_hash) polled the wrong URL and playback was
+    # refused even though the actual play URL was fine.
+    info_hash = normalize_info_hash(stream['infoHash']) or stream['infoHash']
     try:
         if dialog.iscanceled():
             return False, url, None

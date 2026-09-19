@@ -67,6 +67,8 @@ import contextlib
 import xbmc
 import xbmcgui
 
+from lib.stremio.streaminfo import escape_label  # noqa: F401 (re-exported)
+
 #: Back/Nav-Back, PreviousMenu/Esc, Backspace - closes a window without a
 #: selection. Shared by every custom screen (mirrors infowindow's
 #: `_BACK_ACTIONS`, which keeps its own copy so this module can be added
@@ -235,3 +237,51 @@ class BaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         if action.getId() in BACK_ACTIONS:
             self.close()
 
+
+def fetch_and_validate_addon(client, url):
+    """Validate + fetch a Stremio addon manifest for `url`, the shared
+    body of `AddonsWindow._install()`, `AddonCatalogWindow._configure()`
+    and `_install_from_catalog()`, and `CatalogPickerWindow` - all three
+    used to hand-roll the same `validate_transport_url()` ->
+    `client.manifest()` -> `manifest.get('id')` sequence with their own
+    copy-pasted `AddonError` handling and logging, drifting slightly
+    between call sites.
+
+    Returns `(manifest, transport_url, None)` on success - `transport_url`
+    is the already-normalized URL `validate_transport_url()` produced, so
+    callers that need it (to hand to `store.install_addon()`) don't have
+    to re-run validation just to recover it, as `AddonsWindow._install()`/
+    `AddonCatalogWindow._configure()` both used to. On failure, returns
+    `(None, None, string_id)` where `string_id` is the strings.po id
+    (30014, "Invalid addon manifest.") every call site already showed via
+    `notify(L(string_id))` for an invalid URL, a fetch failure, or a
+    manifest missing its required `id` field. Callers keep their own
+    `notify()`/`log()` framing for the happy path; this only centralizes
+    the validation and its logging.
+    """
+    from lib.stremio.addons import (
+        AddonError,
+        addon_error_detail,
+        safe_url_for_log,
+        validate_transport_url,
+    )
+    from lib.ui.compat import log
+
+    try:
+        transport_url = validate_transport_url(url)
+    except AddonError as exc:
+        log('uicommon: invalid transport url %s: %s' % (safe_url_for_log(url or ''), exc), xbmc.LOGERROR)
+        return None, None, 30014
+
+    try:
+        manifest = client.manifest(transport_url)
+    except AddonError as exc:
+        log('uicommon: manifest fetch failed for %s: %s' % (
+            safe_url_for_log(transport_url), addon_error_detail(exc),
+        ), xbmc.LOGERROR)
+        return None, None, 30014
+
+    if not manifest or not manifest.get('id'):
+        return None, None, 30014
+
+    return manifest, transport_url, None

@@ -187,6 +187,18 @@ def test_make_list_item_tolerates_a_title_with_no_name_or_poster(ctx):
     assert list_item.getProperty('thumbnail') == ''
 
 
+def test_make_list_item_escapes_addon_supplied_name_markup(ctx):
+    """A stream/catalog addon controls `item['name']` end to end; an
+    unescaped `[COLOR]`/`$INFO[` payload there would let it restyle or
+    inject skin-evaluated info labels into the grid cell it draws into."""
+    item = _item(ctx.mystuff.BAND_RESUME, name='[COLOR red]Evil[/COLOR]$INFO[Skin.String(x)]')
+
+    list_item = ctx.gridwindow.make_list_item(item)
+
+    assert '[COLOR' not in list_item.getLabel()
+    assert '$INFO[' not in list_item.getLabel()
+
+
 # ---------------------------------------------------------------------------
 # GridWindow - onInit/onClick/onAction
 # ---------------------------------------------------------------------------
@@ -318,6 +330,21 @@ def test_onaction_updates_the_background_from_the_focused_row(ctx):
     win.onAction(xbmcgui.Action(4))  # a plain move, not a back action
 
     assert win.getControl(ctx.gridwindow.BACKGROUND).image == 'two.jpg'
+
+
+def test_update_background_swallows_a_broken_skin_control(ctx):
+    """`BACKGROUND` missing/broken on a partial skin must never break
+    navigation - `_update_background()` is called from `onAction()` on
+    every focus move."""
+    win = _window(ctx, items=[_item(ctx.mystuff.BAND_RESUME, name='A', background='one.jpg')])
+    win.onInit()
+
+    def _broken_set_image(*_args, **_kwargs):
+        raise RuntimeError('Non-Existent Control')
+
+    win.getControl(ctx.gridwindow.BACKGROUND).setImage = _broken_set_image
+
+    win._update_background()  # must not raise
 
 
 def test_start_returns_none_for_an_empty_screen_without_opening_it(ctx):

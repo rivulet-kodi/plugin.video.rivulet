@@ -42,7 +42,7 @@ import xbmc
 import xbmcgui
 
 from lib.ui.compat import log
-from lib.ui.uicommon import BACK_ACTIONS, BaseWindow, open_window
+from lib.ui.uicommon import BACK_ACTIONS, BaseWindow, escape_label, open_window
 
 # ProgressDialog.xml
 PROGRESS_HEADING = 30300
@@ -150,7 +150,7 @@ class _Panel:
                 self._controls[control_id] = control
 
     def label(self, control_id, text):
-        text = text or ''
+        text = escape_label(text or '')
         if self._last.get(control_id) == text:
             return
         control = self._controls.get(control_id)
@@ -429,10 +429,10 @@ class _ConfirmWindow(BaseWindow):
         # to the defensive getControl() wrapper, silently renders an
         # empty dialog. Observed on a real device. Populate here, the
         # same way every other Rivulet screen does.
-        _set_label(self, CONFIRM_HEADING, self.heading)
-        _set_label(self, CONFIRM_BODY, self.body)
-        _set_label(self, CONFIRM_NO, self.nolabel)
-        _set_label(self, CONFIRM_YES, '[B]%s[/B]' % self.yeslabel)
+        _set_label(self, CONFIRM_HEADING, escape_label(self.heading))
+        _set_label(self, CONFIRM_BODY, escape_label(self.body))
+        _set_label(self, CONFIRM_NO, escape_label(self.nolabel))
+        _set_label(self, CONFIRM_YES, '[B]%s[/B]' % escape_label(self.yeslabel))
         with contextlib.suppress(Exception):
             self.setFocusId(CONFIRM_YES)
 
@@ -485,14 +485,14 @@ class _OptionListWindow(BaseWindow):
         # loads it inside doModal(). Doing it early raised
         # "Non-Existent Control 30340/30341" on a real device and left
         # the list silently empty.
-        _set_label(self, OPTIONLIST_HEADING, self.heading)
+        _set_label(self, OPTIONLIST_HEADING, escape_label(self.heading))
         items = []
         for row in self.rows:
             if isinstance(row, str):
-                items.append(xbmcgui.ListItem(label=row))
+                items.append(xbmcgui.ListItem(label=escape_label(row)))
             else:
                 label, sublabel = row
-                items.append(xbmcgui.ListItem(label=label, label2=sublabel or ''))
+                items.append(xbmcgui.ListItem(label=escape_label(label), label2=escape_label(sublabel or '')))
         ctrl = _get_control(self, OPTIONLIST_LIST)
         if ctrl is None:
             return

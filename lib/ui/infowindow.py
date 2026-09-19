@@ -34,7 +34,8 @@ import threading
 
 import xbmcgui
 
-from lib.ui.uicommon import ModalStackWindow
+from lib.ui.playbackmeta import resolve_art
+from lib.ui.uicommon import ModalStackWindow, escape_label
 
 BACKGROUND = 30000
 LOADING = 30001
@@ -167,20 +168,34 @@ def _item_properties(meta):
     """Map one Stremio catalog meta to the string Properties
     ShowcaseWindow.xml's coverflow reads via `$INFO[ListItem.Property(...)]`.
 
+    Every value is coerced to `str()` (`None` -> `''`): `setProperties()`
+    requires str values, but `imdbRating` and `runtime` are routinely
+    numeric in the wild (a JSON `9.0`/`120`, not `"9.0"`/`"120"`), which
+    used to reach Kodi untyped and raise inside the C++ boundary.
+
     Pure helper - no xbmc - so it is trivially unit-testable on its own.
     """
     meta = meta or {}
     poster = meta.get('poster')
     logo = meta.get('logo')
-    background = meta.get('background')
+    # `resolve_art()` is the addon-wide poster/fanart fallback, but it
+    # only chains thumb<-poster and fanart<-background/logo - it never
+    # falls a *missing* poster back to the logo, nor a missing fanart
+    # back to the poster, both of which this coverflow wants (a
+    # logo-only meta still needs a thumbnail; a poster-only meta still
+    # needs a background). One-line overrides on top rather than
+    # duplicating resolve_art()'s own background/logo chain here.
+    art = resolve_art(None, meta)
+    rating = meta.get('imdbRating')
+    runtime = meta.get('runtime')
     props = {
-        'thumbnail': poster or logo or '',
-        'fanart': background or logo or poster or '',
-        'genre': ', '.join(meta.get('genres') or []),
-        'rating': meta.get('imdbRating') or '',
-        'plot': meta.get('description') or '',
+        'thumbnail': art.get('thumb') or logo or '',
+        'fanart': art.get('fanart') or poster or '',
+        'genre': escape_label(', '.join(meta.get('genres') or [])),
+        'rating': str(rating) if rating not in (None, '') else '',
+        'plot': escape_label(meta.get('description') or ''),
         'year': _year_text(meta),
-        'runtime': meta.get('runtime') or '',
+        'runtime': str(runtime) if runtime not in (None, '') else '',
     }
     # Precomposed for the skin: `meta_line` is what the hero actually
     # renders, but `year`/`rating`/`runtime`/`genre` stay individually
@@ -312,14 +327,18 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
                 # Wake the UI thread to drain the queue, exactly as the
                 # enrich workers do - see `_enrich_fetch`'s tail.
                 xbmc.executebuiltin('Action(noop)')
-        except Exception:
+        except Exception as exc:
             # Daemon thread with nobody to catch for it; a failed walk
             # must never take the window down. Same nested guard as
             # `_enrich_worker`: reporting can itself fail during teardown.
+            # LOGWARNING, not DEBUG: a paging addon failing silently used
+            # to leave a truncated strip with no trace in the log at the
+            # default log level.
             try:
+                from lib.stremio.addons import addon_error_detail
                 from lib.ui.compat import log
 
-                log('infowindow: catalog paging worker failed', xbmc.LOGDEBUG)
+                log('infowindow: catalog paging worker failed: %s' % addon_error_detail(exc), xbmc.LOGWARNING)
             except Exception:
                 pass
 
@@ -362,7 +381,7 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
             control.selectItem(focus_index)
 
     def _make_item(self, index, meta, props=None):
-        item = xbmcgui.ListItem(meta.get('name') or meta.get('id') or '?')
+        item = xbmcgui.ListItem(escape_label(meta.get('name') or meta.get('id') or '?'))
         properties = dict(props) if props is not None else _item_properties(meta)
         properties['position'] = str(index)
         # One setProperties() call instead of one setProperty() per key -
@@ -594,7 +613,12 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
 
             full = _fetch_meta(meta.get('type') or 'movie', meta.get('id'))
         except Exception as exc:  # never let a lookup failure break the UI
-            log('infowindow: meta enrich failed for %s: %r' % (meta.get('id'), exc), xbmc.LOGDEBUG)
+            # LOGWARNING, not DEBUG: an addon failing every enrich fetch
+            # used to leave the coverflow's plot/genre blank with nothing
+            # in the log at the default level to explain why.
+            from lib.stremio.addons import addon_error_detail
+
+            log('infowindow: meta enrich failed for %s: %s' % (meta.get('id'), addon_error_detail(exc)), xbmc.LOGWARNING)
             return
         if not full:
             return
@@ -755,6 +779,7 @@ def open_credits_picker(store, client, meta):
     from lib.stremio import metalinks
     from lib.ui import dialogs
     from lib.ui.compat import L, log, notify
+    from lib.ui.uicommon import escape_label
 
     groups = metalinks.iter_link_groups(meta)
     if not groups:
@@ -765,7 +790,7 @@ def open_credits_picker(store, client, meta):
     links = []
     for category, members in groups:
         for name, parsed in members:
-            rows.append((name, category))
+            rows.append((escape_label(name), escape_label(category)))
             links.append(parsed)
 
     choice = dialogs.choose(L(30196), rows)

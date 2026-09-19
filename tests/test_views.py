@@ -21,13 +21,13 @@ by that module.
 """
 import contextlib
 import threading
-import time
 
 import pytest
 
 from lib.stremio.addons import AddonError
 from lib.stremio.api import ApiError
 from lib.ui import urlutil
+from tests.conftest import stub_confirm
 from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = ('lib.ui.compat', 'lib.ui.router', 'lib.ui.views', 'lib.ui.infowindow', 'lib.ui.dialogs')
@@ -134,11 +134,6 @@ class FakeAddonClient:
     catch-all default for `manifest()` when a transport_url has no entry
     in `manifest_results`.
 
-    `delays` (transport_url -> seconds) makes meta() call time.sleep()
-    before returning/raising - used where a test needs one addon to
-    genuinely answer later than another (e.g. proving a faster addon's
-    result wins), not to prove concurrency itself.
-
     `gates` (transport_url -> threading.Event) blocks that addon's call
     until the test sets the event, for proving a caller returned without
     ever waiting on a given addon: if the caller only proceeds after the
@@ -148,12 +143,11 @@ class FakeAddonClient:
     """
 
     def __init__(self, meta_results=None, manifest_result=None, manifest_error=None,
-                 manifest_results=None, delays=None, gates=None):
+                 manifest_results=None, gates=None):
         self._meta_results = meta_results or {}
         self._manifest_result = manifest_result
         self._manifest_error = manifest_error
         self._manifest_results = manifest_results or {}
-        self._delays = delays or {}
         self._gates = gates or {}
         self.manifest_calls = []
         self.meta_calls = []
@@ -162,10 +156,6 @@ class FakeAddonClient:
         gate = self._gates.get(transport_url)
         if gate is not None:
             gate.wait(timeout=_GATE_TIMEOUT)
-            return
-        seconds = self._delays.get(transport_url)
-        if seconds:
-            time.sleep(seconds)
 
     def meta(self, transport_url, stype, sid):
         self.meta_calls.append(transport_url)
@@ -440,7 +430,11 @@ def test_fetch_meta_prefers_earlier_addon_when_it_answers_at_least_as_fast(load_
     """When the first-listed (preferred) addon is not the straggler, the
     old sequential "first hit in store.get_addons() order wins" behavior
     is fully preserved: a slower second addon's answer must lose even
-    though it is also usable.
+    though it is also usable. `t-second` is gated on a threading.Event
+    the test only sets after the assertion, so `_fetch_meta` can only
+    have returned the first addon's result without ever waiting on the
+    second - deterministic proof of preference, not a race against a
+    real sleep.
     """
     ctx = load_views()
     views = ctx.views
@@ -452,18 +446,20 @@ def test_fetch_meta_prefers_earlier_addon_when_it_answers_at_least_as_fast(load_
         'transportUrl': 't-second',
         'manifest': {'id': 'org.second', 'resources': ['meta'], 'types': ['series'], 'idPrefixes': ['tt']},
     }
+    second_gate = threading.Event()  # deliberately not set yet: t-second must not be allowed to answer
     client = FakeAddonClient(
         meta_results={
             't-first': {'id': 'tt1', 'name': 'First Wins', 'type': 'series'},
             't-second': {'id': 'tt1', 'name': 'Second Loses', 'type': 'series'},
         },
-        delays={'t-second': 0.3},
+        gates={'t-second': second_gate},
     )
     _wire_data_layer(views, FakeStore(addons=[descriptor_first, descriptor_second]), client)
 
     result = views._fetch_meta('series', 'tt1')
 
     assert result['name'] == 'First Wins'
+    second_gate.set()  # release the still-blocked background worker thread
 
 
 def test_fetch_meta_cache_hit_skips_addon_fanout(load_views, tmp_path):
@@ -1252,6 +1248,33 @@ def test_sync_addons_now_success_notifies_synced(load_views):
     assert ctx.env.notifications[-1][1] == 'STR30034'
 
 
+def test_sync_addons_now_strips_local_disabled_flag_before_push(load_views):
+    """`flags.disabled` is Rivulet's own local-only presentation bit (see
+    the `flags` docstring at the top of lib/store.py) - never part of the
+    Stremio addon-collection schema. Pushing it as-is would leak a
+    purely local "hidden in this install" toggle into the account, so
+    every other Stremio client syncing that account would see the addon
+    vanish too. The pushed payload must have it removed while the
+    on-disk store descriptor (and its `flags` dict) is left untouched."""
+    ctx = load_views()
+    views = ctx.views
+    auth = {'authKey': 'abc123'}
+    descriptor = {'transportUrl': 't1', 'flags': {'disabled': True, 'protected': True}}
+    store = FakeStore(addons=[descriptor], auth=auth)
+    api = FakeStremioAPI()
+    _wire_data_layer(views, store, FakeAddonClient())
+    _wire_api(views, api)
+
+    views.sync_addons_now()
+
+    assert api.addon_collection_set_calls == [
+        (auth['authKey'], [{'transportUrl': 't1', 'flags': {'protected': True}}]),
+    ]
+    # The stored descriptor itself was never mutated.
+    assert store.get_addons() == [descriptor]
+    assert descriptor['flags'] == {'disabled': True, 'protected': True}
+
+
 def test_sync_addons_now_failure_notifies_failed(load_views):
     ctx = load_views()
     views = ctx.views
@@ -1332,6 +1355,59 @@ def test_refresh_addon_manifests_keeps_cached_manifest_on_fetch_failure_and_cont
     assert len(store.update_addons_calls) == 1
 
 
+def test_map_addons_returns_none_for_a_straggler_past_the_soft_deadline(load_views, monkeypatch):
+    """PS-1 regression: `_map_addons()` used to fan out via
+    `ThreadPoolExecutor.map()`, which blocks until every item finishes -
+    one addon stuck anywhere inside its own 15s `AddonClient` timeout
+    blanked the whole render even though the other addon had already
+    answered. `t-slow` is gated on a threading.Event the test never sets
+    before the assertion, so if `_map_addons` still returns promptly,
+    that proves it stopped waiting at the soft deadline instead of
+    joining every worker - `_SOFT_DEADLINE_S` is patched to a small
+    value so the test doesn't actually wait 4 real seconds.
+    """
+    ctx = load_views()
+    views = ctx.views
+    monkeypatch.setattr(views, '_SOFT_DEADLINE_S', 0.05)
+    slow_gate = threading.Event()  # deliberately never set: t-slow must not be allowed to answer
+    client = FakeAddonClient(gates={'t-slow': slow_gate})
+
+    def _fetch(transport_url):
+        client.meta(transport_url, 'series', 'tt1')
+        return 'answered:%s' % transport_url
+
+    results = views._map_addons(_fetch, ['t-fast', 't-slow'])
+
+    assert results[0] == 'answered:t-fast'
+    assert results[1] is None  # abandoned past the soft deadline, never joined
+    slow_gate.set()  # release the still-blocked background worker thread
+
+
+def test_refresh_addon_manifests_logs_and_continues_on_concurrent_update(load_views):
+    """SP-4 regression: `_refresh_addon_manifests()` was the only
+    `store.update_addons()` call site with no `ConcurrentUpdateError`
+    handling - a raw `default.py` process racing this refresh would
+    crash the whole Home render instead of being logged and skipped like
+    every other best-effort update site (`login()`'s merge, etc.)."""
+    ctx = load_views()
+    views = ctx.views
+    transport = 'https://a.example/manifest.json'
+    descriptor = {'transportUrl': transport, 'manifest': {'id': 'org.a', 'version': '1.0.0'}, 'flags': {}}
+    store = FakeStore(addons=[descriptor])
+    client = FakeAddonClient(manifest_results={transport: {'id': 'org.a', 'version': '2.0.0'}})
+
+    from lib.store import ConcurrentUpdateError
+
+    def _raise(transform, max_attempts=3):
+        raise ConcurrentUpdateError('addons.json kept changing')
+
+    store.update_addons = _raise
+
+    views._refresh_addon_manifests(store, client)  # must not raise
+
+    assert store.get_addons()[0]['manifest']['version'] == '1.0.0'  # unchanged: write was skipped
+
+
 def test_sync_addons_now_refreshes_manifests_before_pushing_to_account(load_views):
     """sync_addons_now() must refresh installed addons' cached manifests
     before pushing the (now up-to-date) local collection to the account -
@@ -1368,16 +1444,7 @@ def test_sync_addons_now_refreshes_manifests_before_pushing_to_account(load_view
     assert api.addon_collection_set_calls[0][1][0]['manifest'] == new_manifest
 
 def _stub_confirm(monkeypatch, ctx, answer, capture=None):
-    """Patches `lib.ui.dialogs.confirm` directly (already exhaustively
-    covered by tests/test_dialogs.py) rather than driving a real
-    `doModal()` - this suite only needs to prove `logout()` passes the
-    right heading/body/labels and reacts correctly to the result."""
-    def _confirm(heading, body, yeslabel, nolabel):
-        if capture is not None:
-            capture.append((heading, body, yeslabel, nolabel))
-        return answer
-
-    monkeypatch.setattr(ctx.dialogs, 'confirm', _confirm)
+    stub_confirm(monkeypatch, ctx, answer, capture=capture)
 
 
 def test_logout_without_auth_is_a_noop(load_views):

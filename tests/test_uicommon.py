@@ -61,56 +61,6 @@ def load_uicommon():
 
 
 # ---------------------------------------------------------------------------
-# setting_bool() / setting_int() -- thin ADDON-bound wrappers delegating to
-# the pure lib.settings helpers also used by ServiceMonitor._refresh() in
-# lib.service_runner (see tests/test_service_runner.py for the shared
-# parsing behavior's own edge-case coverage); these prove the delegation
-# itself reproduces the same missing/malformed/mixed-case/zero/negative/
-# minimum-clamped results through compat's real ADDON instance.
-# ---------------------------------------------------------------------------
-
-
-def test_setting_bool_missing_key_returns_default(load_uicommon):
-    ctx = load_uicommon()
-    assert ctx.compat.setting_bool('missing', True) is True
-    assert ctx.compat.setting_bool('missing', False) is False
-
-
-def test_setting_bool_malformed_value_returns_default(load_uicommon):
-    ctx = load_uicommon()
-    ctx.compat.ADDON.settings['flag'] = 'not-a-bool'
-    assert ctx.compat.setting_bool('flag', True) is True
-
-
-@pytest.mark.parametrize('raw,expected', [
-    ('TRUE', True), ('YES', True), ('On', True),
-    ('FALSE', False), ('No', False), ('OFF', False),
-])
-def test_setting_bool_parses_mixed_case(load_uicommon, raw, expected):
-    ctx = load_uicommon()
-    ctx.compat.ADDON.settings['flag'] = raw
-    assert ctx.compat.setting_bool('flag', not expected) is expected
-
-
-def test_setting_int_malformed_value_returns_default(load_uicommon):
-    ctx = load_uicommon()
-    ctx.compat.ADDON.settings['n'] = 'nope'
-    assert ctx.compat.setting_int('n', 7) == 7
-
-
-def test_setting_int_zero_is_not_treated_as_missing(load_uicommon):
-    ctx = load_uicommon()
-    ctx.compat.ADDON.settings['n'] = '0'
-    assert ctx.compat.setting_int('n', 99) == 0
-
-
-def test_setting_int_negative_value_clamped_up_to_minimum(load_uicommon):
-    ctx = load_uicommon()
-    ctx.compat.ADDON.settings['n'] = '-5'
-    assert ctx.compat.setting_int('n', 0, minimum=1) == 1
-
-
-# ---------------------------------------------------------------------------
 # dismiss_busy_dialog()
 # ---------------------------------------------------------------------------
 
@@ -433,4 +383,109 @@ def test_basewindow_onaction_non_back_action_does_not_close(load_uicommon):
 
     assert win.closed is False
 
+
+# ---------------------------------------------------------------------------
+# escape_label()
+# ---------------------------------------------------------------------------
+
+
+def test_escape_label_is_re_exported_from_streaminfo(load_uicommon):
+    """The pure implementation lives in `lib.stremio.streaminfo` (Kodi-
+    independent - see that module's docstring) since `format_label()`/
+    `format_details()` there need it too; `uicommon.escape_label` is
+    just that same function re-exported so every existing call site
+    keeps working unchanged. Full behavioural coverage (tag/`$INFO[...]`
+    stripping, non-str input, ...) lives in tests/test_streaminfo.py."""
+    from lib.stremio.streaminfo import escape_label as streaminfo_escape_label
+
+    ctx = load_uicommon()
+
+    assert ctx.uicommon.escape_label is streaminfo_escape_label
+
+
+# ---------------------------------------------------------------------------
+# fetch_and_validate_addon()
+# ---------------------------------------------------------------------------
+
+
+class _FakeAddonClient:
+    def __init__(self, manifest=None, error=None):
+        self._manifest = manifest
+        self._error = error
+        self.manifest_calls = []
+
+    def manifest(self, url):
+        self.manifest_calls.append(url)
+        if self._error is not None:
+            raise self._error
+        return self._manifest
+
+
+def test_fetch_and_validate_addon_returns_manifest_on_success(load_uicommon):
+    ctx = load_uicommon()
+    client = _FakeAddonClient(manifest={'id': 'org.stremio.cinemeta', 'name': 'Cinemeta'})
+
+    manifest, transport_url, error_id = ctx.uicommon.fetch_and_validate_addon(
+        client, 'https://example.com/manifest.json'
+    )
+
+    assert manifest == {'id': 'org.stremio.cinemeta', 'name': 'Cinemeta'}
+    assert transport_url == 'https://example.com/manifest.json'
+    assert error_id is None
+    assert client.manifest_calls == ['https://example.com/manifest.json']
+
+
+def test_fetch_and_validate_addon_rejects_invalid_transport_url(load_uicommon):
+    ctx = load_uicommon()
+    client = _FakeAddonClient(manifest={'id': 'x'})
+
+    manifest, transport_url, error_id = ctx.uicommon.fetch_and_validate_addon(
+        client, 'ftp://example.com/manifest.json'
+    )
+
+    assert manifest is None
+    assert transport_url is None
+    assert error_id == 30014
+    assert client.manifest_calls == []  # never reached the network for an invalid url
+
+
+def test_fetch_and_validate_addon_returns_error_when_manifest_fetch_fails(load_uicommon):
+    from lib.stremio.addons import AddonError
+
+    ctx = load_uicommon()
+    client = _FakeAddonClient(error=AddonError('boom'))
+
+    manifest, transport_url, error_id = ctx.uicommon.fetch_and_validate_addon(
+        client, 'https://example.com/manifest.json'
+    )
+
+    assert manifest is None
+    assert transport_url is None
+    assert error_id == 30014
+
+
+def test_fetch_and_validate_addon_rejects_manifest_missing_id(load_uicommon):
+    ctx = load_uicommon()
+    client = _FakeAddonClient(manifest={'name': 'No id here'})
+
+    manifest, transport_url, error_id = ctx.uicommon.fetch_and_validate_addon(
+        client, 'https://example.com/manifest.json'
+    )
+
+    assert manifest is None
+    assert transport_url is None
+    assert error_id == 30014
+
+
+def test_fetch_and_validate_addon_rejects_falsy_manifest(load_uicommon):
+    ctx = load_uicommon()
+    client = _FakeAddonClient(manifest=None)
+
+    manifest, transport_url, error_id = ctx.uicommon.fetch_and_validate_addon(
+        client, 'https://example.com/manifest.json'
+    )
+
+    assert manifest is None
+    assert transport_url is None
+    assert error_id == 30014
 

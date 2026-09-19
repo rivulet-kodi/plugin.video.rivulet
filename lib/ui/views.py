@@ -16,6 +16,9 @@ longer builds any of their directory listings. What remains here is:
 - `home()`, the minimal recovery directory default.py falls back to when
   opening the custom HomeWindow itself raises.
 """
+import queue
+import threading
+import time
 from functools import wraps
 
 import xbmc
@@ -59,25 +62,90 @@ def _url_for(action, **params):
     return urlutil.url_for(router.BASE_URL, action, **params)
 
 
+#: Soft deadline (seconds) for `_map_addons()`'s fan-out: on a low-power
+#: ARM box (see serverbin.py's device notes) one dead/slow addon must
+#: never blank the whole Home screen while every other addon already
+#: answered - so results are rendered as soon as this deadline passes,
+#: with `None` standing in for whichever addons are still in flight.
+#: Abandoned stragglers keep running to completion or their own 15s
+#: AddonClient timeout in a background daemon thread nobody joins - see
+#: `_fetch_meta()`'s docstring for why raw daemon Threads are used here
+#: instead of `concurrent.futures.ThreadPoolExecutor` (its atexit join
+#: hook blocks interpreter shutdown on an in-flight worker regardless of
+#: the daemon flag).
+_SOFT_DEADLINE_S = 4.0
+
+
+def _fan_out(fn, items, max_workers):
+    """Call `fn(item)` once per item, fanned out over up to `max_workers`
+    raw daemon `threading.Thread` workers pulling from a `queue.Queue` -
+    NOT `concurrent.futures.ThreadPoolExecutor` (see `_SOFT_DEADLINE_S`'s
+    docstring for why). Returns a `queue.Queue` of `(index, result)`
+    pairs, one per item, in completion order (not input order) - callers
+    read from it directly so they can apply their own winner/deadline
+    semantics on top of the same daemon-thread fan-out.
+    """
+    work = queue.Queue()
+    for index, item in enumerate(items):
+        work.put((index, item))
+    results = queue.Queue()
+
+    def _worker():
+        while True:
+            try:
+                index, item = work.get_nowait()
+            except queue.Empty:
+                return
+            results.put((index, fn(item)))
+
+    for _ in range(min(len(items), max_workers)):
+        threading.Thread(target=_worker, daemon=True).start()
+    return results
+
+
 def _map_addons(fn, items):
     """Call `fn(item)` once per item in `items`, fanned out across a small
-    bounded thread pool instead of one call at a time, and return the
-    results in the same order as `items` - a drop-in replacement for
-    `[fn(item) for item in items]` that keeps N addons' worth of blocking
-    HTTP calls (each with its own 15s timeout) from serializing behind
-    each other. `fn` is expected to catch its own `AddonError` (log it,
-    return a falsy sentinel) so one addon's failure can never abort the
-    others - that per-addon try/except still runs, just inside whichever
-    worker thread executes it. Used by `_refresh_addon_manifests()`'s
-    per-addon manifest fan-out.
+    bounded thread pool, and return the results in the same order as
+    `items` - a drop-in replacement for `[fn(item) for item in items]`
+    that keeps N addons' worth of blocking HTTP calls (each with its own
+    15s timeout) from serializing behind each other. `fn` is expected to
+    catch its own `AddonError` (log it, return a falsy sentinel) so one
+    addon's failure can never abort the others - that per-addon
+    try/except still runs, just inside whichever worker thread executes
+    it.
+
+    Collection is bounded by `_SOFT_DEADLINE_S`, not "wait for every
+    item": Home's render used to call this (via `_refresh_addon_manifests`
+    and friends) and block on `ThreadPoolExecutor.map()`, which waits for
+    the slowest addon before yielding even the first result - one addon
+    stuck anywhere inside its own 15s `AddonClient` timeout blanked the
+    entire Home screen for up to 15s even though every other addon had
+    already answered. Past the deadline, whichever addons have not yet
+    answered are abandoned (left running in their own daemon thread, not
+    joined) and their slot in the returned list is `None` - every caller
+    of `_map_addons()` must treat a `None` entry as "this addon didn't
+    answer in time", exactly like it already treats a `None` from `fn`
+    itself failing outright.
     """
     if not items:
         return []
     if len(items) == 1:
         return [fn(items[0])]
-    from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=min(len(items), _MAX_ADDON_WORKERS)) as pool:
-        return list(pool.map(fn, items))
+    results = _fan_out(fn, items, _MAX_ADDON_WORKERS)
+    out = [None] * len(items)
+    remaining = len(items)
+    deadline = time.monotonic() + _SOFT_DEADLINE_S
+    while remaining:
+        budget = deadline - time.monotonic()
+        if budget <= 0:
+            break
+        try:
+            index, value = results.get(timeout=budget)
+        except queue.Empty:
+            break
+        out[index] = value
+        remaining -= 1
+    return out
 
 
 def _safe_listing(view):
@@ -137,9 +205,21 @@ def _fetch_meta(stype, sid, store=True, on_miss=None):
     preference is sacrificed on purpose in that case, since waiting on
     the slowest addon ahead of one that already answered is exactly the
     freeze this function exists to avoid. Addons still in flight when we
-    return are abandoned, not cancelled (Future.cancel() only works
-    before a thread starts running) - they keep running to completion or
-    their own 15s timeout in a background thread we no longer wait on.
+    return are abandoned, not joined - they keep running to completion or
+    their own 15s timeout in a background daemon thread we no longer
+    wait on.
+
+    Fan-out uses raw `threading.Thread(daemon=True)` workers pulling from
+    a `queue.Queue`, NOT `concurrent.futures.ThreadPoolExecutor`:
+    `concurrent.futures.thread` registers an atexit hook that JOINS every
+    worker at interpreter shutdown regardless of its daemon flag.
+    Measured directly (see lib/ui/streamswindow.py's
+    `_start_stream_fetch_workers` docstring for the same finding in the
+    streams fan-out): a single addon still inside its own 15s timeout
+    blocked plugin-process exit for a full 6.0s, because
+    `pool.shutdown(wait=False)` only stops the pool itself from waiting,
+    not the interpreter's own atexit join. A raw daemon thread has no
+    such hook: the interpreter abandons it outright at exit.
 
     A short-TTL disk cache (`lib.ui.metacache`) sits in front of the
     fan-out: DetailWindow, infowindow's enrichment, and any other custom
@@ -198,33 +278,35 @@ def _fetch_meta(stype, sid, store=True, on_miss=None):
     if len(targets) == 1:
         result = _fetch_one(targets[0])
     else:
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        pool = ThreadPoolExecutor(max_workers=min(len(targets), _MAX_ADDON_WORKERS))
-        futures = []
+        work = queue.Queue()
+        for index, descriptor in enumerate(targets):
+            work.put((index, descriptor))
+        results = queue.Queue()
+
+        def _worker():
+            while True:
+                try:
+                    index, descriptor = work.get_nowait()
+                except queue.Empty:
+                    return
+                results.put((index, _fetch_one(descriptor)))
+
+        for _ in range(min(len(targets), _MAX_ADDON_WORKERS)):
+            threading.Thread(target=_worker, daemon=True).start()
+
+        finished = {}
         result = None
-        try:
-            futures = [pool.submit(_fetch_one, descriptor) for descriptor in targets]
-            index_of = {future: index for index, future in enumerate(futures)}
-            for future in as_completed(futures):
-                if future.result() is None:
-                    continue
-                winner = future
-                # Only promotes to a future that has *already* finished (a
-                # non-blocking .done() check) - never waits on one still running.
-                for other in futures:
-                    if (index_of[other] < index_of[winner] and other.done()
-                            and other.result() is not None):
-                        winner = other
-                result = winner.result()
+        while len(finished) < len(targets):
+            index, one = results.get()
+            finished[index] = one
+            if one is not None:
+                # Only consults results already in hand - never blocks on a
+                # still-running addon - then picks the earliest-index winner
+                # among those, preserving list-order preference whenever the
+                # preferred addon is at least as fast as the others.
+                winning_index = min(i for i, r in finished.items() if r is not None)
+                result = finished[winning_index]
                 break
-        finally:
-            # Drop any addon call that never got a worker thread (only
-            # possible when len(targets) > _MAX_ADDON_WORKERS); already-running
-            # calls are left to finish in the background. wait=False so this
-            # cleanup never blocks the caller on a straggler.
-            for future in futures:
-                future.cancel()
-            pool.shutdown(wait=False)
 
     if store and cache_dir is not None and result:
         from lib.ui.metacache import store_cached_meta
@@ -433,14 +515,30 @@ def _sync_addons_if_logged_in(store, notify_success=False):
     retrying the same dead key can never succeed; the next user-facing
     screen (LibraryWindow, AddonsWindow, Settings > Account) then
     correctly shows "not logged in" instead of repeating this failure
-    forever."""
+    forever.
+
+    `flags.disabled` is stripped from each descriptor before the push -
+    it is Rivulet's own local-only presentation bit (see the `flags`
+    docstring at the top of lib/store.py), never part of the Stremio
+    addon-collection schema. Pushing it as-is would leak a purely local
+    "hidden in this install" toggle into the account, so every other
+    Stremio client syncing that account would see the addon vanish too."""
     auth = store.get_auth()
     if not auth:
         if notify_success:
             notify(L(30020))
         return False
     try:
-        StremioAPI().addon_collection_set(auth.get('authKey'), store.get_addons())
+        payload = []
+        for descriptor in store.get_addons():
+            flags = descriptor.get('flags')
+            if flags and 'disabled' in flags:
+                descriptor = dict(descriptor)
+                flags = dict(flags)
+                del flags['disabled']
+                descriptor['flags'] = flags
+            payload.append(descriptor)
+        StremioAPI().addon_collection_set(auth.get('authKey'), payload)
     except ApiError as exc:
         log('views._sync_addons_if_logged_in: %r' % (exc,), xbmc.LOGERROR)
         if exc.is_auth_error:
@@ -503,7 +601,12 @@ def _refresh_addon_manifests(store, client):
             for addon in addons
         ]
 
-    store.update_addons(_apply)
+    from lib.store import ConcurrentUpdateError
+
+    try:
+        store.update_addons(_apply)
+    except ConcurrentUpdateError as exc:
+        log('views._refresh_addon_manifests: update_addons failed: %r' % (exc,), xbmc.LOGWARNING)
 
 
 # --------------------------------------------------------------------------

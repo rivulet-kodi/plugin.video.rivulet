@@ -141,9 +141,10 @@ class CatalogPickerWindow(BaseWindow):
 
     def _make_item(self, index, manifest, catalog):
         from lib.ui.compat import L
+        from lib.ui.uicommon import escape_label
 
-        addon_name = manifest.get('name', '?')
-        catalog_name = catalog.get('name') or catalog.get('id')
+        addon_name = escape_label(manifest.get('name', '?'))
+        catalog_name = escape_label(catalog.get('name') or catalog.get('id'))
         catalog_type = catalog.get('type')
         # The type is already named by the heading on a filtered screen,
         # so repeating it per row just crowds out the addon name.
@@ -281,11 +282,12 @@ class CatalogPickerWindow(BaseWindow):
         import xbmc
 
         from lib.ui.compat import L, log, notify
+        from lib.ui.uicommon import escape_label
         from lib.ui.views import iter_catalog_pages
 
         ctype = catalog.get('type')
-        catalog_name = catalog.get('name') or catalog.get('id')
-        addon_name = manifest.get('name')
+        catalog_name = escape_label(catalog.get('name') or catalog.get('id'))
+        addon_name = escape_label(manifest.get('name'))
         # "ADDON · CATALOG" when both are on hand, matching the design's
         # breadcrumb (e.g. "CINEMETA · POPULAR MOVIES") - otherwise just
         # the catalog name, which is always present.

@@ -248,6 +248,39 @@ def test_collect_subtitles_drops_entries_without_a_usable_url():
     assert result == [{"id": "good", "lang": "en", "url": "https://a.example/good.srt"}]
 
 
+def test_collect_subtitles_drops_non_string_url_without_raising():
+    """A non-str `url` (e.g. an addon returning a dict/int) must be
+    dropped before the `url in seen_urls` membership check, which would
+    otherwise still work for an unhashable value but must never let a
+    non-str url reach `ListItem.setSubtitles()` (TB-8)."""
+    addon = _descriptor(MANIFEST_URL_A, _manifest(["subtitles"]))
+    client = FakeSubtitleClient({
+        MANIFEST_URL_A: [
+            {"id": "bad", "lang": "en", "url": 12345},
+            {"id": "good", "lang": "en", "url": "https://a.example/good.srt"},
+        ],
+    })
+
+    result = collect_subtitles(client, [addon], "movie", "tt1234567")
+
+    assert result == [{"id": "good", "lang": "en", "url": "https://a.example/good.srt"}]
+
+
+def test_collect_subtitles_drops_non_http_scheme_urls():
+    addon = _descriptor(MANIFEST_URL_A, _manifest(["subtitles"]))
+    client = FakeSubtitleClient({
+        MANIFEST_URL_A: [
+            {"id": "ftp", "lang": "en", "url": "ftp://a.example/bad.srt"},
+            {"id": "local", "lang": "en", "url": "file:///etc/passwd"},
+            {"id": "good", "lang": "en", "url": "https://a.example/good.srt"},
+        ],
+    })
+
+    result = collect_subtitles(client, [addon], "movie", "tt1234567")
+
+    assert result == [{"id": "good", "lang": "en", "url": "https://a.example/good.srt"}]
+
+
 def test_collect_subtitles_defaults_missing_or_falsy_id_to_url():
     addon = _descriptor(MANIFEST_URL_A, _manifest(["subtitles"]))
     url_missing = "https://a.example/no-id-key.srt"

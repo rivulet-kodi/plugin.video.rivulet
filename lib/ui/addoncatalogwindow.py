@@ -261,6 +261,7 @@ class AddonCatalogWindow(BaseWindow):
         queues a fetch for it - see the module docstring."""
         from lib.ui.addonswindow import _clean_description
         from lib.ui.compat import L
+        from lib.ui.uicommon import escape_label
 
         items = []
         for index in indices:
@@ -270,7 +271,7 @@ class AddonCatalogWindow(BaseWindow):
             state = self.states[index]
             if state in _STATE_SUFFIX_STRING_IDS:
                 label += '  \u00b7  ' + L(_STATE_SUFFIX_STRING_IDS[state])
-            item = xbmcgui.ListItem(label=label, label2=_clean_description(manifest.get('description', '')))
+            item = xbmcgui.ListItem(label=escape_label(label), label2=escape_label(_clean_description(manifest.get('description', ''))))
             item.setProperty('position', str(index))
             logo = (manifest.get('logo') or '').strip()
             if logo:
@@ -389,13 +390,17 @@ class AddonCatalogWindow(BaseWindow):
                         return  # a newer render/close made this batch stale
                     self._pending_pages.append(list(page))
                 xbmc.executebuiltin('Action(noop)')
-        except Exception:
+        except Exception as exc:
             # Daemon thread with nobody to catch for it; a failed walk
-            # must never take the window down.
+            # must never take the window down - but a paging failure is
+            # still worth a LOGWARNING (not LOGDEBUG): it means later
+            # pages silently never appear, which otherwise looks like a
+            # short catalog rather than a bug.
             try:
+                from lib.stremio.addons import addon_error_detail
                 from lib.ui.compat import log
 
-                log('addoncatalogwindow: catalog paging worker failed', xbmc.LOGDEBUG)
+                log('addoncatalogwindow: catalog paging worker failed: %s' % addon_error_detail(exc), xbmc.LOGWARNING)
             except Exception:
                 pass
 
@@ -482,9 +487,10 @@ class AddonCatalogWindow(BaseWindow):
             self._configure(descriptor)
         elif state == STATE_INSTALLED:
             from lib.ui.compat import L, notify
+            from lib.ui.uicommon import escape_label
 
             manifest = descriptor.get('manifest') or {}
-            notify(L(30338) % manifest.get('name', '?'))
+            notify(L(30338) % escape_label(manifest.get('name', '?')))
         else:
             self._install_from_catalog(descriptor)
 
@@ -521,6 +527,7 @@ class AddonCatalogWindow(BaseWindow):
         from lib.stremio.addons import AddonError, safe_url_for_log, validate_transport_url
         from lib.ui import dialogs
         from lib.ui.compat import L, log, notify
+        from lib.ui.uicommon import escape_label
 
         manifest = descriptor.get('manifest') or {}
         raw_url = descriptor.get('transportUrl')
@@ -534,7 +541,7 @@ class AddonCatalogWindow(BaseWindow):
             notify(L(30014))
             return
 
-        if not dialogs.confirm(L(30342), manifest.get('name', '?'), xbmc.getLocalizedString(107), xbmc.getLocalizedString(106)):
+        if not dialogs.confirm(L(30342), escape_label(manifest.get('name', '?')), xbmc.getLocalizedString(107), xbmc.getLocalizedString(106)):
             return
 
         from lib.ui.views import _sync_addons_if_logged_in
@@ -553,41 +560,19 @@ class AddonCatalogWindow(BaseWindow):
         (configured) manifest URL back to Rivulet. Rendering that HTML
         page in-app is impossible - `WindowXMLDialog` has no browser -
         so this never attempts to fetch or display it, only its URL."""
-        import xbmc
-
-        from lib.stremio.addons import (
-            AddonError,
-            addon_error_detail,
-            safe_url_for_log,
-            validate_transport_url,
-        )
-        from lib.ui.compat import L, log, notify
+        from lib.ui.compat import L, notify
+        from lib.ui.uicommon import escape_label, fetch_and_validate_addon
 
         manifest = descriptor.get('manifest') or {}
         transport_url = descriptor.get('transportUrl') or ''
-        heading = L(30341) % (manifest.get('name', '?'), _configure_url(transport_url))
+        heading = L(30341) % (escape_label(manifest.get('name', '?')), _configure_url(transport_url))
         pasted_url = xbmcgui.Dialog().input(heading)
         if not pasted_url:
             return
 
-        try:
-            pasted_transport_url = validate_transport_url(pasted_url)
-        except AddonError as exc:
-            log('addoncatalogwindow: invalid pasted url %s: %s' % (safe_url_for_log(pasted_url), exc), xbmc.LOGERROR)
-            notify(L(30014))
-            return
-
-        try:
-            configured_manifest = get_client().manifest(pasted_transport_url)
-        except AddonError as exc:
-            log('addoncatalogwindow: manifest fetch failed for %s: %s' % (
-                safe_url_for_log(pasted_transport_url), addon_error_detail(exc),
-            ), xbmc.LOGERROR)
-            notify(L(30014))
-            return
-
-        if not configured_manifest or not configured_manifest.get('id'):
-            notify(L(30014))
+        configured_manifest, pasted_transport_url, error_id = fetch_and_validate_addon(get_client(), pasted_url)
+        if error_id:
+            notify(L(error_id))
             return
 
         from lib.ui.views import _sync_addons_if_logged_in

@@ -65,6 +65,8 @@ import binascii
 import json
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
+from lib.stremio.addons import _request_error_category, safe_url_for_log
+
 #: `requests` costs ~35ms and ~200 transitive modules to import - resolved
 #: lazily on first `ServerClient.__init__()` call via `_ensure_requests()`
 #: rather than at module import time, so importing this module's pure
@@ -129,20 +131,42 @@ _ARCHIVE_KIND_BY_KEY = {
 #: Schemes `resolve_stream()` accepts for a Stream's own `url` field once
 #: `magnet:`/`ftp(s):` have been special-cased into a different URL
 #: (see the module docstring) - the current, intended network-media
-#: families Kodi's player can open directly. `_validate_direct_url()`
-#: rejects everything else, including Kodi control/local schemes
-#: (`plugin`, `script`, `special`, `file`, ...) a rogue addon could
-#: otherwise smuggle into an untrusted Stream dict.
+#: families Kodi's player can open directly. `smb`/`nfs` are
+#: deliberately excluded even though Kodi's VFS can mount them: a
+#: Stremio Stream is untrusted addon data, and a LAN file share is a
+#: fundamentally different trust boundary than a network video stream -
+#: an addon must never be able to steer Kodi's player at an arbitrary
+#: SMB/NFS path on the user's network. `_validate_direct_url()` rejects
+#: everything else too, including Kodi control/local schemes (`plugin`,
+#: `script`, `special`, `file`, ...) a rogue addon could otherwise
+#: smuggle into an untrusted Stream dict.
 _DIRECT_URL_SCHEMES = frozenset({
     'http', 'https',
     'ftp', 'ftps',
-    'smb',
-    'nfs',
     'rtmp', 'rtmps',
     'rtsp',
     'rtp',
     'udp',
 })
+
+#: honey: caps rarUrls/zipUrls/.../nzbUrls entry counts before
+#: `_lz_query_url()` runs lzstring's per-char Python compressor over the
+#: JSON body on the UI thread - an addon returning a pathological
+#: thousands-of-mirrors list would otherwise freeze Kodi's UI building a
+#: `/…/create` request nothing sane needs more than a handful of mirrors
+#: for.
+_MAX_ARCHIVE_URL_ENTRIES = 32
+
+
+def _redact_error_url(base_url, url):
+    """`url` with its `base_url` prefix (the free-text server_url setting,
+    which may carry `user:pass@` userinfo) replaced by
+    `safe_url_for_log(base_url)` - so a `ServerError` message never echoes
+    credentials a user pasted into the streaming-server URL setting. The
+    path/query suffix is kept (it never carries userinfo)."""
+    safe_base = safe_url_for_log(base_url)
+    suffix = url[len(base_url):] if url.startswith(base_url) else url
+    return safe_base + suffix
 
 
 def normalize_info_hash(value):
@@ -374,11 +398,11 @@ class ServerClient:
             resp = self.session.get(url, timeout=timeout)
             resp.raise_for_status()
         except requests.RequestException as exc:
-            raise ServerError('GET %s failed: %s' % (url, exc))
+            raise ServerError('GET %s failed: %s' % (_redact_error_url(self.base_url, url), _request_error_category(exc)))
         try:
             return resp.json()
         except ValueError as exc:
-            raise ServerError('GET %s returned invalid JSON: %s' % (url, exc))
+            raise ServerError('GET %s returned invalid JSON: %s' % (_redact_error_url(self.base_url, url), exc))
 
     def file_stats(self, info_hash, file_idx):
         """GET `{base}/{infoHash}/{fileIdx}/stats.json` - per-file buffer stats.
@@ -399,11 +423,11 @@ class ServerClient:
             resp = self.session.get(url, timeout=10)
             resp.raise_for_status()
         except requests.RequestException as exc:
-            raise ServerError('GET %s failed: %s' % (url, exc))
+            raise ServerError('GET %s failed: %s' % (_redact_error_url(self.base_url, url), _request_error_category(exc)))
         try:
             return resp.json()
         except ValueError as exc:
-            raise ServerError('GET %s returned invalid JSON: %s' % (url, exc))
+            raise ServerError('GET %s returned invalid JSON: %s' % (_redact_error_url(self.base_url, url), exc))
 
     def iter_front(self, info_hash, file_idx, want_bytes, chunk_size=16384, timeout=60):
         """Stream the FRONT (offset 0) of a torrent file, yielding each
@@ -440,7 +464,7 @@ class ServerClient:
             resp = self.session.get(url, headers=headers, stream=True, timeout=timeout)
             resp.raise_for_status()
         except requests.RequestException as exc:
-            raise ServerError('GET %s failed: %s' % (url, exc))
+            raise ServerError('GET %s failed: %s' % (_redact_error_url(self.base_url, url), _request_error_category(exc)))
         got = 0
         try:
             for chunk in resp.iter_content(chunk_size=chunk_size):
@@ -452,7 +476,7 @@ class ServerClient:
                     break
         except requests.RequestException as exc:
             if got == 0:
-                raise ServerError('GET %s failed mid-stream: %s' % (url, exc))
+                raise ServerError('GET %s failed mid-stream: %s' % (_redact_error_url(self.base_url, url), _request_error_category(exc)))
             return
         finally:
             try:
@@ -516,7 +540,7 @@ class ServerClient:
         to build `/ftp/{filename}` from).
         """
         entries = []
-        for raw in raw_urls or []:
+        for raw in (raw_urls or [])[:_MAX_ARCHIVE_URL_ENTRIES]:
             if not raw or not isinstance(raw, (list, tuple)) or not raw[0]:
                 continue
             url = raw[0]
@@ -571,7 +595,7 @@ class ServerClient:
             body['nzbUrl'] = single_url
 
         multi_urls = []
-        for nzb_url in stream.get('nzbUrls') or []:
+        for nzb_url in (stream.get('nzbUrls') or [])[:_MAX_ARCHIVE_URL_ENTRIES]:
             if not isinstance(nzb_url, str) or not nzb_url:
                 continue
             if _is_ftp_url(nzb_url):

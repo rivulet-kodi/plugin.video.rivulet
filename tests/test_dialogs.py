@@ -152,6 +152,23 @@ def test_progress_create_shows_without_blocking(load_dialogs):
     assert progress._window.shown is True
     assert progress._window.modal_calls == 0
 
+def test_progress_update_tolerates_setpercent_raising_on_a_broken_skin_control(load_dialogs, monkeypatch):
+    """`_Panel.percent()`'s try/except (guarding `setPercent()` the same
+    way `_set_label()` guards `setLabel()`) had no test exercising the
+    raising branch - only the happy path was covered."""
+    ctx = load_dialogs()
+    d = ctx.dialogs
+    logged = []
+    monkeypatch.setattr(d, 'log', lambda msg, level=None: logged.append(msg))
+    progress = d.RivuletProgress()
+    progress.create(heading='Downloading')
+    bar = progress._window.getControl(d.PROGRESS_BAR)
+    monkeypatch.setattr(bar, 'setPercent', lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError('boom')))
+
+    progress.update(42)  # must not raise
+
+    assert any('setPercent' in msg for msg in logged)
+
 
 # ---------------------------------------------------------------------------
 # RivuletBusy

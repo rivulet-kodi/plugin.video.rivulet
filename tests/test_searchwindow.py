@@ -45,6 +45,7 @@ import contextlib
 import pytest
 
 from lib.stremio.addons import AddonError
+from tests.conftest import make_window, stub_confirm, wire_client, wire_store
 from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
@@ -127,15 +128,15 @@ def load_searchwindow():
 
 
 def _make_window(searchwindow_mod):
-    return searchwindow_mod.SearchWindow('SearchWindow.xml', '/addon/path', 'Default', '1080i')
+    return make_window(searchwindow_mod.SearchWindow)
 
 
 def _wire_store(searchwindow_mod, store):
-    searchwindow_mod.get_store = lambda: store
+    wire_store(searchwindow_mod, store)
 
 
 def _wire_client(searchwindow_mod, client):
-    searchwindow_mod.get_client = lambda: client
+    wire_client(searchwindow_mod, client)
 
 
 def _search_catalog_descriptor(transport, name='Addon'):
@@ -788,17 +789,7 @@ def test_run_search_coverflow_open_failure_is_logged_notified_and_does_not_close
 
 
 def _stub_confirm(monkeypatch, ctx, answer, capture=None):
-    """Patches `lib.ui.dialogs.confirm` directly (already exhaustively
-    covered by tests/test_dialogs.py) rather than driving a real
-    `doModal()` - this suite only needs to prove `_clear_history()`
-    passes the right heading/body/labels and reacts correctly to the
-    result."""
-    def _confirm(heading, body, yeslabel, nolabel):
-        if capture is not None:
-            capture.append((heading, body, yeslabel, nolabel))
-        return answer
-
-    monkeypatch.setattr(ctx.dialogs, 'confirm', _confirm)
+    stub_confirm(monkeypatch, ctx, answer, capture=capture)
 
 
 def test_clear_history_declined_leaves_history_untouched_and_does_not_reload(load_searchwindow, monkeypatch):

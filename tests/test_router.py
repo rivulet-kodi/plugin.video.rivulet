@@ -284,6 +284,25 @@ def test_decode_stream_valid_base64_deflate_garbage_returns_empty_dict():
     assert urlutil.decode_stream(token) == {}
 
 
+def test_decode_stream_bounds_zlib_bomb_and_returns_empty_dict():
+    """A ~1KB deflate stream of repeated bytes can inflate 1000:1; a token
+    reaches decode_stream() straight off sys.argv (a favourite/.strm/skin
+    widget URL) with no auth check, so an unbounded zlib.decompress()
+    would let one crafted URL exhaust memory on the device running Kodi
+    (TB-6). decode_stream() must bound the inflated size and reject the
+    token instead, and must do so without ever materializing the full
+    inflated payload."""
+    import time
+    import zlib as zlib_module
+
+    bomb = zlib_module.compress(b'\x00' * (2 * 1024 * 1024), 9)
+    token = base64.urlsafe_b64encode(bomb).decode('ascii')
+
+    start = time.time()
+    assert urlutil.decode_stream(token) == {}
+    assert time.time() - start < 2.0
+
+
 # ---------------------------------------------------------------------------
 # run() dispatch: directory-listing / no-arg actions
 # ---------------------------------------------------------------------------

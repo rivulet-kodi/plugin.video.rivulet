@@ -73,6 +73,7 @@ class AddonsWindow(BaseWindow):
 
     def _build_items(self):
         from lib.ui.compat import L
+        from lib.ui.uicommon import escape_label
 
         add_item = xbmcgui.ListItem(label=L(30350), label2=L(30351))
         add_item.setProperty('position', 'add')
@@ -80,10 +81,10 @@ class AddonsWindow(BaseWindow):
         for index, descriptor in enumerate(self.addons):
             manifest = descriptor.get('manifest') or {}
             flags = descriptor.get('flags') or {}
-            label = '%s  \u00b7  v%s' % (manifest.get('name', '?'), manifest.get('version', '?'))
+            label = '%s  \u00b7  v%s' % (escape_label(manifest.get('name', '?')), manifest.get('version', '?'))
             if flags.get('disabled'):
                 label += '  \u00b7  ' + L(30251)
-            item = xbmcgui.ListItem(label=label, label2=_clean_description(manifest.get('description', '')))
+            item = xbmcgui.ListItem(label=label, label2=escape_label(_clean_description(manifest.get('description', ''))))
             item.setProperty('position', str(index))
             items.append(item)
         return items
@@ -147,36 +148,16 @@ class AddonsWindow(BaseWindow):
         actions[picked]()
 
     def _install(self):
-        import xbmc
-
-        from lib.stremio.addons import (
-            AddonError,
-            addon_error_detail,
-            safe_url_for_log,
-            validate_transport_url,
-        )
-        from lib.ui.compat import L, log, notify
+        from lib.ui.compat import L, notify
+        from lib.ui.uicommon import fetch_and_validate_addon
 
         url = xbmcgui.Dialog().input(L(30010))
         if not url:
             return
 
-        try:
-            transport_url = validate_transport_url(url)
-        except AddonError as exc:
-            log('addonswindow: invalid transport url %s: %s' % (safe_url_for_log(url), exc), xbmc.LOGERROR)
-            notify(L(30014))
-            return
-
-        try:
-            manifest = get_client().manifest(transport_url)
-        except AddonError as exc:
-            log('addonswindow: manifest fetch failed for %s: %s' % (safe_url_for_log(transport_url), addon_error_detail(exc)), xbmc.LOGERROR)
-            notify(L(30014))
-            return
-
-        if not manifest or not manifest.get('id'):
-            notify(L(30014))
+        manifest, transport_url, error_string_id = fetch_and_validate_addon(get_client(), url)
+        if error_string_id is not None:
+            notify(L(error_string_id))
             return
 
         from lib.ui.views import _sync_addons_if_logged_in

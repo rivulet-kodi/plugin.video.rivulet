@@ -85,7 +85,13 @@ import xbmcgui
 from lib.stremio import streaminfo
 from lib.ui.binge import next_video, pick_binge_stream
 from lib.ui.dependencies import get_client, get_store
-from lib.ui.uicommon import BaseWindow, busy_dialog, close_windows_for_playback, open_window
+from lib.ui.uicommon import (
+    BaseWindow,
+    busy_dialog,
+    close_windows_for_playback,
+    escape_label,
+    open_window,
+)
 
 BACKGROUND = 30000
 LIST = 30002
@@ -258,6 +264,11 @@ class StreamsWindow(BaseWindow):
         #: moved and `single_provider` didn't change either -
         #: `_append_prefix_length()` compares against this to catch it.
         self._rendered_visible_pairs = []
+        #: `_row_render()`'s cache of each `info` dict's OWN
+        #: (line1, line2, properties) row material, keyed by `id(info)` -
+        #: see that method's docstring for why only `line1` (never
+        #: `line2`/`properties`) needs redoing when `include_addon` flips.
+        self._row_cache = {}
 
     def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
         """doModal() showing `pairs` (a list of `(info, stream)` as
@@ -528,27 +539,11 @@ class StreamsWindow(BaseWindow):
             if id(pair) not in kept_ids:
                 continue
             info, _stream = pair
-            # Multi-provider rows show the addon as a gray tail segment on
-            # line 1 (format_label's own include_addon=True rendering);
-            # once every pair is the SAME addon it's redundant there and
-            # surfaces once instead as the info panel's 'via <addon>' line
-            # below, so line 1 drops it (include_addon=False).
-            line1 = streaminfo.format_label(info, include_addon=not single_provider) or info.get('raw') or '?'
-            line1 = line1.replace('\r', ' ').replace('\n', ' ')
-            # Line 2 is the re-derived detail line (audio/channels,
-            # languages, bitrate, release tags, group, tracker) - see
-            # streaminfo.format_details() - never the provider name.
-            line2 = streaminfo.format_details(info).replace('\r', ' ').replace('\n', ' ')
+            line1, line2, properties = self._row_render(info, include_addon=not single_provider)
             item = xbmcgui.ListItem(line1, label2=line2)
-            # The packed label/label2 above stay the ultimate fallback
-            # StreamsWindow.xml renders when a row has no discretely
-            # parsed quality/source/addon at all (see the skin's own
-            # comment) - `stream_fields()` never replaces them, it adds
-            # the discrete per-column properties the new row layout
-            # reads via $INFO[ListItem.Property(...)].
-            properties = streaminfo.stream_fields(info)
-            properties['position'] = str(index)
-            item.setProperties(properties)
+            row_properties = dict(properties)
+            row_properties['position'] = str(index)
+            item.setProperties(row_properties)
             items.append(item)
         control = self.getControl(LIST)
         if start == 0:
@@ -583,7 +578,10 @@ class StreamsWindow(BaseWindow):
         if genres:
             lines.append(' / '.join(genres))
         if single_provider:
-            lines.append('via %s' % single_provider)
+            # single_provider is an addon-supplied name (untrusted
+            # third-party JSON) rendered straight into INFO_PANEL text -
+            # escape_label() neutralises any embedded markup first.
+            lines.append('via %s' % escape_label(single_provider))
         if matched_nothing:
             lines.append(L(_FILTERS_MATCHED_NOTHING_STRING_ID))
         elif hidden_count:
@@ -612,19 +610,74 @@ class StreamsWindow(BaseWindow):
         )
         self.getControl(CACHED_COUNT).setLabel(L(_CACHED_STRING_ID) % cached_count)
 
+    def _row_render(self, info, include_addon):
+        """Cache `info`'s own (line1, line2, properties) row material by
+        OBJECT IDENTITY across every `_rebuild_list()` call - each
+        'playback_*' filter toggle re-runs that loop for every VISIBLE
+        pair, and `streaminfo.format_details()`/`stream_fields()` never
+        depend on `include_addon` (only `format_label()`'s own gray
+        addon-segment does), so recomputing all three on every single
+        toggle was pure waste. Only `line1` is redone when
+        `include_addon` actually flips (the single-provider dedupe
+        changing display_pairs' distinct-addon count) - `line2`/
+        `properties` are computed once and kept forever.
+
+        `line2` and the plain-text `properties` values (`release`/
+        `flags`/`provider`) are addon-supplied text straight out of a
+        third-party JSON payload rendered into a label/skin property -
+        `escape_label()` neutralises any embedded `[B]`/`$INFO[...]`/...
+        markup before either reaches a control. `line1` is left as-is
+        here: `format_label()` packs its OWN intentional BBcode
+        (`[COLOR ...]`/`[B]`) around the same untrusted fragments, and
+        blanket-escaping the packed result would strip that wrapper
+        right along with it - fixing that means escaping the
+        interpolated fields inside `format_label()` itself, in
+        `lib.stremio.streaminfo` (Kodi-independent, cannot import this
+        module's `escape_label()`), not here. Its bare `raw`-text
+        fallback (no markup of its own) is escaped instead."""
+        cache = self._row_cache
+        entry = cache.get(id(info))
+        if entry is None or entry['include_addon'] != include_addon:
+            line1 = streaminfo.format_label(info, include_addon=include_addon) or escape_label(info.get('raw')) or '?'
+            line1 = line1.replace('\r', ' ').replace('\n', ' ')
+            if entry is None:
+                line2 = escape_label(streaminfo.format_details(info)).replace('\r', ' ').replace('\n', ' ')
+                properties = streaminfo.stream_fields(info)
+                properties['release'] = escape_label(properties.get('release'))
+                properties['flags'] = escape_label(properties.get('flags'))
+                properties['provider'] = escape_label(properties.get('provider'))
+                entry = {'line2': line2, 'properties': properties}
+                cache[id(info)] = entry
+            entry['include_addon'] = include_addon
+            entry['line1'] = line1
+        return entry['line1'], entry['line2'], entry['properties']
+
     def onInit(self):
         from lib.ui.compat import L, addon_fanart
+        from lib.ui.playbackmeta import resolve_art
 
         # Pick up anything open_streams() queued via set_loading()/
         # add_pairs() before doModal() actually opened this window, so
         # the ONE initial build below already reflects it.
         self._merge_pending()
 
-        art = self.art or {}
-        background = art.get('fanart') or art.get('poster') or self.poster or addon_fanart()
+        # resolve_art() folds the legacy `self.poster` kwarg into `art`'s
+        # own poster slot before running the poster/fanart/thumb fallback
+        # (down to self.meta's own poster/background/logo) every other
+        # Rivulet ListItem builder already uses, replacing this window's
+        # own hand-rolled fanart-or-poster-or chain.
+        effective_art = dict(self.art or {})
+        if not effective_art.get('poster') and self.poster:
+            effective_art['poster'] = self.poster
+        resolved_art = resolve_art(effective_art, self.meta)
+        background = resolved_art.get('fanart') or resolved_art.get('poster') or addon_fanart()
         self.getControl(BACKGROUND).setImage(background)
-        self.getControl(POSTER).setImage(art.get('poster') or self.poster or '')
-        self.getControl(HEADING).setLabel((self.heading or L(30041)).upper())
+        self.getControl(POSTER).setImage(resolved_art.get('poster') or '')
+        # self.heading carries a caller-supplied title (a Stremio
+        # catalog/meta name off an untrusted third-party addon) straight
+        # into a rendered label - escape_label() neutralises any [B]/
+        # $INFO[...]/... markup it might contain first.
+        self.getControl(HEADING).setLabel((escape_label(self.heading) or L(30041)).upper())
 
         self._rebuild_list()
         self.setFocusId(LIST)
@@ -659,7 +712,10 @@ class StreamsWindow(BaseWindow):
         # open_streams()'s own reopen loop is what brings the picker
         # back once playback actually ends.
         item_meta = {}
-        label = self.heading or (self.meta or {}).get('name') or ''
+        # self.heading/meta name are both addon-supplied text flowing
+        # into play_direct()'s OSD ListItem label - escape_label()
+        # neutralises any embedded markup before that happens.
+        label = escape_label(self.heading or (self.meta or {}).get('name') or '')
         if label:
             item_meta['label'] = label
         art = self.art or ({'poster': self.poster} if self.poster else None)
@@ -993,6 +1049,47 @@ def _await_stream_result(results):
             continue
 
 
+class _StreamAnswerConsumer:
+    """The `consume_next()` closure `_fetch_stream_pairs()` and
+    `open_streams()` used to each define verbatim - both need the exact
+    same "advance by one addon's own answer" step: block on
+    `_await_stream_result()`, fold a failing addon into `failures`
+    (`(name, reason)`, already safe-to-log per
+    `_query_addon_streams()`'s own docstring), or extend a sink list
+    with a successful one. `open_streams()`'s own `late_pairs` sink
+    needs that extend done under its `pairs_lock` (see that function's
+    own docstring on the live->snapshot race) - `_fetch_stream_pairs()`'s
+    plain `pairs` list needs no lock at all, nothing else touches it
+    concurrently, hence `lock=None` picking the unlocked path.
+    `self.consumed` is the running "how many addons have answered"
+    count both callers' `busy_dialog.update()` progress bars read;
+    calling the instance returns `None` once every addon has answered,
+    `(addon_name, addon_pairs)` otherwise - the old closures' own
+    contract, unchanged."""
+
+    def __init__(self, results, total, sink_pairs, failures, lock=None):
+        self._results = results
+        self._total = total
+        self._sink_pairs = sink_pairs
+        self._failures = failures
+        self._lock = lock
+        self.consumed = 0
+
+    def __call__(self):
+        if self.consumed >= self._total:
+            return None
+        addon_name, addon_pairs, failed, reason = _await_stream_result(self._results)
+        self.consumed += 1
+        if failed:
+            self._failures.append((addon_name, reason))
+        elif self._lock is not None:
+            with self._lock:
+                self._sink_pairs.extend(addon_pairs)
+        else:
+            self._sink_pairs.extend(addon_pairs)
+        return addon_name, addon_pairs
+
+
 def _fetch_stream_pairs(stype, sid):
     """Fetch+parse (not sort) every installed addon's streams for
     (stype, sid) - the exact aggregate pipeline `open_streams()` has
@@ -1024,25 +1121,7 @@ def _fetch_stream_pairs(stype, sid):
 
     results = _start_stream_fetch_workers(stype, sid, addons)
     total = len(addons)
-    completed = 0
-
-    def consume_next():
-        """Advance by one addon's own answer, folding its pairs/failure
-        into the running totals above (`failures` collects each failing
-        addon's own `(name, reason)` pair for `_summarize_addon_failures()`
-        below - see `_query_addon_streams()`'s docstring for why `reason`
-        is already safe to log). Returns that addon's own `(name,
-        pairs)`, or None once every addon has answered."""
-        nonlocal completed
-        if completed >= total:
-            return None
-        addon_name, addon_pairs, failed, reason = _await_stream_result(results)
-        completed += 1
-        if failed:
-            failures.append((addon_name, reason))
-        else:
-            pairs.extend(addon_pairs)
-        return addon_name, addon_pairs
+    consume_next = _StreamAnswerConsumer(results, total, pairs, failures)
 
     with busy_dialog(L(30033)) as dialog:
         while True:
@@ -1052,7 +1131,7 @@ def _fetch_stream_pairs(stype, sid):
             if result is None:
                 break
             addon_name, _addon_pairs = result
-            dialog.update(int(completed * 100 / total), L(30187) % addon_name)
+            dialog.update(int(consume_next.consumed * 100 / total), L(30187) % addon_name)
 
     if failures:
         log('streamswindow: %s' % _summarize_addon_failures(failures), xbmc.LOGWARNING)
@@ -1086,7 +1165,10 @@ def _binge_item_meta(show_name, video, art, poster, meta):
     `video`'s own heading instead of the picker's static one, since
     every auto-played episode after the first needs its own OSD title."""
     item_meta = {}
-    label = _binge_heading(show_name, video)
+    # `_binge_heading()` embeds `show_name` - a series/catalog title off
+    # an untrusted third-party addon - straight into the next episode's
+    # OSD ListItem label; escape_label() neutralises any embedded markup.
+    label = escape_label(_binge_heading(show_name, video))
     if label:
         item_meta['label'] = label
     effective_art = art or ({'poster': poster} if poster else None)
@@ -1310,25 +1392,17 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
     total = len(addons)
     pairs = []
     failures = []
-    consumed = 0
-
-    def consume_next():
-        """Advance by one addon's own answer, folding its pairs/failure
-        into the running totals above (`failures` collects each failing
-        addon's own `(name, reason)` pair for `_summarize_addon_failures()`
-        below - see `_query_addon_streams()`'s docstring for why `reason`
-        is already safe to log). Returns that addon's own `(name,
-        pairs)`, or None once every addon has answered."""
-        nonlocal consumed
-        if consumed >= total:
-            return None
-        addon_name, addon_pairs, failed, reason = _await_stream_result(results)
-        consumed += 1
-        if failed:
-            failures.append((addon_name, reason))
-        else:
-            pairs.extend(addon_pairs)
-        return addon_name, addon_pairs
+    # Guards `late_pairs` below - `consume_next` runs on `open_streams()`'s
+    # own synchronous thread until the background fan-out thread (started
+    # below as `drain_remaining`) takes over; both may otherwise call it
+    # concurrently with the moment `pairs`/`win.pairs` are read out at the
+    # live->snapshot transition further down. See the "accumulated
+    # snapshot" contract in that transition's own comment for why every
+    # addon answer must be captured under this lock, never appended
+    # straight onto a variable the main thread can rebind out from under it.
+    pairs_lock = threading.Lock()
+    late_pairs = []
+    consume_next = _StreamAnswerConsumer(results, total, late_pairs, failures, lock=pairs_lock)
 
     with busy_dialog(L(30033)) as dialog:
         while not pairs:
@@ -1338,7 +1412,9 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
             if result is None:
                 break
             addon_name, _addon_pairs = result
-            dialog.update(int(consumed * 100 / total), L(30187) % addon_name)
+            with pairs_lock:
+                pairs = list(late_pairs)
+            dialog.update(int(consume_next.consumed * 100 / total), L(30187) % addon_name)
 
     if not pairs:
         if failures:
@@ -1369,7 +1445,7 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
             if failures:
                 log('streamswindow: %s' % _summarize_addon_failures(failures), xbmc.LOGWARNING)
 
-    still_loading = consumed < total
+    still_loading = consume_next.consumed < total
     if still_loading:
         threading.Thread(target=drain_remaining, daemon=True).start()
     else:
@@ -1416,10 +1492,20 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
             # `pairs` snapshot, and stop listening for more addons. Every
             # later reopen below reuses THIS SAME list unchanged - there
             # is nothing left updating it once live is False.
+            #
+            # Read straight off `late_pairs` (under `pairs_lock`) rather
+            # than `win.pairs`: `consume_next()` may still be running on
+            # `drain_remaining()`'s background thread right up to this
+            # instant, and it is the only thing `late_pairs` is ever
+            # mutated by - so this is the one point-in-time read that
+            # can't race with it, unlike rebinding `pairs` to `win.pairs`
+            # (a name/attribute a concurrent `consume_next()` call has no
+            # reason to know just got swapped out from under it).
             stop_event.set()
             feed.stop()
             live = False
-            pairs = win.pairs
+            with pairs_lock:
+                pairs = streaminfo.sort_streams(list(late_pairs), key=sort_key)
 
         if not played:
             return False

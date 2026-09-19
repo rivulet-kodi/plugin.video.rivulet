@@ -144,6 +144,18 @@ def test_item_properties_year_prefers_release_info_over_released_date(load_infow
     assert props['year'] == '2014-2020'
 
 
+def test_item_properties_coerces_numeric_rating_and_runtime_to_str(load_infowindow):
+    """`setProperties()` requires str values, but `imdbRating`/`runtime`
+    are routinely numeric in the wild (a JSON `9.0`/`120`, not
+    `"9.0"`/`"120"`) - an untyped numeric used to reach the Kodi C++
+    boundary and raise."""
+    ctx = load_infowindow()
+    props = ctx.infowindow._item_properties({'imdbRating': 9.0, 'runtime': 120})
+    assert props['rating'] == '9.0'
+    assert props['runtime'] == '120'
+    assert props['meta_line'] == 'IMDb 9.0 · 120'
+
+
 def test_year_range_closes_open_ended_series_with_a_word(load_infowindow):
     """A still-running series arrives open-ended (`2010-`). The full
     matrix of range shapes is covered against
@@ -1337,6 +1349,9 @@ class _Store:
 
 
 def _stub_choose(monkeypatch, ctx, answers=None, capture=None):
+    # Differs from tests/conftest.py's shared stub_choose(): defaults to a
+    # single -1 (cancelled) and pops safely past exhaustion instead of
+    # raising, which every caller in this file relies on.
     """Patches `lib.ui.dialogs.choose` directly (already exhaustively
     covered by tests/test_dialogs.py) to pop successive `answers`
     (default: a single -1, i.e. cancelled), recording each

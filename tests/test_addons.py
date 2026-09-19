@@ -7,6 +7,7 @@ src/constants.rs URI_COMPONENT_ENCODE_SET (safe set: -_.!~*'()).
 import pytest
 
 from lib.stremio.addons import (
+    _MAX_RESPONSE_BYTES,
     AddonClient,
     AddonError,
     _base_type,
@@ -550,6 +551,20 @@ def test_addon_client_catalog_tolerates_missing_metas_key():
     assert metas == []
 
 
+def test_addon_client_catalog_raises_addon_error_on_list_envelope():
+    client = AddonClient()
+    client.session = FakeSession(responses=[_json_response([])])
+    with pytest.raises(AddonError):
+        client.catalog("https://addon.example", "movie", "top")
+
+
+def test_addon_client_catalog_tolerates_null_metas_key():
+    client = AddonClient()
+    client.session = FakeSession(responses=[_json_response({"metas": None})])
+    assert client.catalog("https://addon.example", "movie", "top") == []
+
+
+
 def test_addon_client_meta_unwraps_meta_key():
     client = AddonClient()
     client.session = FakeSession(
@@ -564,6 +579,13 @@ def test_addon_client_meta_tolerates_missing_meta_key():
     client.session = FakeSession(responses=[_json_response({})])
     meta = client.meta("https://addon.example", "movie", "tt1")
     assert meta is None
+
+
+def test_addon_client_meta_raises_addon_error_on_non_dict_meta_value():
+    client = AddonClient()
+    client.session = FakeSession(responses=[_json_response({"meta": "x"})])
+    with pytest.raises(AddonError):
+        client.meta("https://addon.example", "movie", "tt1")
 
 
 def test_addon_client_streams_tolerates_missing_streams_key():
@@ -623,6 +645,7 @@ def test_addon_client_raises_addon_error_on_invalid_json():
 def _json_response(data, status_code=200):
     class _Resp:
         ok = status_code < 400
+        headers = {}
 
         def __init__(self):
             self.status_code = status_code
@@ -636,6 +659,14 @@ def _json_response(data, status_code=200):
         def json(self):
             return data
 
+        def iter_content(self, chunk_size=None):
+            import json as _json
+
+            yield _json.dumps(data).encode("utf-8")
+
+        def close(self):
+            pass
+
     return _Resp()
 
 
@@ -647,12 +678,19 @@ def _invalid_json_response():
     class _Resp:
         ok = True
         status_code = 200
+        headers = {}
 
         def raise_for_status(self):
             pass
 
         def json(self):
             raise ValueError("invalid json")
+
+        def iter_content(self, chunk_size=None):
+            yield b"not valid json"
+
+        def close(self):
+            pass
 
     return _Resp()
 
@@ -849,3 +887,60 @@ def test_addon_error_detail_never_leaks_url_credentials_path_or_query():
     assert 'token@addon.example' not in detail
     assert secret_url not in detail
     assert detail == 'Exception'
+
+
+# --- _get_json response-size cap ----------------------------------------
+
+
+class _SizedResp:
+    """Stand-in for a streamed `requests.Response` with a controllable
+    `Content-Length` header and chunked body, used to prove
+    `AddonClient._get_json()` (lib/stremio/addons.py) rejects an
+    oversized addon response instead of buffering it whole - a huge
+    catalog body used to OOM this addon's process on ~1 GB-RAM ARM Kodi
+    boxes before any size check ever ran.
+    """
+
+    ok = True
+    status_code = 200
+
+    def __init__(self, chunks, content_length=None):
+        self._chunks = list(chunks)
+        self.headers = {} if content_length is None else {"Content-Length": str(content_length)}
+        self.closed = False
+
+    def raise_for_status(self):
+        pass
+
+    def iter_content(self, chunk_size=None):
+        yield from self._chunks
+
+    def close(self):
+        self.closed = True
+
+
+def test_addon_client_rejects_response_with_oversized_content_length_header():
+    client = AddonClient()
+    client.session = FakeSession(
+        responses=[_SizedResp([b"{}"], content_length=_MAX_RESPONSE_BYTES + 1)]
+    )
+    with pytest.raises(AddonError) as exc_info:
+        client.manifest(MANIFEST_URL)
+    assert exc_info.value.category == 'response too large'
+
+
+def test_addon_client_rejects_oversized_chunked_body_without_content_length():
+    oversized_chunk = b"a" * (_MAX_RESPONSE_BYTES + 1)
+    client = AddonClient()
+    client.session = FakeSession(responses=[_SizedResp([oversized_chunk])])
+    with pytest.raises(AddonError) as exc_info:
+        client.manifest(MANIFEST_URL)
+    assert exc_info.value.category == 'response too large'
+
+
+def test_addon_client_parses_normal_sized_chunked_body():
+    client = AddonClient()
+    client.session = FakeSession(
+        responses=[_SizedResp([b'{"id": "org.test"}'])]
+    )
+    assert client.manifest(MANIFEST_URL) == {"id": "org.test"}

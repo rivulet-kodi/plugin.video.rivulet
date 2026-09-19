@@ -203,6 +203,19 @@ def parse_duration_seconds(value):
     return int(match.group()) * _SECONDS_PER_MINUTE
 
 
+def episode_code(season, episode):
+    """'S01E03' - zero-padded season/episode (Specials as S00Exx). Both
+    inputs are coerced via `int()` with a 0 fallback: some Stremio
+    addons send `season`/`episode` as strings (or omit them), which
+    '%02d' formatting raises TypeError/ValueError on outright."""
+    def _int(value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+    return 'S%02dE%02d' % (_int(season), _int(episode))
+
+
 def resolve_art(art, meta):
     """Best-effort `ListItem.setArt()` payload from `item_meta['art']`
     (any subset of poster/fanart/thumb), falling back field-by-field to

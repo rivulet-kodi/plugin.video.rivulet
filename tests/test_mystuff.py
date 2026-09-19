@@ -395,7 +395,7 @@ def test_a_series_with_a_next_episode_stays_put_and_is_labelled(mystuff):
     mystuff._label_next_episodes(items)
 
     assert items[0]['band'] == mystuff.BAND_NEXT_UP
-    assert items[0]['next_label'] == 'S1E3'
+    assert items[0]['next_label'] == 'S01E03'
 
 
 # ---------------------------------------------------------------------------
@@ -436,3 +436,62 @@ def test_enrich_fetches_next_up_items_that_already_have_name_and_poster(mystuff)
 
     assert fetched == ['tt1'], 'an already-named next-up item must still be fetched for its videos'
     assert items[0].get('videos'), 'the videos list must reach the item'
+
+
+def test_enrich_tolerates_a_none_slot_from_a_timed_out_addon_call(mystuff):
+    """`views._map_addons()` returns None in place of an addon's result when
+    that call misses its 4s soft deadline. Unpacking it as `(meta,
+    was_fresh)` would crash the whole screen over one slow addon."""
+    class _Views:
+        _MAX_ADDON_WORKERS = 4
+
+        @staticmethod
+        def _map_addons(fn, items):
+            return [None for _ in items]
+
+        @staticmethod
+        def _fetch_meta(stype, sid, store=True, on_miss=None):
+            raise AssertionError('not called: _map_addons already returned the slot')
+
+    import sys
+    sys.modules['lib.ui'].views = _Views
+    mystuff.get_store = lambda: type('S', (), {'data_dir': None})()
+
+    items = [{'type': 'series', 'id': 'tt1', 'band': mystuff.BAND_NEXT_UP}]
+
+    assert mystuff._enrich(items) == []
+
+
+def test_a_series_with_a_next_episode_gets_a_zero_padded_label(mystuff):
+    """`next_label` must be zero-padded ('S01E09'), not the bare 'S1E9' -
+    see lib.ui.playbackmeta.episode_code()."""
+    items = [{
+        'band': mystuff.BAND_NEXT_UP, 'video_id': 'tt1:1:8',
+        'videos': [{'id': 'tt1:1:8', 'season': 1, 'episode': 8},
+                   {'id': 'tt1:1:9', 'season': 1, 'episode': 9}],
+    }]
+    mystuff._label_next_episodes(items)
+    assert items[0]['next_label'] == 'S01E09'
+
+
+# ---------------------------------------------------------------------------
+# _fetch_library_entries() - a datastore failure must not sink the screen
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_library_entries_returns_empty_on_api_error(mystuff):
+    """A Stremio API outage/auth hiccup must not crash "My Stuff" - the
+    local played bands still work fully offline, so a library failure is
+    logged and swallowed rather than propagated."""
+    from lib.stremio.api import ApiError
+
+    class _FailingAPI:
+        def datastore_get(self, *args, **kwargs):
+            raise ApiError('boom')
+
+    import sys
+    sys.modules['lib.stremio.api'].StremioAPI = _FailingAPI
+
+    store = type('S', (), {'get_auth': staticmethod(lambda: {'authKey': 'k'})})()
+
+    assert mystuff._fetch_library_entries(store) == []

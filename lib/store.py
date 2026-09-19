@@ -73,6 +73,7 @@ import json
 import os
 import tempfile
 import time
+import zlib
 
 ADDONS_FILENAME = "addons.json"
 AUTH_FILENAME = "auth.json"
@@ -935,11 +936,17 @@ class Store:
     def _cached_read(self, path, default):
         """Memoised ``_read_json(path, default)`` for read-only accessors.
 
-        Revalidates against a single ``os.stat()`` (comparing
-        ``st_mtime_ns`` and ``st_size``, not just mtime -- coarse mtime
-        granularity on some filesystems could otherwise miss a same-tick
-        rewrite) instead of paying a fresh ``open()``/``read()``/
-        ``json.loads()`` on every call.
+        Revalidates against ``os.stat()`` (``st_mtime_ns``, ``st_size``)
+        PLUS a ``zlib.crc32`` of the file's bytes, not just mtime/size --
+        coarse mtime granularity on some filesystems (FAT/exFAT, common
+        on the Android storage this addon targets) can report the SAME
+        ``st_mtime_ns`` for two writes within the same tick, and a
+        same-tick rewrite that happens to keep the byte count identical
+        would also alias on ``st_size`` alone, so ``(mtime_ns, size)``
+        by itself can miss a concurrent writer's change entirely. The
+        files here are at most a few hundred KB, so paying one
+        ``read()`` + crc32 per call to safely skip ``json.loads`` is
+        cheap.
 
         MUST NOT be used anywhere that needs to observe the CURRENT
         on-disk bytes on every attempt -- :meth:`update_addons`'s
@@ -954,11 +961,15 @@ class Store:
         except OSError:
             self._read_cache.pop(path, None)
             return _read_json(path, default)
-        fingerprint = (stat.st_mtime_ns, stat.st_size)
+        raw = _read_raw(path)
+        if raw is None:
+            self._read_cache.pop(path, None)
+            return default
+        fingerprint = (stat.st_mtime_ns, stat.st_size, zlib.crc32(raw.encode("utf-8")))
         cached = self._read_cache.get(path)
         if cached is not None and cached[0] == fingerprint:
             return cached[1]
-        value = _read_json(path, default)
+        value = _parse_json(raw, default)
         self._read_cache[path] = (fingerprint, value)
         return value
 
@@ -1061,21 +1072,33 @@ class Store:
             # fresh content it left behind.
 
     def install_addon(self, transport_url, manifest):
-        """Add or replace the addon descriptor for ``transport_url``.
+        """Add or update the addon descriptor for ``transport_url``.
+
+        An existing descriptor is updated in place, keeping its position
+        and ``flags`` -- only ``manifest`` is replaced. A naive
+        filter-then-append (drop the old entry, append a fresh one with
+        ``flags: {}``) silently reset flags on every reinstall/update:
+        updating a disabled addon re-enabled it, and updating a
+        protected one made it removable. A brand-new transport URL still
+        gets appended with ``flags: {}``.
 
         Safe against a concurrent ``default.py`` process modifying
         addons.json at the same time -- see :meth:`update_addons`.
         """
         def _install(addons):
-            filtered = [
-                addon
-                for addon in addons
-                if addon.get("transportUrl") != transport_url
-            ]
-            filtered.append(
-                {"transportUrl": transport_url, "manifest": manifest, "flags": {}}
-            )
-            return filtered
+            updated = []
+            found = False
+            for addon in addons:
+                if addon.get("transportUrl") == transport_url:
+                    updated.append(dict(addon, manifest=manifest))
+                    found = True
+                else:
+                    updated.append(addon)
+            if not found:
+                updated.append(
+                    {"transportUrl": transport_url, "manifest": manifest, "flags": {}}
+                )
+            return updated
 
         self.update_addons(_install)
 

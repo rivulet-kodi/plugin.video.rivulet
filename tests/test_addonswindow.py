@@ -26,6 +26,7 @@ import pytest
 
 from lib.store import ConcurrentUpdateError
 from lib.stremio.addons import AddonError
+from tests.conftest import make_window, stub_choose, stub_confirm, wire_client, wire_store
 from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
@@ -122,41 +123,23 @@ def load_addonswindow():
 
 
 def _make_window(addonswindow_mod):
-    return addonswindow_mod.AddonsWindow('AddonsWindow.xml', '/addon/path', 'Default', '1080i')
+    return make_window(addonswindow_mod.AddonsWindow)
 
 
 def _wire_store(addonswindow_mod, store):
-    addonswindow_mod.get_store = lambda: store
+    wire_store(addonswindow_mod, store)
 
 
 def _wire_client(addonswindow_mod, client):
-    addonswindow_mod.get_client = lambda: client
+    wire_client(addonswindow_mod, client)
 
 
 def _stub_confirm(monkeypatch, ctx, answer, capture=None):
-    """Patches `lib.ui.dialogs.confirm` directly (already exhaustively
-    covered by tests/test_dialogs.py) rather than driving a real
-    `doModal()` - this suite only needs to prove `_remove()` passes the
-    right heading/body/labels and reacts correctly to the result."""
-    def _confirm(heading, body, yeslabel, nolabel):
-        if capture is not None:
-            capture.append((heading, body, yeslabel, nolabel))
-        return answer
-
-    monkeypatch.setattr(ctx.dialogs, 'confirm', _confirm)
+    stub_confirm(monkeypatch, ctx, answer, capture=capture)
 
 
 def _stub_choose(monkeypatch, ctx, index, capture=None):
-    """Patches `lib.ui.dialogs.choose` directly (already exhaustively
-    covered by tests/test_dialogs.py) rather than driving a real
-    `doModal()` - this suite only needs to prove `_open_actions()` passes
-    the right heading/rows and reacts correctly to the picked index."""
-    def _choose(heading, rows):
-        if capture is not None:
-            capture.append((heading, rows))
-        return index
-
-    monkeypatch.setattr(ctx.dialogs, 'choose', _choose)
+    stub_choose(monkeypatch, ctx, index, capture=capture)
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +169,30 @@ def test_oninit_builds_add_row_and_one_row_per_addon(load_addonswindow, monkeypa
     assert addon_item.label2 == 'Line one Line two'
     assert addon_item.getProperty('position') == '0'
     assert win.getFocusId() == ctx.addonswindow.LIST
+
+
+def test_oninit_escapes_markup_in_addon_name_and_description(load_addonswindow, monkeypatch):
+    """A malicious/misbehaving manifest's `name`/`description` must not
+    reach the skin engine as live `[COLOR]`/`$INFO[...]` markup - see
+    `uicommon.escape_label()`'s docstring for the underlying bug."""
+    ctx = load_addonswindow()
+    descriptor = {
+        'transportUrl': 'https://a.example/manifest.json',
+        'manifest': {
+            'name': '[COLOR red]Evil[/COLOR]',
+            'version': '1.0',
+            'description': '$INFO[System.ProfileName]',
+        },
+        'flags': {},
+    }
+    _wire_store(ctx.addonswindow, _FakeStore(addons=[descriptor]))
+    win = _make_window(ctx.addonswindow)
+
+    win.onInit()
+
+    addon_item = win.getControl(ctx.addonswindow.LIST).items[1]
+    assert addon_item.getLabel() == 'Evil  \u00b7  v1.0'
+    assert addon_item.label2 == 'INFO[System.ProfileName]'
 
 
 def test_oninit_truncates_long_descriptions_to_one_line(load_addonswindow, monkeypatch):

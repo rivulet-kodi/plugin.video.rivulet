@@ -108,10 +108,25 @@ def test_install_addon_upserts_existing_transport_url(tmp_path):
     before = len(store.get_addons())
     store.install_addon(url, {"id": "org.custom", "name": "V2"})
     addons = store.get_addons()
-    assert len(addons) == before
     matches = [a for a in addons if a["transportUrl"] == url]
-    assert len(matches) == 1
+    assert len(matches) == 1 and len(addons) == before
     assert matches[0]["manifest"]["name"] == "V2"
+
+
+def test_install_addon_preserves_flags_on_update(tmp_path):
+    """Reinstalling/updating an addon must not reset its flags: a naive
+    filter-then-append reset ``flags`` to ``{}`` on every update, silently
+    re-enabling a disabled addon (or unprotecting a protected one)."""
+    store = make_store(tmp_path)
+    url = "https://custom.example/manifest.json"
+    store.install_addon(url, {"id": "org.custom", "name": "V1"})
+    store.set_addon_disabled(url, True)
+
+    store.install_addon(url, {"id": "org.custom", "name": "V2"})
+
+    descriptor = next(a for a in store.get_addons() if a["transportUrl"] == url)
+    assert descriptor["flags"] == {"disabled": True}
+    assert descriptor["manifest"]["name"] == "V2"
 
 
 def test_remove_addon_deletes_unprotected_entry(tmp_path):
@@ -1186,3 +1201,26 @@ def test_seen_episodes_cache_is_invalidated_after_write(tmp_path):
     seen = {"series\x1ftt1\x1ftt1:1:3": True}
     store.set_seen_episodes(seen)
     assert store.get_seen_episodes() == seen
+
+
+def test_cached_read_detects_same_size_rewrite_under_frozen_stat(tmp_path, monkeypatch):
+    """On coarse-mtime filesystems (FAT/exFAT -- common on the Android
+    storage this addon targets), `os.stat()` can report an identical
+    `(st_mtime_ns, st_size)` for two different writes within the same
+    tick. A second `Store` instance rewriting the file with new content
+    of the SAME length must still be observed -- the fingerprint must
+    not rely on `(mtime_ns, size)` alone."""
+    store = make_store(tmp_path)
+    seen = {"series\x1ftt1\x1ftt1:1:3": True}
+    store.set_seen_episodes(seen)
+    assert store.get_seen_episodes() == seen  # populates the read cache
+
+    other_store = make_store(tmp_path)
+    frozen_stat = os.stat(store._seen_episodes_path)
+    monkeypatch.setattr(store_module.os, "stat", lambda path: frozen_stat)
+
+    replacement = {"series\x1ftt1\x1ftt1:1:4": True}  # same JSON length as `seen`
+    assert len(json.dumps(replacement)) == len(json.dumps(seen))
+    other_store.set_seen_episodes(replacement)
+
+    assert store.get_seen_episodes() == replacement

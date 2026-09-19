@@ -46,11 +46,15 @@ import time
 FILENAME = 'meta_cache.json'
 
 #: How long a cached meta object is served before being treated as
-#: stale. Short on purpose - covers one browsing session (picking
-#: through a show's seasons, or backing in and out of the same title)
-#: without risking a long-lived stale answer if the addon's own data
-#: changes.
-TTL_SECONDS = 300
+#: stale. Long enough to cover a full browsing session - not just one
+#: title's seasons, but backing out to browse other shows/movies and
+#: returning later - without risking a long-lived stale answer if the
+#: addon's own data changes. Ratings and episode lists backing these
+#: metas change on the order of hours/days, not minutes, so 30 minutes
+#: trades a small amount of staleness for far fewer refetches than the
+#: previous 5-minute TTL, which expired mid-session on any title
+#: revisited after browsing elsewhere.
+TTL_SECONDS = 1800
 
 #: Byte budget for the whole cache file. This bounds the cost of a
 #: single store: the file is rewritten wholesale each time, so the
@@ -114,7 +118,7 @@ def _evict(entries):
     now = time.time()
     kept = {
         key: entry for key, entry in entries.items()
-        if now - entry.get('ts', 0) <= TTL_SECONDS
+        if isinstance(entry, dict) and now - entry.get('ts', 0) <= TTL_SECONDS
     }
     # Never evict away the entry just stored: if a single meta is bigger
     # than the whole budget, caching just that one is still the right
@@ -154,7 +158,10 @@ def load_cached_meta(data_dir, stype, sid):
     """
     try:
         entry = _read_entries(data_dir).get(_key(stype, sid))
-        if not entry or time.time() - entry.get('ts', 0) > TTL_SECONDS:
+        if (
+            not isinstance(entry, dict)
+            or time.time() - entry.get('ts', 0) > TTL_SECONDS
+        ):
             return None
         return entry.get('meta')
     except OSError:

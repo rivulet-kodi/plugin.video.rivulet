@@ -18,6 +18,18 @@ from urllib.parse import urlencode
 #: streams and every one gets a token built for its row.
 _COMPRESS_LEVEL = 1
 
+#: Hard cap on the inflated size `decode_stream()` will ever produce.
+#: `decode_stream()` runs on a `plugin://` token that arrives via
+#: `sys.argv` before any auth/origin check - a favourite, a .strm file,
+#: or a skin widget can hand Kodi an attacker-crafted URL. Plain
+#: `zlib.decompress(payload)` has no output bound, so a hand-built
+#: ~1KB deflate "zip bomb" (highly repetitive bytes compress ~1000:1)
+#: would inflate to a huge in-memory buffer and json.loads() it,
+#: turning one clicked/loaded URL into a memory-exhaustion DoS on the
+#: box running Kodi. 1 MiB is far larger than any real stream dict
+#: (~1KB) ever needs.
+_MAX_TOKEN_BYTES = 1024 * 1024
+
 
 def url_for(base_url, action, **params):
     """Build a plugin:// URL for `action` against `base_url` with the given
@@ -80,7 +92,10 @@ def decode_stream(token):
     try:
         payload = base64.urlsafe_b64decode(padded.encode('ascii'))
         if not payload.startswith(b'{'):
-            payload = zlib.decompress(payload)
+            decompressor = zlib.decompressobj()
+            payload = decompressor.decompress(payload, _MAX_TOKEN_BYTES)
+            if decompressor.unconsumed_tail or not decompressor.eof:
+                return {}
         return json.loads(payload.decode('utf-8'))
     except (ValueError, TypeError, zlib.error):
         return {}

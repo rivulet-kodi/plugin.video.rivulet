@@ -20,6 +20,7 @@ from lib.stremio.streaminfo import (
     _scan_languages,
     _segment_after,
     clean_text,
+    escape_label,
     filter_streams,
     filter_summary,
     format_details,
@@ -190,6 +191,33 @@ def test_clean_text_truncation_mid_emoji_sequence_does_not_raise():
     result = clean_text(huge)  # must not raise
     assert len(result) <= _MAX_TEXT_LEN
     assert "Movie" in result
+
+
+# --- escape_label ----------------------------------------------------------
+
+
+def test_escape_label_returns_empty_string_for_none():
+    assert escape_label(None) == ''
+
+
+def test_escape_label_returns_empty_string_for_non_string():
+    assert escape_label(42) == ''
+
+
+def test_escape_label_strips_format_and_color_tags():
+    text = '[B]Bold[/B] [COLOR red]Danger[/COLOR][CR]next line'
+    assert escape_label(text) == 'Bold Danger' + 'next line'
+
+
+def test_escape_label_neutralizes_info_labels_by_dropping_the_leading_dollar():
+    text = '$INFO[System.ProfileName] $LOCALIZE[123] $VAR[x] $ESCINFO[y] $ADDON[z] $NUMBER[1]'
+    assert escape_label(text) == (
+        'INFO[System.ProfileName] LOCALIZE[123] VAR[x] ESCINFO[y] ADDON[z] NUMBER[1]'
+    )
+
+
+def test_escape_label_leaves_plain_text_untouched():
+    assert escape_label('Cinemeta') == 'Cinemeta'
 
 
 # --- parse_stream ----------------------------------------------------------
@@ -769,6 +797,27 @@ def test_format_label_includes_addon_in_gray():
     label = format_label(info)
     assert "[COLOR gray]" in label
     assert "AIOStreams" in label
+
+
+def test_parse_stream_escapes_bbcode_injected_via_addon_name():
+    # An addon's own manifest `name` is attacker-controlled and gets
+    # wrapped in format_label()'s OWN "[COLOR gray]<addon>[/COLOR]"
+    # segment - a literal "[COLOR red]"/"$INFO[...]" inside it would
+    # otherwise be evaluated by Kodi's skin engine, and escaping the
+    # already-packed format_label() string from outside (as callers do
+    # for format_details()) would strip that legitimate wrapper right
+    # along with the injected markup. escape_label() must therefore run
+    # on `addon_name` at parse time, before it ever reaches the wrap.
+    info = parse_stream(
+        {"name": "x", "title": "", "description": "", "behaviorHints": {}},
+        addon_name="[COLOR red]Evil[/COLOR]$INFO[System.Time]",
+    )
+    assert info["addon"] == "EvilINFO[System.Time]"
+
+    label = format_label(info)
+    assert "[COLOR red]" not in label
+    assert "$INFO[" not in label
+    assert "[COLOR gray]EvilINFO[System.Time][/COLOR]" in label
 
 
 def test_format_label_omits_empty_segments_without_dangling_separators():

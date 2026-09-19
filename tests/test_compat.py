@@ -157,3 +157,83 @@ def test_set_video_info_kodi19_legacy_dict_only_known_nonempty_keys(load_compat)
 
     assert li.legacy_info == {'title': 'The Godfather', 'year': 1972}
     assert li.info_tag.calls == {}
+
+
+# ---------------------------------------------------------------------------
+# setting_bool() / setting_int() - raw-string parsing of an addon setting,
+# never raises regardless of what's stored or what getSetting() does. The
+# single canonical home for this coverage: it used to be duplicated across
+# tests/test_uicommon.py, tests/test_player_buffer.py and
+# tests/test_service_runner.py (each delegating through a different
+# caller), which let the three copies drift out of sync.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('raw,expected', [
+    ('true', True), ('True', True), ('TRUE', True), ('1', True), ('yes', True), ('YES', True), ('on', True), ('On', True),
+    ('false', False), ('False', False), ('FALSE', False), ('0', False), ('no', False), ('No', False), ('off', False), ('OFF', False),
+])
+def test_setting_bool_parses_recognized_strings(load_compat, raw, expected):
+    ctx = load_compat()
+    ctx.env.addon.settings['flag'] = raw
+    assert ctx.compat.setting_bool('flag', not expected) is expected
+
+
+@pytest.mark.parametrize('raw', ['', 'maybe', 'null', '  ', 'not-a-bool'])
+def test_setting_bool_falls_back_to_default_on_unreadable(load_compat, raw):
+    ctx = load_compat()
+    ctx.env.addon.settings['flag'] = raw
+    assert ctx.compat.setting_bool('flag', True) is True
+    assert ctx.compat.setting_bool('flag', False) is False
+
+
+def test_setting_bool_missing_key_falls_back_to_default(load_compat):
+    ctx = load_compat()
+    assert ctx.compat.setting_bool('missing', True) is True
+    assert ctx.compat.setting_bool('missing', False) is False
+
+
+def test_setting_bool_never_raises_when_getsetting_raises(load_compat, monkeypatch):
+    ctx = load_compat()
+
+    def boom(key):
+        raise RuntimeError('kodi settings db locked')
+
+    monkeypatch.setattr(ctx.env.addon, 'getSetting', boom)
+    assert ctx.compat.setting_bool('flag', True) is True
+
+
+def test_setting_int_parses_and_falls_back_to_default(load_compat):
+    ctx = load_compat()
+    ctx.env.addon.settings['n'] = '42'
+    assert ctx.compat.setting_int('n', 20) == 42
+    ctx.env.addon.settings['n'] = ''
+    assert ctx.compat.setting_int('n', 20) == 20
+    ctx.env.addon.settings['n'] = 'not-a-number'
+    assert ctx.compat.setting_int('n', 20) == 20
+
+
+def test_setting_int_zero_is_not_treated_as_missing(load_compat):
+    ctx = load_compat()
+    ctx.env.addon.settings['n'] = '0'
+    assert ctx.compat.setting_int('n', 99) == 0
+
+
+def test_setting_int_clamps_to_minimum(load_compat):
+    ctx = load_compat()
+    ctx.env.addon.settings['n'] = '-5'
+    assert ctx.compat.setting_int('n', 0, minimum=1) == 1
+    ctx.env.addon.settings['n'] = '1'
+    assert ctx.compat.setting_int('n', 20, minimum=5) == 5
+    ctx.env.addon.settings['n'] = '10'
+    assert ctx.compat.setting_int('n', 20, minimum=5) == 10
+
+
+def test_setting_int_never_raises_when_getsetting_raises(load_compat, monkeypatch):
+    ctx = load_compat()
+
+    def boom(key):
+        raise RuntimeError('kodi settings db locked')
+
+    monkeypatch.setattr(ctx.env.addon, 'getSetting', boom)
+    assert ctx.compat.setting_int('n', 20) == 20

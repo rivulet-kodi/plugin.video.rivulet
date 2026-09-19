@@ -16,6 +16,8 @@ Upstream's subtitle resource also carries an optional ``fonts`` field
 it is intentionally dropped here because Kodi's libass renderer cannot
 fetch remote fonts, so carrying it through would be dead weight.
 """
+from urllib.parse import urlparse
+
 from lib.stremio.addons import addon_supports
 
 # ISO 639-1 (2-letter) -> ISO 639-2/B (3-letter) codes for the languages
@@ -101,6 +103,22 @@ def _sanitize_label(label):
 #: Fanning out turns that sum() into a max().
 _MAX_SUBTITLE_ADDON_WORKERS = 8
 
+#: Subtitle addons are untrusted network data (same trust boundary as a
+#: Stream's `url`, see `lib.stremio.server._DIRECT_URL_SCHEMES` and
+#: `_validate_direct_url()`, which this mirrors minimally rather than
+#: importing - `lib.ui.player` hands every kept `url` straight to
+#: `ListItem.setSubtitles()`, so a non-http(s) scheme (or a non-str
+#: value, which would raise on the `url in seen_urls` membership test
+#: below) must never reach that call.
+_SUBTITLE_URL_SCHEMES = frozenset({'http', 'https'})
+
+
+def _is_usable_subtitle_url(url):
+    """Return True if `url` is a str with an allowed subtitle scheme."""
+    if not isinstance(url, str) or not url:
+        return False
+    return urlparse(url).scheme.lower() in _SUBTITLE_URL_SCHEMES
+
 
 def _query_addons(client, transport_urls, rtype, rid, extra):
     """Call `client.subtitles()` once per URL in `transport_urls`, fanned
@@ -166,7 +184,7 @@ def collect_subtitles(client, addons, rtype, rid, extra=None):
             if not isinstance(item, dict):
                 continue
             url = item.get('url')
-            if not url or url in seen_urls:
+            if not _is_usable_subtitle_url(url) or url in seen_urls:
                 continue
             seen_urls.add(url)
             entry = {

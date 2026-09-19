@@ -68,6 +68,23 @@ _DEFAULT_LOCALIZED = {
     30360: 'New episodes: %d',
 }
 
+class FakeClock:
+    """Advances only when `xbmc.Monitor.waitForAbort(timeout)` is called
+    (by `timeout` seconds, never wall-clock time) - lets a test assert
+    the supervision loop's backoff/poll cadence (lib/service_runner.py's
+    RESTART_BACKOFF/HEALTHY_POLL_INTERVAL/etc.) against elapsed time
+    without the test itself sleeping.
+    """
+
+    def __init__(self):
+        self._now = 0.0
+
+    def now(self):
+        return self._now
+
+    def advance(self, seconds):
+        self._now += seconds or 0
+
 
 class FakeAddon:
     """Stand-in for `xbmcaddon.Addon()`: a configurable settings dict, an
@@ -131,6 +148,17 @@ class Env:
     ('ended' or 'stopped') picks which of `onPlayBackEnded()`/
     `onPlayBackStopped()` the fake `Player` dispatches on itself when a
     poll transitions from playing to not-playing.
+
+    `clock`/`wait_calls`: `xbmc.Monitor.waitForAbort(timeout)` used to
+    ignore `timeout` entirely and return immediately, so a test could
+    never verify lib/service_runner.py's poll/backoff cadence (e.g.
+    RESTART_BACKOFF's 5s/10s/30s schedule) against actual elapsed time -
+    only against the raw sequence of interval arguments, which says
+    nothing about total wall-clock cost. `clock` is a `FakeClock`
+    `waitForAbort()` advances by `timeout` on every call (still
+    returning immediately - no test slows down); `wait_calls` records
+    each `timeout` in call order so a test can assert the cadence
+    directly, e.g. `sum(env.wait_calls[:4]) == 5 + 10 + 30 + 30`.
     """
 
     def __init__(self, cancel=False, monitor_abort=False, monitor_abort_requested=False):
@@ -160,6 +188,8 @@ class Env:
         self.player_get_time_calls = 0     # xbmc.Player().getTime() poll count
         self.player_get_total_time_calls = 0  # xbmc.Player().getTotalTime() poll count
         self.player_seek_calls = []        # [seek_seconds, ...] - xbmc.Player().seekTime() calls
+        self.wait_calls = []          # [timeout, ...] - xbmc.Monitor.waitForAbort() calls
+        self.clock = FakeClock()
 
         # xbmcaddon.Addon.openSettings recorder
         self.opened_settings = False

@@ -89,6 +89,8 @@ def make_xbmc(env, info_labels=None):
     class Monitor:
         def waitForAbort(self, timeout=None):
             env.monitor_abort_calls += 1
+            env.wait_calls.append(timeout)
+            env.clock.advance(timeout)
             abort = env.monitor_abort
             return bool(abort(env.monitor_abort_calls)) if callable(abort) else bool(abort)
 
