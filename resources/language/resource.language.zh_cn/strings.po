@@ -945,3 +945,7 @@ msgstr "浏览目录，或从清单网址安装"
 msgctxt "#30360"
 msgid "New episodes: %d"
 msgstr "新剧集：%d"
+
+msgctxt "#30361"
+msgid "Source slower than playback bitrate; expect buffering"
+msgstr "源速度低于播放码率；可能会出现缓冲"

@@ -945,3 +945,7 @@ msgstr "Explore catálogos ou instale de uma URL de manifesto"
 msgctxt "#30360"
 msgid "New episodes: %d"
 msgstr "Novos episódios: %d"
+
+msgctxt "#30361"
+msgid "Source slower than playback bitrate; expect buffering"
+msgstr "Fonte mais lenta que a taxa de bits de reprodução; buffering esperado"

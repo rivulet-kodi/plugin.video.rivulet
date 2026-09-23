@@ -945,3 +945,7 @@ msgstr "Parcourir les catalogues ou installer depuis une URL de manifeste"
 msgctxt "#30360"
 msgid "New episodes: %d"
 msgstr "Nouveaux épisodes : %d"
+
+msgctxt "#30361"
+msgid "Source slower than playback bitrate; expect buffering"
+msgstr "Source plus lente que le débit de lecture ; mise en mémoire tampon probable"

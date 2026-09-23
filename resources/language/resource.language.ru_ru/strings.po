@@ -945,3 +945,7 @@ msgstr "Просмотрите каталоги или установите по
 msgctxt "#30360"
 msgid "New episodes: %d"
 msgstr "Новые эпизоды: %d"
+
+msgctxt "#30361"
+msgid "Source slower than playback bitrate; expect buffering"
+msgstr "Источник медленнее битрейта воспроизведения; возможна буферизация"

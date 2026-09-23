@@ -945,3 +945,7 @@ msgstr "Catalogi verkennen of installeren vanaf een manifest-URL"
 msgctxt "#30360"
 msgid "New episodes: %d"
 msgstr "Nieuwe afleveringen: %d"
+
+msgctxt "#30361"
+msgid "Source slower than playback bitrate; expect buffering"
+msgstr "Bron langzamer dan de afspeelbitrate; buffering te verwachten"

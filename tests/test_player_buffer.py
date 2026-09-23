@@ -103,10 +103,22 @@ def _wire_player_dialogs(ctx, yesno_answers=None):
     module scope (`from lib.ui.dialogs import RivuletProgress, confirm`);
     point those two names at the local fakes above instead of reloading
     lib.ui.uicommon/lib.ui.dialogs and driving a real WindowXMLDialog
-    event loop from this file."""
+    event loop from this file.
+
+    Also stubs `_start_keepalive_pin` to a no-op: production spawns a real
+    background thread there once pre-buffer decides to start (see
+    `_KeepAlivePin` in lib.ui.player), which would otherwise run
+    concurrently with - and non-deterministically race - the exact-call
+    assertions every pre-buffer test in this suite makes against the fake
+    ServerClient's `iter_front_calls`. Tests that want to exercise the pin
+    itself re-point this name back at the real
+    `lib.ui.player._start_keepalive_pin` (or drive `_KeepAlivePin`
+    directly) instead of relying on this fixture's default.
+    """
     ctx.env.dialog_iscanceled_calls = 0
     ctx.player.RivuletProgress = lambda: _FakeProgressDialog(ctx.env)
     ctx.player.confirm = _make_fake_confirm(ctx.env, yesno_answers)
+    ctx.player._start_keepalive_pin = lambda *a, **k: None
     return ctx
 
 
@@ -168,6 +180,7 @@ class _ServerScript:
         self.is_available_calls = 0
         self.create_engine_calls = []
         self.iter_front_calls = []
+        self.iter_front_start_bytes = []
         self.torrent_url_calls = []
 
     def build_class(self):
@@ -200,8 +213,9 @@ class _ServerScript:
                 idx = len(script.create_engine_calls) - 1
                 return results[idx] if idx < len(results) else results[-1]
 
-            def iter_front(self, info_hash, file_idx, want_bytes, chunk_size=1048576, timeout=60):
+            def iter_front(self, info_hash, file_idx, want_bytes, chunk_size=1048576, timeout=60, start_byte=0):
                 script.iter_front_calls.append((info_hash, file_idx, want_bytes))
+                script.iter_front_start_bytes.append(start_byte)
                 idx = len(script.iter_front_calls) - 1
                 attempts = script.iter_front_attempts
                 if not attempts:

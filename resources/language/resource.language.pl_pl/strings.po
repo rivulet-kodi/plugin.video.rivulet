@@ -945,3 +945,7 @@ msgstr "Przeglądaj katalogi lub zainstaluj z adresu URL manifestu"
 msgctxt "#30360"
 msgid "New episodes: %d"
 msgstr "Nowe odcinki: %d"
+
+msgctxt "#30361"
+msgid "Source slower than playback bitrate; expect buffering"
+msgstr "Źródło wolniejsze niż bitrate odtwarzania; możliwe buforowanie"

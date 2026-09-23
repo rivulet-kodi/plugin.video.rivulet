@@ -945,3 +945,7 @@ msgstr "Kataloglara göz atın veya manifest URL'sinden yükleyin"
 msgctxt "#30360"
 msgid "New episodes: %d"
 msgstr "Yeni Bölümler: %d"
+
+msgctxt "#30361"
+msgid "Source slower than playback bitrate; expect buffering"
+msgstr "Kaynak oynatma bit hızından yavaş; arabellekleme beklenebilir"

@@ -945,3 +945,7 @@ msgstr "Kataloge durchstöbern oder über Manifest-URL installieren"
 msgctxt "#30360"
 msgid "New episodes: %d"
 msgstr "Neue Episoden: %d"
+
+msgctxt "#30361"
+msgid "Source slower than playback bitrate; expect buffering"
+msgstr "Quelle langsamer als die Wiedergabe-Bitrate; Pufferung möglich"

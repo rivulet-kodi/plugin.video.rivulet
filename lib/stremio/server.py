@@ -429,20 +429,28 @@ class ServerClient:
         except ValueError as exc:
             raise ServerError('GET %s returned invalid JSON: %s' % (_redact_error_url(self.base_url, url), exc))
 
-    def iter_front(self, info_hash, file_idx, want_bytes, chunk_size=16384, timeout=60):
-        """Stream the FRONT (offset 0) of a torrent file, yielding each
-        chunk's length as it arrives - the pre-buffer readiness probe.
+    def iter_front(self, info_hash, file_idx, want_bytes, chunk_size=16384, timeout=60, start_byte=0):
+        """Stream the FRONT of a torrent file from `start_byte`, yielding
+        each chunk's length as it arrives - the pre-buffer readiness probe.
 
         Issues `GET {base}/{infoHash}/{fileIdx}` with a `Range:
-        bytes=0-(want_bytes-1)` header (the same request shape Kodi's own
-        player makes), streamed rather than buffered whole. A connection
-        that closes after delivering SOME bytes (IncompleteRead /
-        ChunkedEncodingError - the normal shape of a live, poorly-seeded
-        Range read) is treated as a non-fatal end of this attempt, since
-        partial front data is still meaningful; the caller re-issues a
-        fresh request to keep trying. Only a request that fails with NO
-        bytes received raises `ServerError`, matching this file's other
-        methods.
+        bytes=<start_byte>-(want_bytes-1)` header (the same request shape
+        Kodi's own player makes, offset by `start_byte`), streamed rather
+        than buffered whole. A connection that closes after delivering
+        SOME bytes (IncompleteRead / ChunkedEncodingError - the normal
+        shape of a live, poorly-seeded Range read) is treated as a non-
+        fatal end of this attempt, since partial front data is still
+        meaningful; the caller re-issues a fresh request to keep trying.
+        Only a request that fails with NO bytes received raises
+        `ServerError`, matching this file's other methods.
+
+        `start_byte` defaults to 0 (the original front-of-file probe).
+        Callers retrying after a stall/timeout pass the highest byte
+        already received instead, so the retry resumes with `Range:
+        bytes=<got>-<want_bytes-1>` rather than re-requesting (and
+        re-waiting on) bytes already obtained - see
+        `lib.ui.player._prebuffer_torrent`'s buffering loop, which tracks
+        cumulative bytes across attempts for exactly this.
 
         `chunk_size` defaults small (16 KiB), NOT large: `requests`'
         `iter_content()` does one `raw.read(chunk_size)` per chunk, and if
@@ -459,7 +467,7 @@ class ServerClient:
         if requests is None:
             raise ServerError('the "requests" package is required for ServerClient')
         url = '%s/%s/%s' % (self.base_url, str(info_hash).lower(), file_idx)
-        headers = {'Range': 'bytes=0-%d' % (want_bytes - 1)}
+        headers = {'Range': 'bytes=%d-%d' % (start_byte, want_bytes - 1)}
         try:
             resp = self.session.get(url, headers=headers, stream=True, timeout=timeout)
             resp.raise_for_status()
@@ -472,7 +480,7 @@ class ServerClient:
                     continue
                 got += len(chunk)
                 yield len(chunk)
-                if got >= want_bytes:
+                if start_byte + got >= want_bytes:
                     break
         except requests.RequestException as exc:
             if got == 0:

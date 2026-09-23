@@ -650,8 +650,12 @@ def test_prebuffer_starts_late_rather_than_failing_when_budget_is_spent(kodi_stu
     env = kodi_stubs.env
     _ServerScript(
         resolve_url='http://server/x/0',
-        # Always clears the floor, never reaches target, always measurably slow.
-        iter_front_attempts=[[600_000]],
+        # First attempt clears the floor; every retry after that gets
+        # nothing further (resume means a repeated attempt now means
+        # "more bytes arrived", so an empty list is what a genuinely
+        # stalled swarm looks like under start_byte resume), while stats
+        # stay measurably slow with no downloaded-bytes progress evidence.
+        iter_front_attempts=[[600_000], []],
         create_engine_result={'downloadSpeed': 1000, 'peers': 1},
     ).install(monkeypatch, kodi_stubs.player)
 
@@ -840,5 +844,400 @@ def test_buffer_stats_poll_exception_is_best_effort_and_does_not_abort(kodi_stub
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (43, True)
     assert list_item.path == 'http://server/x/0'
+
+# --- resume-from-offset: a retry must not restart the front read at 0 -----
+
+
+def test_front_read_retry_resumes_from_total_bytes_not_from_zero(kodi_stubs, monkeypatch):
+    """A retry after a too-small attempt must ask iter_front() to resume
+    from the highest byte already obtained (Range: bytes=<got>-<want-1>
+    via ServerClient.iter_front's `start_byte`), not restart the front
+    read from offset 0 - and the cumulative total (not just the latest
+    attempt's own bytes) must be what the loop measures against the
+    header floor/target and shows in the dialog.
+    """
+    env = kodi_stubs.env
+    script = _ServerScript(
+        resolve_url='http://server/x/0',
+        # First attempt gets a small amount (under the header floor, so
+        # the loop retries); the second tops it up past the floor.
+        iter_front_attempts=[[100_000], [600_000]],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(50, _torrent_stream(fileIdx=0), 'movie', 'tt50')
+
+    assert script.iter_front_start_bytes == [0, 100_000]  # second attempt resumes, never restarts
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (50, True)
+    assert list_item.path == 'http://server/x/0'
+    # The final buffer-stage update must show the CUMULATIVE 700 KB, not
+    # just the second attempt's own 600 KB - proving no bytes were lost.
+    buffer_updates = [(percent, message) for percent, message, _, _ in env.dialog_updates if percent >= 40]
+    assert buffer_updates[-1] == (48, 'buffered 683.6 KB of 5.0 MB')
+
+
+def test_front_read_retry_after_exception_also_resumes(kodi_stubs, monkeypatch):
+    """The resume offset must reflect bytes actually received, not the
+    attempt count - an attempt that raised with SOME bytes already
+    yielded (via a prior chunk) still contributes to the resume offset;
+    an attempt that raised with NOTHING yielded resumes from 0 again."""
+    env = kodi_stubs.env
+    script = _ServerScript(
+        resolve_url='http://server/x/0',
+        iter_front_attempts=[RuntimeError('boom'), [600_000]],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(50, _torrent_stream(fileIdx=0), 'movie', 'tt50b')
+
+    assert script.iter_front_start_bytes == [0, 0]  # nothing was obtained before the retry
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (50, True)
+
+
+# --- early-start stall guard: a stalled attempt needs progress evidence ---
+
+
+def test_may_start_early_stalled_without_progress_blocks_even_with_fast_prior_speed(kodi_stubs):
+    """A stalled attempt (no new front bytes at all this attempt) must not
+    start on stats left over from before the stall, even a fast one -
+    only genuine progress evidence may override a stall boundary."""
+    player = kodi_stubs.player
+    target = 20 * 1024 * 1024
+    fast_stats = {'downloadSpeed': 8 * 1024 * 1024}
+    assert player._may_start_early(fast_stats, 1245184, target, 0.0, stalled=True, progressed=False) is False
+
+
+def test_may_start_early_stalled_with_progress_falls_back_to_normal_logic(kodi_stubs):
+    """Once progress evidence exists, a stalled attempt is judged exactly
+    like a non-stalled one - the guard only removes the "absent/leftover
+    speed still means start" shortcut, it never blocks outright."""
+    player = kodi_stubs.player
+    target = 20 * 1024 * 1024
+    fast_stats = {'downloadSpeed': 8 * 1024 * 1024}
+    assert player._may_start_early(fast_stats, 1245184, target, 0.0, stalled=True, progressed=True) is True
+
+
+def test_may_start_early_stalled_default_false_leaves_prior_behaviour_unchanged(kodi_stubs):
+    """`stalled` defaults False, so every pre-existing 4-positional-arg
+    caller (see the tests above this section) is unaffected."""
+    player = kodi_stubs.player
+    target = 20 * 1024 * 1024
+    assert player._may_start_early(None, 1245184, target, 0.0) is True  # unchanged absent-stats fast path
+
+
+def test_stall_guard_blocks_absent_stats_then_progress_evidence_allows_start(kodi_stubs, monkeypatch):
+    """Integration proof: a slow swarm blocks normally on attempt 1
+    (measured speed), a stalled attempt 2 with NO stats at all must NOT
+    fall back to the old "absent means fast, start anyway" behaviour it
+    would have hit pre-guard, and only once attempt 3's stats show real
+    progress (downloaded increasing) does playback start.
+    """
+    env = kodi_stubs.env
+    script = _ServerScript(
+        resolve_url='http://server/x/0',
+        create_engine_results=[
+            {},  # engine warm
+            {'downloadSpeed': 174687.6, 'downloaded': 1_000_000, 'peers': 1},  # attempt 1: slow, not stalled
+            {},  # attempt 2: absent stats entirely, front stalled
+            {'downloaded': 2_000_000},  # attempt 3: no speed, but real progress since attempt 1
+        ],
+        iter_front_attempts=[[600_000], [], []],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(51, _torrent_stream(fileIdx=0), 'movie', 'tt51')
+
+    assert len(script.iter_front_calls) == 3  # blocked on attempts 1 and 2, started on 3
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (51, True)
+    assert list_item.path == 'http://server/x/0'
+
+
+# --- feasibility warning: measured speed vs. the file's own bitrate -------
+
+
+def test_required_bytes_per_second_computes_average_bitrate(kodi_stubs):
+    player = kodi_stubs.player
+    # 1200s runtime, 1200 MiB file -> 1 MiB/s required.
+    assert player._required_bytes_per_second(1200, 1200 * 1024 * 1024) == 1024 * 1024
+
+
+@pytest.mark.parametrize(
+    'runtime_seconds, file_length_bytes',
+    [(None, 1000), (1200, None), (0, 1000), (1200, 0), ('nonsense', 1000)],
+)
+def test_required_bytes_per_second_none_when_inputs_missing_or_invalid(kodi_stubs, runtime_seconds, file_length_bytes):
+    player = kodi_stubs.player
+    assert player._required_bytes_per_second(runtime_seconds, file_length_bytes) is None
+
+
+def test_feasibility_warning_needed_true_when_speed_well_below_required(kodi_stubs):
+    player = kodi_stubs.player
+    file_length = 1200 * 1024 * 1024
+    required = player._required_bytes_per_second(1200, file_length)
+    assert player._feasibility_warning_needed(1200, file_length, required * 0.5) is True
+
+
+def test_feasibility_warning_needed_false_when_speed_comfortably_above_required(kodi_stubs):
+    player = kodi_stubs.player
+    file_length = 1200 * 1024 * 1024
+    required = player._required_bytes_per_second(1200, file_length)
+    assert player._feasibility_warning_needed(1200, file_length, required * 2) is False
+
+
+def test_feasibility_warning_needed_false_right_at_the_factor_boundary(kodi_stubs):
+    player = kodi_stubs.player
+    file_length = 1200 * 1024 * 1024
+    required = player._required_bytes_per_second(1200, file_length)
+    boundary_speed = required * player._FEASIBILITY_SPEED_FACTOR
+    assert player._feasibility_warning_needed(1200, file_length, boundary_speed) is False
+
+
+def test_feasibility_warning_needed_false_when_runtime_or_size_unknown(kodi_stubs):
+    player = kodi_stubs.player
+    assert player._feasibility_warning_needed(None, 1000, 1) is False
+    assert player._feasibility_warning_needed(1200, None, 1) is False
+
+
+def test_feasibility_warning_needed_false_when_speed_missing_or_non_positive(kodi_stubs):
+    player = kodi_stubs.player
+    file_length = 1200 * 1024 * 1024
+    assert player._feasibility_warning_needed(1200, file_length, None) is False
+    assert player._feasibility_warning_needed(1200, file_length, 0) is False
+    assert player._feasibility_warning_needed(1200, file_length, 'nonsense') is False
+
+
+def test_feasibility_warning_notifies_and_logs_when_speed_too_slow_for_runtime(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    file_length = 1200 * 1024 * 1024  # 1.2 GiB
+    _ServerScript(
+        resolve_url='http://server/x/0',
+        create_engine_results=[
+            {'files': [{'name': 'Movie.mkv', 'length': file_length}]},  # engine warm
+            {'downloadSpeed': 100_000, 'peers': 1},  # far too slow for the ~1 MiB/s runtime requires
+        ],
+        iter_front_attempts=[[DEFAULT_TARGET_BYTES]],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(
+        52, _torrent_stream(fileIdx=0), 'movie', 'tt52', item_meta={'meta': {'runtime': '20 min'}},
+    )
+
+    assert any('feasibility warning' in msg for msg, _ in env.log_calls)
+    assert [msg for _, msg, _, _ in env.notifications] == ['STR30361']
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (52, True)
+
+
+def test_feasibility_warning_not_triggered_when_speed_is_adequate(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    file_length = 1200 * 1024 * 1024
+    _ServerScript(
+        resolve_url='http://server/x/0',
+        create_engine_results=[
+            {'files': [{'name': 'Movie.mkv', 'length': file_length}]},
+            {'downloadSpeed': 2 * 1024 * 1024, 'peers': 5},  # comfortably above the ~1 MiB/s requirement
+        ],
+        iter_front_attempts=[[DEFAULT_TARGET_BYTES]],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(
+        53, _torrent_stream(fileIdx=0), 'movie', 'tt53', item_meta={'meta': {'runtime': '20 min'}},
+    )
+
+    assert not any('feasibility warning' in msg for msg, _ in env.log_calls)
+    assert env.notifications == []
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (53, True)
+
+
+def test_feasibility_warning_skipped_without_runtime_metadata(kodi_stubs, monkeypatch):
+    """No item_meta (or no meta.runtime) at all must never warn - the
+    check needs both a runtime and a file size, exactly like before this
+    parameter existed for every other caller of `_prebuffer_torrent`."""
+    env = kodi_stubs.env
+    file_length = 1200 * 1024 * 1024
+    _ServerScript(
+        resolve_url='http://server/x/0',
+        create_engine_results=[
+            {'files': [{'name': 'Movie.mkv', 'length': file_length}]},
+            {'downloadSpeed': 100_000, 'peers': 1},
+        ],
+        iter_front_attempts=[[DEFAULT_TARGET_BYTES]],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(54, _torrent_stream(fileIdx=0), 'movie', 'tt54')  # no item_meta at all
+
+    assert not any('feasibility warning' in msg for msg, _ in env.log_calls)
+    assert env.notifications == []
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (54, True)
+
+
+# --- _KeepAlivePin: driven directly via _run(), never via start()/a real -
+# --- thread, so these stay synchronous and deterministic ------------------
+
+
+def test_keepalive_pin_run_stops_immediately_once_is_playing_reports_true(kodi_stubs):
+    """`_run()` must check `is_playing()` BEFORE issuing any front read and
+    return immediately once it reports True - a pin started after Kodi's
+    player has already begun must not open a redundant connection."""
+    player = kodi_stubs.player
+    calls = []
+
+    class _FakeServer:
+        def iter_front(self, *a, **k):
+            calls.append((a, k))
+            yield 16384  # pragma: no cover - never reached
+
+    pin = player._KeepAlivePin(_FakeServer(), INFO_HASH, 0, 100, lambda: True)
+    pin._run()
+
+    assert calls == []  # never reads: is_playing() was already True
+
+
+def test_keepalive_pin_run_resumes_from_start_byte_and_stops_once_playing(kodi_stubs):
+    """The pin's first front read must resume from `start_byte` (not 0),
+    and it must stop as soon as `is_playing()` flips True mid-read -
+    without ever pulling a second chunk from the generator."""
+    player = kodi_stubs.player
+    play_states = iter([False, True])  # not playing yet, then playing after the first chunk
+
+    class _FakeServer:
+        def __init__(self):
+            self.calls = []
+
+        def iter_front(self, info_hash, file_idx, want_bytes, chunk_size=None, timeout=None, start_byte=0):
+            self.calls.append((info_hash, file_idx, want_bytes, start_byte))
+            yield 16384
+            yield 16384  # pragma: no cover - the pin must never reach this second chunk
+
+    server = _FakeServer()
+    pin = player._KeepAlivePin(server, INFO_HASH, 0, 500_000, lambda: next(play_states))
+
+    pin._run()
+
+    assert len(server.calls) == 1
+    info_hash, file_idx, _want_bytes, start_byte = server.calls[0]
+    assert (info_hash, file_idx, start_byte) == (INFO_HASH, 0, 500_000)
+
+
+def test_keepalive_pin_stop_before_run_exits_without_any_network_call(kodi_stubs):
+    """`stop()` called before `_run()` starts must make the very first
+    loop check exit the pin without ever calling `iter_front()`."""
+    player = kodi_stubs.player
+    calls = []
+
+    class _FakeServer:
+        def iter_front(self, *a, **k):
+            calls.append((a, k))
+            yield 16384  # pragma: no cover - never reached
+
+    pin = player._KeepAlivePin(_FakeServer(), INFO_HASH, 0, 0, lambda: False)
+    pin.stop()
+    pin._run()
+
+    assert calls == []
+
+
+def test_keepalive_pin_exits_without_network_call_once_kodi_requests_abort(kodi_stubs):
+    """Kodi waits on a plugin's live threads at shutdown, so an abort
+    request must end the pin at its first check - no front read at all."""
+    player = kodi_stubs.player
+    calls = []
+
+    class _FakeServer:
+        def iter_front(self, *a, **k):
+            calls.append((a, k))
+            yield 16384  # pragma: no cover - never reached
+
+    pin = player._KeepAlivePin(_FakeServer(), INFO_HASH, 0, 0, lambda: False, is_aborted=lambda: True)
+    pin._run()
+
+    assert calls == []
+
+
+def test_keepalive_pin_stops_mid_read_once_abort_flips_true(kodi_stubs):
+    """An abort arriving while the pin is streaming must stop it after the
+    current chunk, never pulling a second one from the generator."""
+    player = kodi_stubs.player
+    aborted = iter([False, True])
+    pulled = []
+
+    class _FakeServer:
+        def iter_front(self, *a, **k):
+            for _ in range(5):
+                pulled.append(16384)
+                yield 16384
+
+    pin = player._KeepAlivePin(_FakeServer(), INFO_HASH, 0, 0, lambda: False, is_aborted=lambda: next(aborted))
+    pin._run()
+
+    assert pulled == [16384]
+
+
+def test_keepalive_pin_broken_abort_probe_is_treated_as_not_aborted(kodi_stubs):
+    """A raising abort probe must not crash the pin; it falls back to the
+    other stop conditions (here: playback already started)."""
+    player = kodi_stubs.player
+
+    def boom():
+        raise RuntimeError('monitor gone')
+
+    pin = player._KeepAlivePin(object(), INFO_HASH, 0, 0, lambda: True, is_aborted=boom)
+    pin._run()  # must not raise
+
+    assert pin._should_stop() is False
+
+
+def test_keepalive_pin_read_exception_is_logged_and_swallowed(kodi_stubs):
+    """A front-read hiccup inside the pin must never raise out of
+    `_run()` - it is a bonus feature, never allowed to crash playback."""
+    env = kodi_stubs.env
+    player = kodi_stubs.player
+    pin_holder = {}
+
+    class _FakeServer:
+        def iter_front(self, *a, **k):
+            raise RuntimeError('boom')
+            yield  # pragma: no cover - unreachable, keeps this a generator function
+
+    def is_playing():
+        # Stop right after this check so the loop exits on its NEXT
+        # condition test - once, after the read exception is handled -
+        # without ever sleeping for real.
+        pin_holder['pin'].stop()
+        return False
+
+    pin = player._KeepAlivePin(_FakeServer(), INFO_HASH, 0, 0, is_playing)
+    pin_holder['pin'] = pin
+
+    pin._run()  # must not raise despite the iter_front() exception
+
+    assert any('keep-alive pin read failed' in msg for msg, _ in env.log_calls)
+
+
+def test_keepalive_pin_start_spawns_a_real_background_thread(kodi_stubs):
+    """`start()` really does spawn a background `threading.Thread` and
+    returns immediately without blocking the caller - exercised via
+    `_KeepAlivePin` directly (not `_start_keepalive_pin`, which every
+    other test's `kodi_stubs` fixture stubs to a no-op precisely to keep
+    the rest of this suite deterministic). `is_playing` is True from the
+    start, so the thread's own body does no network I/O and finishes
+    almost immediately.
+    """
+    player = kodi_stubs.player
+
+    class _FakeServer:
+        def iter_front(self, *a, **k):
+            raise AssertionError('must not be called: is_playing() is already True')
+
+    pin = player._KeepAlivePin(_FakeServer(), INFO_HASH, 0, 0, lambda: True)
+    pin.start()
+
+    assert pin._thread is not None
+    assert pin._thread.name == 'RivuletKeepAlivePin'
+    assert pin._thread.daemon is True
+    pin._thread.join(timeout=5)
+    assert not pin._thread.is_alive()
 
 

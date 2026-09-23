@@ -725,6 +725,68 @@ def test_iter_front_closes_response_when_done():
     assert resp.closed is True
 
 
+# --- iter_front start_byte: resume-from-offset retries ---------------------
+
+
+def test_iter_front_default_start_byte_is_front_of_file():
+    """Unchanged default behaviour: no `start_byte` still means the
+    original front-of-file `Range: bytes=0-(want_bytes-1)` probe."""
+    client = make_client()
+    client.session = FakeSession(responses=[_StreamResp([b"a" * 1024])])
+
+    list(client.iter_front("11" * 20, 0, want_bytes=1024))
+
+    assert client.session.calls[0]["kwargs"]["headers"] == {"Range": "bytes=0-1023"}
+
+
+def test_iter_front_start_byte_sets_resumed_range_header():
+    """A retry that already obtained some bytes passes `start_byte` (the
+    highest byte already received) and must request only the REMAINING
+    range, not re-request the front from 0."""
+    client = make_client()
+    client.session = FakeSession(responses=[_StreamResp([b"b" * 512])])
+
+    list(client.iter_front("22" * 20, 0, want_bytes=4096, start_byte=2048))
+
+    assert client.session.calls[0]["kwargs"]["headers"] == {"Range": "bytes=2048-4095"}
+
+
+def test_iter_front_start_byte_stops_once_want_bytes_satisfied():
+    """The early-stop condition must account for `start_byte`: with a
+    2048-byte head start, a single 1024-byte chunk already reaches a
+    want_bytes=3072 target and the generator must stop rather than
+    issuing a second `raw.read()`."""
+    client = make_client()
+    client.session = FakeSession(
+        responses=[_StreamResp([b"c" * 1024, b"d" * 1024])]
+    )
+
+    lengths = list(client.iter_front("33" * 20, 0, want_bytes=3072, start_byte=2048))
+
+    assert lengths == [1024]  # stops after the first chunk: 2048 + 1024 >= 3072
+
+
+def test_iter_front_start_byte_resume_after_partial_read_then_stall():
+    """The exact resume workflow: a first call gets some bytes then the
+    connection stalls (IncompleteRead-shaped), and the caller's retry
+    passes that count back in as `start_byte` - the resumed request's
+    Range header must start exactly where the first one left off, not
+    from 0."""
+    client = make_client()
+    client.session = FakeSession(
+        responses=[_StreamResp([b"e" * 512], raise_after=requests.exceptions.ChunkedEncodingError("closed"))]
+    )
+
+    first_attempt = list(client.iter_front("44" * 20, 0, want_bytes=4096))
+    assert first_attempt == [512]
+    got = sum(first_attempt)
+
+    client.session = FakeSession(responses=[_StreamResp([b"f" * 512])])
+    list(client.iter_front("44" * 20, 0, want_bytes=4096, start_byte=got))
+
+    assert client.session.calls[0]["kwargs"]["headers"] == {"Range": "bytes=512-4095"}
+
+
 # ============================================================================
 # NEW SECTION (StreamSources) - base32 info hashes, percent-encoded
 # trackers, archive/nzb/ftp `/create` payload building, and the

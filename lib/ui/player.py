@@ -5,6 +5,7 @@ base64url-decoded stream dict for action=play. This module owns the only
 xbmc* calls involved in actually starting playback.
 """
 import contextlib
+import threading
 import time
 from urllib.parse import urlencode
 
@@ -101,6 +102,41 @@ _EARLY_START_ETA_SECONDS = 10
 #: rather than sitting in the dialog forever. Once this much time has gone
 #: into the buffering loop, whatever cleared the header floor is played.
 _TARGET_WAIT_SECONDS = 45
+
+#: Upper bound on how long the keep-alive pin (`_KeepAlivePin`) is allowed
+#: to keep a background streaming request open on the torrent's URL after
+#: pre-buffer decides to start - it exists to hold stremio-server-go's
+#: piece priority on this file while Kodi's player is still opening/
+#: probing the URL, not to babysit playback forever, so it always gives
+#: up by this deadline even if Kodi never reports playback started.
+_KEEPALIVE_MAX_SECONDS = 60.0
+
+#: How often the pin re-checks `xbmc.Player().isPlayingVideo()` (and, when
+#: a front read yields nothing to advance on, backs off) while held open.
+_KEEPALIVE_POLL_SECONDS = 1.0
+
+#: Bounded read rate for the pin's background GET: it exists to keep the
+#: file's pieces prioritized server-side, not to race the real player for
+#: bandwidth once handoff is imminent - so every chunk is followed by a
+#: short sleep (interruptible by stop/abort) capping throughput well
+#: below any real playback bitrate. Same 16 KiB chunk_size as the
+#: pre-buffer loop, for the same IncompleteRead-loss reason (see
+#: `ServerClient.iter_front`'s docstring).
+_KEEPALIVE_CHUNK_SIZE = 16384
+_KEEPALIVE_SLEEP_SECONDS = 0.25
+
+#: How far past the pin's current offset each of its front reads asks
+#: for - just needs to comfortably outlast what `_KEEPALIVE_MAX_SECONDS`
+#: at the bounded rate above can consume, so the connection is never
+#: starved for want_bytes headroom before the timer/abort/playback-
+#: started check ends it.
+_KEEPALIVE_WINDOW_BYTES = 8 * 1024 * 1024
+
+#: Feasibility warning: if the swarm's measured download speed during
+#: buffering falls below this fraction of the file's own average bitrate
+#: (file size / runtime), the source is unlikely to keep up with
+#: playback once it starts - see `_feasibility_warning_needed()`.
+_FEASIBILITY_SPEED_FACTOR = 0.7
 
 #: RivuletProgress percent bands for the staged "Preparing stream" dialog
 #: `_resolve_playable_item` owns (created once, threaded through every
@@ -285,7 +321,7 @@ def _poll_stats_best_effort(server, info_hash):
         return None
 
 
-def _may_start_early(stats, got, target, waited):
+def _may_start_early(stats, got, target, waited, stalled=False, progressed=False):
     """Whether a front read that cleared the header floor but not `target`
     may start playback anyway.
 
@@ -302,11 +338,25 @@ def _may_start_early(stats, got, target, waited):
     inventing a 45s wait from missing evidence. Only a speed the server
     actually reported can hold playback back.
 
+    `stalled` (default False, every pre-existing caller/test unaffected)
+    is True when the front-read attempt that just ran made NO progress at
+    all (a timeout/zero-byte attempt) - a stronger warning sign than a
+    merely-slow `downloadSpeed` figure, since that figure may just be
+    stale data from before the stall. In that specific case an early
+    start additionally requires `progressed` - genuine evidence (the
+    aggregate downloaded-bytes counter grew since the previous attempt)
+    that the swarm is still making progress somewhere, even if not on
+    this file's front. Absent that evidence, a stalled attempt must not
+    talk itself into starting on stale pre-stall speed data; it keeps
+    buffering instead, still bounded by `_TARGET_WAIT_SECONDS` below.
+
     Also yes once `_TARGET_WAIT_SECONDS` of filling has gone by, so a
     slow-but-alive swarm eventually plays instead of buffering forever.
     """
     if waited >= _TARGET_WAIT_SECONDS:
         return True
+    if stalled and not progressed:
+        return False
     if not isinstance(stats, dict) or 'downloadSpeed' not in stats:
         return True
     try:
@@ -316,6 +366,176 @@ def _may_start_early(stats, got, target, waited):
     if speed <= 0:
         return False
     return (target - got) / speed <= _EARLY_START_ETA_SECONDS
+
+
+def _coerce_float(value):
+    """`float(value)`, or None for anything that isn't cleanly numeric -
+    shared by the feasibility/progress checks below, which must never
+    raise on a malformed or missing stats field."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _stats_file_length(stats, file_idx):
+    """Best-effort file size in bytes for `file_idx` out of a `/create`
+    stats dict's `files` array (`[{'name', 'path', 'length', 'offset'},
+    ...]` - see `guess_file_idx()`'s docstring in lib.stremio.server for
+    the full response shape, and `lib.ui.playbackmeta.extract_file_name`
+    for the sibling filename lookup this mirrors). None when `stats`/
+    `files`/the entry at `file_idx`/its `length` is missing, malformed,
+    or not positive - feeds the feasibility warning below, which must
+    degrade to "can't judge" rather than raise or invent a size.
+    """
+    try:
+        files = stats.get('files')
+    except AttributeError:
+        return None
+    if not isinstance(files, list) or file_idx is None or not (0 <= file_idx < len(files)):
+        return None
+    entry = files[file_idx]
+    length = _coerce_float(entry.get('length') if isinstance(entry, dict) else None)
+    return length if length and length > 0 else None
+
+
+def _required_bytes_per_second(runtime_seconds, file_length_bytes):
+    """Bytes/s the swarm must sustain to deliver `file_length_bytes` over
+    `runtime_seconds` of playback - the file's own average bitrate. None
+    when either input is missing/non-positive: feasibility cannot be
+    judged without both a runtime and a file size.
+    """
+    runtime_seconds = _coerce_float(runtime_seconds)
+    file_length_bytes = _coerce_float(file_length_bytes)
+    if not runtime_seconds or runtime_seconds <= 0 or not file_length_bytes or file_length_bytes <= 0:
+        return None
+    return file_length_bytes / runtime_seconds
+
+
+def _feasibility_warning_needed(runtime_seconds, file_length_bytes, download_speed):
+    """Whether the measured `download_speed` (bytes/s) over the buffering
+    window is too slow to sustain the file's own average bitrate (see
+    `_required_bytes_per_second`) by more than `_FEASIBILITY_SPEED_FACTOR`.
+
+    Absent/non-positive/malformed inputs never warn - this is a best-
+    effort heads-up, not a hard gate, and must never invent a warning
+    from missing evidence (mirrors `_may_start_early`'s "absent means
+    unknown, not slow" philosophy for this same swarm-speed class of
+    check).
+    """
+    required = _required_bytes_per_second(runtime_seconds, file_length_bytes)
+    if required is None:
+        return False
+    speed = _coerce_float(download_speed)
+    if not speed or speed <= 0:
+        return False
+    return speed < required * _FEASIBILITY_SPEED_FACTOR
+
+
+class _KeepAlivePin:
+    """Background thread that keeps a streaming GET open on the torrent's
+    URL after pre-buffer decides to hand off to Kodi's player, so
+    stremio-server-go keeps this file's pieces prioritized while the
+    player itself is still spinning up (opening the URL, probing the
+    container, filling its own read-ahead) - the exact window a cold
+    swarm can lose piece priority in and stall Kodi's very first read.
+
+    Reads and discards at a bounded rate (`_KEEPALIVE_SLEEP_SECONDS`
+    between `_KEEPALIVE_CHUNK_SIZE` chunks) starting from `start_byte`
+    (the offset pre-buffer already reached) rather than racing the real
+    player for bandwidth. Stops itself as soon as
+    `is_playing()` reports True, `is_aborted()` reports True (Kodi is
+    shutting down: Kodi waits on a plugin's live threads, so an unchecked
+    pin would hold shutdown for up to `_KEEPALIVE_MAX_SECONDS`), after
+    `_KEEPALIVE_MAX_SECONDS`, or once `stop()` is called - whichever comes
+    first. `start()` never blocks the caller: it spawns a daemon thread and
+    returns immediately.
+    """
+
+    def __init__(self, server, info_hash, file_idx, start_byte, is_playing, is_aborted=None):
+        self._server = server
+        self._info_hash = info_hash
+        self._file_idx = file_idx
+        self._start_byte = max(0, start_byte or 0)
+        self._is_playing = is_playing
+        self._is_aborted = is_aborted
+        self._stop_event = threading.Event()
+        self._thread = None
+
+    def start(self):
+        self._thread = threading.Thread(target=self._run, name='RivuletKeepAlivePin', daemon=True)
+        self._thread.start()
+        return self
+
+    def stop(self):
+        """Signal the background thread to stop at its next check point -
+        best-effort cleanup on abort/playback-ended; never blocks/joins."""
+        self._stop_event.set()
+
+    def _playing_now(self):
+        try:
+            return bool(self._is_playing())
+        except Exception:  # noqa: BLE001 - a broken probe must never wedge the pin open
+            return False
+
+    def _should_stop(self):
+        """True once `stop()` was called or Kodi requested abort; a broken
+        abort probe counts as "not aborted" (the deadline still bounds it)."""
+        if self._stop_event.is_set():
+            return True
+        if self._is_aborted is None:
+            return False
+        try:
+            return bool(self._is_aborted())
+        except Exception:  # noqa: BLE001 - a broken probe must never crash the pin
+            return False
+
+    def _run(self):
+        deadline = time.monotonic() + _KEEPALIVE_MAX_SECONDS
+        offset = self._start_byte
+        try:
+            while time.monotonic() < deadline and not self._should_stop():
+                if self._playing_now():
+                    return
+                advanced = False
+                try:
+                    want_bytes = offset + _KEEPALIVE_WINDOW_BYTES
+                    for chunk_len in self._server.iter_front(
+                        self._info_hash, self._file_idx, want_bytes,
+                        chunk_size=_KEEPALIVE_CHUNK_SIZE, timeout=_FRONT_TIMEOUT, start_byte=offset,
+                    ):
+                        offset += chunk_len
+                        advanced = True
+                        if self._should_stop() or time.monotonic() >= deadline or self._playing_now():
+                            return
+                        if self._stop_event.wait(_KEEPALIVE_SLEEP_SECONDS):
+                            return
+                except Exception as exc:  # noqa: BLE001 - a pin read hiccup must never crash playback
+                    log('player: keep-alive pin read failed for %s: %r' % (self._info_hash, exc), xbmc.LOGDEBUG)
+                if not advanced and self._stop_event.wait(_KEEPALIVE_POLL_SECONDS):
+                    return
+        except Exception as exc:  # noqa: BLE001 - the pin is a bonus, never fatal to playback
+            log('player: keep-alive pin failed for %s: %r' % (self._info_hash, exc), xbmc.LOGWARNING)
+
+
+def _start_keepalive_pin(server, info_hash, file_idx, start_byte):
+    """Spawn a `_KeepAlivePin` for the torrent pre-buffer just decided to
+    start on, and return immediately - see `_KeepAlivePin`'s docstring.
+    A module-level seam (like `RivuletProgress`/`confirm` used elsewhere
+    in this module) so tests can monkeypatch this to a no-op instead of
+    spawning a real background thread.
+    """
+    try:
+        monitor = xbmc.Monitor()
+        _KeepAlivePin(
+            server, info_hash, file_idx, start_byte,
+            lambda: xbmc.Player().isPlayingVideo(),
+            is_aborted=monitor.abortRequested,
+        ).start()
+    except Exception as exc:  # noqa: BLE001 - the pin is a bonus, never fatal to playback
+        log('player: keep-alive pin failed to start for %s: %r' % (info_hash, exc), xbmc.LOGWARNING)
 
 
 def _await_file_idx(server, stream, info_hash, url, dialog, monitor):
@@ -374,7 +594,7 @@ def _await_file_idx(server, stream, info_hash, url, dialog, monitor):
     return UNKNOWN_FILE_IDX, url, True, None
 
 
-def _prebuffer_torrent(server, stream, url, dialog, monitor):
+def _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=None):
     """Warm the torrent engine and show cancellable, truthful progress
     before playback, ticking the shared `dialog` (owned/closed by
     `_resolve_playable_item` for the whole resolve, not here - see that
@@ -392,6 +612,17 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
     another reason - see `extract_file_name`) when one could be
     recovered, else None. ANY unexpected error degrades to `(True, url,
     None)` - a broken pre-buffer must never block playback.
+
+    `item_meta` (optional, forwarded unchanged from `_resolve_playable_item`)
+    supplies `meta.runtime` for the feasibility warning below when
+    present; `None`/no `runtime` simply skips that check, exactly as
+    before this parameter existed.
+
+    Every successful return spawns a `_KeepAlivePin` (via
+    `_start_keepalive_pin`, a monkeypatchable seam) on the exact bytes
+    already obtained, so stremio-server-go keeps this file prioritized
+    while Kodi's player is still opening/probing the URL this function
+    hands back.
     """
     buffer_enable = setting_bool('buffer_enable', True)
     log(
@@ -416,6 +647,7 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
         if file_idx is None:
             file_idx = UNKNOWN_FILE_IDX
         filename = None
+        file_length_bytes = None
         if file_idx == UNKNOWN_FILE_IDX:
             file_idx, url, proceed, stats = _await_file_idx(server, stream, info_hash, url, dialog, monitor)
             if not proceed:
@@ -426,6 +658,7 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
                 notify(L(30083))
                 return True, url, None
             filename = extract_file_name(stats, file_idx)
+            file_length_bytes = _stats_file_length(stats, file_idx)
         else:
             # Warm the engine, but bounded: a cold /create would otherwise
             # block for its full timeout with no cancel check. The front
@@ -436,8 +669,15 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
             try:
                 warm_stats = server.create_engine(info_hash, timeout=_METADATA_TIMEOUT)
                 filename = extract_file_name(warm_stats, file_idx)
+                file_length_bytes = _stats_file_length(warm_stats, file_idx)
             except Exception as exc:  # noqa: BLE001 - front reads drive the engine regardless
                 log('player: engine warm failed for %s: %r (continuing)' % (info_hash, exc), xbmc.LOGWARNING)
+
+        # Best-effort runtime for the feasibility warning below - a missing/
+        # unparseable meta.runtime just means that check never fires,
+        # exactly like a missing file_length_bytes above.
+        runtime_seconds = parse_duration_seconds(((item_meta or {}).get('meta') or {}).get('runtime'))
+        feasibility_warned = False
 
         buffer_mb = setting_int('buffer_mb', 20, minimum=5)
         target = buffer_mb * 1024 * 1024
@@ -451,14 +691,13 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
             xbmc.LOGINFO,
         )
 
-        # Front-priming readiness loop. Streams the file FRONT (offset 0,
-        # where ffmpeg's container probe reads) directly rather than
-        # trusting aggregate download stats, which can report megabytes
-        # "buffered" from out-of-order pieces while the front is still
-        # missing (the live CURLE_PARTIAL_FILE / "error probing input
-        # format" bug). Short per-read timeout keeps the dialog cancellable;
-        # a genuinely dead swarm fails honestly (30084) after the budget
-        # rather than hanging or handing Kodi a doomed URL.
+        # Front-priming readiness loop. Streams the file FRONT directly
+        # rather than trusting aggregate download stats, which can report
+        # megabytes "buffered" from out-of-order pieces while the front is
+        # still missing (the live CURLE_PARTIAL_FILE / "error probing
+        # input format" bug). Short per-read timeout keeps the dialog
+        # cancellable; a genuinely dead swarm fails honestly (30084) after
+        # the budget rather than hanging or handing Kodi a doomed URL.
         # Wall clock for the whole buffering loop, used by the early-start
         # gate below to bound how long a slow swarm is allowed to keep
         # filling before playback starts on what it has.
@@ -467,9 +706,19 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
         def waited():
             return time.monotonic() - loop_started
 
-        #: Best front length seen across attempts - each attempt re-reads the
-        #: front from offset 0, so this is what the loop actually achieved.
-        best_got = 0
+        #: Cumulative bytes obtained across every attempt so far. Each
+        #: retry resumes from here via iter_front's `start_byte` (Range:
+        #: bytes=<total_got>-<target-1>) instead of restarting the front
+        #: read from offset 0, so a stall/retry never re-downloads (or
+        #: re-waits on) data already received. Monotonically
+        #: non-decreasing: a chunk received in any attempt is never lost.
+        total_got = 0
+        #: Aggregate downloaded-bytes counter from the previous attempt's
+        #: stats poll, best-effort - used only by the stalled-attempt
+        #: guard in `_may_start_early` to tell "swarm truly dead" apart
+        #: from "still making progress elsewhere, just not on this file's
+        #: front yet". None until a poll actually reports one.
+        prev_downloaded = None
 
         for attempt in range(_MAX_FRONT_ATTEMPTS):
             if dialog.iscanceled():
@@ -485,8 +734,19 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
             if dialog.iscanceled():
                 return False, url, None
 
-            got = 0
-            # A 20 MB pre-buffer at 10 KB chunks is ~2000 iterations of this
+            if not feasibility_warned and file_length_bytes and runtime_seconds:
+                measured_speed = (stats or {}).get('downloadSpeed')
+                if _feasibility_warning_needed(runtime_seconds, file_length_bytes, measured_speed):
+                    feasibility_warned = True
+                    log(
+                        'player: feasibility warning for %s: runtime=%.0fs size=%d speed=%r'
+                        % (info_hash, runtime_seconds, file_length_bytes, measured_speed),
+                        xbmc.LOGWARNING,
+                    )
+                    notify(L(30361))
+
+            got_before_attempt = total_got
+            # A 20 MB pre-buffer at 16 KB chunks is ~1300 iterations of this
             # loop. RivuletProgress already dedupes identical writes into
             # Kodi itself (measured: 324 calls instead of 20,480 for that
             # run), but building the message here - two human_size() calls
@@ -499,42 +759,60 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
             last_size = None
             last_percent = None
             try:
-                for chunk_len in server.iter_front(info_hash, file_idx, target, timeout=_FRONT_TIMEOUT):
-                    got += chunk_len
-                    percent = min(100, _BUFFER_PERCENT_BASE + got * _BUFFER_PERCENT_SPAN // target) if target else 100
-                    size = human_size(got)
+                for chunk_len in server.iter_front(
+                    info_hash, file_idx, target, timeout=_FRONT_TIMEOUT, start_byte=total_got,
+                ):
+                    total_got += chunk_len
+                    percent = min(100, _BUFFER_PERCENT_BASE + total_got * _BUFFER_PERCENT_SPAN // target) if target else 100
+                    size = human_size(total_got)
                     if size != last_size or percent != last_percent:
                         last_size, last_percent = size, percent
                         dialog.update(percent, _lfmt(30081, size, target_size), stats=stats_line)
                     if dialog.iscanceled():
                         return False, url, None
-                    if got >= target:
+                    if total_got >= target:
                         break
             except Exception as exc:  # noqa: BLE001 - a front-read hiccup must not brick playback
                 log('player: front read failed for %s: %r' % (info_hash, exc), xbmc.LOGWARNING)
 
-            if got >= target:
+            # This attempt's own stall boundary: no new bytes at all,
+            # whether from a timeout, an exception, or a zero-chunk
+            # response - see `_may_start_early`'s `stalled` parameter.
+            stalled = total_got == got_before_attempt
+            downloaded_now = _coerce_float((stats or {}).get('downloaded'))
+            progressed = (
+                downloaded_now is not None
+                and prev_downloaded is not None
+                and downloaded_now > prev_downloaded
+            )
+            if downloaded_now is not None:
+                prev_downloaded = downloaded_now
+
+            if total_got >= target:
                 log(
                     'player: pre-buffer complete for %s: buffered=%d target=%d'
-                    % (info_hash, got, target),
+                    % (info_hash, total_got, target),
                     xbmc.LOGINFO,
                 )
+                _start_keepalive_pin(server, info_hash, file_idx, total_got)
                 return True, url, filename
 
-            if got >= _HEADER_MIN_BYTES and _may_start_early(stats, got, target, waited()):
+            if total_got >= _HEADER_MIN_BYTES and _may_start_early(
+                stats, total_got, target, waited(), stalled=stalled, progressed=progressed
+            ):
                 log(
                     'player: pre-buffer header floor reached, starting early for %s: '
-                    'buffered=%d target=%d waited=%.1fs' % (info_hash, got, target, waited()),
+                    'buffered=%d target=%d waited=%.1fs' % (info_hash, total_got, target, waited()),
                     xbmc.LOGINFO,
                 )
+                _start_keepalive_pin(server, info_hash, file_idx, total_got)
                 return True, url, filename
-            best_got = max(best_got, got)
 
             # About to sleep _ATTEMPT_PAUSE_SECONDS before retrying - show a
             # retrying hint so that silent pause isn't a dead-looking dialog.
-            percent = min(100, _BUFFER_PERCENT_BASE + got * _BUFFER_PERCENT_SPAN // target) if target else 100
+            percent = min(100, _BUFFER_PERCENT_BASE + total_got * _BUFFER_PERCENT_SPAN // target) if target else 100
             dialog.update(
-                percent, _lfmt(30081, human_size(got), target_size),
+                percent, _lfmt(30081, human_size(total_got), target_size),
                 attempt=_lfmt(30090, attempt + 1, _MAX_FRONT_ATTEMPTS),
                 stats=stats_line,
             )
@@ -542,16 +820,17 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor):
             if monitor.waitForAbort(_ATTEMPT_PAUSE_SECONDS):
                 return False, url, None
 
-        if best_got >= _HEADER_MIN_BYTES:
+        if total_got >= _HEADER_MIN_BYTES:
             # The retry budget ran out while still under target, but the
             # header is readable. Failing here would be a regression: before
             # the early-start gate this case started playback immediately, so
             # play it rather than refusing a stream that is merely slow.
             log(
                 'player: pre-buffer budget spent for %s, starting on %d of %d bytes'
-                % (info_hash, best_got, target),
+                % (info_hash, total_got, target),
                 xbmc.LOGINFO,
             )
+            _start_keepalive_pin(server, info_hash, file_idx, total_got)
             return True, url, filename
 
         log(
@@ -778,7 +1057,7 @@ def _resolve_playable_item(stream, stype, sid, item_meta=None, video_id=None):
             return None, None
 
         if stream.get('infoHash'):
-            proceed, url, resolved_filename = _prebuffer_torrent(server, stream, url, dialog, monitor)
+            proceed, url, resolved_filename = _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=item_meta)
             if not proceed:
                 return None, None
     finally:

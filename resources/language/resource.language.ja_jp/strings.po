@@ -945,3 +945,7 @@ msgstr "カタログを閲覧、またはマニフェスト URL からインス�
 msgctxt "#30360"
 msgid "New episodes: %d"
 msgstr "新しいエピソード: %d"
+
+msgctxt "#30361"
+msgid "Source slower than playback bitrate; expect buffering"
+msgstr "ソースが再生ビットレートより遅いため、バッファリングが発生する可能性があります"

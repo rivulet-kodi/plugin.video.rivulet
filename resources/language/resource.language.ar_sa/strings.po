@@ -945,3 +945,7 @@ msgstr "استعرض الكتالوجات أو ثبّت من رابط ملف man
 msgctxt "#30360"
 msgid "New episodes: %d"
 msgstr "حلقات جديدة: %d"
+
+msgctxt "#30361"
+msgid "Source slower than playback bitrate; expect buffering"
+msgstr "المصدر أبطأ من معدل بت التشغيل؛ يُتوقع التخزين المؤقت"
