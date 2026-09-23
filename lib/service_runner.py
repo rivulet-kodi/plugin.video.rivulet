@@ -33,7 +33,7 @@ import subprocess
 import time
 from urllib.parse import urlparse
 
-from lib import library, procflags
+from lib import library, procflags, s4me
 from lib import settings as _settings
 from lib.store import Store
 from lib.stremio.api import StremioAPI
@@ -907,6 +907,29 @@ def main():
         xbmc, store, StremioAPI(), log, lambda: _settings.setting_bool(addon, "sync_progress", True),
     )
 
+    # --- S4Me bridge -----------------------------------------------------
+    #
+    # Deliberately independent of ServiceMonitor: reads its own settings
+    # fresh every call instead of caching them, so this stays a single,
+    # self-contained hook with no coupling to the embedded-server restart
+    # machinery above/below. BridgeSupervisor.apply() is cheap and
+    # idempotent (see its own docstring), so calling this every
+    # supervision-loop tick (see the `while` loop's `_sync_s4me_bridge()`
+    # call near the bottom of `main()`) is fine.
+    s4me_bridge = s4me.BridgeSupervisor(addon.getAddonInfo("path"))
+
+    def _sync_s4me_bridge():
+        try:
+            s4me_bridge.apply(
+                _settings.setting_bool(addon, "s4me_enable", False),
+                _settings.setting_int(addon, "s4me_port", s4me.DEFAULT_PORT),
+                lambda: bool(xbmc.getCondVisibility("System.HasAddon(%s)" % s4me.S4ME_ADDON_ID)),
+                xbmc.executebuiltin,
+                store,
+            )
+        except Exception as exc:  # noqa: BLE001 - a bridge sync failure must never crash the service loop
+            log(xbmc.LOGWARNING, f"s4me bridge sync failed: {exc}")
+
     class ServiceMonitor(xbmc.Monitor):
         def __init__(self):
             super().__init__()
@@ -916,12 +939,14 @@ def main():
             self.server_url = DEFAULT_SERVER_URL
             self.extra_settings = {}
             self.extra_env = {}
+            self.force_library = False
             self._refresh()
 
         def _refresh(self):
             self.enabled = _settings.setting_bool(addon, "server_enable", EXTRA_ENV_TYPED_DEFAULTS["server_enable"])
             self.binary_setting = addon.getSetting("server_binary")
             self.server_url = addon.getSetting("server_url") or DEFAULT_SERVER_URL
+            self.force_library = _settings.setting_bool(addon, "server_force_library", False)
             values = {}
             for setting_id, _env_var, kind in EXTRA_ENV_SETTINGS:
                 default = EXTRA_ENV_TYPED_DEFAULTS.get(setting_id)
@@ -936,7 +961,7 @@ def main():
 
         def _snapshot(self):
             return (
-                self.enabled, self.binary_setting, self.server_url,
+                self.enabled, self.binary_setting, self.server_url, self.force_library,
                 tuple(sorted(self.extra_settings.items())),
             )
 
@@ -982,6 +1007,54 @@ def main():
             next_interval = RESTART_BACKOFF[min(state.backoff_idx, len(RESTART_BACKOFF) - 1)]
             state.backoff_idx = min(state.backoff_idx + 1, len(RESTART_BACKOFF) - 1)
             return None, next_interval
+        return candidate, HEALTHY_POLL_INTERVAL
+
+    def _resolve_library_candidate(profile_dir):
+        """Return the libstremio-server.so path to use for c-shared
+        library mode (see lib.libserver.LibraryServer), or None when
+        unavailable: ctypes import failed in this Python build (see
+        lib.libserver.LIBRARY_SUPPORTED), or serverbin.install_binary()
+        has not extracted a companion library into
+        serverbin.install_dir()'s location yet -- true of every
+        non-Android platform, and of an Android install predating
+        library-mode support. Cheap enough (an isfile() check, at most)
+        to call fresh at every site that needs it rather than caching
+        across a tick.
+        """
+        from lib import libserver
+        if not libserver.LIBRARY_SUPPORTED:
+            return None
+        from lib import serverbin
+        bin_dir = serverbin.install_dir(profile_dir, ADDON_ID)
+        return serverbin.resolve_library(bin_dir)
+
+    def _start_library_server(library_path, state):
+        """Spawn the c-shared library server. Mirrors
+        _start_embedded_server()'s `(candidate, interval)` contract and
+        failed-spawn backoff, using lib.libserver.LibraryServer instead
+        of a subprocess.Popen-backed ServerProcess -- see that class's
+        docstring for why its public surface matches ServerProcess
+        closely enough that `state.proc` doesn't need to know which one
+        it holds.
+        """
+        log(xbmc.LOGINFO, f"starting library-mode server: {library_path}")
+        from lib import libserver
+
+        candidate = libserver.LibraryServer(
+            library_path, monitor.server_url, app_path, log_path,
+            extra_env=monitor.extra_env,
+            log_fn=lambda message: log(xbmc.LOGWARNING, message),
+        )
+        try:
+            candidate.start()
+        except Exception as exc:  # noqa: BLE001 - a failed spawn must never crash the supervision loop
+            log(xbmc.LOGERROR, f"failed to start library-mode server: {exc}")
+            next_interval = RESTART_BACKOFF[min(state.backoff_idx, len(RESTART_BACKOFF) - 1)]
+            state.backoff_idx = min(state.backoff_idx + 1, len(RESTART_BACKOFF) - 1)
+            return None, next_interval
+        xbmcgui.Dialog().notification(
+            addon.getAddonInfo("name"), addon.getLocalizedString(30364),
+        )
         return candidate, HEALTHY_POLL_INTERVAL
 
     def _abort_progress(done, total):
@@ -1156,6 +1229,15 @@ def main():
             if probe_listening(monitor.server_url):
                 state.notified_missing = False
                 interval = EXTERNAL_RECHECK_INTERVAL
+            elif monitor.force_library and (library_path := _resolve_library_candidate(profile_dir)) is not None:
+                # Explicit opt-out of the exec()-based path entirely (see
+                # `server_force_library`'s docstring in settings.xml) --
+                # skip resolve_binary()/install_binary() altogether and go
+                # straight to c-shared library mode whenever a companion
+                # libstremio-server.so is already on disk.
+                state.notified_missing = False
+                state.unsupported_platform = False
+                state.proc, interval = _start_library_server(library_path, state)
             elif state.unsupported_platform:
                 # The exception that latched this flag cannot tell a
                 # permanent platform ban from a transient environment
@@ -1164,24 +1246,37 @@ def main():
                 # work as the branch below -- just resolve_binary(), not
                 # a fresh install attempt -- only at this coarser cadence.
                 interval = UNSUPPORTED_PLATFORM_POLL_INTERVAL
-                binary = resolve_binary(monitor.binary_setting, profile_dir)
-                if binary is None:
-                    if not state.notified_missing:
-                        xbmcgui.Dialog().notification(
-                            addon.getAddonInfo("name"),
-                            addon.getLocalizedString(30031),
-                            xbmcgui.NOTIFICATION_ERROR,
-                        )
-                        log(xbmc.LOGERROR, "stremio-server binary not found")
-                        state.notified_missing = True
-                else:
-                    # Self-heal: a runnable binary appeared (or a
-                    # noexec/EACCES mount condition cleared) without any
-                    # Kodi setting changing -- unlatch immediately instead
-                    # of waiting on onSettingsChanged() -> restart_requested.
+                library_path = _resolve_library_candidate(profile_dir)
+                if library_path is not None:
+                    # Self-heal into library mode: a companion .so is now
+                    # on disk -- install_binary() extracts it regardless of
+                    # whether the executable itself passed
+                    # verify_executable() -- and ctypes works here, so
+                    # prefer it over the exec()-based self-heal below,
+                    # which keeps failing for the exact same permanent
+                    # reason on an enforcing-SELinux device.
                     state.notified_missing = False
                     state.unsupported_platform = False
-                    state.proc, interval = _start_embedded_server(binary, state)
+                    state.proc, interval = _start_library_server(library_path, state)
+                else:
+                    binary = resolve_binary(monitor.binary_setting, profile_dir)
+                    if binary is None:
+                        if not state.notified_missing:
+                            xbmcgui.Dialog().notification(
+                                addon.getAddonInfo("name"),
+                                addon.getLocalizedString(30031),
+                                xbmcgui.NOTIFICATION_ERROR,
+                            )
+                            log(xbmc.LOGERROR, "stremio-server binary not found")
+                            state.notified_missing = True
+                    else:
+                        # Self-heal: a runnable binary appeared (or a
+                        # noexec/EACCES mount condition cleared) without any
+                        # Kodi setting changing -- unlatch immediately instead
+                        # of waiting on onSettingsChanged() -> restart_requested.
+                        state.notified_missing = False
+                        state.unsupported_platform = False
+                        state.proc, interval = _start_embedded_server(binary, state)
             else:
                 binary = resolve_binary(monitor.binary_setting, profile_dir)
                 if binary is None:
@@ -1216,14 +1311,32 @@ def main():
                             log(xbmc.LOGINFO, "stremio-server binary download aborted, shutting down")
                             return interval, True
                         except serverbin.UnsupportedPlatformError as exc:
-                            state.unsupported_platform = True
-                            state.next_download_at = None
-                            log(xbmc.LOGWARNING, f"stremio-server binary cannot run on this device: {exc}")
-                            xbmcgui.Dialog().notification(
-                                addon.getAddonInfo("name"),
-                                addon.getLocalizedString(30091),
-                                xbmcgui.NOTIFICATION_ERROR,
-                            )
+                            library_path = _resolve_library_candidate(profile_dir)
+                            if library_path is not None:
+                                # install_binary() extracts the optional
+                                # libstremio-server.so companion regardless
+                                # of whether the executable itself passed
+                                # verify_executable() (see its docstring) --
+                                # so a fresh SELinux-enforcing failure right
+                                # here can fall back to c-shared library
+                                # mode immediately instead of latching
+                                # unsupported.
+                                log(xbmc.LOGINFO,
+                                    f"stremio-server executable unsupported ({exc}), "
+                                    f"falling back to library mode")
+                                state.notified_missing = False
+                                state.unsupported_platform = False
+                                state.proc, interval = _start_library_server(library_path, state)
+                            else:
+                                state.unsupported_platform = True
+                                state.next_download_at = None
+                                log(xbmc.LOGWARNING,
+                                    f"stremio-server binary cannot run on this device: {exc}")
+                                xbmcgui.Dialog().notification(
+                                    addon.getAddonInfo("name"),
+                                    addon.getLocalizedString(30091),
+                                    xbmcgui.NOTIFICATION_ERROR,
+                                )
                         except Exception as exc:
                             # Transient failure (network hiccup, GitHub
                             # outage, no release asset published yet, ...)
@@ -1284,6 +1397,7 @@ def main():
 
     while not monitor.abortRequested():
         _tick_progress_and_restart(state)
+        _sync_s4me_bridge()
 
         interval, should_break = _dispatch_supervision(state)
         if should_break:

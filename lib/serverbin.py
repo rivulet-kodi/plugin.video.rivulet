@@ -39,6 +39,15 @@ SERVER_TAG = "v0.14.0"
 USER_AGENT = "plugin.video.rivulet"
 
 BINARY_NAME = "stremio-server"
+#: The optional stremio-server-go c-shared library build (cmd/libstremio),
+#: packaged inside the same Android arm64/armv7 release archives as
+#: BINARY_NAME for c-shared library mode (see lib.libserver.LibraryServer)
+#: -- the SELinux-*enforcing* Android fallback for devices where
+#: verify_executable() finds exec() itself denied (see
+#: UnsupportedPlatformError's docstring). Every other platform's archive
+#: simply lacks this member; see _extract_library_companion()/
+#: resolve_library() for why that is never an error.
+LIBRARY_NAME = "libstremio-server.so"
 PART_SUFFIX = ".part"
 DOWNLOAD_CHUNK_SIZE = 64 * 1024
 REQUEST_TIMEOUT = 30
@@ -317,6 +326,22 @@ def install_dir(profile_dir, addon_id):
     return os.path.join(profile_dir, "bin")
 
 
+def resolve_library(dest_dir):
+    """Return the path to the optional libstremio-server.so companion
+    install_binary() may have extracted into `dest_dir` (the exact same
+    directory install_dir() picks -- see lib.libserver.LibraryServer and
+    _extract_library_companion()), or None when it isn't there.
+
+    None is the normal case, not an error: every non-Android archive
+    lacks this member entirely, and so does an Android install performed
+    before library-mode support existed. Callers (lib.service_runner's
+    library-mode fallback) treat None as "fall back to the executable
+    path" exactly like resolve_binary() finding nothing.
+    """
+    path = os.path.join(dest_dir, LIBRARY_NAME)
+    return path if os.path.isfile(path) else None
+
+
 def _asset_name(os_name, arch):
     """Return the goreleaser archive name for (os_name, arch)."""
     ext = "zip" if os_name == "Windows" else "tar.gz"
@@ -458,6 +483,43 @@ def _extract_binary(archive_path, asset_name, target_name, dest_path):
                 shutil.copyfileobj(src, dst)
 
 
+def _extract_library_companion(archive_path, asset_name, dest_dir):
+    """Best-effort extraction of the optional libstremio-server.so
+    companion (see LIBRARY_NAME's docstring) from the archive already
+    downloaded for the executable, straight into `dest_dir` -- the exact
+    directory resolve_library() later looks in.
+
+    Deliberately silent on any failure: only the Android arm64/armv7
+    assets currently ship this member at all, so "not present in this
+    archive" is the normal case on every other platform, not a broken
+    install -- it must never fail an otherwise-good executable install
+    over an optional file. Written via the same download-then-promote
+    pattern as the executable (temp name, then os.replace()) so a
+    partial write from an interrupted extraction can never leave a
+    truncated .so where resolve_library() would find it.
+    """
+    lib_final_path = os.path.join(dest_dir, LIBRARY_NAME)
+    lib_tmp_path = lib_final_path + PART_SUFFIX
+    try:
+        if asset_name.endswith(".zip"):
+            with zipfile.ZipFile(archive_path) as zf:
+                member = _find_zip_member(zf, LIBRARY_NAME)
+                with zf.open(member) as src, open(lib_tmp_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+        else:
+            with tarfile.open(archive_path, mode="r:*") as tar:
+                member = _find_tar_member(tar, LIBRARY_NAME)
+                src = tar.extractfile(member)
+                if src is None:
+                    return
+                with src, open(lib_tmp_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+    except (DownloadError, OSError):
+        _safe_remove(lib_tmp_path)
+        return
+    os.replace(lib_tmp_path, lib_final_path)
+
+
 def verify_executable(path):
     """Best-effort confirmation that the installed binary can be exec()'d.
 
@@ -513,6 +575,15 @@ def install_binary(dest_dir, progress_cb=None):
     A successful install records SERVER_TAG via `_write_tag_stamp` so a
     later release bump can tell this binary is out of date.
 
+    The optional libstremio-server.so companion (see LIBRARY_NAME's and
+    _extract_library_companion()'s docstrings) is extracted right after
+    the checksum passes, independent of whatever happens to the
+    executable below -- including when verify_executable() goes on to
+    raise UnsupportedPlatformError, since that is exactly the device
+    lib.libserver.LibraryServer exists for. Its own archive membership is
+    covered by the same PINNED_SHA256 check as the executable (they are
+    the same downloaded file), so it needs no separate pin.
+
     Raises UnsupportedPlatformError (a DownloadError subclass) immediately,
     before any network request, on iOS/iPadOS/tvOS: sandboxing rules out
     exec()ing a downloaded binary there no matter where it is installed, so
@@ -554,6 +625,8 @@ def install_binary(dest_dir, progress_cb=None):
 
         if digest.lower() != expected_sha256.lower():
             raise DownloadError("checksum mismatch for %s" % asset_name)
+
+        _extract_library_companion(archive_path, asset_name, dest_dir)
 
         target_name = _target_member_name(os_name)
         final_path = os.path.join(dest_dir, target_name)

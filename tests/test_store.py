@@ -421,6 +421,106 @@ def test_move_addon_retries_and_reapplies_against_fresh_data_on_conflict(tmp_pat
     )
     assert urls.index("https://b.example/manifest.json") < urls.index("https://a.example/manifest.json")
 
+# --- set_builtin_addon / remove_builtin_addon -------------------------------
+
+
+def test_set_builtin_addon_appends_new_protected_unofficial_entry(tmp_path):
+    store = make_store(tmp_path)
+    before = len(store.get_addons())
+
+    store.set_builtin_addon("s4me", "http://127.0.0.1:11480/manifest.json", {"id": "org.rivulet.s4me"})
+
+    addons = store.get_addons()
+    assert len(addons) == before + 1
+    entry = next(a for a in addons if a["flags"].get("builtin") == "s4me")
+    assert entry["transportUrl"] == "http://127.0.0.1:11480/manifest.json"
+    assert entry["manifest"] == {"id": "org.rivulet.s4me"}
+    assert entry["flags"] == {"official": False, "protected": True, "builtin": "s4me"}
+
+
+def test_set_builtin_addon_updates_existing_entry_by_builtin_flag_not_url(tmp_path):
+    """A changed transportUrl (e.g. a bridge whose port setting changed)
+    must update the SAME entry in place, matched by flags.builtin, not
+    leave a stale duplicate behind."""
+    store = make_store(tmp_path)
+    store.set_builtin_addon("s4me", "http://127.0.0.1:11480/manifest.json", {"id": "org.rivulet.s4me", "v": 1})
+    before = len(store.get_addons())
+
+    store.set_builtin_addon("s4me", "http://127.0.0.1:11481/manifest.json", {"id": "org.rivulet.s4me", "v": 2})
+
+    addons = store.get_addons()
+    assert len(addons) == before
+    matches = [a for a in addons if a["flags"].get("builtin") == "s4me"]
+    assert len(matches) == 1
+    assert matches[0]["transportUrl"] == "http://127.0.0.1:11481/manifest.json"
+    assert matches[0]["manifest"]["v"] == 2
+
+
+def test_set_builtin_addon_is_noop_write_when_unchanged(tmp_path, monkeypatch):
+    store = make_store(tmp_path)
+    manifest = {"id": "org.rivulet.s4me"}
+    store.set_builtin_addon("s4me", "http://127.0.0.1:11480/manifest.json", manifest)
+
+    write_calls = []
+    real_atomic_write = store_module._atomic_write
+
+    def spy_atomic_write(path, data, compact=False):
+        write_calls.append(path)
+        return real_atomic_write(path, data, compact=compact)
+
+    monkeypatch.setattr(store_module, "_atomic_write", spy_atomic_write)
+
+    store.set_builtin_addon("s4me", "http://127.0.0.1:11480/manifest.json", manifest)
+
+    assert write_calls == []
+
+
+def test_remove_builtin_addon_deletes_flagged_entry(tmp_path):
+    store = make_store(tmp_path)
+    before = len(store.get_addons())
+    store.set_builtin_addon("s4me", "http://127.0.0.1:11480/manifest.json", {"id": "org.rivulet.s4me"})
+
+    store.remove_builtin_addon("s4me")
+
+    addons = store.get_addons()
+    assert len(addons) == before
+    assert not any(a["flags"].get("builtin") == "s4me" for a in addons)
+
+
+def test_remove_builtin_addon_missing_is_noop(tmp_path):
+    store = make_store(tmp_path)
+    store.get_addons()  # seed
+    before = store.get_addons()
+
+    store.remove_builtin_addon("s4me")  # never installed
+
+    assert store.get_addons() == before
+
+
+def test_remove_builtin_addon_never_raises_for_protected_official_defaults(tmp_path):
+    """Unlike remove_addon(), remove_builtin_addon() has no protected-addon
+    refusal -- it must never raise even though DEFAULT_ADDONS entries are
+    themselves protected (they simply don't match the builtin flag, so
+    they are left untouched)."""
+    store = make_store(tmp_path)
+    before = store.get_addons()
+
+    store.remove_builtin_addon("s4me")  # must not raise
+
+    assert store.get_addons() == before
+
+
+def test_set_builtin_addon_leaves_other_addons_untouched(tmp_path):
+    store = make_store(tmp_path)
+    store.install_addon("https://custom.example/manifest.json", {"id": "org.custom"})
+    before = store.get_addons()
+
+    store.set_builtin_addon("s4me", "http://127.0.0.1:11480/manifest.json", {"id": "org.rivulet.s4me"})
+
+    after = store.get_addons()
+    assert all(a in after for a in before)
+
+
 
 # --- auth ------------------------------------------------------------------
 

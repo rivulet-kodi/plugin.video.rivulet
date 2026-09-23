@@ -949,3 +949,31 @@ msgstr "Nouveaux épisodes : %d"
 msgctxt "#30361"
 msgid "Source slower than playback bitrate; expect buffering"
 msgstr "Source plus lente que le débit de lecture ; mise en mémoire tampon probable"
+
+msgctxt "#30362"
+msgid "Force library mode (Android)"
+msgstr "Forcer le mode bibliothèque (Android)"
+
+msgctxt "#30363"
+msgid "Run the streaming server as an in-process library instead of a separate executable. Enable this only if the embedded server fails to start (e.g. on an SELinux-enforcing Android device)."
+msgstr "Exécute le serveur de streaming en tant que bibliothèque intégrée au processus plutôt que comme exécutable séparé. N'activez cette option que si le serveur intégré ne démarre pas (par ex. sur un appareil Android avec SELinux en mode enforcing)."
+
+msgctxt "#30364"
+msgid "Streaming server switched to library mode"
+msgstr "Serveur de streaming basculé en mode bibliothèque"
+
+msgctxt "#30371"
+msgid "Stream4Me bridge"
+msgstr "Passerelle Stream4Me"
+
+msgctxt "#30372"
+msgid "Enable Stream4Me bridge"
+msgstr "Activer la passerelle Stream4Me"
+
+msgctxt "#30373"
+msgid "Bridge port"
+msgstr "Port de la passerelle"
+
+msgctxt "#30374"
+msgid "Channels (comma-separated, blank = every active channel)"
+msgstr "Chaînes (séparées par des virgules, vide = toutes les chaînes actives)"

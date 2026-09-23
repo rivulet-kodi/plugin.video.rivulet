@@ -1203,6 +1203,67 @@ class Store:
 
         self.update_addons(_move)
 
+    def set_builtin_addon(self, builtin_id, transport_url, manifest):
+        """Ensure exactly one addon descriptor flagged `flags.builtin ==
+        builtin_id` exists, at `transport_url` with `manifest`, protected
+        and unofficial.
+
+        Matched by `flags.builtin`, NOT `transportUrl` -- so a caller
+        whose `transport_url` changes (e.g. a bridge addon whose local
+        port setting changed) still updates the SAME entry in place
+        rather than leaving a stale duplicate behind. Idempotent: calling
+        this every session with an unchanged `transport_url`/`manifest`
+        is a no-op write (see :meth:`update_addons`'s equality check).
+
+        Unlike :meth:`install_addon`, this always pins `flags` to
+        `{"official": False, "protected": True, "builtin": builtin_id}`
+        rather than preserving whatever flags an existing entry had --
+        this is the ONE path that creates/maintains a given
+        `builtin_id`'s entry, so there is no independent local state
+        (like a user-toggled `disabled` bit) to preserve across a resync.
+
+        Safe against a concurrent ``default.py`` process modifying
+        addons.json at the same time -- see :meth:`update_addons`.
+        """
+        target = {
+            "transportUrl": transport_url,
+            "manifest": manifest,
+            "flags": {"official": False, "protected": True, "builtin": builtin_id},
+        }
+
+        def _sync(addons):
+            updated = []
+            found = False
+            for addon in addons:
+                if (addon.get("flags") or {}).get("builtin") == builtin_id:
+                    found = True
+                    updated.append(target)
+                else:
+                    updated.append(addon)
+            if not found:
+                updated.append(target)
+            return updated
+
+        self.update_addons(_sync)
+
+    def remove_builtin_addon(self, builtin_id):
+        """Remove any addon descriptor flagged `flags.builtin ==
+        builtin_id`. No-ops if none is installed.
+
+        Deliberately bypasses :meth:`remove_addon`'s protected-addon
+        refusal: that guard exists to stop a *user* removing a protected
+        addon through the UI, not to stop the very code that maintains a
+        builtin entry from retracting it once its feature is disabled or
+        its prerequisite (e.g. Stream4Me itself) goes missing.
+
+        Safe against a concurrent ``default.py`` process modifying
+        addons.json at the same time -- see :meth:`update_addons`.
+        """
+        def _remove(addons):
+            return [a for a in addons if (a.get("flags") or {}).get("builtin") != builtin_id]
+
+        self.update_addons(_remove)
+
     # -- auth --------------------------------------------------------------
 
     def get_auth(self):

@@ -949,3 +949,31 @@ msgstr "حلقات جديدة: %d"
 msgctxt "#30361"
 msgid "Source slower than playback bitrate; expect buffering"
 msgstr "المصدر أبطأ من معدل بت التشغيل؛ يُتوقع التخزين المؤقت"
+
+msgctxt "#30362"
+msgid "Force library mode (Android)"
+msgstr "فرض وضع المكتبة (Android)"
+
+msgctxt "#30363"
+msgid "Run the streaming server as an in-process library instead of a separate executable. Enable this only if the embedded server fails to start (e.g. on an SELinux-enforcing Android device)."
+msgstr "شغّل خادم البث كمكتبة داخل نفس العملية بدلاً من ملف تنفيذي منفصل. فعّل هذا الخيار فقط إذا فشل الخادم المدمج في البدء (مثلاً على جهاز Android يعمل بوضع SELinux enforcing)."
+
+msgctxt "#30364"
+msgid "Streaming server switched to library mode"
+msgstr "تم التحويل إلى وضع المكتبة لخادم البث"
+
+msgctxt "#30371"
+msgid "Stream4Me bridge"
+msgstr "جسر Stream4Me"
+
+msgctxt "#30372"
+msgid "Enable Stream4Me bridge"
+msgstr "تفعيل جسر Stream4Me"
+
+msgctxt "#30373"
+msgid "Bridge port"
+msgstr "منفذ الجسر"
+
+msgctxt "#30374"
+msgid "Channels (comma-separated, blank = every active channel)"
+msgstr "القنوات (مفصولة بفواصل، فارغ = جميع القنوات النشطة)"

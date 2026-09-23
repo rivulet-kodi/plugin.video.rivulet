@@ -24,6 +24,7 @@ import sys
 
 import pytest
 
+import lib.libserver as libserver
 import lib.serverbin as serverbin
 import lib.service_runner as service_runner
 from tests.kodistubs import install_kodi_stubs
@@ -203,6 +204,72 @@ def _make_process_factory(specs):
     return factory, spawned
 
 
+class ScriptedLibraryServer:
+    """Stand-in for `lib.libserver.LibraryServer` itself, used only by the
+    library-mode `main()` orchestration tests below -- mirrors
+    `ScriptedProcess`'s recording/scripting surface exactly, since
+    `_start_library_server()` treats the two interchangeably."""
+
+    def __init__(
+        self, library_path, server_url, app_path, log_path,
+        poll_sequence=None, uptime_value=None, extra_env=None, log_fn=None,
+        start_exceptions=None, stop_exceptions=None,
+    ):
+        self.library_path = library_path
+        self.server_url = server_url
+        self.app_path = app_path
+        self.log_path = log_path
+        self.extra_env = extra_env or {}
+        self.log_fn = log_fn
+        self.start_calls = 0
+        self.stop_calls = 0
+        self.rotate_check_calls = 0
+        self._poll_sequence = list(poll_sequence or [])
+        self._uptime_value = uptime_value
+        self._start_exceptions = list(start_exceptions or [])
+        self._stop_exceptions = list(stop_exceptions or [])
+
+    def start(self):
+        self.start_calls += 1
+        if self._start_exceptions:
+            exc = self._start_exceptions.pop(0)
+            if exc is not None:
+                raise exc
+
+    def poll(self):
+        return self._poll_sequence.pop(0) if self._poll_sequence else None
+
+    def uptime(self):
+        return self._uptime_value
+
+    def maybe_rotate_log(self):
+        self.rotate_check_calls += 1
+
+    def stop(self, grace=5.0):
+        self.stop_calls += 1
+        if self._stop_exceptions:
+            exc = self._stop_exceptions.pop(0)
+            if exc is not None:
+                raise exc
+
+
+def _make_library_process_factory(specs):
+    """Same contract as `_make_process_factory()`, for
+    `lib.libserver.LibraryServer` instead of `ServerProcess`."""
+    queue = list(specs)
+    spawned = []
+
+    def factory(library_path, server_url, app_path, log_path, extra_env=None, log_fn=None):
+        kwargs = queue.pop(0) if queue else {}
+        proc = ScriptedLibraryServer(
+            library_path, server_url, app_path, log_path,
+            extra_env=extra_env, log_fn=log_fn, **kwargs)
+        spawned.append(proc)
+        return proc
+
+    return factory, spawned
+
+
 def _scripted_wait(intervals, steps):
     """Builds a `Monitor.waitForAbort(self, timeout)` replacement.
 
@@ -287,6 +354,94 @@ def test_main_external_server_already_listening_skips_spawn(monkeypatch, tmp_pat
     assert spawned == []
     assert intervals == [service_runner.EXTERNAL_RECHECK_INTERVAL] * 2
     assert not any('shutting down' in msg for msg, _level in ctx.env.log_calls)
+
+
+
+# --- s4me bridge hook: main() syncs BridgeSupervisor every tick -------------
+
+
+class _FakeBridgeSupervisor:
+    """Stand-in for lib.s4me.BridgeSupervisor: records every apply() call's
+    (enabled, port) plus whether has_addon_fn()/launch_fn were passed
+    through unchanged, without touching a real store or RunScript."""
+
+    instances = []
+
+    def __init__(self, addon_path):
+        self.addon_path = addon_path
+        self.apply_calls = []
+        _FakeBridgeSupervisor.instances.append(self)
+
+    def apply(self, enabled, port, has_addon_fn, launch_fn, store):
+        self.apply_calls.append((enabled, port, has_addon_fn(), launch_fn, store))
+
+
+def test_main_syncs_s4me_bridge_every_tick_with_current_settings(monkeypatch, tmp_path):
+    _FakeBridgeSupervisor.instances = []
+    monkeypatch.setattr(service_runner.s4me, "BridgeSupervisor", _FakeBridgeSupervisor)
+    monkeypatch.setattr(service_runner, "probe_listening", lambda *a, **kw: True)
+
+    cond_calls = []
+
+    def cond_visibility(cond):
+        cond_calls.append(cond)
+        return True
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None])
+    settings = {'server_enable': True, 's4me_enable': True, 's4me_port': 11499}
+    with _main_env(tmp_path, wait, settings=settings, cond_visibility=cond_visibility) as ctx:
+        service_runner.main()
+        expected_launch_fn = ctx.xbmc.executebuiltin
+
+    assert len(_FakeBridgeSupervisor.instances) == 1
+    supervisor = _FakeBridgeSupervisor.instances[0]
+    assert isinstance(supervisor.addon_path, str)  # xbmcaddon FakeAddon.getAddonInfo("path")
+    assert len(supervisor.apply_calls) == 2  # once per loop tick
+    enabled, port, has_addon, launch_fn, store = supervisor.apply_calls[0]
+    assert enabled is True
+    assert port == 11499
+    assert has_addon is True
+    assert launch_fn == expected_launch_fn
+    assert any('plugin.video.s4me' in c for c in cond_calls)
+
+
+def test_main_s4me_bridge_disabled_by_default(monkeypatch, tmp_path):
+    """s4me_enable defaults False -- an untouched install must never sync
+    an active bridge."""
+    _FakeBridgeSupervisor.instances = []
+    monkeypatch.setattr(service_runner.s4me, "BridgeSupervisor", _FakeBridgeSupervisor)
+    monkeypatch.setattr(service_runner, "probe_listening", lambda *a, **kw: True)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}):
+        service_runner.main()
+
+    supervisor = _FakeBridgeSupervisor.instances[0]
+    enabled, port, has_addon, launch_fn, store = supervisor.apply_calls[0]
+    assert enabled is False
+    assert port == service_runner.s4me.DEFAULT_PORT
+
+
+def test_main_s4me_bridge_sync_failure_is_swallowed(monkeypatch, tmp_path):
+    """A raising BridgeSupervisor.apply() must never crash the supervision
+    loop -- mirrors every other defensively-wrapped per-tick call in
+    main()."""
+    class _RaisingSupervisor:
+        def __init__(self, addon_path):
+            pass
+
+        def apply(self, *a, **kw):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(service_runner.s4me, "BridgeSupervisor", _RaisingSupervisor)
+    monkeypatch.setattr(service_runner, "probe_listening", lambda *a, **kw: True)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}):
+        service_runner.main()  # must not raise
 
 
 # --- (b) embedded enabled + binary found: spawn, then healthy poll ----------
@@ -1687,3 +1842,308 @@ def test_main_upgrade_aborted_by_shutdown_unwinds_without_spawning(monkeypatch, 
         'upgrade aborted, shutting down' in msg
         for msg, level in ctx.env.log_calls if level == ctx.xbmc.LOGINFO
     )
+
+
+# ===========================================================================
+# main(): c-shared library mode (lib.libserver.LibraryServer) selection
+# ===========================================================================
+
+
+def test_main_force_library_prefers_library_mode_when_companion_library_present(monkeypatch, tmp_path):
+    """`server_force_library=True` skips resolve_binary()/install_binary()
+    entirely and goes straight to c-shared library mode whenever a
+    companion libstremio-server.so is already on disk."""
+
+    def resolve_binary_must_not_run(*args, **kwargs):
+        pytest.fail('resolve_binary must not run when server_force_library is set '
+                    'and a companion library is available')
+
+    def install_binary_must_not_run(*args, **kwargs):
+        pytest.fail('install_binary must not run when server_force_library is set '
+                    'and a companion library is available')
+
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', resolve_binary_must_not_run)
+    monkeypatch.setattr(serverbin, 'install_binary', install_binary_must_not_run)
+    monkeypatch.setattr(serverbin, 'resolve_library', lambda dest_dir: '/opt/lib/libstremio-server.so')
+
+    factory, spawned = _make_library_process_factory([{}])
+    monkeypatch.setattr(libserver, 'LibraryServer', factory)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None])
+    settings = {'server_enable': True, 'server_force_library': True}
+    with _main_env(tmp_path, wait, settings=settings) as ctx:
+        service_runner.main()
+
+    assert len(spawned) == 1
+    proc = spawned[0]
+    assert proc.library_path == '/opt/lib/libstremio-server.so'
+    assert proc.server_url == service_runner.DEFAULT_SERVER_URL
+    assert proc.start_calls == 1
+    assert intervals == [service_runner.HEALTHY_POLL_INTERVAL] * 2
+    assert len([n for n in ctx.env.notifications if n[1] == 'STR30364']) == 1
+    # main() returned with the library server still alive -> the
+    # post-loop shutdown path stops it exactly once, same as ServerProcess.
+    assert proc.stop_calls == 1
+    assert any('starting library-mode server' in msg for msg, _level in ctx.env.log_calls)
+
+
+def test_main_force_library_falls_back_to_binary_flow_when_no_companion_library(monkeypatch, tmp_path):
+    """`server_force_library=True` with nothing on disk to load must fall
+    straight through to the ordinary resolve_binary()/install_binary()
+    flow instead of getting stuck."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: '/opt/bin/stremio-server')
+    monkeypatch.setattr(serverbin, 'resolve_library', lambda dest_dir: None)
+
+    def library_factory_must_not_run(*args, **kwargs):
+        pytest.fail('LibraryServer must not be constructed with no companion library available')
+
+    monkeypatch.setattr(libserver, 'LibraryServer', library_factory_must_not_run)
+    factory, spawned = _make_process_factory([{}])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None])
+    settings = {'server_enable': True, 'server_force_library': True}
+    with _main_env(tmp_path, wait, settings=settings):
+        service_runner.main()
+
+    assert len(spawned) == 1
+    assert spawned[0].binary == '/opt/bin/stremio-server'
+
+
+def test_main_force_library_falls_back_to_binary_flow_when_ctypes_unsupported(monkeypatch, tmp_path):
+    """Even with a companion library on disk and the setting enabled,
+    ctypes being unavailable in this Python build must fall back to the
+    ordinary exec()-based flow -- `_resolve_library_candidate()` must
+    short-circuit on `LIBRARY_SUPPORTED` before even asking
+    `serverbin.resolve_library()`."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: '/opt/bin/stremio-server')
+    monkeypatch.setattr(libserver, 'LIBRARY_SUPPORTED', False)
+
+    def resolve_library_must_not_run(*args, **kwargs):
+        pytest.fail('resolve_library must not be consulted when ctypes is unsupported')
+
+    monkeypatch.setattr(serverbin, 'resolve_library', resolve_library_must_not_run)
+    factory, spawned = _make_process_factory([{}])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None])
+    settings = {'server_enable': True, 'server_force_library': True}
+    with _main_env(tmp_path, wait, settings=settings):
+        service_runner.main()
+
+    assert len(spawned) == 1
+    assert spawned[0].binary == '/opt/bin/stremio-server'
+
+
+def test_main_unsupported_platform_falls_back_to_library_mode_immediately(monkeypatch, tmp_path):
+    """install_binary() raising UnsupportedPlatformError must prefer an
+    already-extracted companion library over latching
+    `unsupported_platform` -- it extracts the .so regardless of whether
+    the executable itself passed verify_executable() (see
+    serverbin.install_binary()'s docstring)."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: None)
+    monkeypatch.setattr(serverbin, 'resolve_library', lambda dest_dir: '/opt/lib/libstremio-server.so')
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        raise serverbin.UnsupportedPlatformError('exec() forbidden')
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
+    factory, spawned = _make_library_process_factory([{}])
+    monkeypatch.setattr(libserver, 'LibraryServer', factory)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}) as ctx:
+        service_runner.main()
+
+    assert len(spawned) == 1
+    assert spawned[0].start_calls == 1
+    assert intervals == [service_runner.HEALTHY_POLL_INTERVAL] * 2
+    assert [n for n in ctx.env.notifications if n[1] == 'STR30091'] == []  # never latched/notified unsupported
+    assert any('falling back to library mode' in msg for msg, _level in ctx.env.log_calls)
+
+
+def test_main_unsupported_platform_self_heals_into_library_mode_when_library_appears_later(
+        monkeypatch, tmp_path):
+    """The coarse-cadence latch self-heal check must prefer library mode
+    over the exec()-based resolve_binary() self-heal once a companion
+    library shows up on disk, exactly like the immediate-fallback case
+    above but discovered one poll later."""
+    probe_calls = []
+    resolve_library_calls = []
+
+    def fake_resolve_library(dest_dir):
+        resolve_library_calls.append(1)
+        return None if len(resolve_library_calls) < 2 else '/opt/lib/libstremio-server.so'
+
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: probe_calls.append(1) or False)
+    monkeypatch.setattr(serverbin, 'resolve_library', fake_resolve_library)
+
+    resolve_binary_calls = []
+
+    def fake_resolve_binary(*args, **kwargs):
+        # Only ever called by the "else" (not-yet-latched) branch's
+        # unconditional first lookup, and by the latched self-heal
+        # sub-branch when NO library is available -- must never be
+        # reached again once a companion library is found while latched.
+        resolve_binary_calls.append(1)
+        return None
+
+    monkeypatch.setattr(service_runner, 'resolve_binary', fake_resolve_binary)
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        raise serverbin.UnsupportedPlatformError('exec() forbidden')
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
+    factory, spawned = _make_library_process_factory([{}])
+    monkeypatch.setattr(libserver, 'LibraryServer', factory)
+
+    # iter1: install_binary() fails, resolve_library() (call #1) still
+    # None -> latches unsupported_platform. iter2: latched, resolve_library()
+    # (call #2) now finds the library -> unlatches and starts it. iter3:
+    # library server running -> ordinary healthy supervision.
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None, None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}) as ctx:
+        service_runner.main()
+
+    assert len(spawned) == 1
+    assert spawned[0].start_calls == 1
+    assert len(resolve_library_calls) == 2
+    # Called once for the initial (pre-latch) "nothing resolvable" probe;
+    # never again once the latched self-heal check finds a library first.
+    assert len(resolve_binary_calls) == 1
+    assert intervals == [
+        service_runner.MISSING_BINARY_RECHECK_INTERVAL,
+        # The self-heal finds and starts the library server within the
+        # SAME (latched) tick, so the interval reflects that immediately
+        # -- no need to wait out one more UNSUPPORTED_PLATFORM_POLL_INTERVAL
+        # tick now that something is actually running.
+        service_runner.HEALTHY_POLL_INTERVAL,
+        service_runner.HEALTHY_POLL_INTERVAL,
+    ]
+    assert len([n for n in ctx.env.notifications if n[1] == 'STR30091']) == 1
+
+
+def test_main_unsupported_platform_still_latches_when_no_library_available(monkeypatch, tmp_path):
+    """Regression guard: with no companion library ever available (the
+    ordinary non-Android/pre-library-mode case), the original latch +
+    30091 notification behavior must be unchanged."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(serverbin, 'resolve_library', lambda dest_dir: None)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: None)
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        raise serverbin.UnsupportedPlatformError('exec() forbidden')
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
+
+    def library_factory_must_not_run(*args, **kwargs):
+        pytest.fail('LibraryServer must not be constructed with no companion library available')
+
+    monkeypatch.setattr(libserver, 'LibraryServer', library_factory_must_not_run)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}) as ctx:
+        service_runner.main()
+
+    assert len([n for n in ctx.env.notifications if n[1] == 'STR30091']) == 1
+    assert intervals == [
+        service_runner.MISSING_BINARY_RECHECK_INTERVAL,
+        service_runner.UNSUPPORTED_PLATFORM_POLL_INTERVAL,
+    ]
+
+
+def test_main_library_mode_never_consults_the_stale_upgrade_helper(monkeypatch, tmp_path):
+    """Deferred-upgrade contract: `lib.libserver._load_library()` refuses
+    a different path in the same process, so any SERVER_TAG upgrade of
+    the on-disk .so must wait for the next Kodi start (a fresh process)
+    -- library mode must never call the exec-mode upgrade-if-stale
+    helper (`serverbin.installed_tag`/a second `install_binary()`) at
+    all."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(serverbin, 'resolve_library', lambda dest_dir: '/opt/lib/libstremio-server.so')
+
+    def installed_tag_must_not_run(*args, **kwargs):
+        pytest.fail('installed_tag must not be consulted in library mode')
+
+    def install_binary_must_not_run(*args, **kwargs):
+        pytest.fail('install_binary must not run in library mode with a companion library present')
+
+    monkeypatch.setattr(serverbin, 'installed_tag', installed_tag_must_not_run)
+    monkeypatch.setattr(serverbin, 'install_binary', install_binary_must_not_run)
+    factory, spawned = _make_library_process_factory([{}])
+    monkeypatch.setattr(libserver, 'LibraryServer', factory)
+
+    wait = _scripted_wait([], [None])
+    settings = {'server_enable': True, 'server_force_library': True}
+    with _main_env(tmp_path, wait, settings=settings):
+        service_runner.main()
+
+    assert len(spawned) == 1
+
+
+def test_main_library_mode_restart_backoff_on_failed_spawn(monkeypatch, tmp_path):
+    """A failed `LibraryServer.start()` must back off exactly like a
+    failed `ServerProcess.start()` -- never crash the supervision loop,
+    and advance `state.backoff_idx` through RESTART_BACKOFF."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(serverbin, 'resolve_library', lambda dest_dir: '/opt/lib/libstremio-server.so')
+
+    factory, spawned = _make_library_process_factory([
+        {'start_exceptions': [OSError('cannot dlopen')]},
+        {},
+    ])
+    monkeypatch.setattr(libserver, 'LibraryServer', factory)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None])
+    settings = {'server_enable': True, 'server_force_library': True}
+    with _main_env(tmp_path, wait, settings=settings):
+        service_runner.main()
+
+    assert len(spawned) == 2
+    assert spawned[0].start_calls == 1
+    assert spawned[1].start_calls == 1
+    assert intervals == [service_runner.RESTART_BACKOFF[0], service_runner.HEALTHY_POLL_INTERVAL]
+
+
+def test_main_library_mode_settings_change_restarts_and_can_revert_to_binary_mode(monkeypatch, tmp_path):
+    """Flipping `server_force_library` off mid-session must tear down the
+    running library server (via the normal restart_requested path, since
+    `force_library` is part of `ServiceMonitor._snapshot()`) and fall
+    back to the ordinary binary flow on the very next tick."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(serverbin, 'resolve_library', lambda dest_dir: '/opt/lib/libstremio-server.so')
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: '/opt/bin/stremio-server')
+
+    lib_factory, lib_spawned = _make_library_process_factory([{}])
+    monkeypatch.setattr(libserver, 'LibraryServer', lib_factory)
+    bin_factory, bin_spawned = _make_process_factory([{}])
+    monkeypatch.setattr(service_runner, 'ServerProcess', bin_factory)
+
+    env_box = {}
+
+    def disable_force_library(monitor):
+        env_box['env'].addon.settings['server_force_library'] = False
+        monitor.onSettingsChanged()
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, disable_force_library, None])
+    settings = {'server_enable': True, 'server_force_library': True}
+    with _main_env(tmp_path, wait, settings=settings) as ctx:
+        env_box['env'] = ctx.env
+        service_runner.main()
+
+    assert len(lib_spawned) == 1
+    assert lib_spawned[0].stop_calls == 1  # torn down by the settings-changed restart
+    assert len(bin_spawned) == 1
+    assert bin_spawned[0].binary == '/opt/bin/stremio-server'

@@ -776,3 +776,100 @@ def test_install_dir_falls_back_to_plain_bin_when_no_android_candidate_usable(mo
     monkeypatch.setattr(os.path, "isdir", lambda p: False)
     profile_dir = _android_profile_dir()
     assert serverbin.install_dir(profile_dir, "plugin.video.rivulet") == os.path.join(profile_dir, "bin")
+
+
+# --- libstremio-server.so companion (c-shared library mode) ----------------
+
+
+def test_resolve_library_returns_none_when_absent(tmp_path):
+    assert serverbin.resolve_library(str(tmp_path)) is None
+
+
+def test_resolve_library_returns_path_when_present(tmp_path):
+    lib_path = tmp_path / serverbin.LIBRARY_NAME
+    lib_path.write_bytes(b"fake-so")
+    assert serverbin.resolve_library(str(tmp_path)) == str(lib_path)
+
+
+def test_install_binary_extracts_companion_library_when_present_in_archive(
+        tmp_path, monkeypatch, fake_requests):
+    """The Android archives ship libstremio-server.so alongside the
+    executable (see LIBRARY_NAME's docstring) -- install_binary() must
+    extract it too, so lib.libserver.LibraryServer has something to load
+    without a separate download."""
+    _set_platform(monkeypatch, "Linux", "arm64", android_root="/system")
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
+    lib_content = b"fake-elf-shared-object"
+    archive_bytes = _make_tar_gz({"stremio-server": b"binary", "libstremio-server.so": lib_content})
+    monkeypatch.setitem(
+        PINNED_SHA256, ("Android", "arm64"), hashlib.sha256(archive_bytes).hexdigest())
+    fake_requests.queue_get(_StreamResponse(archive_bytes))
+
+    install_binary(str(tmp_path))
+
+    lib_path = serverbin.resolve_library(str(tmp_path))
+    assert lib_path == str(tmp_path / serverbin.LIBRARY_NAME)
+    with open(lib_path, "rb") as fh:
+        assert fh.read() == lib_content
+    assert not (tmp_path / (serverbin.LIBRARY_NAME + ".part")).exists()
+
+
+def test_install_binary_tolerates_a_missing_companion_library(tmp_path, monkeypatch, fake_requests):
+    """Every non-Android archive (and pre-library-mode Android ones) simply
+    lacks libstremio-server.so -- must not be treated as a broken
+    install."""
+    _set_platform(monkeypatch, "Linux", "x86_64")
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
+    archive_bytes = _make_tar_gz({"stremio-server": b"binary"})
+    monkeypatch.setitem(PINNED_SHA256, ("Linux", "x86_64"), hashlib.sha256(archive_bytes).hexdigest())
+    fake_requests.queue_get(_StreamResponse(archive_bytes))
+
+    result_path = install_binary(str(tmp_path))
+
+    assert os.path.isfile(result_path)
+    assert serverbin.resolve_library(str(tmp_path)) is None
+
+
+def test_install_binary_extracts_companion_library_even_when_exec_verification_fails(
+        tmp_path, monkeypatch, fake_requests):
+    """The exact device lib.libserver.LibraryServer exists for: exec()
+    itself is denied (SELinux-enforcing Android, see
+    UnsupportedPlatformError's docstring), so verify_executable() raises
+    and install_binary() re-raises post-network -- but the companion
+    library, extracted before the executable is even touched, must still
+    be on disk afterward so lib.service_runner's fallback can use it."""
+    _set_platform(monkeypatch, "Linux", "arm64", android_root="/system")
+
+    def _raise(*args, **kwargs):
+        raise OSError(13, "Permission denied")
+
+    monkeypatch.setattr(subprocess, "run", _raise)
+    lib_content = b"fake-elf-shared-object"
+    archive_bytes = _make_tar_gz({"stremio-server": b"binary", "libstremio-server.so": lib_content})
+    monkeypatch.setitem(
+        PINNED_SHA256, ("Android", "arm64"), hashlib.sha256(archive_bytes).hexdigest())
+    fake_requests.queue_get(_StreamResponse(archive_bytes))
+
+    with pytest.raises(UnsupportedPlatformError):
+        install_binary(str(tmp_path))
+
+    lib_path = serverbin.resolve_library(str(tmp_path))
+    assert lib_path == str(tmp_path / serverbin.LIBRARY_NAME)
+    with open(lib_path, "rb") as fh:
+        assert fh.read() == lib_content
+
+
+def test_install_binary_checksum_mismatch_also_skips_the_companion_library(
+        tmp_path, monkeypatch, fake_requests):
+    """A refused (bad-checksum) download must not leave ANY file behind,
+    library companion included -- _extract_library_companion() is only
+    ever reached after the checksum check passes."""
+    _set_platform(monkeypatch, "Linux", "arm64", android_root="/system")
+    archive_bytes = _make_tar_gz({"stremio-server": b"binary", "libstremio-server.so": b"lib"})
+    monkeypatch.setitem(PINNED_SHA256, ("Android", "arm64"), "0" * 64)
+    fake_requests.queue_get(_StreamResponse(archive_bytes))
+
+    with pytest.raises(DownloadError, match="checksum mismatch"):
+        install_binary(str(tmp_path))
+
+    assert serverbin.resolve_library(str(tmp_path)) is None

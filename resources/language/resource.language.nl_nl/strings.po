@@ -949,3 +949,31 @@ msgstr "Nieuwe afleveringen: %d"
 msgctxt "#30361"
 msgid "Source slower than playback bitrate; expect buffering"
 msgstr "Bron langzamer dan de afspeelbitrate; buffering te verwachten"
+
+msgctxt "#30362"
+msgid "Force library mode (Android)"
+msgstr "Bibliotheekmodus forceren (Android)"
+
+msgctxt "#30363"
+msgid "Run the streaming server as an in-process library instead of a separate executable. Enable this only if the embedded server fails to start (e.g. on an SELinux-enforcing Android device)."
+msgstr "Voer de streamingserver uit als in-process bibliotheek in plaats van een apart uitvoerbaar bestand. Alleen inschakelen als de ingebouwde server niet start (bijv. op een Android-apparaat met SELinux in enforcing-modus)."
+
+msgctxt "#30364"
+msgid "Streaming server switched to library mode"
+msgstr "Streamingserver overgeschakeld naar bibliotheekmodus"
+
+msgctxt "#30371"
+msgid "Stream4Me bridge"
+msgstr "Stream4Me-brug"
+
+msgctxt "#30372"
+msgid "Enable Stream4Me bridge"
+msgstr "Stream4Me-brug inschakelen"
+
+msgctxt "#30373"
+msgid "Bridge port"
+msgstr "Brugpoort"
+
+msgctxt "#30374"
+msgid "Channels (comma-separated, blank = every active channel)"
+msgstr "Kanalen (kommagescheiden, leeg = alle actieve kanalen)"

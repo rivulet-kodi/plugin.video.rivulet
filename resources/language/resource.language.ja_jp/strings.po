@@ -949,3 +949,31 @@ msgstr "新しいエピソード: %d"
 msgctxt "#30361"
 msgid "Source slower than playback bitrate; expect buffering"
 msgstr "ソースが再生ビットレートより遅いため、バッファリングが発生する可能性があります"
+
+msgctxt "#30362"
+msgid "Force library mode (Android)"
+msgstr "ライブラリモードを強制 (Android)"
+
+msgctxt "#30363"
+msgid "Run the streaming server as an in-process library instead of a separate executable. Enable this only if the embedded server fails to start (e.g. on an SELinux-enforcing Android device)."
+msgstr "ストリーミングサーバーを独立した実行ファイルではなく、プロセス内ライブラリとして実行します。組み込みサーバーが起動しない場合のみ有効にしてください （例: SELinux が enforcing モードの Android デバイス）。"
+
+msgctxt "#30364"
+msgid "Streaming server switched to library mode"
+msgstr "ストリーミングサーバーはライブラリモードに切り替わりました"
+
+msgctxt "#30371"
+msgid "Stream4Me bridge"
+msgstr "Stream4Me ブリッジ"
+
+msgctxt "#30372"
+msgid "Enable Stream4Me bridge"
+msgstr "Stream4Me ブリッジを有効にする"
+
+msgctxt "#30373"
+msgid "Bridge port"
+msgstr "ブリッジのポート"
+
+msgctxt "#30374"
+msgid "Channels (comma-separated, blank = every active channel)"
+msgstr "チャンネル（カンマ区切り、空欄 = すべてのアクティブなチャンネル）"
