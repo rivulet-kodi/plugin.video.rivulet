@@ -35,7 +35,7 @@ except ImportError:  # pragma: no cover - exercised only without the dependency
 from lib import procflags
 
 GITHUB_REPO = "M0Rf30/stremio-server-go"
-SERVER_TAG = "v0.14.0"
+SERVER_TAG = "v0.15.0"
 USER_AGENT = "plugin.video.rivulet"
 
 BINARY_NAME = "stremio-server"
@@ -67,7 +67,7 @@ TAG_STAMP_NAME = ".server-tag"
 #: never be slurped whole.
 TAG_STAMP_READ_LIMIT = 64
 # SHA-256 digests for every stremio-server-go SERVER_TAG release asset,
-# computed locally from the downloaded v0.14.0 assets on 2026-09-23 and
+# computed locally from the downloaded v0.15.0 assets on 2026-09-23 and
 # cross-checked against that release's checksums.txt (they agree), then
 # committed here instead of being re-fetched at runtime. Pinning matters
 # because:
@@ -81,7 +81,7 @@ TAG_STAMP_READ_LIMIT = 64
 #    this table (together with SERVER_TAG), so upgrading the bundled
 #    server is a deliberate, auditable decision, not an unattended fetch.
 #
-# The two Android rows arrived with v0.12.1 (re-verified for v0.14.0) and are what make an
+# The two Android rows arrived with v0.12.1 (re-verified for v0.15.0) and are what make an
 # on-device server viable at all: unlike the Linux rows (pure-Go, static)
 # they are cgo builds linked against bionic, verified from the published
 # artifacts as `ELF pie executable ... dynamically linked` with NEEDED
@@ -90,18 +90,20 @@ TAG_STAMP_READ_LIMIT = 64
 # binary's resolver falls back to `127.0.0.1:53` and every tracker/DHT
 # lookup fails ("nothing resolved"), while a libc++_shared.so dependency
 # (what these builds NEEDed before `-static-libstdc++`) cannot be
-# satisfied by a binary with no APK to bundle it in. Re-check both
+# satisfied by a binary with no APK to bundle it in. Since v0.15.0 the same
+# Android archives also carry libstremio-server.so (c-shared, same NEEDED
+# set) for library mode; the archive digest covers it. Re-check both
 # whenever SERVER_TAG moves.
 PINNED_SHA256 = {
-    ("Android", "arm64"): "9d8456c41105a4155e5e6d0e2800fbaceaf1a364357a9c34367b8f85719b4cd6",
-    ("Android", "armv7"): "7173abcc5f1ca70060ba8dcfc584465f977d27a59e08a623d451e7d8a3a5812c",
-    ("Darwin", "arm64"): "76788226824fdb8a9294b131fa5350c1a6923e61988774921b4d5d5e538b8e73",
-    ("Darwin", "x86_64"): "a4304ffd3d1637ceacc982a6cd01a8c01f12c3f46e8b4ad28b67be79de20e8d0",
-    ("Linux", "arm64"): "f4bf4776bf78786feb00c9ff987405eee23c9e8f1937a993dcb7aa17673bc9a1",
-    ("Linux", "armv7"): "d22da28805bb870d1f85d9e90daad9dbd978e87868ec3e4d6ce0328b4cb68557",
-    ("Linux", "x86_64"): "35fd03aa0d1d3bb0b6f1d3ff4c8a40cf9efbd595e4d87ec440399f48226c6a16",
-    ("Windows", "arm64"): "4fd5e6260293d14fe1d72bcca04e4d73e9c8be3d367b2d2742bb70ec2c1ab16d",
-    ("Windows", "x86_64"): "7ef90528327eecc02c7147b19f894e71c77f4873ea5f29e1d33caa809a504b28",
+    ("Android", "arm64"): "cc104aba7352d80ecf41e7e86520fba71bf1f3d3ab95aba9816950440c4e4871",
+    ("Android", "armv7"): "4aadb7972dd82d872861a2184d105b84fad056822fe8f0b63a73d22dbdcd6458",
+    ("Darwin", "arm64"): "52d0e7624ab0119dd09287c86de8cb11911f5b57e905d207fa236da7b650994e",
+    ("Darwin", "x86_64"): "d3681e5efd573b5382766d76d73a3f7c732b41282dfa3ee5f917c1cbffae4f0e",
+    ("Linux", "arm64"): "669322b49482797164d3c4e66cc3c7ff2d5d490766e5219b8146b13639ec2fc2",
+    ("Linux", "armv7"): "78ff92bcf38b59d1a7e04bf1a90a7b7c0d03e950eda314ad734afa668478e361",
+    ("Linux", "x86_64"): "42378fb61bed52f9f0e617d6b42b01a8158bb8e39f3f7efe48473f583afe8196",
+    ("Windows", "arm64"): "fd32c996fc97559d09109936bef62abef805b32e70012a3e521d6c37e41a34c5",
+    ("Windows", "x86_64"): "d0c80eda53eb4bade8511ac6a77bb5432d989fb06acd87b2c20364ddc2ba8749",
 }
 
 
