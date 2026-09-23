@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.rivulet" name="Rivulet" version="0.22.2" provider-name="M0RF30">
+<addon id="plugin.video.rivulet" name="Rivulet" version="0.23.0" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" version="2.22.0"/>
@@ -12,7 +12,13 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse and search catalogs by type, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote stremio-server-go streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.22.2:
+    <news>v0.23.0:
+- Fix: torrent sources with few peers often never started playing. Rivulet finished "Preparing stream" and handed over to Kodi, and Kodi gave up twenty seconds later without receiving a single byte. The bundled streaming server now fetches the part of the file the player is actually waiting for first, instead of a quarter of a gigabyte from the start and the end of the file all at once, and Rivulet keeps the stream warm while Kodi opens it so the server does not set it aside in between.
+- Fix: when a buffering attempt timed out, the next one started again from the very beginning of the file and threw away everything already received. It now carries on from where the previous attempt stopped.
+- Fix: Rivulet no longer starts playback early straight after an attempt that received nothing, unless the server shows it is still making progress.
+- New: when a source clearly cannot download as fast as it plays, for example a 4K remux shared by a handful of peers, Rivulet says so before playback starts, so the buffering that follows is not a surprise.
+- Improved: the bundled streaming server moves to 0.14.0 on every platform, installed in place on first run. It also closes several security holes found in a review and honours the BitTorrent soft speed limit setting.
+v0.22.2:
 - Fixed: hardened addon response parsing, stream-token decompression, subtitle URLs and server error redaction against malformed or hostile third-party data.
 - Fixed: preserved addon flags during updates and kept local disabled state out of account synchronization.
 - Improved: bounded addon fan-out latency, removed background-thread shutdown hangs, fixed late stream results, and expanded regression coverage.
