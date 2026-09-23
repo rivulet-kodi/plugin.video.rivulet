@@ -12,6 +12,8 @@ sibling-file import once its own directory is on `sys.path`.
 """
 import importlib.util
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -23,6 +25,21 @@ _HELPERS_PATH = os.path.normpath(
 _spec = importlib.util.spec_from_file_location("s4me_bridge_helpers_under_test", _HELPERS_PATH)
 bh = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bh)
+
+#: `bridge.py` itself, loaded the same way (see this module's docstring) --
+#: only its `resources/s4me_bridge/`-local imports run at module scope
+#: (json/os/socket/sys/threading/concurrent.futures/functools/http.server
+#: plus this same sibling `bridge_helpers`), so this is safe without Kodi
+#: or Stream4Me installed. Used below to test the request-orchestration
+#: pieces of `_handle_stream_request()` that are not pure enough to live
+#: in `bridge_helpers.py` itself (cache-key/channel-selection interplay,
+#: the request budget's partial-results-on-timeout behaviour).
+_BRIDGE_PATH = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "resources", "s4me_bridge", "bridge.py")
+)
+_bridge_spec = importlib.util.spec_from_file_location("s4me_bridge_under_test", _BRIDGE_PATH)
+bridge = importlib.util.module_from_spec(_bridge_spec)
+_bridge_spec.loader.exec_module(bridge)
 
 
 # --- manifest kept in sync with lib.s4me ------------------------------------
@@ -139,6 +156,52 @@ def test_result_matches_handles_none_info_labels():
     assert bh.result_matches(None, "603", "The Matrix", "1999") is False
 
 
+def test_result_matches_rejects_conflicting_tmdb_ids_even_with_equal_title_year():
+    info_labels = {"tmdb_id": "1", "title": "The Matrix", "year": "1999"}
+    assert bh.result_matches(info_labels, "603", "The Matrix", "1999") is False
+
+
+def test_result_matches_title_fallback_when_candidate_has_no_tmdb_id():
+    info_labels = {"tmdb_id": "", "title": "The Matrix", "year": "1999"}
+    assert bh.result_matches(info_labels, "603", "The Matrix", "1999") is True
+
+
+def test_result_matches_title_fallback_when_target_has_no_tmdb_id():
+    info_labels = {"tmdb_id": "603", "title": "The Matrix", "year": "1999"}
+    assert bh.result_matches(info_labels, None, "The Matrix", "1999") is True
+
+
+# --- content_type_for_s4me / label_value_or ---------------------------------
+
+
+def test_content_type_for_s4me_maps_series_to_tvshow():
+    assert bh.content_type_for_s4me("series") == "tvshow"
+
+
+def test_content_type_for_s4me_leaves_movie_unchanged():
+    assert bh.content_type_for_s4me("movie") == "movie"
+
+
+def test_label_value_or_keeps_zero_season():
+    assert bh.label_value_or(0, "5") == 0
+
+
+def test_label_value_or_keeps_zero_episode():
+    assert bh.label_value_or(0, 3) == 0
+
+
+def test_label_value_or_falls_back_when_none():
+    assert bh.label_value_or(None, "attr-value") == "attr-value"
+
+
+def test_label_value_or_falls_back_when_empty_string():
+    assert bh.label_value_or("", "attr-value") == "attr-value"
+
+
+def test_label_value_or_keeps_present_nonzero_value():
+    assert bh.label_value_or(4, "attr-value") == 4
+
+
 # --- shape_stream ------------------------------------------------------------
 
 
@@ -220,6 +283,34 @@ def test_ttl_cache_missing_key_returns_none():
     assert cache.get("missing") is None
 
 
+def test_ttl_cache_evicts_oldest_when_over_capacity():
+    cache = bh.TTLCache(1000, max_size=2)
+    cache.set("a", 1)
+    cache.set("b", 2)
+    cache.set("c", 3)
+    assert len(cache) == 2
+    assert cache.get("a") is None
+    assert cache.get("b") == 2
+    assert cache.get("c") == 3
+
+
+def test_ttl_cache_set_purges_expired_keys_never_read_again():
+    now = [0.0]
+    cache = bh.TTLCache(10, clock=lambda: now[0])
+    cache.set("stale", "v")
+    now[0] = 11.0  # "stale" has expired, but nothing ever calls .get("stale")
+    cache.set("fresh", "v2")
+    assert len(cache) == 1
+    assert cache.get("fresh") == "v2"
+
+
+def test_ttl_cache_default_max_size_is_bounded():
+    cache = bh.TTLCache(1000)
+    for i in range(1000):
+        cache.set("k%d" % i, i)
+    assert len(cache) <= 256
+
+
 # --- Budget --------------------------------------------------------------
 
 
@@ -244,3 +335,151 @@ def test_budget_remaining_never_negative():
     budget = bh.Budget(5, clock=lambda: now[0])
     now[0] = 100.0
     assert budget.remaining() == 0.0
+
+
+# --- cors_allow_origin --------------------------------------------------------
+
+
+def test_cors_allow_origin_matches_allowlisted_origin():
+    assert bh.cors_allow_origin("https://app.strem.io") == "https://app.strem.io"
+
+
+def test_cors_allow_origin_rejects_unknown_origin():
+    assert bh.cors_allow_origin("https://evil.example") is None
+
+
+def test_cors_allow_origin_rejects_missing_origin():
+    assert bh.cors_allow_origin(None) is None
+
+
+# --- collect_with_budget ------------------------------------------------------
+
+
+def test_collect_with_budget_collects_all_when_nothing_expires():
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results, timed_out = bh.collect_with_budget(pool, {"a": lambda: [1], "b": lambda: [2, 3]}, bh.Budget(5))
+    assert sorted(results) == [1, 2, 3]
+    assert timed_out is False
+
+
+def test_collect_with_budget_empty_tasks_returns_immediately():
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        results, timed_out = bh.collect_with_budget(pool, {}, bh.Budget(5))
+    assert results == []
+    assert timed_out is False
+
+
+def test_collect_with_budget_swallows_task_errors_and_reports_them():
+    errors = []
+
+    def _boom():
+        raise ValueError("boom")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results, timed_out = bh.collect_with_budget(
+            pool, {"ok": lambda: [1], "bad": _boom}, bh.Budget(5),
+            on_error=lambda key, exc: errors.append((key, type(exc))),
+        )
+    assert results == [1]
+    assert timed_out is False
+    assert errors == [("bad", ValueError)]
+
+
+def test_collect_with_budget_returns_partial_results_without_waiting_for_stragglers():
+    pool = ThreadPoolExecutor(max_workers=2)
+    try:
+        tasks = {"fast": lambda: [1], "slow": lambda: (time.sleep(0.5) or [2])}
+        started = time.monotonic()
+        results, timed_out = bh.collect_with_budget(pool, tasks, bh.Budget(0.05))
+        elapsed = time.monotonic() - started
+    finally:
+        pool.shutdown(wait=False)
+    assert results == [1]
+    assert timed_out is True
+    assert elapsed < 0.4
+
+
+# --- bridge.py: _handle_stream_request orchestration -------------------------
+
+
+class _FakeCache:
+    def __init__(self):
+        self._store = {}
+
+    def get(self, key):
+        return self._store.get(key)
+
+    def set(self, key, value):
+        self._store[key] = value
+
+
+class _FakeState:
+    def __init__(self, channels):
+        self.cache = _FakeCache()
+        self._channels = channels
+
+    def channels_for_request(self):
+        return self._channels
+
+
+def test_handle_stream_request_cache_key_includes_channel_selection(monkeypatch):
+    """A response cached under one channel selection must never be reused
+    for a request that resolves a different one (e.g. after the user
+    edits s4me_channels) -- see channels_for_request()'s callers."""
+    monkeypatch.setattr(bridge, "_resolve_title", lambda imdb_id, search_type: ("Title", "1999", "603"))
+    monkeypatch.setattr(
+        bridge, "_streams_for_channel",
+        lambda channel_id, *a, **k: [{"url": "u-%s" % channel_id}],
+    )
+    shared_cache = _FakeCache()
+    state_a = _FakeState(("chan1",))
+    state_a.cache = shared_cache
+    state_b = _FakeState(("chan2",))
+    state_b.cache = shared_cache
+
+    result_a = bridge._handle_stream_request(state_a, "movie", "tt1234567")
+    result_b = bridge._handle_stream_request(state_b, "movie", "tt1234567")
+
+    assert result_a["streams"] == [{"url": "u-chan1"}]
+    assert result_b["streams"] == [{"url": "u-chan2"}]
+
+
+def test_handle_stream_request_cache_hit_for_repeated_same_selection(monkeypatch):
+    calls = []
+    monkeypatch.setattr(bridge, "_resolve_title", lambda imdb_id, search_type: ("Title", "1999", "603"))
+
+    def _fake(channel_id, *a, **k):
+        calls.append(channel_id)
+        return [{"url": "u"}]
+
+    monkeypatch.setattr(bridge, "_streams_for_channel", _fake)
+    state = _FakeState(("chan1",))
+
+    bridge._handle_stream_request(state, "movie", "tt1234567")
+    bridge._handle_stream_request(state, "movie", "tt1234567")
+
+    assert calls == ["chan1"]
+
+
+def test_handle_stream_request_returns_partial_results_on_budget_timeout(monkeypatch):
+    """A channel exceeding the request budget must yield whatever the
+    other channels already returned, not raise/500 and not block on the
+    straggler -- see _handle_stream_request()'s use of collect_with_budget()."""
+    monkeypatch.setattr(bridge, "_resolve_title", lambda imdb_id, search_type: ("Title", "1999", "603"))
+    monkeypatch.setattr(bridge, "_REQUEST_BUDGET_SECONDS", 0.1)
+
+    def _fake(channel_id, *a, **k):
+        if channel_id == "slow":
+            time.sleep(0.5)
+            return [{"url": "slow-result"}]
+        return [{"url": "fast-result"}]
+
+    monkeypatch.setattr(bridge, "_streams_for_channel", _fake)
+    state = _FakeState(("fast", "slow"))
+
+    started = time.monotonic()
+    result = bridge._handle_stream_request(state, "movie", "tt1234567")
+    elapsed = time.monotonic() - started
+
+    assert result["streams"] == [{"url": "fast-result"}]
+    assert elapsed < 0.4

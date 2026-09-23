@@ -2147,3 +2147,160 @@ def test_main_library_mode_settings_change_restarts_and_can_revert_to_binary_mod
     assert lib_spawned[0].stop_calls == 1  # torn down by the settings-changed restart
     assert len(bin_spawned) == 1
     assert bin_spawned[0].binary == '/opt/bin/stremio-server'
+
+
+# --- regression: library-mode notification fires once per session ----------
+
+
+def test_main_library_mode_notification_fires_once_per_session_across_crash_restarts(monkeypatch, tmp_path):
+    """Notification 30364 must fire once per session, not once per
+    successful `_start_library_server()` call: a crashing library-mode
+    server that keeps getting restarted (ServerStart erroring out right
+    after start(), for example) would otherwise re-show it on every
+    RESTART_BACKOFF-spaced restart for the rest of the session."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(serverbin, 'resolve_library', lambda dest_dir: '/opt/lib/libstremio-server.so')
+
+    factory, spawned = _make_library_process_factory([
+        {'poll_sequence': [1]},  # exits right away -> triggers a crash restart
+        {},
+    ])
+    monkeypatch.setattr(libserver, 'LibraryServer', factory)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None, None, None])
+    settings = {'server_enable': True, 'server_force_library': True}
+    with _main_env(tmp_path, wait, settings=settings) as ctx:
+        service_runner.main()
+
+    assert len(spawned) == 2  # crash-restarted once
+    library_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30364']
+    assert len(library_notifications) == 1
+
+
+# --- regression: exec-spawn failure of an on-disk bundled binary falls ------
+# --- back to library mode instead of retrying the doomed spawn forever -----
+
+
+def test_main_binary_spawn_failure_falls_back_to_library_mode_when_bundled_and_library_present(
+    monkeypatch, tmp_path
+):
+    """install_binary() deliberately promotes an unverified, chmod'd
+    executable to final_path even when verify_executable() failed (see
+    its own docstring). On a LATER session, resolve_binary() finds that
+    leftover executable via a plain os.access(X_OK) check that an
+    SELinux-enforcing W^X policy still passes, but ServerProcess.start()
+    keeps failing (EACCES/PermissionError). Library mode must be tried
+    immediately once a companion .so is already on disk, instead of
+    retrying the same doomed exec() at RESTART_BACKOFF cadence for the
+    rest of the session with library mode never selected."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: _bundled(tmp_path))
+    # Already at the current tag -- _upgrade_bundled_if_stale() must be a
+    # no-op here so the only thing under test is the post-spawn-failure
+    # fallback, not a reinstall.
+    monkeypatch.setattr(serverbin, 'installed_tag', lambda dest_dir: serverbin.SERVER_TAG)
+    monkeypatch.setattr(serverbin, 'resolve_library', lambda dest_dir: '/opt/lib/libstremio-server.so')
+
+    factory, spawned = _make_process_factory([
+        {'start_exceptions': [PermissionError('exec() denied')]},
+    ])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    lib_factory, lib_spawned = _make_library_process_factory([{}])
+    monkeypatch.setattr(libserver, 'LibraryServer', lib_factory)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}) as ctx:
+        service_runner.main()
+
+    assert len(spawned) == 1
+    assert spawned[0].start_calls == 1
+    assert len(lib_spawned) == 1
+    assert lib_spawned[0].start_calls == 1
+    assert intervals[0] == service_runner.HEALTHY_POLL_INTERVAL
+    assert any('falling back to library mode' in msg for msg, _level in ctx.env.log_calls)
+
+
+def test_main_binary_spawn_failure_stays_in_binary_mode_when_no_library_available(monkeypatch, tmp_path):
+    """Regression guard: with no companion library ever available, a
+    failed exec() of a bundled binary must keep retrying the ordinary
+    embedded-server backoff -- unchanged from before this fallback was
+    added -- and must never construct a LibraryServer."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: _bundled(tmp_path))
+    monkeypatch.setattr(serverbin, 'installed_tag', lambda dest_dir: serverbin.SERVER_TAG)
+    monkeypatch.setattr(serverbin, 'resolve_library', lambda dest_dir: None)
+
+    factory, spawned = _make_process_factory([
+        {'start_exceptions': [PermissionError('exec() denied')]},
+        {},
+    ])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    def library_factory_must_not_run(*args, **kwargs):
+        pytest.fail('LibraryServer must not be constructed with no companion library available')
+
+    monkeypatch.setattr(libserver, 'LibraryServer', library_factory_must_not_run)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}):
+        service_runner.main()
+
+    assert len(spawned) == 2
+    assert intervals == [service_runner.RESTART_BACKOFF[0], service_runner.HEALTHY_POLL_INTERVAL]
+
+
+# --- regression: unsupported_platform latch survives a failed library start
+
+
+def test_main_unsupported_platform_latch_survives_failed_library_start_in_both_branches(
+    monkeypatch, tmp_path
+):
+    """A failed `LibraryServer.start()` (dlopen() failure, missing
+    export, ...) must NOT clear `state.unsupported_platform` in either
+    fallback site: doing so would fall through to the un-latched branch
+    on the very next tick, which re-attempts `install_binary()` (and
+    therefore a fresh archive download) every poll for as long as the
+    library keeps failing to load. Exercises both call sites: iteration
+    1 fails inside the `UnsupportedPlatformError` handler's fallback,
+    iteration 2 fails inside the already-latched self-heal branch, and
+    iteration 3 finally succeeds there and unlatches.
+    """
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: None)
+    monkeypatch.setattr(serverbin, 'resolve_library', lambda dest_dir: '/opt/lib/libstremio-server.so')
+
+    install_calls = []
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        install_calls.append(dest_dir)
+        raise serverbin.UnsupportedPlatformError('exec() forbidden')
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
+
+    factory, spawned = _make_library_process_factory([
+        {'start_exceptions': [OSError('cannot dlopen')]},  # iter1: UnsupportedPlatformError branch
+        {'start_exceptions': [OSError('cannot dlopen')]},  # iter2: latched self-heal branch
+        {},                                                 # iter3: latched self-heal branch, succeeds
+    ])
+    monkeypatch.setattr(libserver, 'LibraryServer', factory)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None, None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}):
+        service_runner.main()
+
+    # install_binary() is only reachable from the un-latched branch --
+    # exactly one call means the latch held through both failed library
+    # starts instead of re-entering the download path on iter2/iter3.
+    assert len(install_calls) == 1
+    assert len(spawned) == 3
+    assert [p.start_calls for p in spawned] == [1, 1, 1]
+    assert intervals == [
+        service_runner.RESTART_BACKOFF[0],
+        service_runner.RESTART_BACKOFF[1],
+        service_runner.HEALTHY_POLL_INTERVAL,
+    ]

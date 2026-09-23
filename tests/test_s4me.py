@@ -21,6 +21,18 @@ class _FakeStore:
     def remove_builtin_addon(self, builtin_id):
         self.remove_calls.append(builtin_id)
 
+class _FakeClock:
+    """Controllable monotonic clock for backoff tests."""
+
+    def __init__(self, now=0.0):
+        self._now = now
+
+    def __call__(self):
+        return self._now
+
+    def advance(self, seconds):
+        self._now += seconds
+
 
 # --- manifest_url / bridge_script_path / run_script_command -----------------
 
@@ -104,12 +116,24 @@ def test_apply_inactive_when_addon_missing_even_if_enabled():
     assert store.remove_calls == ["s4me"]
 
 
-def test_apply_active_launches_once_and_syncs_store():
+def test_apply_launch_does_not_publish_until_probe_succeeds():
     store = _FakeStore()
     launches = []
-    supervisor = s4me.BridgeSupervisor("/addon/root")
+    supervisor = s4me.BridgeSupervisor("/addon/root", clock=_FakeClock())
 
-    supervisor.apply(True, 11480, lambda: True, launches.append, store)
+    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: False)
+
+    assert launches == [s4me.run_script_command("/addon/root", 11480)]
+    assert store.set_calls == []
+
+
+def test_apply_publishes_once_probe_confirms_manifest_answers():
+    store = _FakeStore()
+    launches = []
+    supervisor = s4me.BridgeSupervisor("/addon/root", clock=_FakeClock())
+
+    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: False)
+    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: True)
 
     assert launches == [s4me.run_script_command("/addon/root", 11480)]
     assert store.set_calls == [("s4me", s4me.manifest_url(11480), s4me.MANIFEST)]
@@ -118,22 +142,70 @@ def test_apply_active_launches_once_and_syncs_store():
 def test_apply_active_second_call_same_port_does_not_relaunch_but_resyncs_store():
     store = _FakeStore()
     launches = []
-    supervisor = s4me.BridgeSupervisor("/addon/root")
+    supervisor = s4me.BridgeSupervisor("/addon/root", clock=_FakeClock())
 
-    supervisor.apply(True, 11480, lambda: True, launches.append, store)
-    supervisor.apply(True, 11480, lambda: True, launches.append, store)
+    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: True)
+    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: True)
+    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: True)
 
     assert launches == [s4me.run_script_command("/addon/root", 11480)]
     assert len(store.set_calls) == 2
 
 
-def test_apply_port_change_while_active_relaunches_and_repoints_store():
+def test_apply_retracts_immediately_when_bridge_stops_answering():
     store = _FakeStore()
     launches = []
-    supervisor = s4me.BridgeSupervisor("/addon/root")
+    clock = _FakeClock()
+    supervisor = s4me.BridgeSupervisor("/addon/root", clock=clock)
 
-    supervisor.apply(True, 11480, lambda: True, launches.append, store)
-    supervisor.apply(True, 11481, lambda: True, launches.append, store)
+    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: True)
+    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: True)
+    assert store.set_calls  # published once
+
+    # Still within the relaunch backoff window: retracted, but not relaunched yet.
+    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: False)
+
+    assert store.remove_calls == ["s4me", "s4me"]
+    assert launches == [s4me.run_script_command("/addon/root", 11480)]
+
+
+def test_apply_relaunches_dead_bridge_only_after_backoff_elapses():
+    store = _FakeStore()
+    launches = []
+    clock = _FakeClock()
+    supervisor = s4me.BridgeSupervisor("/addon/root", clock=clock)
+
+    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: False)
+    assert launches == [s4me.run_script_command("/addon/root", 11480)]
+
+    # Backoff has not elapsed yet: no second launch attempt.
+    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: False)
+    assert launches == [s4me.run_script_command("/addon/root", 11480)]
+
+    clock.advance(s4me.RELAUNCH_BACKOFF_SECONDS + 1)
+    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: False)
+    assert launches == [
+        s4me.run_script_command("/addon/root", 11480),
+        s4me.run_script_command("/addon/root", 11480),
+    ]
+
+
+def test_apply_port_change_while_active_relaunches_and_repoints_store_once_ready():
+    store = _FakeStore()
+    launches = []
+    supervisor = s4me.BridgeSupervisor("/addon/root", clock=_FakeClock())
+
+    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: True)
+    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: True)
+    assert store.set_calls[-1] == ("s4me", s4me.manifest_url(11480), s4me.MANIFEST)
+
+    # Port changes: the stale descriptor for the old port is retracted right
+    # away, and the new port is not published until it answers in turn.
+    supervisor.apply(True, 11481, lambda: True, launches.append, store, probe_fn=lambda port: False)
+    assert store.remove_calls[-1] == "s4me"
+    assert store.set_calls[-1] == ("s4me", s4me.manifest_url(11480), s4me.MANIFEST)
+
+    supervisor.apply(True, 11481, lambda: True, launches.append, store, probe_fn=lambda port: True)
 
     assert launches == [
         s4me.run_script_command("/addon/root", 11480),
@@ -145,14 +217,56 @@ def test_apply_port_change_while_active_relaunches_and_repoints_store():
 def test_apply_disabling_after_active_removes_and_relaunches_if_reenabled():
     store = _FakeStore()
     launches = []
-    supervisor = s4me.BridgeSupervisor("/addon/root")
+    supervisor = s4me.BridgeSupervisor("/addon/root", clock=_FakeClock())
 
-    supervisor.apply(True, 11480, lambda: True, launches.append, store)
-    supervisor.apply(False, 11480, lambda: True, launches.append, store)
-    supervisor.apply(True, 11480, lambda: True, launches.append, store)
+    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: True)
+    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: True)
+    supervisor.apply(False, 11480, lambda: True, launches.append, store, probe_fn=lambda port: True)
+    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: True)
 
     assert launches == [
         s4me.run_script_command("/addon/root", 11480),
         s4me.run_script_command("/addon/root", 11480),
     ]
-    assert store.remove_calls == ["s4me"]
+    assert store.remove_calls[-1] == "s4me"
+
+
+# --- probe_manifest ---------------------------------------------------------
+
+
+def test_probe_manifest_true_on_successful_response(monkeypatch):
+    import urllib.request
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _Resp())
+
+    assert s4me.probe_manifest(11480) is True
+
+
+def test_probe_manifest_true_on_http_error_status(monkeypatch):
+    import urllib.error
+    import urllib.request
+
+    def _raise(*a, **k):
+        raise urllib.error.HTTPError("url", 404, "not found", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", _raise)
+
+    assert s4me.probe_manifest(11480) is True
+
+
+def test_probe_manifest_false_on_connection_failure(monkeypatch):
+    import urllib.request
+
+    def _raise(*a, **k):
+        raise ConnectionRefusedError("refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _raise)
+
+    assert s4me.probe_manifest(11480) is False

@@ -57,9 +57,11 @@ never answered its manifest.
 """
 import json
 import os
+import socket
 import sys
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # When Kodi's RunScript() invokes this file directly, CPython already put
@@ -85,6 +87,15 @@ _SEARCH_LANGUAGE = "it"
 #: fan-out -- "return whatever resolved in time" rather than block on a
 #: slow/dead channel.
 _REQUEST_BUDGET_SECONDS = 12.0
+#: Blocking-I/O ceiling applied process-wide via `socket.setdefaulttimeout()`
+#: in `main()` -- bounds every socket call a channel's search/findvideos/
+#: resolve makes that does not set its own timeout, so a stalled channel's
+#: worker thread eventually raises instead of hanging past the request
+#: budget above (and past process exit, since Python 3.8's ThreadPoolExecutor
+#: cannot cancel a running worker -- see `_handle_stream_request()`).
+#: Comfortably under `_REQUEST_BUDGET_SECONDS` so one slow channel unblocks
+#: with the budget still open for the others' results to be collected.
+_CHANNEL_IO_TIMEOUT_SECONDS = 8.0
 _CACHE_TTL_SECONDS = 30 * 60
 
 
@@ -166,7 +177,10 @@ def _search_channel(channel_id, title, content_type):
     try:
         from core.item import Item
         module = __import__("channels.%s" % channel_id, None, None, ["channels.%s" % channel_id])
-        item = Item(channel=channel_id, global_search=True, contentType=content_type)
+        item = Item(
+            channel=channel_id, global_search=True,
+            contentType=bh.content_type_for_s4me(content_type),
+        )
         return module.search(item, title) or []
     except Exception as exc:  # noqa: BLE001 - one broken channel must never abort the request
         _log("channel %s search failed: %r" % (channel_id, exc), level_error=True)
@@ -182,8 +196,12 @@ def _episodes_for(channel_id, show_item, season, episode):
         episodes = module.episodios(show_item) or []
         for ep_item in episodes:
             ep_labels = getattr(ep_item, "infoLabels", {}) or {}
-            ep_season = str(ep_labels.get("season") or getattr(ep_item, "season", ""))
-            ep_episode = str(ep_labels.get("episode") or getattr(ep_item, "episode", ""))
+            ep_season = str(bh.label_value_or(
+                ep_labels.get("season"), getattr(ep_item, "season", ""),
+            ))
+            ep_episode = str(bh.label_value_or(
+                ep_labels.get("episode"), getattr(ep_item, "episode", ""),
+            ))
             if ep_season == str(season) and ep_episode == str(episode):
                 return ep_item
     except Exception as exc:  # noqa: BLE001 - never abort the request over one channel's listing
@@ -287,7 +305,12 @@ def _handle_stream_request(state, content_type_param, id_param):
         return {"streams": []}
     imdb_id, season, episode = parsed
 
-    cache_key = (content_type_param, imdb_id, season, episode)
+    # Resolve the channel selection BEFORE the cache lookup, and fold it
+    # into the cache key: `s4me_channels` can change between requests, and
+    # a response cached under the old selection must never be replayed
+    # for a request that would now fan out to a different channel set.
+    channels = state.channels_for_request()
+    cache_key = (content_type_param, imdb_id, season, episode, channels)
     cached = state.cache.get(cache_key)
     if cached is not None:
         return {"streams": cached}
@@ -298,25 +321,36 @@ def _handle_stream_request(state, content_type_param, id_param):
         return {"streams": []}
     title, year, tmdb_id = resolved
 
-    channels = state.channels_for_request()
     budget = bh.Budget(_REQUEST_BUDGET_SECONDS)
     streams = []
     if channels:
-        with ThreadPoolExecutor(max_workers=min(_MAX_CHANNEL_WORKERS, len(channels))) as pool:
-            futures = {
-                pool.submit(
-                    _streams_for_channel, channel_id, imdb_id, title, year, tmdb_id,
-                    season, episode, content_type_param,
-                ): channel_id
-                for channel_id in channels
-            }
-            for future in as_completed(futures, timeout=budget.remaining() or None):
-                try:
-                    streams.extend(future.result() or [])
-                except Exception as exc:  # noqa: BLE001 - one channel's failure must never drop the others
-                    _log("channel %s raised: %r" % (futures[future], exc), level_error=True)
-                if budget.expired():
-                    break
+        pool = ThreadPoolExecutor(max_workers=min(_MAX_CHANNEL_WORKERS, len(channels)))
+        tasks = {
+            channel_id: partial(
+                _streams_for_channel, channel_id, imdb_id, title, year, tmdb_id,
+                season, episode, content_type_param,
+            )
+            for channel_id in channels
+        }
+        try:
+            streams, timed_out = bh.collect_with_budget(
+                pool, tasks, budget,
+                on_error=lambda channel_id, exc: _log(
+                    "channel %s raised: %r" % (channel_id, exc), level_error=True,
+                ),
+            )
+        finally:
+            # Python 3.8 has no shutdown(cancel_futures=True) -- waiting
+            # here for a straggler would defeat the whole point of the
+            # budget above. A left-over worker keeps running in the
+            # background (bounded by _CHANNEL_IO_TIMEOUT_SECONDS, see
+            # main()) and is simply discarded once it finishes.
+            pool.shutdown(wait=False)
+        if timed_out:
+            _log(
+                "channel fan-out exceeded the %.1fs request budget, returning %d partial result(s)"
+                % (_REQUEST_BUDGET_SECONDS, len(streams))
+            )
 
     state.cache.set(cache_key, streams)
     return {"streams": streams}
@@ -332,7 +366,10 @@ def _make_handler(state):
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Access-Control-Allow-Origin", "*")
+            origin = bh.cors_allow_origin(self.headers.get("Origin"))
+            if origin is not None:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
             self.end_headers()
             self.wfile.write(body)
 
@@ -388,6 +425,12 @@ def main():
 
     state = _BridgeState(s4me_root)
     server = ThreadingHTTPServer(("127.0.0.1", port), _make_handler(state))
+    # Set AFTER the listening socket above is already bound/listening, so
+    # only sockets created from here on (each accepted request connection,
+    # and every outbound HTTP call a channel's search/findvideos/resolve
+    # makes without its own explicit timeout) are bounded by it -- see
+    # _CHANNEL_IO_TIMEOUT_SECONDS's own comment for why.
+    socket.setdefaulttimeout(_CHANNEL_IO_TIMEOUT_SECONDS)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     _log("serving on 127.0.0.1:%d" % port)

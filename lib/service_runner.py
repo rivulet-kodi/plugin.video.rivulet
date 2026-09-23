@@ -1052,9 +1052,11 @@ def main():
             next_interval = RESTART_BACKOFF[min(state.backoff_idx, len(RESTART_BACKOFF) - 1)]
             state.backoff_idx = min(state.backoff_idx + 1, len(RESTART_BACKOFF) - 1)
             return None, next_interval
-        xbmcgui.Dialog().notification(
-            addon.getAddonInfo("name"), addon.getLocalizedString(30364),
-        )
+        if not state.library_mode_notified:
+            xbmcgui.Dialog().notification(
+                addon.getAddonInfo("name"), addon.getLocalizedString(30364),
+            )
+            state.library_mode_notified = True
         return candidate, HEALTHY_POLL_INTERVAL
 
     def _abort_progress(done, total):
@@ -1165,6 +1167,9 @@ def main():
             # tag, and re-arming it there would let a user toggling
             # settings during a GitHub outage re-download on every toggle.
             self.upgrade_attempted = False
+            # Notification 30364 must fire once per session, not once per
+            # crash restart -- see _start_library_server().
+            self.library_mode_notified = False
 
     def _tick_progress_and_restart(state):
         """Phase B: sample playback progress, then apply a pending
@@ -1256,8 +1261,11 @@ def main():
                     # which keeps failing for the exact same permanent
                     # reason on an enforcing-SELinux device.
                     state.notified_missing = False
-                    state.unsupported_platform = False
                     state.proc, interval = _start_library_server(library_path, state)
+                    # A failed dlopen() must not unlatch: keep polling at the
+                    # coarse cadence instead of re-entering install_binary()'s
+                    # download path on the next tick.
+                    state.unsupported_platform = state.proc is None
                 else:
                     binary = resolve_binary(monitor.binary_setting, profile_dir)
                     if binary is None:
@@ -1325,8 +1333,11 @@ def main():
                                     f"stremio-server executable unsupported ({exc}), "
                                     f"falling back to library mode")
                                 state.notified_missing = False
-                                state.unsupported_platform = False
                                 state.proc, interval = _start_library_server(library_path, state)
+                                # A failed dlopen() must not re-enter the
+                                # download branch on the next tick.
+                                state.unsupported_platform = state.proc is None
+                                state.next_download_at = None
                             else:
                                 state.unsupported_platform = True
                                 state.next_download_at = None
@@ -1389,6 +1400,21 @@ def main():
                             "stremio-server binary upgrade aborted, shutting down")
                         return interval, True
                     state.proc, interval = _start_embedded_server(binary, state)
+                    if state.proc is None and is_bundled_binary(binary, profile_dir):
+                        # install_binary() promotes an unverified executable
+                        # to final_path even when verify_executable() failed
+                        # (see its own docstring), so a leftover binary that
+                        # still cannot exec() (SELinux W^X, noexec mount, ...)
+                        # would otherwise spawn-fail forever at
+                        # RESTART_BACKOFF cadence with library mode never
+                        # tried in this session. Fall back when a companion
+                        # .so is already on disk.
+                        library_path = _resolve_library_candidate(profile_dir)
+                        if library_path is not None:
+                            log(xbmc.LOGINFO,
+                                "stremio-server executable failed to spawn, "
+                                "falling back to library mode")
+                            state.proc, interval = _start_library_server(library_path, state)
 
         return interval, False
 

@@ -1211,37 +1211,50 @@ class Store:
         Matched by `flags.builtin`, NOT `transportUrl` -- so a caller
         whose `transport_url` changes (e.g. a bridge addon whose local
         port setting changed) still updates the SAME entry in place
-        rather than leaving a stale duplicate behind. Idempotent: calling
-        this every session with an unchanged `transport_url`/`manifest`
-        is a no-op write (see :meth:`update_addons`'s equality check).
+        rather than leaving a stale duplicate behind. If more than one
+        entry is already flagged with this `builtin_id` (a duplicate
+        persisted before this method de-duplicated, or from external
+        tampering with ``addons.json``), only the first is kept and
+        updated in place -- every later match is dropped, so a sync
+        always repairs the list back down to exactly one. Idempotent:
+        calling this every session with an unchanged
+        `transport_url`/`manifest`/disabled-state is a no-op write (see
+        :meth:`update_addons`'s equality check).
 
-        Unlike :meth:`install_addon`, this always pins `flags` to
-        `{"official": False, "protected": True, "builtin": builtin_id}`
-        rather than preserving whatever flags an existing entry had --
-        this is the ONE path that creates/maintains a given
-        `builtin_id`'s entry, so there is no independent local state
-        (like a user-toggled `disabled` bit) to preserve across a resync.
+        Unlike :meth:`install_addon`, this always pins
+        `flags.official`/`flags.protected`/`flags.builtin` rather than
+        preserving whatever flags an existing entry had -- EXCEPT
+        `flags.disabled`, which is carried over from the existing entry
+        (defaulting to not-disabled for a brand new entry). That is the
+        one piece of independent local state a builtin entry can carry:
+        a user who disabled this addon via :meth:`set_addon_disabled`
+        must stay disabled across every later resync, not be silently
+        re-enabled the next time this method runs.
 
         Safe against a concurrent ``default.py`` process modifying
         addons.json at the same time -- see :meth:`update_addons`.
         """
-        target = {
-            "transportUrl": transport_url,
-            "manifest": manifest,
-            "flags": {"official": False, "protected": True, "builtin": builtin_id},
-        }
+        def _descriptor(disabled):
+            flags = {"official": False, "protected": True, "builtin": builtin_id}
+            if disabled:
+                flags["disabled"] = True
+            return {"transportUrl": transport_url, "manifest": manifest, "flags": flags}
 
         def _sync(addons):
             updated = []
             found = False
             for addon in addons:
                 if (addon.get("flags") or {}).get("builtin") == builtin_id:
+                    if found:
+                        # Already replaced the first match above -- drop
+                        # this extra duplicate instead of keeping it.
+                        continue
                     found = True
-                    updated.append(target)
+                    updated.append(_descriptor((addon.get("flags") or {}).get("disabled")))
                 else:
                     updated.append(addon)
             if not found:
-                updated.append(target)
+                updated.append(_descriptor(False))
             return updated
 
         self.update_addons(_sync)

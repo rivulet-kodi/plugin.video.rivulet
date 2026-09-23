@@ -521,6 +521,93 @@ def test_set_builtin_addon_leaves_other_addons_untouched(tmp_path):
     assert all(a in after for a in before)
 
 
+def test_set_builtin_addon_preserves_user_disabled_flag_across_resync(tmp_path):
+    store = make_store(tmp_path)
+    url = "http://127.0.0.1:11480/manifest.json"
+    store.set_builtin_addon("s4me", url, {"id": "org.rivulet.s4me", "v": 1})
+    store.set_addon_disabled(url, True)
+
+    store.set_builtin_addon("s4me", url, {"id": "org.rivulet.s4me", "v": 2})
+
+    entry = next(a for a in store.get_addons() if a["flags"].get("builtin") == "s4me")
+    assert entry["flags"]["disabled"] is True
+    assert entry["flags"]["protected"] is True
+    assert entry["manifest"]["v"] == 2
+
+
+def test_set_builtin_addon_preserves_disabled_flag_across_port_change(tmp_path):
+    store = make_store(tmp_path)
+    store.set_builtin_addon("s4me", "http://127.0.0.1:11480/manifest.json", {"id": "org.rivulet.s4me"})
+    store.set_addon_disabled("http://127.0.0.1:11480/manifest.json", True)
+
+    store.set_builtin_addon("s4me", "http://127.0.0.1:11481/manifest.json", {"id": "org.rivulet.s4me"})
+
+    entry = next(a for a in store.get_addons() if a["flags"].get("builtin") == "s4me")
+    assert entry["transportUrl"] == "http://127.0.0.1:11481/manifest.json"
+    assert entry["flags"]["disabled"] is True
+
+
+def test_set_builtin_addon_new_entry_has_no_disabled_flag(tmp_path):
+    store = make_store(tmp_path)
+
+    store.set_builtin_addon("s4me", "http://127.0.0.1:11480/manifest.json", {"id": "org.rivulet.s4me"})
+
+    entry = next(a for a in store.get_addons() if a["flags"].get("builtin") == "s4me")
+    assert "disabled" not in entry["flags"]
+
+
+def test_set_builtin_addon_dedupes_pre_existing_duplicate_entries(tmp_path):
+    """A persisted addons.json that already carries two entries flagged
+    with the same builtin_id (e.g. from before this method de-duplicated,
+    or from external tampering) must collapse back to exactly one on the
+    next sync -- not grow to three."""
+    store = make_store(tmp_path)
+    dup_flags = {"official": False, "protected": True, "builtin": "s4me"}
+    store.update_addons(lambda addons: addons + [
+        {
+            "transportUrl": "http://127.0.0.1:11480/manifest.json",
+            "manifest": {"id": "org.rivulet.s4me", "v": 1},
+            "flags": dict(dup_flags),
+        },
+        {
+            "transportUrl": "http://127.0.0.1:11481/manifest.json",
+            "manifest": {"id": "org.rivulet.s4me", "v": 2},
+            "flags": dict(dup_flags),
+        },
+    ])
+    before = len(store.get_addons())
+
+    store.set_builtin_addon("s4me", "http://127.0.0.1:11482/manifest.json", {"id": "org.rivulet.s4me", "v": 3})
+
+    addons = store.get_addons()
+    matches = [a for a in addons if a["flags"].get("builtin") == "s4me"]
+    assert len(matches) == 1
+    assert matches[0]["transportUrl"] == "http://127.0.0.1:11482/manifest.json"
+    assert len(addons) == before - 1
+
+
+def test_set_builtin_addon_dedupe_preserves_disabled_from_first_match(tmp_path):
+    store = make_store(tmp_path)
+    store.update_addons(lambda addons: addons + [
+        {
+            "transportUrl": "http://127.0.0.1:11480/manifest.json",
+            "manifest": {"id": "org.rivulet.s4me"},
+            "flags": {"official": False, "protected": True, "builtin": "s4me", "disabled": True},
+        },
+        {
+            "transportUrl": "http://127.0.0.1:11481/manifest.json",
+            "manifest": {"id": "org.rivulet.s4me"},
+            "flags": {"official": False, "protected": True, "builtin": "s4me"},
+        },
+    ])
+
+    store.set_builtin_addon("s4me", "http://127.0.0.1:11482/manifest.json", {"id": "org.rivulet.s4me"})
+
+    matches = [a for a in store.get_addons() if a["flags"].get("builtin") == "s4me"]
+    assert len(matches) == 1
+    assert matches[0]["flags"]["disabled"] is True
+
+
 
 # --- auth ------------------------------------------------------------------
 

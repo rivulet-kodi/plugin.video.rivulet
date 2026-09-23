@@ -49,6 +49,9 @@ which pins them together across any future edit to either.
 import re
 import time
 import unicodedata
+from collections import OrderedDict
+from concurrent.futures import TimeoutError as _FuturesTimeoutError
+from concurrent.futures import as_completed
 from urllib.parse import parse_qsl
 
 #: Stremio addon manifest this bridge serves at `/manifest.json` -- see
@@ -143,16 +146,50 @@ def title_matches(candidate_title, candidate_year, target_title, target_year):
 def result_matches(info_labels, target_tmdb_id, target_title, target_year):
     """True if `info_labels` (a Stream4Me `Item.infoLabels`-like mapping)
     identifies the same title as `target_tmdb_id`/`target_title`/
-    `target_year` -- `tmdb_id` first, normalized title+year fallback."""
+    `target_year` -- `tmdb_id` first, normalized title+year fallback.
+
+    The title+year fallback only applies when at least one side lacks a
+    `tmdb_id`: if both carry one and `tmdb_id_matches()` above already
+    said they differ, an equal title+year is a same-name coincidence
+    (e.g. a remake), not the same title, and must not override that."""
     info_labels = info_labels or {}
-    if tmdb_id_matches(info_labels.get("tmdb_id"), target_tmdb_id):
+    candidate_tmdb_id = info_labels.get("tmdb_id")
+    if tmdb_id_matches(candidate_tmdb_id, target_tmdb_id):
         return True
+    if candidate_tmdb_id and target_tmdb_id:
+        return False
     return title_matches(
         info_labels.get("title") or info_labels.get("originaltitle"),
         info_labels.get("year"),
         target_title,
         target_year,
     )
+
+
+
+def content_type_for_s4me(content_type):
+    """Map a Stremio content type to the value Stream4Me's own
+    `Item(contentType=...)` understands.
+
+    Stream4Me's `core.item.InfoLabels` stores `contentType` as
+    `infoLabels.mediatype`, and silently downgrades any value outside
+    `{"list", "movie", "tvshow", "season", "episode", "music",
+    "undefined"}` to `"list"` -- so Stremio's own `"series"` must become
+    `"tvshow"` here, or a channel that branches on the item's media type
+    searches in the wrong mode and misses every series result. Every
+    other content type (currently only `"movie"`) already matches
+    Stream4Me's vocabulary and passes through unchanged."""
+    return "tvshow" if content_type == "series" else content_type
+
+
+def label_value_or(label_value, fallback_value):
+    """`label_value` if present, else `fallback_value`.
+
+    "Present" means not `None` and not `""` -- NOT merely truthy: a
+    Stream4Me `infoLabels` season/episode of `0` (a special/extra) is a
+    valid, present value and must be kept, unlike a bare `x or fallback`
+    which would treat `0` as missing."""
+    return label_value if label_value not in (None, "") else fallback_value
 
 
 def shape_stream(channel, server_name, url, headers=None, quality=None):
@@ -223,12 +260,21 @@ def select_channels(configured, active_channels):
 class TTLCache:
     """Tiny per-key time-to-live cache. `clock` is injectable
     (`time.monotonic` in production) so tests can control expiry
-    deterministically without sleeping."""
+    deterministically without sleeping.
 
-    def __init__(self, ttl_seconds, clock=time.monotonic):
+    Bounded on two axes so a long-running bridge process's cache cannot
+    grow without limit: `max_size` caps the number of distinct keys
+    (oldest-inserted evicted first once exceeded), and every `set()`
+    also sweeps out every already-expired entry -- not just the one
+    key being written -- so a key that is never requested again (e.g. a
+    title nobody re-queries) does not linger past its TTL just because
+    `get()` is the only thing that used to notice expiry."""
+
+    def __init__(self, ttl_seconds, clock=time.monotonic, max_size=256):
         self._ttl = ttl_seconds
         self._clock = clock
-        self._store = {}
+        self._max_size = max_size
+        self._store = OrderedDict()
 
     def get(self, key):
         entry = self._store.get(key)
@@ -241,7 +287,17 @@ class TTLCache:
         return value
 
     def set(self, key, value):
+        self._purge_expired()
         self._store[key] = (self._clock() + self._ttl, value)
+        self._store.move_to_end(key)
+        while len(self._store) > self._max_size:
+            self._store.popitem(last=False)
+
+    def _purge_expired(self):
+        now = self._clock()
+        expired = [k for k, (expires_at, _value) in self._store.items() if now >= expires_at]
+        for k in expired:
+            del self._store[k]
 
     def __len__(self):
         return len(self._store)
@@ -261,3 +317,74 @@ class Budget:
 
     def expired(self):
         return self._clock() >= self._deadline
+
+
+#: Origins Stremio's own web client runs from -- the only cross-origin
+#: browser callers this bridge needs to support. `cors_allow_origin()`
+#: returns `None` for anything else so `_send_json()` sends no
+#: `Access-Control-Allow-Origin` header at all for an unrecognized
+#: origin: this bridge binds to `127.0.0.1`, but that only limits which
+#: machines can reach it, not which page loaded in the user's browser
+#: can -- a wildcard `*` would let ANY site the user has open read back
+#: this response's `behaviorHints.proxyHeaders.request` (cookies/
+#: referer/user-agent for a known stream id) via `fetch()` (CWE-942).
+#: Non-browser callers (Stremio desktop, curl, ...) send no `Origin`
+#: header at all and are unaffected either way -- CORS is a browser-only
+#: restriction on reading the response, not on the server accepting it.
+ALLOWED_ORIGINS = frozenset((
+    "https://app.strem.io",
+    "https://web.strem.io",
+    "https://staging.strem.io",
+))
+
+
+def cors_allow_origin(origin, allowed_origins=ALLOWED_ORIGINS):
+    """The `Access-Control-Allow-Origin` header value to send back for a
+    request's `Origin` header, or `None` to send no such header at all
+    (see `ALLOWED_ORIGINS`)."""
+    return origin if origin in allowed_origins else None
+
+
+def collect_with_budget(pool, tasks, budget, on_error=None):
+    """Run every zero-arg callable in `tasks` (a `{key: callable}`
+    mapping) on `pool` (a `concurrent.futures.Executor` the CALLER
+    created and is responsible for disposing of -- typically via
+    `pool.shutdown(wait=False)`, since Python 3.8 has no
+    `shutdown(cancel_futures=True)` to cancel still-running work
+    outright), collecting every non-empty result list into one flat
+    list. Returns `(results, timed_out)`.
+
+    Stops and returns whatever has completed so far, WITHOUT waiting for
+    any task still running, the moment `budget` expires -- whether that
+    is noticed via `as_completed()`'s own `timeout=` raising
+    `concurrent.futures.TimeoutError`, or via the `budget.expired()`
+    check after each completion (belt-and-suspenders: the latter alone
+    would still block on `as_completed()`'s internal wait for the next
+    completion past the deadline if the former did not exist). Neither
+    the timeout NOR any individual task raising is allowed to propagate:
+    a stalled or broken task must degrade this request to partial
+    results, never to an error response.
+
+    `on_error(key, exc)`, if given, is called for a task whose callable
+    raised -- the exception itself is always swallowed.
+    """
+    results = []
+    if not tasks:
+        return results, False
+    futures = {pool.submit(fn): key for key, fn in tasks.items()}
+    try:
+        for future in as_completed(futures, timeout=budget.remaining() or None):
+            key = futures[future]
+            try:
+                value = future.result()
+            except Exception as exc:  # noqa: BLE001 - one task's failure must never drop the others
+                value = None
+                if on_error is not None:
+                    on_error(key, exc)
+            if value:
+                results.extend(value)
+            if budget.expired():
+                return results, True
+        return results, False
+    except _FuturesTimeoutError:
+        return results, True

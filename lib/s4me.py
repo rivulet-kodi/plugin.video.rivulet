@@ -22,6 +22,7 @@ its own pure-logic helpers are deliberately duplicated in
 """
 
 import os
+import time
 
 #: Kodi addon id of the community Stream4Me addon this bridge wraps.
 S4ME_ADDON_ID = "plugin.video.s4me"
@@ -70,6 +71,47 @@ def manifest_url(port):
     return "http://127.0.0.1:%d/manifest.json" % port
 
 
+#: Timeout for one `probe_manifest()` HTTP round-trip -- short because this
+#: runs on the same settings-refresh cadence as the rest of `main()`'s
+#: supervision tick and must never stall it (mirrors
+#: `lib.service_runner.PROBE_TIMEOUT`).
+PROBE_TIMEOUT_SECONDS = 2.0
+
+#: Minimum gap between two launch attempts once a launch is judged to have
+#: failed (readiness probe still failing) -- stops a persistently broken
+#: Stream4Me install from spawning a fresh `RunScript()` on every
+#: settings-poll tick.
+RELAUNCH_BACKOFF_SECONDS = 30.0
+
+
+def probe_manifest(port, timeout=PROBE_TIMEOUT_SECONDS):
+    """True if `/manifest.json` answers at `127.0.0.1:port` -- confirms the
+    `RunScript()` bridge actually imported Stream4Me and bound its socket,
+    rather than trusting `xbmc.executebuiltin()`'s fire-and-forget return
+    (see `BridgeSupervisor.apply()`).
+
+    Any completed HTTP exchange, including an HTTP error status, counts as
+    "answering" -- same convention as
+    `lib.service_runner.probe_listening()`, whose docstring explains why.
+
+    `urllib.request`/`urllib.error` are imported here, not at module scope,
+    for the same import-cost reason as `probe_listening()`: this module is
+    imported on every settings refresh, but the probe itself only runs
+    while the bridge is enabled and not yet confirmed ready.
+    """
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(manifest_url(port), timeout=timeout):
+            pass
+        return True
+    except urllib.error.HTTPError:
+        return True
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
 def run_script_command(addon_path, port):
     """The exact `RunScript(...)` builtin `main()` passes to
     `xbmc.executebuiltin()`.
@@ -115,36 +157,81 @@ class BridgeSupervisor:
 
     Kept entirely Kodi-free: `has_addon_fn`/`launch_fn` are injected
     callables (`main()` passes
-    `lambda: xbmc.getCondVisibility(...)`/`xbmc.executebuiltin`), so this
-    is unit-testable without `xbmc` or a real `RunScript` call.
+    `lambda: xbmc.getCondVisibility(...)`/`xbmc.executebuiltin`), and
+    `probe_fn` defaults to `probe_manifest` but is equally injectable, so
+    this is unit-testable without `xbmc`, a real `RunScript` call, or a
+    real HTTP round-trip.
 
-    `apply()` is idempotent per port: repeated calls with the same
-    `(active, port)` outcome launch the script at most once (Kodi has no
-    "is this RunScript still running" query, so this guards against
-    spawning a second bridge process on every settings poll) but always
-    re-syncs the store descriptor -- cheap (a no-op write once it already
-    matches, see `Store.set_builtin_addon`), and self-healing if something
-    else touched `addons.json`.
+    `xbmc.executebuiltin()` returns as soon as `RunScript()` is queued --
+    long before the script has imported Stream4Me and bound its port (or
+    failed to do either). Publishing the store descriptor on that return
+    alone would let `Store.get_enabled_addons()` fan a request out to a
+    port nothing is listening on yet, or ever, on a failed launch. So
+    `apply()` only calls `Store.set_builtin_addon()` once `probe_fn(port)`
+    confirms `/manifest.json` actually answers; retracts the descriptor
+    the moment a previously-answering bridge stops answering; and
+    relaunches -- no more often than `RELAUNCH_BACKOFF_SECONDS` apart --
+    while a launch has not yet produced a working bridge.
+
+    `apply()` is idempotent per port: readiness/backoff state is tracked
+    per launched port, so repeated calls that keep finding the bridge
+    healthy neither relaunch nor spam `launch_fn`, but do keep re-syncing
+    the store descriptor once published -- cheap (a no-op write once it
+    already matches, see `Store.set_builtin_addon`), and self-healing if
+    something else touched `addons.json`.
 
     A `port` change while already active DOES re-launch (a fresh
-    `RunScript()` bound to the new port) and repoints the store entry at
-    it immediately; the previous bridge process, if still running, is
-    simply left listening on its old port with nothing pointing at it
-    anymore until Kodi restarts -- an accepted, low-cost trade-off for an
-    opt-in feature, avoided entirely by leaving `s4me_port` alone.
+    `RunScript()` bound to the new port), retracting any descriptor for
+    the old port immediately -- the store entry only repoints at the new
+    port once THAT launch answers, avoiding a window where the descriptor
+    names a port nothing yet serves. The previous bridge process, if
+    still running, is simply left listening on its old port with nothing
+    pointing at it anymore until Kodi restarts -- Kodi's `RunScript()`
+    builtin hands back no handle to stop it, so this (and leaving it
+    running when the bridge is disabled) is an accepted, low-cost
+    trade-off for an opt-in feature, avoided entirely by leaving
+    `s4me_port` alone.
     """
 
-    def __init__(self, addon_path):
+    def __init__(self, addon_path, clock=time.monotonic):
         self.addon_path = addon_path
+        self._clock = clock
         self._launched_port = None
+        self._published = False
+        self._next_relaunch_at = 0.0
 
-    def apply(self, enabled, port, has_addon_fn, launch_fn, store):
+    def apply(self, enabled, port, has_addon_fn, launch_fn, store, probe_fn=probe_manifest):
         active = bool(enabled) and bool(has_addon_fn())
-        if active:
-            store.set_builtin_addon(BUILTIN_ID, manifest_url(port), MANIFEST)
-            if self._launched_port != port:
-                launch_fn(run_script_command(self.addon_path, port))
-                self._launched_port = port
-        else:
+        if not active:
             self._launched_port = None
+            self._published = False
+            self._next_relaunch_at = 0.0
             store.remove_builtin_addon(BUILTIN_ID)
+            return
+
+        if self._launched_port != port:
+            self._published = False
+            store.remove_builtin_addon(BUILTIN_ID)
+            self._launch(port, launch_fn)
+        elif not probe_fn(port):
+            if self._published:
+                # It answered before but has stopped -- retract right away
+                # so get_enabled_addons() never fans a request out to a
+                # dead port. The backoff check below decides whether it is
+                # also time to try relaunching it.
+                self._published = False
+                store.remove_builtin_addon(BUILTIN_ID)
+            if self._clock() >= self._next_relaunch_at:
+                self._launch(port, launch_fn)
+            return
+        else:
+            self._published = True
+
+        if self._published:
+            store.set_builtin_addon(BUILTIN_ID, manifest_url(port), MANIFEST)
+
+    def _launch(self, port, launch_fn):
+        launch_fn(run_script_command(self.addon_path, port))
+        self._launched_port = port
+        self._published = False
+        self._next_relaunch_at = self._clock() + RELAUNCH_BACKOFF_SECONDS
