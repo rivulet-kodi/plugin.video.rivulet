@@ -57,7 +57,6 @@ never answered its manifest.
 """
 import json
 import os
-import socket
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -87,14 +86,24 @@ _SEARCH_LANGUAGE = "it"
 #: fan-out -- "return whatever resolved in time" rather than block on a
 #: slow/dead channel.
 _REQUEST_BUDGET_SECONDS = 12.0
-#: Blocking-I/O ceiling applied process-wide via `socket.setdefaulttimeout()`
-#: in `main()` -- bounds every socket call a channel's search/findvideos/
-#: resolve makes that does not set its own timeout, so a stalled channel's
+#: Blocking-I/O ceiling applied to Stream4Me's own HTTP layer (see
+#: `_bound_channel_io_timeout()`) -- bounds every `core.httptools
+#: .downloadpage()` call a channel's search/findvideos/resolve makes
+#: that does not set its own explicit `timeout=`, so a stalled channel's
 #: worker thread eventually raises instead of hanging past the request
 #: budget above (and past process exit, since Python 3.8's ThreadPoolExecutor
 #: cannot cancel a running worker -- see `_handle_stream_request()`).
 #: Comfortably under `_REQUEST_BUDGET_SECONDS` so one slow channel unblocks
 #: with the budget still open for the others' results to be collected.
+#:
+#: Deliberately NOT `socket.setdefaulttimeout()`: that is process/
+#: interpreter-global, so it would also reset the timeout on THIS
+#: server's own accepted HTTP connections, and on CPython builds whose
+#: socket module default-timeout state is not per-subinterpreter, it
+#: could leak into Kodi's OTHER addon subinterpreters entirely
+#: unrelated to this bridge. Scoping it to Stream4Me's own httptools
+#: module attribute affects only the HTTP calls this bridge's own
+#: channel fan-out makes, in this process alone.
 _CHANNEL_IO_TIMEOUT_SECONDS = 8.0
 _CACHE_TTL_SECONDS = 30 * 60
 
@@ -106,6 +115,28 @@ def _log(message, level_error=False):
                   xbmc.LOGERROR if level_error else xbmc.LOGINFO)
     except Exception:  # noqa: BLE001 - logging must never crash the bridge
         pass
+
+
+def _bound_channel_io_timeout():
+    """Lower Stream4Me's own `core.httptools.downloadpage()` default
+    timeout to `_CHANNEL_IO_TIMEOUT_SECONDS`, scoped to this process's
+    already-imported copy of Stream4Me's `core.httptools` module --
+    see that constant's own comment for why this, and not
+    `socket.setdefaulttimeout()`, is the right lever. `downloadpage()`
+    (used by essentially every channel/server module's own HTTP calls,
+    per Stream4Me's own convention) only falls back to this
+    module-level default when a caller does not pass its own explicit
+    `timeout=` kwarg, so an occasional channel that already sets one
+    keeps that value untouched. Best-effort: swallows any failure
+    (missing/renamed attribute in a Stream4Me fork, for example) since a
+    slightly-later channel timeout is far better than refusing to serve
+    requests at all.
+    """
+    try:
+        from core import httptools
+        httptools.HTTPTOOLS_DEFAULT_DOWNLOAD_TIMEOUT = _CHANNEL_IO_TIMEOUT_SECONDS
+    except Exception as exc:  # noqa: BLE001 - a best-effort timeout tweak must never block startup
+        _log("could not bound Stream4Me's httptools timeout: %r" % (exc,), level_error=True)
 
 
 def _install_s4me_path(s4me_root):
@@ -323,6 +354,7 @@ def _handle_stream_request(state, content_type_param, id_param):
 
     budget = bh.Budget(_REQUEST_BUDGET_SECONDS)
     streams = []
+    timed_out = False
     if channels:
         pool = ThreadPoolExecutor(max_workers=min(_MAX_CHANNEL_WORKERS, len(channels)))
         tasks = {
@@ -352,7 +384,13 @@ def _handle_stream_request(state, content_type_param, id_param):
                 % (_REQUEST_BUDGET_SECONDS, len(streams))
             )
 
-    state.cache.set(cache_key, streams)
+    # A timed-out fan-out only reflects whichever channels happened to
+    # finish first -- caching it would keep re-serving that same partial,
+    # transiently-slow-channel-shaped result for the full
+    # _CACHE_TTL_SECONDS (30 minutes) to every repeat request instead of
+    # giving a fresh fan-out another chance to complete in full.
+    if not timed_out:
+        state.cache.set(cache_key, streams)
     return {"streams": streams}
 
 
@@ -422,15 +460,10 @@ def main():
     except Exception as exc:  # noqa: BLE001 - a broken Stream4Me install must exit cleanly, never half-serve
         _log("failed to import Stream4Me's core package, exiting: %r" % (exc,), level_error=True)
         sys.exit(1)
+    _bound_channel_io_timeout()
 
     state = _BridgeState(s4me_root)
     server = ThreadingHTTPServer(("127.0.0.1", port), _make_handler(state))
-    # Set AFTER the listening socket above is already bound/listening, so
-    # only sockets created from here on (each accepted request connection,
-    # and every outbound HTTP call a channel's search/findvideos/resolve
-    # makes without its own explicit timeout) are bounded by it -- see
-    # _CHANNEL_IO_TIMEOUT_SECONDS's own comment for why.
-    socket.setdefaulttimeout(_CHANNEL_IO_TIMEOUT_SECONDS)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     _log("serving on 127.0.0.1:%d" % port)

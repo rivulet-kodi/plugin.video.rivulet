@@ -12,6 +12,7 @@ sibling-file import once its own directory is on `sys.path`.
 """
 import importlib.util
 import os
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -28,9 +29,9 @@ _spec.loader.exec_module(bh)
 
 #: `bridge.py` itself, loaded the same way (see this module's docstring) --
 #: only its `resources/s4me_bridge/`-local imports run at module scope
-#: (json/os/socket/sys/threading/concurrent.futures/functools/http.server
-#: plus this same sibling `bridge_helpers`), so this is safe without Kodi
-#: or Stream4Me installed. Used below to test the request-orchestration
+#: (json/os/sys/threading/concurrent.futures/functools/http.server plus
+#: this same sibling `bridge_helpers`), so this is safe without Kodi or
+#: Stream4Me installed. Used below to test the request-orchestration
 #: pieces of `_handle_stream_request()` that are not pure enough to live
 #: in `bridge_helpers.py` itself (cache-key/channel-selection interplay,
 #: the request budget's partial-results-on-timeout behaviour).
@@ -399,6 +400,26 @@ def test_collect_with_budget_returns_partial_results_without_waiting_for_straggl
     assert elapsed < 0.4
 
 
+def test_collect_with_budget_returns_immediately_when_budget_already_expired():
+    """Regression test: `Budget.remaining()` returns `0` once expired, and
+    `0 or None` evaluates to `None` -- passing that straight to
+    `as_completed(timeout=...)` would wait with NO timeout at all for a
+    still-running task, exactly defeating the 'never wait past the
+    budget' contract."""
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        tasks = {"stuck": lambda: (time.sleep(1.0) or [1])}
+        budget = bh.Budget(0)  # already expired by the time it's used below
+        started = time.monotonic()
+        results, timed_out = bh.collect_with_budget(pool, tasks, budget)
+        elapsed = time.monotonic() - started
+    finally:
+        pool.shutdown(wait=False)
+    assert results == []
+    assert timed_out is True
+    assert elapsed < 0.3
+
+
 # --- bridge.py: _handle_stream_request orchestration -------------------------
 
 
@@ -483,3 +504,72 @@ def test_handle_stream_request_returns_partial_results_on_budget_timeout(monkeyp
 
     assert result["streams"] == [{"url": "fast-result"}]
     assert elapsed < 0.4
+    assert state.cache.get(("movie", "tt1234567", None, None, ("fast", "slow"))) is None
+
+
+def test_handle_stream_request_does_not_cache_on_timeout(monkeypatch):
+    """A partial, timed-out result must not be cached: caching it would
+    keep re-serving that same partial result -- missing whichever
+    channel was still slow -- to every repeat request for the full
+    30-minute cache TTL instead of giving a fresh fan-out another
+    chance to complete in full."""
+    monkeypatch.setattr(bridge, "_resolve_title", lambda imdb_id, search_type: ("Title", "1999", "603"))
+    monkeypatch.setattr(bridge, "_REQUEST_BUDGET_SECONDS", 0.1)
+
+    calls = []
+
+    def _fake(channel_id, *a, **k):
+        calls.append(channel_id)
+        if channel_id == "slow":
+            time.sleep(0.5)
+        return [{"url": "%s-result" % channel_id}]
+
+    monkeypatch.setattr(bridge, "_streams_for_channel", _fake)
+    state = _FakeState(("fast", "slow"))
+
+    first = bridge._handle_stream_request(state, "movie", "tt1234567")
+    assert first["streams"] == [{"url": "fast-result"}]
+
+    # A second, immediate request must NOT be a cache hit: both channels
+    # are queried again, not just replayed from a cached partial result.
+    calls.clear()
+    second = bridge._handle_stream_request(state, "movie", "tt1234567")
+
+    assert set(calls) == {"fast", "slow"}
+    assert second["streams"] == [{"url": "fast-result"}]
+
+
+# --- bridge.py: _bound_channel_io_timeout ------------------------------------
+
+
+def test_bound_channel_io_timeout_sets_stream4me_httptools_default(monkeypatch):
+    """Must scope the timeout to Stream4Me's OWN `core.httptools` default
+    (used by `downloadpage()` -- Stream4Me's near-universal per-channel
+    HTTP call convention) rather than `socket.setdefaulttimeout()`, which
+    would leak into this server's own accepted connections and
+    potentially into other Kodi addon subinterpreters."""
+    import types
+
+    fake_httptools = types.ModuleType("core.httptools")
+    fake_httptools.HTTPTOOLS_DEFAULT_DOWNLOAD_TIMEOUT = 5
+    fake_core = types.ModuleType("core")
+    fake_core.httptools = fake_httptools
+    monkeypatch.setitem(sys.modules, "core", fake_core)
+    monkeypatch.setitem(sys.modules, "core.httptools", fake_httptools)
+
+    bridge._bound_channel_io_timeout()
+
+    assert fake_httptools.HTTPTOOLS_DEFAULT_DOWNLOAD_TIMEOUT == bridge._CHANNEL_IO_TIMEOUT_SECONDS
+
+
+def test_bound_channel_io_timeout_swallows_missing_core(monkeypatch):
+    monkeypatch.delitem(sys.modules, "core", raising=False)
+    monkeypatch.delitem(sys.modules, "core.httptools", raising=False)
+
+    bridge._bound_channel_io_timeout()  # must not raise even without Stream4Me installed
+
+
+def test_bridge_module_does_not_import_socket():
+    """Regression guard for the reverted `socket.setdefaulttimeout()`
+    approach: bridge.py must not import `socket` at all."""
+    assert not hasattr(bridge, "socket")

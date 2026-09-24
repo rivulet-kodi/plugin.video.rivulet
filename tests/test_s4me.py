@@ -14,12 +14,17 @@ class _FakeStore:
     def __init__(self):
         self.set_calls = []
         self.remove_calls = []
+        self.offline_calls = []
 
     def set_builtin_addon(self, builtin_id, transport_url, manifest):
         self.set_calls.append((builtin_id, transport_url, manifest))
 
     def remove_builtin_addon(self, builtin_id):
         self.remove_calls.append(builtin_id)
+
+    def set_builtin_addon_offline(self, builtin_id):
+        self.offline_calls.append(builtin_id)
+
 
 class _FakeClock:
     """Controllable monotonic clock for backoff tests."""
@@ -152,7 +157,7 @@ def test_apply_active_second_call_same_port_does_not_relaunch_but_resyncs_store(
     assert len(store.set_calls) == 2
 
 
-def test_apply_retracts_immediately_when_bridge_stops_answering():
+def test_apply_marks_offline_immediately_when_bridge_stops_answering():
     store = _FakeStore()
     launches = []
     clock = _FakeClock()
@@ -162,10 +167,13 @@ def test_apply_retracts_immediately_when_bridge_stops_answering():
     supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: True)
     assert store.set_calls  # published once
 
-    # Still within the relaunch backoff window: retracted, but not relaunched yet.
+    # Still within the relaunch backoff window: marked offline, but not
+    # relaunched yet, and NOT removed -- a transient blip must preserve the
+    # user's flags.disabled choice and the entry's position in addons.json.
     supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: False)
 
-    assert store.remove_calls == ["s4me", "s4me"]
+    assert store.offline_calls == ["s4me", "s4me"]  # first activation + this stop
+    assert store.remove_calls == []
     assert launches == [s4me.run_script_command("/addon/root", 11480)]
 
 
@@ -199,10 +207,12 @@ def test_apply_port_change_while_active_relaunches_and_repoints_store_once_ready
     supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: True)
     assert store.set_calls[-1] == ("s4me", s4me.manifest_url(11480), s4me.MANIFEST)
 
-    # Port changes: the stale descriptor for the old port is retracted right
-    # away, and the new port is not published until it answers in turn.
+    # Port changes: the stale descriptor for the old port is marked
+    # offline right away (not removed), and the new port is not
+    # published until it answers in turn.
     supervisor.apply(True, 11481, lambda: True, launches.append, store, probe_fn=lambda port: False)
-    assert store.remove_calls[-1] == "s4me"
+    assert store.offline_calls[-1] == "s4me"
+    assert store.remove_calls == []
     assert store.set_calls[-1] == ("s4me", s4me.manifest_url(11480), s4me.MANIFEST)
 
     supervisor.apply(True, 11481, lambda: True, launches.append, store, probe_fn=lambda port: True)

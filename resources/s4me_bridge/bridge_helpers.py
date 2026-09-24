@@ -373,7 +373,7 @@ def collect_with_budget(pool, tasks, budget, on_error=None):
         return results, False
     futures = {pool.submit(fn): key for key, fn in tasks.items()}
     try:
-        for future in as_completed(futures, timeout=budget.remaining() or None):
+        for future in as_completed(futures, timeout=max(budget.remaining(), 0.0)):
             key = futures[future]
             try:
                 value = future.result()

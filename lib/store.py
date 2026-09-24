@@ -995,16 +995,23 @@ class Store:
         return addons
 
     def get_enabled_addons(self):
-        """Return installed addon descriptors minus the disabled ones.
+        """Return installed addon descriptors minus the disabled and
+        offline ones.
 
         This is the read path every fan-out call site uses to decide which
         addons to query for catalogs, metas, streams and subtitles.
         :meth:`get_addons` itself remains the full installed list -- the
         one the addon manager UI displays and the Stremio account sync
         pushes -- since ``disabled`` is local presentation state, not part
-        of the addon-collection schema being synced.
+        of the addon-collection schema being synced. ``offline`` is the
+        same kind of local, non-synced state: it marks a builtin entry
+        (see :meth:`set_builtin_addon_offline`) whose backing process is
+        transiently unavailable, without removing/disabling it.
         """
-        return [a for a in self.get_addons() if not (a.get("flags") or {}).get("disabled")]
+        return [
+            a for a in self.get_addons()
+            if not (a.get("flags") or {}).get("disabled") and not (a.get("flags") or {}).get("offline")
+        ]
 
     def set_addons(self, addons):
         addons = list(addons)
@@ -1258,6 +1265,43 @@ class Store:
             return updated
 
         self.update_addons(_sync)
+
+    def set_builtin_addon_offline(self, builtin_id):
+        """Mark the existing entry flagged `flags.builtin == builtin_id`
+        as transiently unavailable (`flags.offline = True`), in place --
+        preserving its list position and `flags.disabled` -- WITHOUT
+        touching `transportUrl`/`manifest` or removing it. No-op if no
+        such entry exists yet (nothing published, nothing to mark).
+
+        For `lib.s4me.BridgeSupervisor.apply()`'s TRANSIENT unavailable
+        cases (not yet confirmed ready, or a launch/port-change in
+        flight): unlike :meth:`remove_builtin_addon` -- for the
+        PERMANENT case, the bridge setting is off or Stream4Me itself is
+        gone -- this keeps the user's `flags.disabled` choice and the
+        entry's position in `addons.json` intact across a blip, instead
+        of losing both to a remove-then-re-append. `get_enabled_addons()`
+        excludes an offline entry from every fan-out exactly like a
+        disabled one. The next successful :meth:`set_builtin_addon` call
+        rebuilds `flags` from scratch and so clears `offline` again.
+
+        Safe against a concurrent ``default.py`` process modifying
+        addons.json at the same time -- see :meth:`update_addons`.
+        """
+        def _mark_offline(addons):
+            updated = []
+            changed = False
+            for addon in addons:
+                flags = addon.get("flags") or {}
+                if flags.get("builtin") == builtin_id and not flags.get("offline"):
+                    new_addon = dict(addon)
+                    new_addon["flags"] = dict(flags, offline=True)
+                    updated.append(new_addon)
+                    changed = True
+                else:
+                    updated.append(addon)
+            return updated if changed else addons
+
+        self.update_addons(_mark_offline)
 
     def remove_builtin_addon(self, builtin_id):
         """Remove any addon descriptor flagged `flags.builtin ==

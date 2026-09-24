@@ -168,10 +168,16 @@ class BridgeSupervisor:
     alone would let `Store.get_enabled_addons()` fan a request out to a
     port nothing is listening on yet, or ever, on a failed launch. So
     `apply()` only calls `Store.set_builtin_addon()` once `probe_fn(port)`
-    confirms `/manifest.json` actually answers; retracts the descriptor
-    the moment a previously-answering bridge stops answering; and
-    relaunches -- no more often than `RELAUNCH_BACKOFF_SECONDS` apart --
-    while a launch has not yet produced a working bridge.
+    confirms `/manifest.json` actually answers; marks the descriptor
+    offline (`Store.set_builtin_addon_offline()`) the moment a
+    previously-answering bridge stops answering, or while a fresh launch
+    (first activation or a port change) is in flight; and relaunches --
+    no more often than `RELAUNCH_BACKOFF_SECONDS` apart -- while a launch
+    has not yet produced a working bridge. Marking offline, rather than
+    removing the descriptor outright, is what a TRANSIENT unavailability
+    calls for: it keeps the user's `flags.disabled` choice and the
+    entry's position in `addons.json` intact for whenever it comes back;
+    `remove_builtin_addon()` is reserved for the permanent case below.
 
     `apply()` is idempotent per port: readiness/backoff state is tracked
     per launched port, so repeated calls that keep finding the bridge
@@ -181,15 +187,15 @@ class BridgeSupervisor:
     something else touched `addons.json`.
 
     A `port` change while already active DOES re-launch (a fresh
-    `RunScript()` bound to the new port), retracting any descriptor for
-    the old port immediately -- the store entry only repoints at the new
-    port once THAT launch answers, avoiding a window where the descriptor
-    names a port nothing yet serves. The previous bridge process, if
-    still running, is simply left listening on its old port with nothing
-    pointing at it anymore until Kodi restarts -- Kodi's `RunScript()`
-    builtin hands back no handle to stop it, so this (and leaving it
-    running when the bridge is disabled) is an accepted, low-cost
-    trade-off for an opt-in feature, avoided entirely by leaving
+    `RunScript()` bound to the new port), marking any descriptor for the
+    old port offline immediately -- the store entry only repoints at the
+    new port once THAT launch answers, avoiding a window where the
+    descriptor names a port nothing yet serves. The previous bridge
+    process, if still running, is simply left listening on its old port
+    with nothing pointing at it anymore until Kodi restarts -- Kodi's
+    `RunScript()` builtin hands back no handle to stop it, so this (and
+    leaving it running when the bridge is disabled) is an accepted,
+    low-cost trade-off for an opt-in feature, avoided entirely by leaving
     `s4me_port` alone.
     """
 
@@ -211,16 +217,20 @@ class BridgeSupervisor:
 
         if self._launched_port != port:
             self._published = False
-            store.remove_builtin_addon(BUILTIN_ID)
+            # Transient: a fresh launch (first activation, or a port
+            # change) is in flight. Mark any existing descriptor offline
+            # rather than removing it, so the user's flags.disabled choice
+            # and its position in addons.json survive until it republishes.
+            store.set_builtin_addon_offline(BUILTIN_ID)
             self._launch(port, launch_fn)
         elif not probe_fn(port):
             if self._published:
-                # It answered before but has stopped -- retract right away
-                # so get_enabled_addons() never fans a request out to a
-                # dead port. The backoff check below decides whether it is
-                # also time to try relaunching it.
+                # It answered before but has stopped -- mark it offline
+                # right away so get_enabled_addons() never fans a request
+                # out to a dead port. The backoff check below decides
+                # whether it is also time to try relaunching it.
                 self._published = False
-                store.remove_builtin_addon(BUILTIN_ID)
+                store.set_builtin_addon_offline(BUILTIN_ID)
             if self._clock() >= self._next_relaunch_at:
                 self._launch(port, launch_fn)
             return

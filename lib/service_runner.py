@@ -1264,7 +1264,15 @@ def main():
                     state.proc, interval = _start_library_server(library_path, state)
                     # A failed dlopen() must not unlatch: keep polling at the
                     # coarse cadence instead of re-entering install_binary()'s
-                    # download path on the next tick.
+                    # download path on the next tick. But an executable may
+                    # already be usable (this latch cannot tell a permanent
+                    # library-load failure from a transient one either) --
+                    # try it before giving up on this tick.
+                    if state.proc is None:
+                        binary = resolve_binary(monitor.binary_setting, profile_dir)
+                        if binary is not None:
+                            state.notified_missing = False
+                            state.proc, interval = _start_embedded_server(binary, state)
                     state.unsupported_platform = state.proc is None
                 else:
                     binary = resolve_binary(monitor.binary_setting, profile_dir)
@@ -1335,7 +1343,14 @@ def main():
                                 state.notified_missing = False
                                 state.proc, interval = _start_library_server(library_path, state)
                                 # A failed dlopen() must not re-enter the
-                                # download branch on the next tick.
+                                # download branch on the next tick, but an
+                                # executable may already be usable -- try it
+                                # before giving up on this tick.
+                                if state.proc is None:
+                                    binary = resolve_binary(monitor.binary_setting, profile_dir)
+                                    if binary is not None:
+                                        state.notified_missing = False
+                                        state.proc, interval = _start_embedded_server(binary, state)
                                 state.unsupported_platform = state.proc is None
                                 state.next_download_at = None
                             else:

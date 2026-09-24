@@ -2304,3 +2304,116 @@ def test_main_unsupported_platform_latch_survives_failed_library_start_in_both_b
         service_runner.RESTART_BACKOFF[1],
         service_runner.HEALTHY_POLL_INTERVAL,
     ]
+
+
+# --- regression: a failed library start also tries a now-available exec ----
+
+
+def test_main_latched_self_heal_falls_back_to_executable_when_library_start_fails(monkeypatch, tmp_path):
+    """Once latched, retrying ONLY the companion library forever (while it
+    remains on disk but keeps failing to dlopen()) can never notice a
+    binary that becomes runnable in the meantime -- that self-heal
+    previously ran only when NO library was found at all. A failed
+    `_start_library_server()` must also try `resolve_binary()` /
+    `_start_embedded_server()` on the SAME tick instead of waiting out a
+    full `UNSUPPORTED_PLATFORM_POLL_INTERVAL` cycle (or a settings
+    change/restart) to notice it."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+
+    resolve_library_calls = []
+
+    def fake_resolve_library(dest_dir):
+        resolve_library_calls.append(1)
+        return None if len(resolve_library_calls) < 2 else '/opt/lib/libstremio-server.so'
+
+    monkeypatch.setattr(serverbin, 'resolve_library', fake_resolve_library)
+
+    resolve_binary_calls = []
+
+    def fake_resolve_binary(*args, **kwargs):
+        resolve_binary_calls.append(1)
+        # None on the initial pre-latch probe (iter1) and for as long as
+        # the library is still missing; becomes available only once the
+        # latched self-heal branch's library attempt has failed (iter2).
+        return None if len(resolve_binary_calls) < 2 else '/opt/bin/stremio-server'
+
+    monkeypatch.setattr(service_runner, 'resolve_binary', fake_resolve_binary)
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        raise serverbin.UnsupportedPlatformError('exec() forbidden')
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
+
+    lib_factory, lib_spawned = _make_library_process_factory([
+        {'start_exceptions': [OSError('cannot dlopen')]},
+    ])
+    monkeypatch.setattr(libserver, 'LibraryServer', lib_factory)
+
+    bin_factory, bin_spawned = _make_process_factory([{}])
+    monkeypatch.setattr(service_runner, 'ServerProcess', bin_factory)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None, None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}):
+        service_runner.main()
+
+    # iter1: install_binary() raises, no library yet -> latches, no exec
+    # attempted (nothing resolvable either). iter2: latched, library now
+    # found but LibraryServer.start() fails -> falls back to the now-
+    # available executable on the SAME tick and unlatches.
+    assert resolve_library_calls == [1, 1]
+    assert resolve_binary_calls == [1, 1]
+    assert len(lib_spawned) == 1
+    assert lib_spawned[0].start_calls == 1
+    assert len(bin_spawned) == 1
+    assert bin_spawned[0].start_calls == 1
+    assert intervals == [
+        service_runner.MISSING_BINARY_RECHECK_INTERVAL,
+        service_runner.HEALTHY_POLL_INTERVAL,
+    ]
+
+
+def test_main_unsupported_platform_error_branch_falls_back_to_executable_when_library_start_fails(
+    monkeypatch, tmp_path
+):
+    """Same fallback, exercised at the OTHER call site: the fresh
+    `UnsupportedPlatformError` handler's own library attempt (not yet
+    latched) also tries a resolvable executable on the same tick when
+    the library fails to start, instead of latching unconditionally."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
+    monkeypatch.setattr(serverbin, 'resolve_library', lambda dest_dir: '/opt/lib/libstremio-server.so')
+    resolve_binary_calls = []
+
+    def fake_resolve_binary(*args, **kwargs):
+        resolve_binary_calls.append(1)
+        # None for the outer "nothing resolvable yet" probe that leads
+        # into install_binary(); becomes available only once the library
+        # fallback's own attempt has failed.
+        return None if len(resolve_binary_calls) < 2 else '/opt/bin/stremio-server'
+
+    monkeypatch.setattr(service_runner, 'resolve_binary', fake_resolve_binary)
+
+    def fake_install_binary(dest_dir, progress_cb=None):
+        raise serverbin.UnsupportedPlatformError('exec() forbidden')
+
+    monkeypatch.setattr(serverbin, 'install_binary', fake_install_binary)
+
+    lib_factory, lib_spawned = _make_library_process_factory([
+        {'start_exceptions': [OSError('cannot dlopen')]},
+    ])
+    monkeypatch.setattr(libserver, 'LibraryServer', lib_factory)
+
+    bin_factory, bin_spawned = _make_process_factory([{}])
+    monkeypatch.setattr(service_runner, 'ServerProcess', bin_factory)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}):
+        service_runner.main()
+
+    assert resolve_binary_calls == [1, 1]
+    assert len(lib_spawned) == 1
+    assert lib_spawned[0].start_calls == 1
+    assert len(bin_spawned) == 1
+    assert bin_spawned[0].start_calls == 1
+    assert intervals == [service_runner.HEALTHY_POLL_INTERVAL]
