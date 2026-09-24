@@ -949,3 +949,27 @@ msgstr "Nowe odcinki: %d"
 msgctxt "#30361"
 msgid "Source slower than playback bitrate; expect buffering"
 msgstr "Źródło wolniejsze niż bitrate odtwarzania; możliwe buforowanie"
+
+msgctxt "#30362"
+msgid "Force library mode (Android)"
+msgstr "Wymuś tryb biblioteki (Android)"
+
+msgctxt "#30363"
+msgid "Run the streaming server as an in-process library instead of a separate executable. Enable this only if the embedded server fails to start (e.g. on an SELinux-enforcing Android device)."
+msgstr "Uruchom serwer strumieniowy jako bibliotekę działającą w tym samym procesie zamiast osobnego pliku wykonywalnego. Włącz tylko wtedy, gdy wbudowany serwer nie uruchamia się (np. na urządzeniu Android z SELinux w trybie enforcing)."
+
+msgctxt "#30371"
+msgid "Stream4Me bridge"
+msgstr "Mostek Stream4Me"
+
+msgctxt "#30372"
+msgid "Enable Stream4Me bridge"
+msgstr "Włącz mostek Stream4Me"
+
+msgctxt "#30373"
+msgid "Bridge port"
+msgstr "Port mostka"
+
+msgctxt "#30374"
+msgid "Channels (comma-separated, blank = every active channel)"
+msgstr "Kanały (oddzielone przecinkami, puste = wszystkie aktywne kanały)"

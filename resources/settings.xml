@@ -89,6 +89,12 @@
                     <data>RunPlugin(plugin://plugin.video.rivulet/?action=server_download)</data>
                     <control type="button" format="action"/>
                 </setting>
+                <setting id="server_force_library" type="boolean" label="30362">
+                    <level>1</level>
+                    <default>false</default>
+                    <help>30363</help>
+                    <control type="toggle"/>
+                </setting>
             </group>
         </category>
         <category id="playback" label="30070">
@@ -532,6 +538,41 @@
                     </constraints>
                     <control type="edit" format="string">
                         <heading>30052</heading>
+                    </control>
+                </setting>
+            </group>
+        </category>
+        <category id="s4me" label="30371">
+            <group id="1">
+                <!-- s4me_enable FIRST, same reasoning as server_enable above:
+                     a toggle first in the category avoids Kodi auto-focusing
+                     an edit control and trapping the arrow keys. Off by
+                     default - this bridges an optional third-party addon
+                     (Stream4Me) that most installs won't have. -->
+                <setting id="s4me_enable" type="boolean" label="30372">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="s4me_port" type="integer" label="30373">
+                    <level>1</level>
+                    <default>11480</default>
+                    <constraints>
+                        <minimum>1</minimum>
+                        <maximum>65535</maximum>
+                    </constraints>
+                    <control type="edit" format="integer">
+                        <heading>30373</heading>
+                    </control>
+                </setting>
+                <setting id="s4me_channels" type="string" label="30374">
+                    <level>1</level>
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30374</heading>
                     </control>
                 </setting>
             </group>

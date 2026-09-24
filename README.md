@@ -141,23 +141,21 @@ install. Subtitles are pulled from your installed Stremio subtitle addons at
 playback time — OpenSubtitles v3 is preinstalled — and sorted using the
 **Preferred subtitle language** setting under **Settings → Subtitles**.
 
-> **Android limitation.** The embedded server does not work on Android,
-> including Android TV, Google TV and Chromecast with Google TV. Kodi 19+
-> targets Android API 29 or newer, and Android 10+ forbids executing a
-> binary from an app's own writable data directory (a W^X violation), so a
-> downloaded `stremio-server-go` can never be launched there — the
-> **Download stremio-server binary** button reports this instead of
-> downloading. This is Android platform policy, not a Rivulet bug; desktop
-> Linux, macOS and Windows are unaffected. On an affected device, run
-> `stremio-server-go` on another machine (PC, NAS, Raspberry Pi) and point
-> **Server URL** at it, leaving **Run embedded server** off. On the device
-> itself, [Termux](https://termux.dev/) is a working alternative: it is a
-> separate app with its own exec-capable home directory, so the
-> `stremio-server_Android_arm64` / `stremio-server_Android_armv7` release
-> archive can be unpacked and run there, then reached at
-> `http://127.0.0.1:11470` — no root needed. Rooted devices that lift the
-> restriction outright (for example with a Magisk SELinux policy module) can
-> instead use **Server binary path** to point at a binary installed by hand.
+> **Android.** Kodi 19+ targets Android API 29 or newer, where Android 10+
+> forbids *executing* a binary from an app's own writable data directory
+> (SELinux W^X). Rivulet therefore installs the server in two forms from the
+> same integrity-checked `stremio-server_Android_arm64` / `_armv7` archive:
+> the executable, and `libstremio-server.so`, the same server built as a
+> shared library. It tries the executable first; when Android denies it, the
+> service falls back to **library mode**, loading the `.so` into Kodi's own
+> process (the approach Elementum uses) — no root and no second app needed.
+> **Settings → Streaming server → Force library mode (Android)** skips the
+> executable attempt. In library mode a server upgrade takes effect at the
+> next Kodi restart, and a server crash takes Kodi down with it, since both
+> share one process. Features needing external tools (`yt-dlp` for YouTube
+> streams) are unavailable on Android either way. If neither form can start,
+> point **Server URL** at a `stremio-server-go` running elsewhere (PC, NAS,
+> [Termux](https://termux.dev/)) and leave **Run embedded server** off.
 
 ## Development
 

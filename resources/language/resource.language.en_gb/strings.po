@@ -949,3 +949,27 @@ msgstr ""
 msgctxt "#30361"
 msgid "Source slower than playback bitrate; expect buffering"
 msgstr ""
+
+msgctxt "#30362"
+msgid "Force library mode (Android)"
+msgstr ""
+
+msgctxt "#30363"
+msgid "Run the streaming server as an in-process library instead of a separate executable. Enable this only if the embedded server fails to start (e.g. on an SELinux-enforcing Android device)."
+msgstr ""
+
+msgctxt "#30371"
+msgid "Stream4Me bridge"
+msgstr ""
+
+msgctxt "#30372"
+msgid "Enable Stream4Me bridge"
+msgstr ""
+
+msgctxt "#30373"
+msgid "Bridge port"
+msgstr ""
+
+msgctxt "#30374"
+msgid "Channels (comma-separated, blank = every active channel)"
+msgstr ""

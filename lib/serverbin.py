@@ -35,10 +35,19 @@ except ImportError:  # pragma: no cover - exercised only without the dependency
 from lib import procflags
 
 GITHUB_REPO = "M0Rf30/stremio-server-go"
-SERVER_TAG = "v0.14.0"
+SERVER_TAG = "v0.16.1"
 USER_AGENT = "plugin.video.rivulet"
 
 BINARY_NAME = "stremio-server"
+#: The optional stremio-server-go c-shared library build (cmd/libstremio),
+#: packaged inside the same Android arm64/armv7 release archives as
+#: BINARY_NAME for c-shared library mode (see lib.libserver.LibraryServer)
+#: -- the SELinux-*enforcing* Android fallback for devices where
+#: verify_executable() finds exec() itself denied (see
+#: UnsupportedPlatformError's docstring). Every other platform's archive
+#: simply lacks this member; see _extract_library_companion()/
+#: resolve_library() for why that is never an error.
+LIBRARY_NAME = "libstremio-server.so"
 PART_SUFFIX = ".part"
 DOWNLOAD_CHUNK_SIZE = 64 * 1024
 REQUEST_TIMEOUT = 30
@@ -58,7 +67,7 @@ TAG_STAMP_NAME = ".server-tag"
 #: never be slurped whole.
 TAG_STAMP_READ_LIMIT = 64
 # SHA-256 digests for every stremio-server-go SERVER_TAG release asset,
-# computed locally from the downloaded v0.14.0 assets on 2026-09-23 and
+# computed locally from the downloaded v0.16.1 assets on 2026-09-23 and
 # cross-checked against that release's checksums.txt (they agree), then
 # committed here instead of being re-fetched at runtime. Pinning matters
 # because:
@@ -72,7 +81,7 @@ TAG_STAMP_READ_LIMIT = 64
 #    this table (together with SERVER_TAG), so upgrading the bundled
 #    server is a deliberate, auditable decision, not an unattended fetch.
 #
-# The two Android rows arrived with v0.12.1 (re-verified for v0.14.0) and are what make an
+# The two Android rows arrived with v0.12.1 (re-verified for v0.16.1) and are what make an
 # on-device server viable at all: unlike the Linux rows (pure-Go, static)
 # they are cgo builds linked against bionic, verified from the published
 # artifacts as `ELF pie executable ... dynamically linked` with NEEDED
@@ -81,18 +90,20 @@ TAG_STAMP_READ_LIMIT = 64
 # binary's resolver falls back to `127.0.0.1:53` and every tracker/DHT
 # lookup fails ("nothing resolved"), while a libc++_shared.so dependency
 # (what these builds NEEDed before `-static-libstdc++`) cannot be
-# satisfied by a binary with no APK to bundle it in. Re-check both
+# satisfied by a binary with no APK to bundle it in. Since v0.16.1 the same
+# Android archives also carry libstremio-server.so (c-shared, same NEEDED
+# set) for library mode; the archive digest covers it. Re-check both
 # whenever SERVER_TAG moves.
 PINNED_SHA256 = {
-    ("Android", "arm64"): "9d8456c41105a4155e5e6d0e2800fbaceaf1a364357a9c34367b8f85719b4cd6",
-    ("Android", "armv7"): "7173abcc5f1ca70060ba8dcfc584465f977d27a59e08a623d451e7d8a3a5812c",
-    ("Darwin", "arm64"): "76788226824fdb8a9294b131fa5350c1a6923e61988774921b4d5d5e538b8e73",
-    ("Darwin", "x86_64"): "a4304ffd3d1637ceacc982a6cd01a8c01f12c3f46e8b4ad28b67be79de20e8d0",
-    ("Linux", "arm64"): "f4bf4776bf78786feb00c9ff987405eee23c9e8f1937a993dcb7aa17673bc9a1",
-    ("Linux", "armv7"): "d22da28805bb870d1f85d9e90daad9dbd978e87868ec3e4d6ce0328b4cb68557",
-    ("Linux", "x86_64"): "35fd03aa0d1d3bb0b6f1d3ff4c8a40cf9efbd595e4d87ec440399f48226c6a16",
-    ("Windows", "arm64"): "4fd5e6260293d14fe1d72bcca04e4d73e9c8be3d367b2d2742bb70ec2c1ab16d",
-    ("Windows", "x86_64"): "7ef90528327eecc02c7147b19f894e71c77f4873ea5f29e1d33caa809a504b28",
+    ("Android", "arm64"): "ae1059b9d3f07822d6963684f74f8213c000d072185848026bc31bc56f1a1ae9",
+    ("Android", "armv7"): "6afea51557d8abbc2857054256c482b8e9390d492067116ba8b0177ff5ba78a6",
+    ("Darwin", "arm64"): "efaab51ec748670e54bb5b866305c8f41eefd02f5448aa151377beccc27471e3",
+    ("Darwin", "x86_64"): "98af45e34d5631a2cdc9974f8bc39101afdc942351290cad892cda5e59ecbc89",
+    ("Linux", "arm64"): "8291f8dacbe1315b6f6f9e45c3eae9238022a80c145917e81c6f49edffabb725",
+    ("Linux", "armv7"): "fb92a3255759af78d122172c2da546515d1c6518c974ca528e616b8831326e49",
+    ("Linux", "x86_64"): "51bd98295ae1d61eafa671f1b2883a21818fad2b42313dd401a53eda5298fbf1",
+    ("Windows", "arm64"): "740588a9839f0507466796ca9763a3c074f1f8cb44be44edf18111b585c15e89",
+    ("Windows", "x86_64"): "2aca16d92d214970ed92938964d6c0920ad66ae6f163bd115925e249b7c0b749",
 }
 
 
@@ -317,6 +328,22 @@ def install_dir(profile_dir, addon_id):
     return os.path.join(profile_dir, "bin")
 
 
+def resolve_library(dest_dir):
+    """Return the path to the optional libstremio-server.so companion
+    install_binary() may have extracted into `dest_dir` (the exact same
+    directory install_dir() picks -- see lib.libserver.LibraryServer and
+    _extract_library_companion()), or None when it isn't there.
+
+    None is the normal case, not an error: every non-Android archive
+    lacks this member entirely, and so does an Android install performed
+    before library-mode support existed. Callers (lib.service_runner's
+    library-mode fallback) treat None as "fall back to the executable
+    path" exactly like resolve_binary() finding nothing.
+    """
+    path = os.path.join(dest_dir, LIBRARY_NAME)
+    return path if os.path.isfile(path) else None
+
+
 def _asset_name(os_name, arch):
     """Return the goreleaser archive name for (os_name, arch)."""
     ext = "zip" if os_name == "Windows" else "tar.gz"
@@ -458,6 +485,43 @@ def _extract_binary(archive_path, asset_name, target_name, dest_path):
                 shutil.copyfileobj(src, dst)
 
 
+def _extract_library_companion(archive_path, asset_name, dest_dir):
+    """Best-effort extraction of the optional libstremio-server.so
+    companion (see LIBRARY_NAME's docstring) from the archive already
+    downloaded for the executable, straight into `dest_dir` -- the exact
+    directory resolve_library() later looks in.
+
+    Deliberately silent on any failure: only the Android arm64/armv7
+    assets currently ship this member at all, so "not present in this
+    archive" is the normal case on every other platform, not a broken
+    install -- it must never fail an otherwise-good executable install
+    over an optional file. Written via the same download-then-promote
+    pattern as the executable (temp name, then os.replace()) so a
+    partial write from an interrupted extraction can never leave a
+    truncated .so where resolve_library() would find it.
+    """
+    lib_final_path = os.path.join(dest_dir, LIBRARY_NAME)
+    lib_tmp_path = lib_final_path + PART_SUFFIX
+    try:
+        if asset_name.endswith(".zip"):
+            with zipfile.ZipFile(archive_path) as zf:
+                member = _find_zip_member(zf, LIBRARY_NAME)
+                with zf.open(member) as src, open(lib_tmp_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+        else:
+            with tarfile.open(archive_path, mode="r:*") as tar:
+                member = _find_tar_member(tar, LIBRARY_NAME)
+                src = tar.extractfile(member)
+                if src is None:
+                    return
+                with src, open(lib_tmp_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+    except (DownloadError, OSError):
+        _safe_remove(lib_tmp_path)
+        return
+    os.replace(lib_tmp_path, lib_final_path)
+
+
 def verify_executable(path):
     """Best-effort confirmation that the installed binary can be exec()'d.
 
@@ -513,6 +577,15 @@ def install_binary(dest_dir, progress_cb=None):
     A successful install records SERVER_TAG via `_write_tag_stamp` so a
     later release bump can tell this binary is out of date.
 
+    The optional libstremio-server.so companion (see LIBRARY_NAME's and
+    _extract_library_companion()'s docstrings) is extracted right after
+    the checksum passes, independent of whatever happens to the
+    executable below -- including when verify_executable() goes on to
+    raise UnsupportedPlatformError, since that is exactly the device
+    lib.libserver.LibraryServer exists for. Its own archive membership is
+    covered by the same PINNED_SHA256 check as the executable (they are
+    the same downloaded file), so it needs no separate pin.
+
     Raises UnsupportedPlatformError (a DownloadError subclass) immediately,
     before any network request, on iOS/iPadOS/tvOS: sandboxing rules out
     exec()ing a downloaded binary there no matter where it is installed, so
@@ -554,6 +627,8 @@ def install_binary(dest_dir, progress_cb=None):
 
         if digest.lower() != expected_sha256.lower():
             raise DownloadError("checksum mismatch for %s" % asset_name)
+
+        _extract_library_companion(archive_path, asset_name, dest_dir)
 
         target_name = _target_member_name(os_name)
         final_path = os.path.join(dest_dir, target_name)

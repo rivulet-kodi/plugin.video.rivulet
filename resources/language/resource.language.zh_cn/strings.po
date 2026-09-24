@@ -949,3 +949,27 @@ msgstr "新剧集：%d"
 msgctxt "#30361"
 msgid "Source slower than playback bitrate; expect buffering"
 msgstr "源速度低于播放码率；可能会出现缓冲"
+
+msgctxt "#30362"
+msgid "Force library mode (Android)"
+msgstr "强制库模式（Android）"
+
+msgctxt "#30363"
+msgid "Run the streaming server as an in-process library instead of a separate executable. Enable this only if the embedded server fails to start (e.g. on an SELinux-enforcing Android device)."
+msgstr "以进程内库的形式运行流媒体服务器，而不是作为独立的可执行文件。仅当内嵌服务器无法启动时启用（例如在 SELinux 强制模式的 Android 设备上）。"
+
+msgctxt "#30371"
+msgid "Stream4Me bridge"
+msgstr "Stream4Me 桥接"
+
+msgctxt "#30372"
+msgid "Enable Stream4Me bridge"
+msgstr "启用 Stream4Me 桥接"
+
+msgctxt "#30373"
+msgid "Bridge port"
+msgstr "桥接端口"
+
+msgctxt "#30374"
+msgid "Channels (comma-separated, blank = every active channel)"
+msgstr "频道（逗号分隔，留空 = 所有活跃频道）"

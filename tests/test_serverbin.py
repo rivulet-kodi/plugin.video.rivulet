@@ -164,29 +164,29 @@ def test_platform_key_macos_arm64_is_not_mistaken_for_apple_mobile(monkeypatch):
 
 # --- PINNED_SHA256 / select_asset -------------------------------------------
 
-# Exact digests reviewed against the v0.14.0 GitHub release: computed
+# Exact digests reviewed against the v0.16.1 GitHub release: computed
 # locally from the downloaded assets and cross-checked against that
 # release's checksums.txt. Any drift here (wrong tag, tampered digest,
 # added/removed platform) must be a deliberate, reviewed edit to
 # lib/serverbin.py.
 EXPECTED_PINNED_SHA256 = {
-    ("Android", "arm64"): "9d8456c41105a4155e5e6d0e2800fbaceaf1a364357a9c34367b8f85719b4cd6",
-    ("Android", "armv7"): "7173abcc5f1ca70060ba8dcfc584465f977d27a59e08a623d451e7d8a3a5812c",
-    ("Darwin", "arm64"): "76788226824fdb8a9294b131fa5350c1a6923e61988774921b4d5d5e538b8e73",
-    ("Darwin", "x86_64"): "a4304ffd3d1637ceacc982a6cd01a8c01f12c3f46e8b4ad28b67be79de20e8d0",
-    ("Linux", "arm64"): "f4bf4776bf78786feb00c9ff987405eee23c9e8f1937a993dcb7aa17673bc9a1",
-    ("Linux", "armv7"): "d22da28805bb870d1f85d9e90daad9dbd978e87868ec3e4d6ce0328b4cb68557",
-    ("Linux", "x86_64"): "35fd03aa0d1d3bb0b6f1d3ff4c8a40cf9efbd595e4d87ec440399f48226c6a16",
-    ("Windows", "arm64"): "4fd5e6260293d14fe1d72bcca04e4d73e9c8be3d367b2d2742bb70ec2c1ab16d",
-    ("Windows", "x86_64"): "7ef90528327eecc02c7147b19f894e71c77f4873ea5f29e1d33caa809a504b28",
+    ("Android", "arm64"): "ae1059b9d3f07822d6963684f74f8213c000d072185848026bc31bc56f1a1ae9",
+    ("Android", "armv7"): "6afea51557d8abbc2857054256c482b8e9390d492067116ba8b0177ff5ba78a6",
+    ("Darwin", "arm64"): "efaab51ec748670e54bb5b866305c8f41eefd02f5448aa151377beccc27471e3",
+    ("Darwin", "x86_64"): "98af45e34d5631a2cdc9974f8bc39101afdc942351290cad892cda5e59ecbc89",
+    ("Linux", "arm64"): "8291f8dacbe1315b6f6f9e45c3eae9238022a80c145917e81c6f49edffabb725",
+    ("Linux", "armv7"): "fb92a3255759af78d122172c2da546515d1c6518c974ca528e616b8831326e49",
+    ("Linux", "x86_64"): "51bd98295ae1d61eafa671f1b2883a21818fad2b42313dd401a53eda5298fbf1",
+    ("Windows", "arm64"): "740588a9839f0507466796ca9763a3c074f1f8cb44be44edf18111b585c15e89",
+    ("Windows", "x86_64"): "2aca16d92d214970ed92938964d6c0920ad66ae6f163bd115925e249b7c0b749",
 }
 
 
-def test_server_tag_is_pinned_to_v0_14_0():
-    assert SERVER_TAG == "v0.14.0"
+def test_server_tag_is_pinned_to_v0_16_1():
+    assert SERVER_TAG == "v0.16.1"
 
 
-def test_pinned_sha256_table_matches_reviewed_v0_14_0_digests_exactly():
+def test_pinned_sha256_table_matches_reviewed_v0_16_1_digests_exactly():
     assert PINNED_SHA256 == EXPECTED_PINNED_SHA256
 
 
@@ -207,7 +207,7 @@ def test_select_asset_returns_deterministic_name_url_and_pinned_digest(
     assert asset is not None
     assert asset["name"] == expected_name
     assert asset["url"] == (
-        "https://github.com/%s/releases/download/v0.14.0/%s" % (GITHUB_REPO, expected_name))
+        "https://github.com/%s/releases/download/v0.16.1/%s" % (GITHUB_REPO, expected_name))
     assert asset["sha256"] == EXPECTED_PINNED_SHA256[(os_name, arch)]
 
 
@@ -304,7 +304,7 @@ def test_install_binary_downloads_verifies_pinned_checksum_and_installs(
     assert progress_calls[-1][1] == len(archive_bytes)
     assert len(fake_requests.calls) == 1
     assert fake_requests.calls[0]["url"] == (
-        "https://github.com/%s/releases/download/v0.14.0/stremio-server_Linux_x86_64.tar.gz"
+        "https://github.com/%s/releases/download/v0.16.1/stremio-server_Linux_x86_64.tar.gz"
         % GITHUB_REPO)
     assert not (tmp_path / ".stremio-server.part").exists()
     assert not os.path.exists(result_path + ".part")
@@ -776,3 +776,100 @@ def test_install_dir_falls_back_to_plain_bin_when_no_android_candidate_usable(mo
     monkeypatch.setattr(os.path, "isdir", lambda p: False)
     profile_dir = _android_profile_dir()
     assert serverbin.install_dir(profile_dir, "plugin.video.rivulet") == os.path.join(profile_dir, "bin")
+
+
+# --- libstremio-server.so companion (c-shared library mode) ----------------
+
+
+def test_resolve_library_returns_none_when_absent(tmp_path):
+    assert serverbin.resolve_library(str(tmp_path)) is None
+
+
+def test_resolve_library_returns_path_when_present(tmp_path):
+    lib_path = tmp_path / serverbin.LIBRARY_NAME
+    lib_path.write_bytes(b"fake-so")
+    assert serverbin.resolve_library(str(tmp_path)) == str(lib_path)
+
+
+def test_install_binary_extracts_companion_library_when_present_in_archive(
+        tmp_path, monkeypatch, fake_requests):
+    """The Android archives ship libstremio-server.so alongside the
+    executable (see LIBRARY_NAME's docstring) -- install_binary() must
+    extract it too, so lib.libserver.LibraryServer has something to load
+    without a separate download."""
+    _set_platform(monkeypatch, "Linux", "arm64", android_root="/system")
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
+    lib_content = b"fake-elf-shared-object"
+    archive_bytes = _make_tar_gz({"stremio-server": b"binary", "libstremio-server.so": lib_content})
+    monkeypatch.setitem(
+        PINNED_SHA256, ("Android", "arm64"), hashlib.sha256(archive_bytes).hexdigest())
+    fake_requests.queue_get(_StreamResponse(archive_bytes))
+
+    install_binary(str(tmp_path))
+
+    lib_path = serverbin.resolve_library(str(tmp_path))
+    assert lib_path == str(tmp_path / serverbin.LIBRARY_NAME)
+    with open(lib_path, "rb") as fh:
+        assert fh.read() == lib_content
+    assert not (tmp_path / (serverbin.LIBRARY_NAME + ".part")).exists()
+
+
+def test_install_binary_tolerates_a_missing_companion_library(tmp_path, monkeypatch, fake_requests):
+    """Every non-Android archive (and pre-library-mode Android ones) simply
+    lacks libstremio-server.so -- must not be treated as a broken
+    install."""
+    _set_platform(monkeypatch, "Linux", "x86_64")
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
+    archive_bytes = _make_tar_gz({"stremio-server": b"binary"})
+    monkeypatch.setitem(PINNED_SHA256, ("Linux", "x86_64"), hashlib.sha256(archive_bytes).hexdigest())
+    fake_requests.queue_get(_StreamResponse(archive_bytes))
+
+    result_path = install_binary(str(tmp_path))
+
+    assert os.path.isfile(result_path)
+    assert serverbin.resolve_library(str(tmp_path)) is None
+
+
+def test_install_binary_extracts_companion_library_even_when_exec_verification_fails(
+        tmp_path, monkeypatch, fake_requests):
+    """The exact device lib.libserver.LibraryServer exists for: exec()
+    itself is denied (SELinux-enforcing Android, see
+    UnsupportedPlatformError's docstring), so verify_executable() raises
+    and install_binary() re-raises post-network -- but the companion
+    library, extracted before the executable is even touched, must still
+    be on disk afterward so lib.service_runner's fallback can use it."""
+    _set_platform(monkeypatch, "Linux", "arm64", android_root="/system")
+
+    def _raise(*args, **kwargs):
+        raise OSError(13, "Permission denied")
+
+    monkeypatch.setattr(subprocess, "run", _raise)
+    lib_content = b"fake-elf-shared-object"
+    archive_bytes = _make_tar_gz({"stremio-server": b"binary", "libstremio-server.so": lib_content})
+    monkeypatch.setitem(
+        PINNED_SHA256, ("Android", "arm64"), hashlib.sha256(archive_bytes).hexdigest())
+    fake_requests.queue_get(_StreamResponse(archive_bytes))
+
+    with pytest.raises(UnsupportedPlatformError):
+        install_binary(str(tmp_path))
+
+    lib_path = serverbin.resolve_library(str(tmp_path))
+    assert lib_path == str(tmp_path / serverbin.LIBRARY_NAME)
+    with open(lib_path, "rb") as fh:
+        assert fh.read() == lib_content
+
+
+def test_install_binary_checksum_mismatch_also_skips_the_companion_library(
+        tmp_path, monkeypatch, fake_requests):
+    """A refused (bad-checksum) download must not leave ANY file behind,
+    library companion included -- _extract_library_companion() is only
+    ever reached after the checksum check passes."""
+    _set_platform(monkeypatch, "Linux", "arm64", android_root="/system")
+    archive_bytes = _make_tar_gz({"stremio-server": b"binary", "libstremio-server.so": b"lib"})
+    monkeypatch.setitem(PINNED_SHA256, ("Android", "arm64"), "0" * 64)
+    fake_requests.queue_get(_StreamResponse(archive_bytes))
+
+    with pytest.raises(DownloadError, match="checksum mismatch"):
+        install_binary(str(tmp_path))
+
+    assert serverbin.resolve_library(str(tmp_path)) is None
