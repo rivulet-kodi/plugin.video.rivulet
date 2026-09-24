@@ -958,10 +958,6 @@ msgctxt "#30363"
 msgid "Run the streaming server as an in-process library instead of a separate executable. Enable this only if the embedded server fails to start (e.g. on an SELinux-enforcing Android device)."
 msgstr "以进程内库的形式运行流媒体服务器，而不是作为独立的可执行文件。仅当内嵌服务器无法启动时启用（例如在 SELinux 强制模式的 Android 设备上）。"
 
-msgctxt "#30364"
-msgid "Streaming server switched to library mode"
-msgstr "流媒体服务器已切换为库模式"
-
 msgctxt "#30371"
 msgid "Stream4Me bridge"
 msgstr "Stream4Me 桥接"

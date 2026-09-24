@@ -1882,7 +1882,7 @@ def test_main_force_library_prefers_library_mode_when_companion_library_present(
     assert proc.server_url == service_runner.DEFAULT_SERVER_URL
     assert proc.start_calls == 1
     assert intervals == [service_runner.HEALTHY_POLL_INTERVAL] * 2
-    assert len([n for n in ctx.env.notifications if n[1] == 'STR30364']) == 1
+    assert ctx.env.notifications == []  # library mode is silent; it is only logged
     # main() returned with the library server still alive -> the
     # post-loop shutdown path stops it exactly once, same as ServerProcess.
     assert proc.stop_calls == 1
@@ -2149,15 +2149,13 @@ def test_main_library_mode_settings_change_restarts_and_can_revert_to_binary_mod
     assert bin_spawned[0].binary == '/opt/bin/stremio-server'
 
 
-# --- regression: library-mode notification fires once per session ----------
+# --- regression: library mode never notifies the user -----------------------
 
 
-def test_main_library_mode_notification_fires_once_per_session_across_crash_restarts(monkeypatch, tmp_path):
-    """Notification 30364 must fire once per session, not once per
-    successful `_start_library_server()` call: a crashing library-mode
-    server that keeps getting restarted (ServerStart erroring out right
-    after start(), for example) would otherwise re-show it on every
-    RESTART_BACKOFF-spaced restart for the rest of the session."""
+def test_main_library_mode_is_silent_across_crash_restarts(monkeypatch, tmp_path):
+    """Switching to library mode (and crash-restarting in it) is an
+    implementation detail the user should not be told about: it must only
+    be logged, never shown as a Kodi notification."""
     monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: False)
     monkeypatch.setattr(serverbin, 'resolve_library', lambda dest_dir: '/opt/lib/libstremio-server.so')
 
@@ -2174,8 +2172,7 @@ def test_main_library_mode_notification_fires_once_per_session_across_crash_rest
         service_runner.main()
 
     assert len(spawned) == 2  # crash-restarted once
-    library_notifications = [n for n in ctx.env.notifications if n[1] == 'STR30364']
-    assert len(library_notifications) == 1
+    assert ctx.env.notifications == []
 
 
 # --- regression: exec-spawn failure of an on-disk bundled binary falls ------

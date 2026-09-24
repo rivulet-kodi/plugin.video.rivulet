@@ -1052,11 +1052,6 @@ def main():
             next_interval = RESTART_BACKOFF[min(state.backoff_idx, len(RESTART_BACKOFF) - 1)]
             state.backoff_idx = min(state.backoff_idx + 1, len(RESTART_BACKOFF) - 1)
             return None, next_interval
-        if not state.library_mode_notified:
-            xbmcgui.Dialog().notification(
-                addon.getAddonInfo("name"), addon.getLocalizedString(30364),
-            )
-            state.library_mode_notified = True
         return candidate, HEALTHY_POLL_INTERVAL
 
     def _abort_progress(done, total):
@@ -1167,9 +1162,6 @@ def main():
             # tag, and re-arming it there would let a user toggling
             # settings during a GitHub outage re-download on every toggle.
             self.upgrade_attempted = False
-            # Notification 30364 must fire once per session, not once per
-            # crash restart -- see _start_library_server().
-            self.library_mode_notified = False
 
     def _tick_progress_and_restart(state):
         """Phase B: sample playback progress, then apply a pending

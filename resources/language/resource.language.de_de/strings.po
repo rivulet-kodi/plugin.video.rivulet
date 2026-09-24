@@ -958,10 +958,6 @@ msgctxt "#30363"
 msgid "Run the streaming server as an in-process library instead of a separate executable. Enable this only if the embedded server fails to start (e.g. on an SELinux-enforcing Android device)."
 msgstr "Den Streaming-Server als In-Process-Bibliothek statt als separate ausführbare Datei ausführen. Nur aktivieren, wenn der eingebettete Server nicht startet (z. B. auf einem Android-Gerät mit SELinux im Enforcing-Modus)."
 
-msgctxt "#30364"
-msgid "Streaming server switched to library mode"
-msgstr "Streaming-Server auf Bibliotheksmodus umgeschaltet"
-
 msgctxt "#30371"
 msgid "Stream4Me bridge"
 msgstr "Stream4Me-Bridge"
