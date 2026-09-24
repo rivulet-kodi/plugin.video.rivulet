@@ -546,16 +546,35 @@
             <group id="1">
                 <!-- s4me_enable FIRST, same reasoning as server_enable above:
                      a toggle first in the category avoids Kodi auto-focusing
-                     an edit control and trapping the arrow keys. Off by
-                     default - this bridges an optional third-party addon
-                     (Stream4Me) that most installs won't have. -->
+                     an edit control and trapping the arrow keys. On by
+                     default: lib/service_runner.py only runs the bridge for
+                     Italian users with Stream4Me installed, and these
+                     settings are hidden from everyone else. The visibility
+                     check can only match the English language name, so the
+                     audio-language fallback is enforced in code alone. -->
                 <setting id="s4me_enable" type="boolean" label="30372">
                     <level>0</level>
-                    <default>false</default>
+                    <default>true</default>
+                    <dependencies>
+                        <dependency type="visible">
+                            <and>
+                                <condition on="property" name="InfoBool">System.HasAddon(plugin.video.s4me)</condition>
+                                <condition on="property" name="InfoBool">String.IsEqual(System.Language,Italian)</condition>
+                            </and>
+                        </dependency>
+                    </dependencies>
                     <control type="toggle"/>
                 </setting>
                 <setting id="s4me_port" type="integer" label="30373">
                     <level>1</level>
+                    <dependencies>
+                        <dependency type="visible">
+                            <and>
+                                <condition on="property" name="InfoBool">System.HasAddon(plugin.video.s4me)</condition>
+                                <condition on="property" name="InfoBool">String.IsEqual(System.Language,Italian)</condition>
+                            </and>
+                        </dependency>
+                    </dependencies>
                     <default>11480</default>
                     <constraints>
                         <minimum>1</minimum>
@@ -567,6 +586,14 @@
                 </setting>
                 <setting id="s4me_channels" type="string" label="30374">
                     <level>1</level>
+                    <dependencies>
+                        <dependency type="visible">
+                            <and>
+                                <condition on="property" name="InfoBool">System.HasAddon(plugin.video.s4me)</condition>
+                                <condition on="property" name="InfoBool">String.IsEqual(System.Language,Italian)</condition>
+                            </and>
+                        </dependency>
+                    </dependencies>
                     <default></default>
                     <constraints>
                         <allowempty>true</allowempty>

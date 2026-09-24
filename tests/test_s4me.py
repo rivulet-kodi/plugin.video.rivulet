@@ -42,6 +42,22 @@ class _FakeClock:
 # --- manifest_url / bridge_script_path / run_script_command -----------------
 
 
+@pytest.mark.parametrize("ui, audio, expected", [
+    ("it", None, True),
+    ("IT", None, True),
+    ("en", "Italian", True),
+    ("en", "italiano", True),
+    ("en", "ita", True),
+    ("en", "original", False),
+    ("en", "English", False),
+    (None, None, False),
+    ("", "", False),
+    (123, ["it"], False),  # non-strings never match
+])
+def test_is_italian_user(ui, audio, expected):
+    assert s4me.is_italian_user(ui, audio) is expected
+
+
 def test_manifest_url_uses_localhost_and_port():
     assert s4me.manifest_url(11480) == "http://127.0.0.1:11480/manifest.json"
 

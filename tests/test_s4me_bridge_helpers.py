@@ -78,6 +78,30 @@ def test_parse_stream_id_invalid_returns_none(id_):
 # --- split_kodi_url ----------------------------------------------------------
 
 
+def test_restore_moved_xbmc_functions_fills_kodi20_gaps():
+    """Kodi 20+: xbmc lacks the helpers, xbmcvfs has them -> copied over,
+    so Stream4Me's `xbmc.translatePath()` calls work in the bridge."""
+    import types
+    xbmc_mod = types.SimpleNamespace()
+    vfs = types.SimpleNamespace(
+        translatePath=lambda p: "T" + p, validatePath=lambda p: p, makeLegalFilename=lambda p: p,
+    )
+    assert bh.restore_moved_xbmc_functions(xbmc_mod, vfs) == list(bh.MOVED_XBMC_FUNCTIONS)
+    assert xbmc_mod.translatePath("special://temp") == "Tspecial://temp"
+
+
+def test_restore_moved_xbmc_functions_never_replaces_existing():
+    """Kodi 18: xbmc still has them -> left untouched; and nothing missing
+    from xbmcvfs is invented."""
+    import types
+    own = lambda p: "own"  # noqa: E731
+    xbmc_mod = types.SimpleNamespace(translatePath=own)
+    vfs = types.SimpleNamespace(translatePath=lambda p: "vfs")
+    assert bh.restore_moved_xbmc_functions(xbmc_mod, vfs) == []
+    assert xbmc_mod.translatePath is own
+    assert not hasattr(xbmc_mod, "validatePath")
+
+
 def test_split_kodi_url_no_pipe_returns_url_and_empty_headers():
     assert bh.split_kodi_url("https://example.com/video.mp4") == ("https://example.com/video.mp4", {})
 

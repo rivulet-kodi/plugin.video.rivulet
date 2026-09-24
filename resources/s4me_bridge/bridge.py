@@ -454,6 +454,18 @@ def main():
         _log("Stream4Me addon not found, exiting: %r" % (exc,), level_error=True)
         sys.exit(1)
 
+    # Stream4Me still calls xbmc.translatePath()/validatePath()/
+    # makeLegalFilename(), which Kodi 19 moved to xbmcvfs and Kodi 20+
+    # removed from xbmc. Its own entry points (default.py, service.py,
+    # contextmenu.py) copy them back onto xbmc before importing anything,
+    # so the bridge must do the same or `import core` fails on
+    # platformcode.config's first translatePath() call.
+    try:
+        import xbmcvfs
+        bh.restore_moved_xbmc_functions(xbmc, xbmcvfs)
+    except Exception as exc:  # noqa: BLE001 - Kodi 18 has no xbmcvfs.translatePath; nothing to restore
+        _log("could not restore xbmc path helpers: %r" % (exc,), level_error=True)
+
     _install_s4me_path(s4me_root)
     try:
         import core  # noqa: F401 - proves Stream4Me's tree actually imports before serving anything
@@ -461,6 +473,13 @@ def main():
         _log("failed to import Stream4Me's core package, exiting: %r" % (exc,), level_error=True)
         sys.exit(1)
     _bound_channel_io_timeout()
+    # Also mirrors Stream4Me's default.py: point TMPDIR at its temp dir so
+    # anything it writes through tempfile lands where it expects.
+    try:
+        from platformcode import config
+        os.environ["TMPDIR"] = config.get_temp_file("")
+    except Exception as exc:  # noqa: BLE001 - best effort, same as Stream4Me itself
+        _log("could not set TMPDIR for Stream4Me: %r" % (exc,), level_error=True)
 
     state = _BridgeState(s4me_root)
     server = ThreadingHTTPServer(("127.0.0.1", port), _make_handler(state))

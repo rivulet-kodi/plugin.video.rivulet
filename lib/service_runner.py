@@ -871,6 +871,33 @@ def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn):
     return _RivuletPlayer()
 
 
+def _detect_italian_user(xbmc):
+    """Whether the Kodi user is Italian, per `s4me.is_italian_user()`:
+    interface language, then the preferred audio language.
+
+    Takes the `xbmc` module so it stays importable (and patchable) outside
+    Kodi. Every Kodi call is guarded: a missing API or a malformed
+    JSON-RPC reply must read as "not Italian", never raise, because this
+    runs on every supervision tick."""
+    import json
+
+    ui_language = None
+    try:
+        ui_language = xbmc.getLanguage(xbmc.ISO_639_1)
+    except Exception:  # noqa: BLE001 - absent/older API -> treat as unknown
+        pass
+    audio_language = None
+    try:
+        reply = json.loads(xbmc.executeJSONRPC(json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "Settings.GetSettingValue",
+            "params": {"setting": "locale.audiolanguage"},
+        })))
+        audio_language = (reply.get("result") or {}).get("value")
+    except Exception:  # noqa: BLE001 - JSON-RPC unavailable/malformed -> unknown
+        pass
+    return s4me.is_italian_user(ui_language, audio_language)
+
+
 def main():
     """Entry point for service.py: xbmc.Monitor-driven supervision loop."""
     import xbmc
@@ -920,8 +947,17 @@ def main():
 
     def _sync_s4me_bridge():
         try:
+            # Stream4Me's channels are Italian-language sites: the bridge
+            # only runs for Italian users who also have Stream4Me
+            # installed. s4me_enable defaults to on, so for those users it
+            # is active without setup; the setting (hidden from everyone
+            # else by settings.xml) lets them turn it off.
+            enabled = (
+                _settings.setting_bool(addon, "s4me_enable", True)
+                and _detect_italian_user(xbmc)
+            )
             s4me_bridge.apply(
-                _settings.setting_bool(addon, "s4me_enable", False),
+                enabled,
                 _settings.setting_int(addon, "s4me_port", s4me.DEFAULT_PORT),
                 lambda: bool(xbmc.getCondVisibility("System.HasAddon(%s)" % s4me.S4ME_ADDON_ID)),
                 xbmc.executebuiltin,

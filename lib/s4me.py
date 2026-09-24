@@ -59,6 +59,27 @@ MANIFEST = {
     "catalogs": [],
 }
 
+#: Values that mark a language setting as Italian. Kodi reports the
+#: interface language as an ISO 639-1 code via `xbmc.getLanguage()`, but
+#: stores `locale.audiolanguage` as the language's English name (or a
+#: code, for users who typed one), so both spellings are accepted.
+_ITALIAN_VALUES = frozenset({"it", "ita", "italian", "italiano"})
+
+
+def is_italian_user(ui_language, audio_language=None):
+    """Whether this Kodi install belongs to an Italian-speaking user.
+
+    Stream4Me's channels are Italian-language sites, so the bridge is
+    only offered to Italian users. Kodi has no country setting, so this
+    reads the user's language choices instead: the interface language
+    first, then the preferred audio language as a fallback for people
+    who run Kodi in English but watch in Italian. Either being Italian is
+    enough; anything missing or unrecognised counts as not Italian."""
+    for value in (ui_language, audio_language):
+        if isinstance(value, str) and value.strip().lower() in _ITALIAN_VALUES:
+            return True
+    return False
+
 
 def bridge_script_path(addon_path):
     """Absolute path to `bridge.py`, given Rivulet's own addon root path

@@ -78,6 +78,24 @@ MANIFEST = {
 _STREAM_ID_RE = re.compile(r"^(tt\d+)(?::(\d+):(\d+))?$")
 
 
+#: Functions Kodi 19 moved from `xbmc` to `xbmcvfs` (and Kodi 20+ removed
+#: from `xbmc`) that Stream4Me still calls through `xbmc`.
+MOVED_XBMC_FUNCTIONS = ("translatePath", "validatePath", "makeLegalFilename")
+
+
+def restore_moved_xbmc_functions(xbmc_mod, xbmcvfs_mod):
+    """Copy `MOVED_XBMC_FUNCTIONS` from `xbmcvfs_mod` onto `xbmc_mod`,
+    exactly as Stream4Me's own entry points do before importing its code.
+    Only fills in what `xbmc_mod` lacks and `xbmcvfs_mod` has, so it never
+    replaces a working function. Returns the names it restored."""
+    restored = []
+    for name in MOVED_XBMC_FUNCTIONS:
+        if not hasattr(xbmc_mod, name) and hasattr(xbmcvfs_mod, name):
+            setattr(xbmc_mod, name, getattr(xbmcvfs_mod, name))
+            restored.append(name)
+    return restored
+
+
 def parse_stream_id(id_):
     """Split a Stremio `/stream/{type}/{id}.json` id into `(imdb_id,
     season, episode)` -- `season`/`episode` are `None` for a movie id.

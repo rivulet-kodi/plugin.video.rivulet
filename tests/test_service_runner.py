@@ -380,6 +380,7 @@ def test_main_syncs_s4me_bridge_every_tick_with_current_settings(monkeypatch, tm
     _FakeBridgeSupervisor.instances = []
     monkeypatch.setattr(service_runner.s4me, "BridgeSupervisor", _FakeBridgeSupervisor)
     monkeypatch.setattr(service_runner, "probe_listening", lambda *a, **kw: True)
+    monkeypatch.setattr(service_runner, "_detect_italian_user", lambda xbmc: True)
 
     cond_calls = []
 
@@ -406,12 +407,13 @@ def test_main_syncs_s4me_bridge_every_tick_with_current_settings(monkeypatch, tm
     assert any('plugin.video.s4me' in c for c in cond_calls)
 
 
-def test_main_s4me_bridge_disabled_by_default(monkeypatch, tmp_path):
-    """s4me_enable defaults False -- an untouched install must never sync
-    an active bridge."""
+def test_main_s4me_bridge_on_by_default_for_italian_users(monkeypatch, tmp_path):
+    """s4me_enable defaults True: an Italian user with Stream4Me installed
+    gets the bridge without touching any setting."""
     _FakeBridgeSupervisor.instances = []
     monkeypatch.setattr(service_runner.s4me, "BridgeSupervisor", _FakeBridgeSupervisor)
     monkeypatch.setattr(service_runner, "probe_listening", lambda *a, **kw: True)
+    monkeypatch.setattr(service_runner, "_detect_italian_user", lambda xbmc: True)
 
     intervals = []
     wait = _scripted_wait(intervals, [None])
@@ -420,8 +422,81 @@ def test_main_s4me_bridge_disabled_by_default(monkeypatch, tmp_path):
 
     supervisor = _FakeBridgeSupervisor.instances[0]
     enabled, port, has_addon, launch_fn, store = supervisor.apply_calls[0]
-    assert enabled is False
+    assert enabled is True
     assert port == service_runner.s4me.DEFAULT_PORT
+
+
+def test_main_s4me_bridge_disabled_for_non_italian_users(monkeypatch, tmp_path):
+    """Non-Italian users never get the bridge, even with s4me_enable on."""
+    _FakeBridgeSupervisor.instances = []
+    monkeypatch.setattr(service_runner.s4me, "BridgeSupervisor", _FakeBridgeSupervisor)
+    monkeypatch.setattr(service_runner, "probe_listening", lambda *a, **kw: True)
+    monkeypatch.setattr(service_runner, "_detect_italian_user", lambda xbmc: False)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True, 's4me_enable': True}):
+        service_runner.main()
+
+    enabled = _FakeBridgeSupervisor.instances[0].apply_calls[0][0]
+    assert enabled is False
+
+
+def test_main_s4me_bridge_respects_user_opt_out(monkeypatch, tmp_path):
+    """An Italian user who switches s4me_enable off keeps it off."""
+    _FakeBridgeSupervisor.instances = []
+    monkeypatch.setattr(service_runner.s4me, "BridgeSupervisor", _FakeBridgeSupervisor)
+    monkeypatch.setattr(service_runner, "probe_listening", lambda *a, **kw: True)
+    monkeypatch.setattr(service_runner, "_detect_italian_user", lambda xbmc: True)
+
+    intervals = []
+    wait = _scripted_wait(intervals, [None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True, 's4me_enable': False}):
+        service_runner.main()
+
+    enabled = _FakeBridgeSupervisor.instances[0].apply_calls[0][0]
+    assert enabled is False
+
+
+class _LangXbmc:
+    """Just enough of `xbmc` for `_detect_italian_user()`."""
+    ISO_639_1 = 0
+
+    def __init__(self, ui=None, audio=None, ui_raises=False, rpc_reply=None):
+        self._ui, self._ui_raises = ui, ui_raises
+        self._rpc = rpc_reply if rpc_reply is not None else (
+            '{"id":1,"jsonrpc":"2.0","result":{"value":%s}}'
+            % ('null' if audio is None else '"%s"' % audio))
+        self.rpc_requests = []
+
+    def getLanguage(self, fmt):
+        if self._ui_raises:
+            raise AttributeError("no getLanguage")
+        return self._ui
+
+    def executeJSONRPC(self, request):
+        self.rpc_requests.append(request)
+        return self._rpc
+
+
+@pytest.mark.parametrize("ui, audio, expected", [
+    ("it", "English", True),         # Italian interface
+    ("en", "Italian", True),         # English UI, Italian audio preference
+    ("en", "original", False),
+    ("de", None, False),
+])
+def test_detect_italian_user(ui, audio, expected):
+    fake = _LangXbmc(ui=ui, audio=audio)
+    assert service_runner._detect_italian_user(fake) is expected
+    assert 'locale.audiolanguage' in fake.rpc_requests[0]
+
+
+def test_detect_italian_user_tolerates_broken_kodi_apis():
+    """A missing getLanguage() and a malformed JSON-RPC reply read as
+    'not Italian' instead of raising on every supervision tick."""
+    fake = _LangXbmc(ui_raises=True, rpc_reply='not json')
+    assert service_runner._detect_italian_user(fake) is False
+    assert service_runner._detect_italian_user(_LangXbmc(ui_raises=True, audio="Italian")) is True
 
 
 def test_main_s4me_bridge_sync_failure_is_swallowed(monkeypatch, tmp_path):
