@@ -80,7 +80,15 @@ S4ME_ADDON_ID = "plugin.video.s4me"
 #: local constant, deliberately not shared, since this runs on low-power
 #: ARM boxes) applied to Stream4Me's channel count instead of Rivulet's
 #: own addon count.
-_MAX_CHANNEL_WORKERS = 4
+#: Six, not four: after `bh.channels_for_type()` filtering a request fans
+#: out to about nine searchable channels, so six workers finish in two
+#: rounds inside `_REQUEST_BUDGET_SECONDS` where four needed three. The
+#: work is network-bound (threads mostly wait on sockets), so this stays
+#: cheap on the low-power ARM boxes this runs on.
+_MAX_CHANNEL_WORKERS = 6
+#: How long a timed-out fan-out may keep running in the background to
+#: finish and cache its complete result (see `_cache_late()`).
+_LATE_COMPLETION_SECONDS = 60.0
 _SEARCH_LANGUAGE = "it"
 #: Overall wall-clock budget for one /stream request's whole channel
 #: fan-out -- "return whatever resolved in time" rather than block on a
@@ -108,11 +116,16 @@ _CHANNEL_IO_TIMEOUT_SECONDS = 8.0
 _CACHE_TTL_SECONDS = 30 * 60
 
 
-def _log(message, level_error=False):
+def _log(message, level_error=False, level_debug=False):
     try:
         import xbmc
-        xbmc.log("[%s] s4me bridge: %s" % (ADDON_ID, message),
-                  xbmc.LOGERROR if level_error else xbmc.LOGINFO)
+        if level_error:
+            level = xbmc.LOGERROR
+        elif level_debug:
+            level = xbmc.LOGDEBUG
+        else:
+            level = xbmc.LOGINFO
+        xbmc.log("[%s] s4me bridge: %s" % (ADDON_ID, message), level)
     except Exception:  # noqa: BLE001 - logging must never crash the bridge
         pass
 
@@ -151,16 +164,17 @@ def _install_s4me_path(s4me_root):
 
 
 class _ChannelCatalog:
-    """Lazily reads Stream4Me's `channels/<id>.json` `active` flags
-    exactly once per process."""
+    """Lazily reads Stream4Me's `channels/<id>.json` files exactly once per
+    process: which channels are `active`, which content `categories` each
+    declares, and whether its module defines a `search()` entry point."""
 
     def __init__(self, s4me_root):
         self._dir = os.path.join(s4me_root, "channels")
-        self._active = None
+        self._channels = None
 
-    def active_channel_ids(self):
-        if self._active is None:
-            ids = []
+    def _load(self):
+        if self._channels is None:
+            channels = []
             try:
                 names = sorted(os.listdir(self._dir))
             except OSError:
@@ -173,10 +187,33 @@ class _ChannelCatalog:
                         data = json.load(fh)
                 except (OSError, ValueError):
                     continue
-                if isinstance(data, dict) and data.get("active") and data.get("id"):
-                    ids.append(data["id"])
-            self._active = tuple(ids)
-        return self._active
+                if not (isinstance(data, dict) and data.get("active") and data.get("id")):
+                    continue
+                channels.append((
+                    data["id"],
+                    tuple(data.get("categories") or ()),
+                    self._defines_search(name[:-len(".json")]),
+                ))
+            self._channels = tuple(channels)
+        return self._channels
+
+    def _defines_search(self, module_name):
+        # Read the source instead of importing it: importing every channel
+        # up front would run their module-level code (some fetch their
+        # host) for channels this request may never touch.
+        try:
+            with open(os.path.join(self._dir, module_name + ".py"), encoding="utf-8") as fh:
+                return bh.defines_search(fh.read())
+        except OSError:
+            return False
+
+    def active_channel_ids(self, content_type=None):
+        """Active channels, restricted to those that can search for
+        `content_type` (Stremio `movie`/`series`) when one is given."""
+        channels = self._load()
+        if content_type is None:
+            return tuple(cid for cid, _cats, _search in channels)
+        return bh.channels_for_type(channels, content_type)
 
 
 def _resolve_title(imdb_id, search_type):
@@ -317,8 +354,8 @@ class _BridgeState:
         self.cache = bh.TTLCache(_CACHE_TTL_SECONDS)
         self.configured_channels = None  # refreshed per-request, see _read_channels_setting
 
-    def channels_for_request(self):
-        active = self.catalog.active_channel_ids()
+    def channels_for_request(self, content_type=None):
+        active = self.catalog.active_channel_ids(content_type)
         return bh.select_channels(self._read_channels_setting(), active)
 
     def _read_channels_setting(self):
@@ -340,7 +377,7 @@ def _handle_stream_request(state, content_type_param, id_param):
     # into the cache key: `s4me_channels` can change between requests, and
     # a response cached under the old selection must never be replayed
     # for a request that would now fan out to a different channel set.
-    channels = state.channels_for_request()
+    channels = state.channels_for_request(content_type_param)
     cache_key = (content_type_param, imdb_id, season, episode, channels)
     cached = state.cache.get(cache_key)
     if cached is not None:
@@ -365,11 +402,23 @@ def _handle_stream_request(state, content_type_param, id_param):
             for channel_id in channels
         }
         try:
+            def _cache_late(all_streams):
+                # The fan-out outlived the request budget; once every
+                # channel has finished, cache the complete answer so the
+                # next request for this title is served instantly.
+                state.cache.set(cache_key, all_streams)
+                _log(
+                    "late fan-out finished for %s, cached %d result(s)"
+                    % (id_param, len(all_streams)),
+                )
+
             streams, timed_out = bh.collect_with_budget(
                 pool, tasks, budget,
                 on_error=lambda channel_id, exc: _log(
                     "channel %s raised: %r" % (channel_id, exc), level_error=True,
                 ),
+                on_late_complete=_cache_late,
+                late_timeout=_LATE_COMPLETION_SECONDS,
             )
         finally:
             # Python 3.8 has no shutdown(cancel_futures=True) -- waiting
@@ -385,10 +434,9 @@ def _handle_stream_request(state, content_type_param, id_param):
             )
 
     # A timed-out fan-out only reflects whichever channels happened to
-    # finish first -- caching it would keep re-serving that same partial,
-    # transiently-slow-channel-shaped result for the full
-    # _CACHE_TTL_SECONDS (30 minutes) to every repeat request instead of
-    # giving a fresh fan-out another chance to complete in full.
+    # finish first -- caching that partial would keep re-serving it for
+    # the full _CACHE_TTL_SECONDS (30 minutes). The complete result is
+    # cached instead by _cache_late() above once the stragglers finish.
     if not timed_out:
         state.cache.set(cache_key, streams)
     return {"streams": streams}
@@ -397,7 +445,9 @@ def _handle_stream_request(state, content_type_param, id_param):
 def _make_handler(state):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):  # noqa: A003 - overriding BaseHTTPRequestHandler's own name
-            _log(fmt % args)
+            # Debug, not info: Rivulet probes /manifest.json every 10 s,
+            # which would otherwise add a kodi.log line each time.
+            _log(fmt % args, level_debug=True)
 
         def _send_json(self, payload, status=200):
             body = json.dumps(payload).encode("utf-8")

@@ -13,6 +13,7 @@ sibling-file import once its own directory is on `sys.path`.
 import importlib.util
 import os
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -424,6 +425,36 @@ def test_collect_with_budget_returns_partial_results_without_waiting_for_straggl
     assert elapsed < 0.4
 
 
+def test_collect_with_budget_late_complete_receives_every_result():
+    """After a timeout, on_late_complete gets ALL tasks' results once the
+    stragglers finish -- not just the ones returned in time."""
+    done = threading.Event()
+    late = []
+
+    def _late(all_results):
+        late.extend(all_results)
+        done.set()
+
+    pool = ThreadPoolExecutor(max_workers=2)
+    try:
+        tasks = {"fast": lambda: [1], "slow": lambda: (time.sleep(0.3) or [2])}
+        results, timed_out = bh.collect_with_budget(
+            pool, tasks, bh.Budget(0.05), on_late_complete=_late, late_timeout=5,
+        )
+        assert (results, timed_out) == ([1], True)
+        assert done.wait(3)
+    finally:
+        pool.shutdown(wait=False)
+    assert sorted(late) == [1, 2]
+
+
+def test_collect_with_budget_late_complete_not_called_when_in_time():
+    called = []
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        bh.collect_with_budget(pool, {"a": lambda: [1]}, bh.Budget(5), on_late_complete=called.append)
+    assert called == []
+
+
 def test_collect_with_budget_returns_immediately_when_budget_already_expired():
     """Regression test: `Budget.remaining()` returns `0` once expired, and
     `0 or None` evaluates to `None` -- passing that straight to
@@ -458,12 +489,55 @@ class _FakeCache:
         self._store[key] = value
 
 
+def test_defines_search_matches_top_level_def_only():
+    assert bh.defines_search("import x\n\ndef search(item, text):\n    pass\n")
+    assert not bh.defines_search("def mainlist(item):\n    def search(x): pass\n")
+    assert not bh.defines_search("")
+    assert not bh.defines_search(None)
+
+
+@pytest.mark.parametrize("content_type, expected", [
+    ("movie", ("films", "anime", "untagged")),
+    ("series", ("shows", "anime", "untagged")),
+    ("other", ("films", "shows", "anime", "untagged", "live")),
+])
+def test_channels_for_type_filters_by_category_and_search(content_type, expected):
+    channels = (
+        ("films", ("movie",), True),
+        ("shows", ("tvshow", "documentary"), True),
+        ("anime", ("anime",), True),
+        ("untagged", (), True),
+        ("live", ("live",), True),
+        ("nosearch", ("movie", "tvshow"), False),
+    )
+    assert bh.channels_for_type(channels, content_type) == expected
+
+
+def test_channel_catalog_reads_categories_and_search(tmp_path):
+    """The catalog skips inactive channels and flags ones lacking search()."""
+    import json as _json
+    ch = tmp_path / "channels"
+    ch.mkdir()
+    specs = {
+        "films": ({"id": "films", "active": True, "categories": ["movie"]}, "def search(i, t):\n    pass\n"),
+        "radio": ({"id": "radio", "active": True, "categories": ["movie"]}, "def mainlist(i):\n    pass\n"),
+        "off": ({"id": "off", "active": False, "categories": ["movie"]}, "def search(i, t):\n    pass\n"),
+    }
+    for name, (meta, src) in specs.items():
+        (ch / (name + ".json")).write_text(_json.dumps(meta))
+        (ch / (name + ".py")).write_text(src)
+    catalog = bridge._ChannelCatalog(str(tmp_path))
+    assert catalog.active_channel_ids() == ("films", "radio")
+    assert catalog.active_channel_ids("movie") == ("films",)
+    assert catalog.active_channel_ids("series") == ()
+
+
 class _FakeState:
     def __init__(self, channels):
         self.cache = _FakeCache()
         self._channels = channels
 
-    def channels_for_request(self):
+    def channels_for_request(self, content_type=None):
         return self._channels
 
 
@@ -531,21 +605,22 @@ def test_handle_stream_request_returns_partial_results_on_budget_timeout(monkeyp
     assert state.cache.get(("movie", "tt1234567", None, None, ("fast", "slow"))) is None
 
 
-def test_handle_stream_request_does_not_cache_on_timeout(monkeypatch):
-    """A partial, timed-out result must not be cached: caching it would
-    keep re-serving that same partial result -- missing whichever
-    channel was still slow -- to every repeat request for the full
-    30-minute cache TTL instead of giving a fresh fan-out another
-    chance to complete in full."""
+def test_handle_stream_request_caches_only_the_complete_late_result(monkeypatch):
+    """A timed-out request returns partial results WITHOUT caching them
+    (that would hide the slow channel for the 30-minute TTL). Once the
+    slow channel finishes in the background, the complete result is
+    cached, so the next identical request is an instant, full cache hit."""
     monkeypatch.setattr(bridge, "_resolve_title", lambda imdb_id, search_type: ("Title", "1999", "603"))
     monkeypatch.setattr(bridge, "_REQUEST_BUDGET_SECONDS", 0.1)
 
     calls = []
+    finished = threading.Event()
 
     def _fake(channel_id, *a, **k):
         calls.append(channel_id)
         if channel_id == "slow":
-            time.sleep(0.5)
+            time.sleep(0.4)
+            finished.set()
         return [{"url": "%s-result" % channel_id}]
 
     monkeypatch.setattr(bridge, "_streams_for_channel", _fake)
@@ -553,14 +628,18 @@ def test_handle_stream_request_does_not_cache_on_timeout(monkeypatch):
 
     first = bridge._handle_stream_request(state, "movie", "tt1234567")
     assert first["streams"] == [{"url": "fast-result"}]
+    assert state.cache.get(("movie", "tt1234567", None, None, ("fast", "slow"))) is None
 
-    # A second, immediate request must NOT be a cache hit: both channels
-    # are queried again, not just replayed from a cached partial result.
+    assert finished.wait(3)
+    for _ in range(50):  # the late callback runs just after the task returns
+        if state.cache.get(("movie", "tt1234567", None, None, ("fast", "slow"))):
+            break
+        time.sleep(0.02)
+
     calls.clear()
     second = bridge._handle_stream_request(state, "movie", "tt1234567")
-
-    assert set(calls) == {"fast", "slow"}
-    assert second["streams"] == [{"url": "fast-result"}]
+    assert calls == []  # served from cache, no new fan-out
+    assert sorted(s["url"] for s in second["streams"]) == ["fast-result", "slow-result"]
 
 
 # --- bridge.py: _bound_channel_io_timeout ------------------------------------

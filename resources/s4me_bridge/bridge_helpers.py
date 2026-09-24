@@ -47,11 +47,13 @@ that module's docstring. `tests/test_s4me.py` and
 which pins them together across any future edit to either.
 """
 import re
+import threading
 import time
 import unicodedata
 from collections import OrderedDict
 from concurrent.futures import TimeoutError as _FuturesTimeoutError
 from concurrent.futures import as_completed
+from concurrent.futures import wait as _futures_wait
 from urllib.parse import parse_qsl
 
 #: Stremio addon manifest this bridge serves at `/manifest.json` -- see
@@ -275,6 +277,44 @@ def select_channels(configured, active_channels):
     return tuple(c for c in configured if c in active_set)
 
 
+#: Stream4Me channel `categories` that can serve each Stremio content type.
+#: Anime channels carry both films and series, so they count for either.
+_CATEGORIES_FOR_TYPE = {
+    "movie": frozenset({"movie", "anime"}),
+    "series": frozenset({"tvshow", "anime"}),
+}
+
+_SEARCH_DEF_RE = re.compile(r"^def search\(", re.MULTILINE)
+
+
+def defines_search(source):
+    """Whether a Stream4Me channel module's source defines a top-level
+    `search()` -- the only entry point the bridge calls. Channels without
+    one (live TV, radio) would only fail with AttributeError on every
+    request. Matching the source, not importing it, keeps the check free
+    of each channel's module-level side effects."""
+    return bool(_SEARCH_DEF_RE.search(source or ""))
+
+
+def channels_for_type(channels, content_type):
+    """Ids of the channels worth searching for a Stremio `content_type`.
+
+    `channels` is `(id, categories, has_search)` per active channel. A
+    channel is kept when it defines `search()` and either declares a
+    category serving `content_type` or declares no categories at all (so
+    an untagged channel is not silently lost). An unknown content type
+    keeps every searchable channel."""
+    wanted = _CATEGORIES_FOR_TYPE.get(content_type)
+    selected = []
+    for channel_id, categories, has_search in channels:
+        if not has_search:
+            continue
+        if wanted is None or not categories or wanted & set(categories):
+            selected.append(channel_id)
+    return tuple(selected)
+
+
+
 class TTLCache:
     """Tiny per-key time-to-live cache. `clock` is injectable
     (`time.monotonic` in production) so tests can control expiry
@@ -363,7 +403,9 @@ def cors_allow_origin(origin, allowed_origins=ALLOWED_ORIGINS):
     return origin if origin in allowed_origins else None
 
 
-def collect_with_budget(pool, tasks, budget, on_error=None):
+def collect_with_budget(
+    pool, tasks, budget, on_error=None, on_late_complete=None, late_timeout=60.0,
+):
     """Run every zero-arg callable in `tasks` (a `{key: callable}`
     mapping) on `pool` (a `concurrent.futures.Executor` the CALLER
     created and is responsible for disposing of -- typically via
@@ -385,24 +427,55 @@ def collect_with_budget(pool, tasks, budget, on_error=None):
 
     `on_error(key, exc)`, if given, is called for a task whose callable
     raised -- the exception itself is always swallowed.
+    `on_late_complete(all_results)`, if given, is called from a background
+    daemon thread once EVERY task has finished (or `late_timeout` seconds
+    pass), but only when the budget ran out first. It receives every
+    task's results, not just the ones returned in time, so the caller can
+    cache the complete answer for the next identical request: slow
+    pipelines (a series needs search, episodes, sources and resolving)
+    rarely fit one request budget, but they do finish shortly after.
     """
     results = []
     if not tasks:
         return results, False
     futures = {pool.submit(fn): key for key, fn in tasks.items()}
+
+    def _value_of(future):
+        try:
+            return future.result() or []
+        except Exception as exc:  # noqa: BLE001 - one task's failure must never drop the others
+            if on_error is not None:
+                on_error(futures[future], exc)
+            return []
+
+    def _timed_out():
+        if on_late_complete is not None:
+            threading.Thread(target=_finish_late, daemon=True).start()
+        return results, True
+
+    def _finish_late():
+        done, _pending = _futures_wait(list(futures), timeout=late_timeout)
+        all_results = []
+        for future in futures:
+            if future in done:
+                # Error callbacks already fired for tasks seen in time;
+                # a late failure is simply an empty contribution here.
+                try:
+                    all_results.extend(future.result() or [])
+                except Exception:  # noqa: BLE001 - see above
+                    pass
+        try:
+            on_late_complete(all_results)
+        except Exception:  # noqa: BLE001 - a caching callback must never kill the thread noisily
+            pass
+
     try:
         for future in as_completed(futures, timeout=max(budget.remaining(), 0.0)):
-            key = futures[future]
-            try:
-                value = future.result()
-            except Exception as exc:  # noqa: BLE001 - one task's failure must never drop the others
-                value = None
-                if on_error is not None:
-                    on_error(key, exc)
+            value = _value_of(future)
             if value:
                 results.extend(value)
             if budget.expired():
-                return results, True
+                return _timed_out()
         return results, False
     except _FuturesTimeoutError:
-        return results, True
+        return _timed_out()
