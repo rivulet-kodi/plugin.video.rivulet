@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.rivulet" name="Rivulet" version="0.24.0" provider-name="M0RF30">
+<addon id="plugin.video.rivulet" name="Rivulet" version="0.24.1" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" version="2.22.0"/>
@@ -12,7 +12,12 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse and search catalogs by type, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote stremio-server-go streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.24.0:
+    <news>v0.24.1:
+- Changed: the optional local bridge addon is now offered only to Italian users (Italian interface or preferred audio language) who have its source addon installed. For them it is on by default and can be switched off; everyone else no longer sees its settings.
+- Fix: the bridge addon failed to start on Kodi 20 and later.
+- Improved: bridge lookups search only the channels that can serve the requested type. A slow lookup that runs out of time keeps going in the background, so opening the same title again shows the full list at once. This mostly helps TV episodes.
+- Improved: the bridge no longer writes a line to the Kodi log on every health check.
+v0.24.0:
 - New: the embedded streaming server now works on Android, including Android TV and Google TV boxes. Android does not let Kodi run a downloaded program, so Rivulet now loads the server into Kodi itself when that happens. It switches automatically, with nothing to set up. Settings -> Streaming server -> Force library mode (Android) skips the first attempt. A server update installed this way takes effect the next time Kodi starts.
 - Fix: on 32-bit Android boxes (armeabi-v7a Kodi, such as the Xiaomi Mi Box), torrents containing a file of 4 GB or more never started playing. They now stream normally.
 - Improved: the bundled streaming server moves to 0.16.1 on every platform, installed in place on first run. It adds settings for tuning HLS transcoding and fixes transcoding when the server is bound to a LAN address.
