@@ -53,6 +53,16 @@ EXTRA_SAFE_CHARS = "-_.!~*'()"
 #: transport_url so callers can pass either form as `base`.
 MANIFEST_SUFFIX = '/manifest.json'
 
+#: User-Agent every addon-protocol request carries. `requests`' default
+#: ("python-requests/X.Y.Z") is refused outright by some addons' CDN:
+#: Torrentio sits behind Cloudflare, which answers that UA with a 403 HTML
+#: challenge page on both /manifest.json and /stream/ while serving the
+#: very same request fine under any other UA. The 403 was only logged as
+#: a per-addon failure, so the user just saw "no streams found" beside a
+#: working Cinemeta catalog (issue #57). Same value `lib.serverbin` sends,
+#: duplicated rather than imported to keep this module's import cheap.
+USER_AGENT = 'plugin.video.rivulet'
+
 #: Cap on any single addon-protocol HTTP response body. `_get_json()`
 #: streams the response via `iter_content()` instead of buffering
 #: `resp.json()` directly: a malicious/misbehaving third-party addon can
@@ -268,6 +278,7 @@ class AddonClient:
             raise AddonError('the "requests" package is required for AddonClient')
         self.timeout = timeout
         self.session = requests.Session()
+        self.session.headers['User-Agent'] = USER_AGENT
 
     def _get_json(self, url):
         """GET `url` and JSON-decode the body, capped at `_MAX_RESPONSE_BYTES`.
