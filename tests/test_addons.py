@@ -525,6 +525,16 @@ def test_catalog_required_extra_names_does_not_confuse_with_catalog_extra_names(
 MANIFEST_URL = "https://addon.example/manifest.json"
 
 
+def test_addon_client_session_does_not_send_default_requests_user_agent():
+    # Torrentio's Cloudflare front 403s "python-requests/X.Y.Z" on every
+    # resource while serving any other UA (issue #57): the real Session
+    # must carry the addon's own UA, not requests' default.
+    client = AddonClient()
+    ua = client.session.headers["User-Agent"]
+    assert ua == "plugin.video.rivulet"
+    assert "python-requests" not in ua
+
+
 def test_addon_client_manifest_returns_dict():
     client = AddonClient()
     client.session = FakeSession(
