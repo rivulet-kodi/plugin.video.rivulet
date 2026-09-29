@@ -47,6 +47,7 @@ from lib.ui.playbackmeta import (
     parse_year,
     resolve_art,
     sanitize_title,
+    split_embedded_headers,
 )
 
 #: Bounded (connect, read) timeouts for the pre-buffer network calls. The
@@ -1154,11 +1155,19 @@ def _resolve_playable_item(stream, stype, sid, item_meta=None, video_id=None):
             'falling back to direct playback' % (manifest_type, stype, sid),
             xbmc.LOGINFO,
         )
-    if request_headers and not use_isa:
+    if use_isa:
+        # ISA reads its own Properties (set below), never a path suffix,
+        # so a resolved url baking its own "|urlencoded=headers" (some
+        # addons/resolvers do this directly, same convention this
+        # module's own non-ISA branch below bakes) must be split back
+        # apart here and merged into proxyHeaders - otherwise those
+        # headers are silently lost and ISA's manifest fetch can fail.
+        url, embedded_headers = split_embedded_headers(url)
+        if embedded_headers:
+            request_headers = dict(request_headers, **embedded_headers)
+    elif request_headers:
         # Kodi convention: "|urlencoded=headers" appended to the path makes
         # the player send these headers with every request for that URL.
-        # Skipped for ISA: those headers are set as Properties below
-        # instead (ISA reads its own headers, not the path suffix).
         url = '%s|%s' % (url, urlencode(request_headers))
 
     filename = behavior_hints.get('filename') or resolved_filename

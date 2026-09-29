@@ -881,6 +881,18 @@ def test_resolve_passes_the_raw_item_url_to_servertools(monkeypatch):
     assert calls == [("voe", "https://page/1|X=1")]
 
 
+def test_mega_play_registry_sized_to_outlive_the_response_cache():
+    """The module docstring above `_MEGA_PLAY_REGISTRY` requires a key to
+    stay valid at least as long as `_BridgeState.cache` (same TTL) can
+    still serve a `/stream` response referencing it. `bh.TTLCache`'s
+    default `max_size=256` evicts the oldest key long before its TTL
+    expires once more than 256 mega items are listed within that window
+    -- a real risk with stream prefetch from the detail window. Must be
+    large enough that a realistic listing burst never starves it."""
+    assert bridge._MEGA_PLAY_REGISTRY._max_size >= 4096
+    assert bridge._MEGA_PLAY_REGISTRY._ttl == bridge._CACHE_TTL_SECONDS
+
+
 def test_resolve_defers_mega_to_play_time(monkeypatch):
     """A mega server item must NOT resolve at LIST time (see
     `bridge._shape_mega_stream()`'s docstring for why) -- it becomes a
@@ -1278,13 +1290,33 @@ def test_get_shutdown_returns_405_and_does_not_set_event(monkeypatch):
     assert not event.is_set()
 
 
-def test_post_shutdown_returns_ok_and_sets_event(monkeypatch):
+def test_post_shutdown_without_header_returns_403_and_does_not_set_event(monkeypatch):
+    """A same-path cross-origin form/img POST (the CSRF vector -- see
+    SHUTDOWN_HEADER's own docstring) carries no custom header and must
+    never be able to trigger a shutdown."""
     event = threading.Event()
     monkeypatch.setattr(bridge, "_SHUTDOWN_EVENT", event)
     handler_cls = bridge._make_handler(object())
 
     status, _headers, body = _run_handler_request(
         handler_cls, b"POST /shutdown HTTP/1.0\r\nContent-Length: 0\r\n\r\n",
+    )
+
+    assert status == 403
+    assert json.loads(body) == {"error": "forbidden"}
+    assert not event.is_set()
+
+
+def test_post_shutdown_with_header_returns_ok_and_sets_event(monkeypatch):
+    event = threading.Event()
+    monkeypatch.setattr(bridge, "_SHUTDOWN_EVENT", event)
+    handler_cls = bridge._make_handler(object())
+
+    status, _headers, body = _run_handler_request(
+        handler_cls,
+        b"POST /shutdown HTTP/1.0\r\n"
+        + ("%s: 1\r\n" % bridge.SHUTDOWN_HEADER).encode("ascii")
+        + b"Content-Length: 0\r\n\r\n",
     )
 
     assert status == 200

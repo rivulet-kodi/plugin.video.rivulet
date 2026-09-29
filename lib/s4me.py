@@ -104,6 +104,15 @@ def shutdown_url(port):
 #: `lib.service_runner.PROBE_TIMEOUT`).
 PROBE_TIMEOUT_SECONDS = 2.0
 
+#: Custom header `shutdown_bridge()` sends with its `POST /shutdown` so
+#: the bridge can reject a cross-origin form/img CSRF submit to the same
+#: path -- see `resources/s4me_bridge/bridge.py`'s `SHUTDOWN_HEADER` for
+#: the full rationale. Kept in sync BY HAND with that copy for the same
+#: reason `MANIFEST` is (this module can never import that script -- see
+#: its own docstring); `tests/test_s4me.py` and
+#: `tests/test_s4me_bridge_helpers.py` both assert this exact value.
+SHUTDOWN_HEADER = "X-Rivulet-Bridge-Shutdown"
+
 #: Minimum gap between two launch attempts once a launch is judged to have
 #: failed (readiness probe still failing) -- stops a persistently broken
 #: Stream4Me install from spawning a fresh `RunScript()` on every
@@ -185,7 +194,10 @@ def probe_manifest_version(port, timeout=PROBE_TIMEOUT_SECONDS):
         with urllib.request.urlopen(manifest_url(port), timeout=timeout) as response:
             body = response.read()
     except urllib.error.HTTPError as exc:
-        body = exc.read()
+        try:
+            body = exc.read()
+        finally:
+            exc.close()
     except (urllib.error.URLError, OSError, ValueError):
         return None
 
@@ -221,10 +233,14 @@ def shutdown_bridge(port, timeout=PROBE_TIMEOUT_SECONDS):
     import urllib.error
     import urllib.request
 
-    request = urllib.request.Request(shutdown_url(port), data=b"", method="POST")
+    request = urllib.request.Request(
+        shutdown_url(port), data=b"", method="POST", headers={SHUTDOWN_HEADER: "1"},
+    )
     try:
         with urllib.request.urlopen(request, timeout=timeout):
             pass
+    except urllib.error.HTTPError as exc:
+        exc.close()
     except (urllib.error.URLError, OSError, ValueError):
         pass
 
@@ -328,13 +344,15 @@ class BridgeSupervisor:
     `RunScript()` bound to the new port), marking any descriptor for the
     old port offline immediately -- the store entry only repoints at the
     new port once THAT launch answers, avoiding a window where the
-    descriptor names a port nothing yet serves. The previous bridge
-    process, if still running, is simply left listening on its old port
-    with nothing pointing at it anymore until Kodi restarts -- Kodi's
-    `RunScript()` builtin hands back no handle to stop it, so this (and
-    leaving it running when the bridge is disabled) is an accepted,
-    low-cost trade-off for an opt-in feature, avoided entirely by leaving
-    `s4me_port` alone.
+    descriptor names a port nothing yet serves. Before doing either,
+    `apply()` best-effort POSTs `/shutdown` (`shutdown_fn`) to the
+    PREVIOUS `_launched_port` -- same as the STALE-bridge eviction above --
+    so the old process actually stops instead of being orphaned: it does
+    the same on deactivation (`enabled=False` or `has_addon_fn()` turning
+    false), since `RunScript()` itself hands back no handle to stop it
+    and an unreachable orphan otherwise keeps its socket bound (and, per
+    `lib.service_runner.main()`, can make Kodi hang on quit) with nothing
+    left pointing at it.
     """
 
     def __init__(self, addon_path, clock=time.monotonic):
@@ -371,6 +389,11 @@ class BridgeSupervisor:
     ):
         active = bool(enabled) and bool(has_addon_fn())
         if not active:
+            if self._launched_port is not None:
+                try:
+                    shutdown_fn(self._launched_port)
+                except Exception:  # noqa: BLE001 - a bridge with no /shutdown route (old build) or already gone must never block deactivation
+                    pass
             self._launched_port = None
             self._published = False
             self._next_relaunch_at = 0.0
@@ -381,6 +404,11 @@ class BridgeSupervisor:
             return
 
         if self._launched_port != port:
+            if self._launched_port is not None:
+                try:
+                    shutdown_fn(self._launched_port)
+                except Exception:  # noqa: BLE001 - same as above: never block the new launch
+                    pass
             self._published = False
             self._stale_relaunches = 0
             self._stale_logged = False

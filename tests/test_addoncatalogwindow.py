@@ -475,7 +475,10 @@ def test_builtin_source_entry_deduped_in_favor_of_the_installed_source_entry(loa
     builtin_envelope = {'addons': [
         {'transportUrl': shared_url, 'manifest': {'id': 'shared', 'name': 'Shared (builtin)', 'version': '2.0.0'}},
     ]}
-    session = FakeSession(responses=[FakeResponse(installed_envelope), FakeResponse(builtin_envelope)])
+    session = FakeSession(url_responses={
+        'https://source.example/addon_catalog/movie/community.json': FakeResponse(installed_envelope),
+        'https://builtin.example/addon_catalog/all/builtin.json': FakeResponse(builtin_envelope),
+    })
     _wire_store(ctx.addoncatalogwindow, _FakeStore(addons=[_source_addon()]))
     _wire_client(ctx.addoncatalogwindow, _FakeClient(session=session))
 

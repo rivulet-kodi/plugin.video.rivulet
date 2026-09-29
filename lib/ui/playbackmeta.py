@@ -9,6 +9,7 @@ responsibility (actually starting playback) separate from this one
 """
 import os
 import re
+from urllib.parse import parse_qsl
 
 #: Extension -> MIME type for the video containers Stremio streams commonly
 #: use. Keyed by `os.path.splitext()` output (lowercased, leading dot kept).
@@ -47,6 +48,30 @@ def filename_from_url(url):
     """
     base = url.split('|', 1)[0].split('?', 1)[0]
     return base.rsplit('/', 1)[-1]
+
+
+def split_embedded_headers(url):
+    """`(clean_url, headers)` splitting off a resolved stream url's own
+    `|urlencoded-headers` suffix (the Kodi player-path convention some
+    Stremio addons/resolvers bake straight into the `url` they return,
+    same shape player.py's own `play()` bakes for the non-ISA path
+    below) - `{}` when `url` carries none.
+
+    Exists so the ISA path can merge these into
+    `behaviorHints.proxyHeaders.request` instead of leaving them stuck
+    in a path suffix inputstream.adaptive never reads (it only reads
+    its own Properties, set from `_apply_isa_properties()`) - a manifest
+    fetch missing an addon-required header (referer/cookie/auth) then
+    fails outright rather than merely losing that header when Kodi's
+    ordinary player would have sent it.
+    """
+    if not url or '|' not in url:
+        return url, {}
+    base, _, raw = url.partition('|')
+    if not raw:
+        return base, {}
+    return base, dict(parse_qsl(raw, keep_blank_values=True))
+
 
 
 #: `behaviorHints.rivuletManifestType` values the Stream4Me bridge sets

@@ -589,6 +589,31 @@ def test_adaptive_stream_uses_bridge_hint_even_when_url_has_no_manifest_extensio
     assert list_item.mimetype == 'application/x-mpegURL'
 
 
+def test_adaptive_stream_strips_embedded_pipe_headers_and_merges_into_isa_properties(kodi_stubs, monkeypatch):
+    """Some addons/resolvers bake their own '|urlencoded=headers' suffix
+    straight onto the resolved url (the same convention this module's
+    own non-ISA branch bakes below). inputstream.adaptive never reads a
+    path suffix - only its own Properties - so that suffix must be
+    stripped off the ListItem path AND merged into the headers ISA
+    actually gets, on top of any proxyHeaders.request already present."""
+    env = kodi_stubs.env
+    resolve_url = 'https://cdn.example/index.m3u8|Referer=https%3A%2F%2Fsite.example'
+    _ServerScript(resolve_url=resolve_url).install(monkeypatch, kodi_stubs.player)
+    _stub_isa_available(monkeypatch, kodi_stubs)
+    _stub_kodi_version(monkeypatch, kodi_stubs, '22.0 Git:abcdef')
+
+    stream = {'url': resolve_url,
+              'behaviorHints': {'proxyHeaders': {'request': {'User-Agent': 'Rivulet'}}}}
+    kodi_stubs.player.play(55, stream, 'movie', 'tt55')
+
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (55, True)
+    assert list_item.path == 'https://cdn.example/index.m3u8'
+    assert list_item.properties['inputstream'] == 'inputstream.adaptive'
+    headers = dict(pair.split('=', 1) for pair in list_item.properties['inputstream.adaptive.common_headers'].split('&'))
+    assert headers == {'User-Agent': 'Rivulet', 'Referer': 'https%3A%2F%2Fsite.example'}
+
+
 def test_adaptive_stream_falls_back_to_direct_playback_when_isa_not_installed(kodi_stubs, monkeypatch):
     """No inputstream.adaptive at all: the existing pre-ISA path is used
     unchanged - headers baked as a '|urlencoded' path suffix, no ISA

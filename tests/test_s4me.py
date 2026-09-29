@@ -379,44 +379,124 @@ def test_apply_stale_shutdown_fn_raising_does_not_block_relaunch():
 def test_apply_port_change_while_active_relaunches_and_repoints_store_once_ready():
     store = _FakeStore()
     launches = []
+    shutdowns = []
     supervisor = s4me.BridgeSupervisor("/addon/root", clock=_FakeClock())
 
-    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: s4me.MANIFEST["version"])
-    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: s4me.MANIFEST["version"])
+    supervisor.apply(
+        True, 11480, lambda: True, launches.append, store,
+        probe_fn=lambda port: s4me.MANIFEST["version"], shutdown_fn=shutdowns.append,
+    )
+    supervisor.apply(
+        True, 11480, lambda: True, launches.append, store,
+        probe_fn=lambda port: s4me.MANIFEST["version"], shutdown_fn=shutdowns.append,
+    )
     assert store.set_calls[-1] == ("s4me", s4me.manifest_url(11480), s4me.MANIFEST)
+    assert shutdowns == []  # no port change yet: the healthy 11480 bridge is left alone
 
     # Port changes: the stale descriptor for the old port is marked
     # offline right away (not removed), and the new port is not
-    # published until it answers in turn.
-    supervisor.apply(True, 11481, lambda: True, launches.append, store, probe_fn=lambda port: None)
+    # published until it answers in turn. The bridge still listening on
+    # the OLD port must be told to shut down -- otherwise it is orphaned
+    # (nothing points at it, and Kodi's own /shutdown fan-out at exit
+    # only reaches the CURRENT launched_port) -- see the class docstring.
+    supervisor.apply(
+        True, 11481, lambda: True, launches.append, store,
+        probe_fn=lambda port: None, shutdown_fn=shutdowns.append,
+    )
+    assert shutdowns == [11480]
     assert store.offline_calls[-1] == "s4me"
     assert store.remove_calls == []
     assert store.set_calls[-1] == ("s4me", s4me.manifest_url(11480), s4me.MANIFEST)
 
-    supervisor.apply(True, 11481, lambda: True, launches.append, store, probe_fn=lambda port: s4me.MANIFEST["version"])
+    supervisor.apply(
+        True, 11481, lambda: True, launches.append, store,
+        probe_fn=lambda port: s4me.MANIFEST["version"], shutdown_fn=shutdowns.append,
+    )
 
     assert launches == [
         s4me.run_script_command("/addon/root", 11480),
         s4me.run_script_command("/addon/root", 11481),
     ]
     assert store.set_calls[-1] == ("s4me", s4me.manifest_url(11481), s4me.MANIFEST)
+    # No further shutdown once the new port is up and unchanged.
+    assert shutdowns == [11480]
+
+
+def test_apply_port_change_shutdown_fn_raising_does_not_block_relaunch():
+    """Same never-block contract as the STALE-eviction shutdown_fn call:
+    an unreachable/old-build bridge on the previous port must never stop
+    the new port's launch."""
+    store = _FakeStore()
+    launches = []
+    supervisor = s4me.BridgeSupervisor("/addon/root", clock=_FakeClock())
+
+    supervisor.apply(
+        True, 11480, lambda: True, launches.append, store,
+        probe_fn=lambda port: s4me.MANIFEST["version"], shutdown_fn=lambda port: None,
+    )
+
+    def _raising_shutdown(port):
+        raise ConnectionRefusedError("refused")
+
+    supervisor.apply(
+        True, 11481, lambda: True, launches.append, store,
+        probe_fn=lambda port: None, shutdown_fn=_raising_shutdown,
+    )
+
+    assert launches == [
+        s4me.run_script_command("/addon/root", 11480),
+        s4me.run_script_command("/addon/root", 11481),
+    ]
 
 
 def test_apply_disabling_after_active_removes_and_relaunches_if_reenabled():
     store = _FakeStore()
     launches = []
+    shutdowns = []
     supervisor = s4me.BridgeSupervisor("/addon/root", clock=_FakeClock())
 
-    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: s4me.MANIFEST["version"])
-    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: s4me.MANIFEST["version"])
-    supervisor.apply(False, 11480, lambda: True, launches.append, store, probe_fn=lambda port: s4me.MANIFEST["version"])
-    supervisor.apply(True, 11480, lambda: True, launches.append, store, probe_fn=lambda port: s4me.MANIFEST["version"])
+    supervisor.apply(
+        True, 11480, lambda: True, launches.append, store,
+        probe_fn=lambda port: s4me.MANIFEST["version"], shutdown_fn=shutdowns.append,
+    )
+    supervisor.apply(
+        True, 11480, lambda: True, launches.append, store,
+        probe_fn=lambda port: s4me.MANIFEST["version"], shutdown_fn=shutdowns.append,
+    )
+    # Deactivation (user turns off s4me_enable, or _detect_italian_user()
+    # flips) must shut down the still-running bridge on the old port too --
+    # RunScript() itself hands back no handle to stop it, so this is the
+    # ONLY way it does not keep listening with nothing pointing at it.
+    supervisor.apply(
+        False, 11480, lambda: True, launches.append, store,
+        probe_fn=lambda port: s4me.MANIFEST["version"], shutdown_fn=shutdowns.append,
+    )
+    assert shutdowns == [11480]
+    supervisor.apply(
+        True, 11480, lambda: True, launches.append, store,
+        probe_fn=lambda port: s4me.MANIFEST["version"], shutdown_fn=shutdowns.append,
+    )
 
     assert launches == [
         s4me.run_script_command("/addon/root", 11480),
         s4me.run_script_command("/addon/root", 11480),
     ]
     assert store.remove_calls[-1] == "s4me"
+
+
+def test_apply_disabling_never_active_skips_shutdown():
+    """No bridge was ever launched (`_launched_port` still `None`): there
+    is nothing to shut down, and `shutdown_fn` must not be called with a
+    bogus port."""
+    store = _FakeStore()
+    shutdowns = []
+    supervisor = s4me.BridgeSupervisor("/addon/root", clock=_FakeClock())
+
+    supervisor.apply(False, 11480, lambda: True, lambda cmd: None, store, shutdown_fn=shutdowns.append)
+
+    assert shutdowns == []
+    assert store.remove_calls == ["s4me"]
+
 
 
 # --- probe_manifest ---------------------------------------------------------
@@ -529,6 +609,32 @@ def test_probe_manifest_version_reads_body_off_http_error_responses(monkeypatch)
     assert s4me.probe_manifest_version(11480) == "1.0.0"
 
 
+def test_probe_manifest_version_closes_http_error_response(monkeypatch):
+    """`exc.read()` alone leaves the underlying socket open until GC -- see
+    lib/s4me.py's own note that a leaked one raises ResourceWarning and
+    that probe_fn runs on every supervisor tick."""
+    import io
+    import json
+    import urllib.error
+    import urllib.request
+
+    body = json.dumps({"version": "1.0.0"}).encode("utf-8")
+    closed = []
+
+    class _ClosingBytesIO(io.BytesIO):
+        def close(self):
+            closed.append(True)
+            super().close()
+
+    def _raise(*a, **k):
+        raise urllib.error.HTTPError("url", 404, "not found", {}, _ClosingBytesIO(body))
+
+    monkeypatch.setattr(urllib.request, "urlopen", _raise)
+
+    assert s4me.probe_manifest_version(11480) == "1.0.0"
+    assert closed == [True]
+
+
 def test_probe_manifest_version_none_on_connection_failure(monkeypatch):
     import urllib.request
 
@@ -551,6 +657,9 @@ def test_shutdown_bridge_posts_to_shutdown_url(monkeypatch):
     def _urlopen(request, timeout=None):
         captured["url"] = request.full_url
         captured["method"] = request.get_method()
+        captured["header"] = next(
+            (v for k, v in request.header_items() if k.lower() == s4me.SHUTDOWN_HEADER.lower()), None,
+        )
         return _JsonResp(b"")
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
@@ -559,6 +668,7 @@ def test_shutdown_bridge_posts_to_shutdown_url(monkeypatch):
 
     assert captured["url"] == s4me.shutdown_url(11480)
     assert captured["method"] == "POST"
+    assert captured["header"] == "1"
 
 
 def test_shutdown_bridge_swallows_missing_route_and_connection_failure(monkeypatch):
@@ -576,6 +686,32 @@ def test_shutdown_bridge_swallows_missing_route_and_connection_failure(monkeypat
         lambda *a, **k: (_ for _ in ()).throw(ConnectionRefusedError("refused")),
     )
     s4me.shutdown_bridge(11480)  # must not raise
+
+
+def test_shutdown_bridge_closes_http_error_response(monkeypatch):
+    """Same leaked-socket concern as probe_manifest_version() -- an old
+    bridge build without the /shutdown route answers 404 through
+    HTTPError, and its fp must be closed rather than left for GC."""
+    import io
+    import urllib.error
+    import urllib.request
+
+    closed = []
+
+    class _ClosingBytesIO(io.BytesIO):
+        def close(self):
+            closed.append(True)
+            super().close()
+
+    monkeypatch.setattr(
+        urllib.request, "urlopen",
+        lambda *a, **k: (_ for _ in ()).throw(
+            urllib.error.HTTPError("url", 404, "not found", {}, _ClosingBytesIO(b"")),
+        ),
+    )
+    s4me.shutdown_bridge(11480)  # must not raise
+
+    assert closed == [True]
 
 
 def test_launched_port_tracks_launch():

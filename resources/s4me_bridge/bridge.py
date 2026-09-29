@@ -76,6 +76,18 @@ import bridge_helpers as bh  # noqa: E402 - sys.path must be set up first
 ADDON_ID = "plugin.video.rivulet"
 S4ME_ADDON_ID = "plugin.video.s4me"
 
+#: `POST /shutdown` requires this header (any non-empty value) rather
+#: than trusting the path alone. A cross-origin `<form>`/`<img>` submit
+#: -- the realistic CSRF vector against a bare `127.0.0.1` HTTP server
+#: with no other auth -- can never set a custom header without
+#: triggering a CORS preflight this server does not answer, so a plain
+#: cross-site POST to this path is rejected before it can trigger a
+#: shutdown. Kept in sync BY HAND with `lib.s4me.shutdown_bridge()` (same
+#: reason `MANIFEST` is duplicated rather than imported -- see this
+#: module's own docstring); `tests/test_s4me.py` and
+#: `tests/test_s4me_bridge_helpers.py` both assert this exact value.
+SHUTDOWN_HEADER = "X-Rivulet-Bridge-Shutdown"
+
 #: Fan-out bound for the per-channel search pool -- this addon's own
 #: convention (see AGENTS.md: every fan-out call site carries its own
 #: local constant, deliberately not shared, since this runs on low-power
@@ -361,7 +373,7 @@ _BRIDGE_PORT = None
 #: stream response offering this url can be served from that cache for
 #: just as long, so the key it references must stay valid at least that
 #: long too.
-_MEGA_PLAY_REGISTRY = bh.TTLCache(_CACHE_TTL_SECONDS)
+_MEGA_PLAY_REGISTRY = bh.TTLCache(_CACHE_TTL_SECONDS, max_size=4096)
 
 #: key -> `{"client": <servers.mega Client>, "target": url}`. NOT a
 #: `TTLCache`: entries are pruned by the megaserver `Client`'s own
@@ -814,6 +826,14 @@ def _make_handler(state):
             path = self.path.split("?", 1)[0]
             try:
                 if path == "/shutdown":
+                    if not self.headers.get(SHUTDOWN_HEADER):
+                        # No custom header: either a stray/misbehaving
+                        # client or exactly the cross-origin form/img CSRF
+                        # submit this header exists to block (see
+                        # SHUTDOWN_HEADER's own docstring) -- either way,
+                        # never signal shutdown for it.
+                        self._send_json({"error": "forbidden"}, status=403)
+                        return
                     # Reply BEFORE signalling: lib.s4me.shutdown_bridge()
                     # must see its {"ok": true} even though this process
                     # is about to stop serving.
