@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.24.2" provider-name="M0RF30">
+<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.25.0" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0" />
     <import addon="script.module.requests" version="2.22.0" />
@@ -12,7 +12,17 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse and search catalogs by type, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote stremio-server-go streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.24.2:
+    <news>v0.25.0:
+- Fix: the bridge addon could list another film's file under a title (asking for "Il padrino" returned "Le ali della libertà"). Each result now belongs to the title asked for.
+- Fix: most bridge streams (StreamingCommunity above all) were refused by their servers. They are now requested the same way the source addon requests them.
+- Fix: Kodi could hang when quitting while the bridge was running. It now quits in a few seconds.
+- Fix: after updating Rivulet, the bridge kept running the old version until Kodi was restarted. It now switches to the new one within seconds.
+- New: mega links from the bridge play again. They are resolved when you press play instead of when the list is built.
+- Improved: HLS and DASH streams play through inputstream.adaptive when it is installed, which starts them much faster. Rivulet also waits longer for a slow stream to start before reopening the source list.
+- Improved: after the first episode of a series, the bridge finds the next ones in about a second. Opening a series also starts the lookup for its first episode in the background, and bridge sources that keep failing are skipped for a while.
+- Improved: bridge subtitles are passed on to the player.
+- New: the addon catalog also lists the community catalog from stremio-addons.net (over 600 addons). Adult addons appear only when "Hide adult content" is off.
+v0.24.2:
 - Fix: Torrentio showed no streams on any platform. Its server was rejecting Rivulet's requests; they now go through.
 v0.24.1:
 - Changed: the optional local bridge addon is now offered only to Italian users (Italian interface or preferred audio language) who have its source addon installed. For them it is on by default and can be switched off; everyone else no longer sees its settings.
@@ -223,7 +233,7 @@ v0.4.7:
 - New: a custom, non-standard Home/Discover/Search/Detail/Streams UI (Library/Add-ons/Settings still classic).
 - Showcase now reports errors (notification + log) instead of failing silently.</news>
     <platform>all</platform>
-    <license>MIT</license>
+    <license>MIT AND GPL-3.0-only</license>
     <website>https://github.com/rivulet-kodi/plugin.video.rivulet</website>
     <source>https://github.com/rivulet-kodi/plugin.video.rivulet</source>
     <assets>
