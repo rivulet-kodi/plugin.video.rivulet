@@ -13,6 +13,7 @@ import contextlib
 import json
 import socket
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -83,10 +84,22 @@ class FakeSession:
     Session per client instance rather than opening a connection per call).
     """
 
-    def __init__(self, responses=None, exc=None):
+    def __init__(self, responses=None, exc=None, url_responses=None):
         self.calls = []
         self._responses = list(responses or [])
         self._exc = exc
+        #: url -> single response, or a list of responses consumed one per
+        #: call to that same url (FIFO within that url only). Takes
+        #: precedence over `_responses` for a url with an entry here.
+        #: Exists so a test whose two calls race under a real thread pool
+        #: (`fetch_addon_catalogs()`'s `Executor.map()` gives no ordering
+        #: guarantee across sources - see
+        #: https://docs.python.org/3.8/library/concurrent.futures.html)
+        #: can pick its response by url instead of by call order.
+        self._url_responses = dict(url_responses or {})
+        #: Guards `_responses`/`_url_responses` pop + `calls` append
+        #: against exactly that same concurrent fan-out.
+        self._lock = threading.Lock()
 
     def get(self, url, **kwargs):
         return self._respond("GET", url, kwargs)
@@ -95,12 +108,22 @@ class FakeSession:
         return self._respond("POST", url, kwargs)
 
     def _respond(self, method, url, kwargs):
-        self.calls.append({"method": method, "url": url, "kwargs": kwargs})
-        if self._exc is not None:
-            raise self._exc
-        if not self._responses:
-            raise AssertionError("FakeSession: no queued response for %s" % url)
-        item = self._responses.pop(0)
+        with self._lock:
+            self.calls.append({"method": method, "url": url, "kwargs": kwargs})
+            if self._exc is not None:
+                raise self._exc
+            if url in self._url_responses:
+                queued = self._url_responses[url]
+                if isinstance(queued, list):
+                    if not queued:
+                        raise AssertionError("FakeSession: no queued url_responses left for %s" % url)
+                    item = queued.pop(0)
+                else:
+                    item = queued
+            else:
+                if not self._responses:
+                    raise AssertionError("FakeSession: no queued response for %s" % url)
+                item = self._responses.pop(0)
         if isinstance(item, Exception):
             raise item
         return item

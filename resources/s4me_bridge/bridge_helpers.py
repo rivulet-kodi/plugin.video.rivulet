@@ -20,7 +20,7 @@ bridge (`bridge.py`, in this same directory).
 Licensed GPL-3, unlike the rest of this MIT-licensed addon: this whole
 `resources/s4me_bridge/` directory only exists to glue into the GPL-3
 Stream4Me (`plugin.video.s4me`) addon at runtime, and ships as an
-opt-in-only feature (see `s4me_enable`, default off, in `resources/settings.xml`).
+opt-in-only feature (see `s4me_enable` in `resources/settings.xml`).
 
 This module is deliberately its OWN copy of the request/response shaping
 logic, rather than importing `lib.s4me` (Rivulet's `lib` package) or
@@ -45,8 +45,18 @@ anything from Stream4Me itself:
 that module's docstring. `tests/test_s4me.py` and
 `tests/test_s4me_bridge_helpers.py` both assert the two are identical,
 which pins them together across any future edit to either.
+
+`bridge.py` also serves two small non-Stremio routes this module's
+helpers back: `POST /shutdown` (a clean-exit request `lib.s4me
+.shutdown_bridge()` sends a stale bridge before relaunching it -- see
+`ChannelBackoff` and `generate_play_key()`'s own docstrings for the two
+pure pieces involved) and `GET /play/<key>`, which `generate_play_key()`
+and `TTLCache` back for mega's deferred, on-demand resolve (see
+`bridge.py`'s own `_shape_mega_stream()`/`_resolve_mega_play()` for why
+mega cannot resolve at LIST time like every other server).
 """
 import re
+import secrets
 import threading
 import time
 import unicodedata
@@ -62,7 +72,7 @@ from urllib.parse import parse_qsl
 MANIFEST = {
     "id": "org.rivulet.s4me",
     "name": "Stream4Me",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": (
         "Bridges the Stream4Me (S4Me) Kodi addon's Italian channel "
         "scrapers into the Stremio protocol."
@@ -212,7 +222,31 @@ def label_value_or(label_value, fallback_value):
     return label_value if label_value not in (None, "") else fallback_value
 
 
-def shape_stream(channel, server_name, url, headers=None, quality=None):
+def pick_episode(episodes, season, episode):
+    """The single episode Item within `episodes` (a channel's own
+    `episodios()` result) matching `(season, episode)`, or `None`.
+
+    Split out of the `episodios()` CALL itself (`bridge.py`'s
+    `_episodes_list()`) so the list can be cached at show level -- see
+    `match_cache_key()` -- while this pure season/episode match stays
+    independently testable."""
+    for ep_item in episodes or []:
+        ep_labels = getattr(ep_item, "infoLabels", {}) or {}
+        ep_season = str(label_value_or(
+            ep_labels.get("season"), getattr(ep_item, "season", ""),
+        ))
+        ep_episode = str(label_value_or(
+            ep_labels.get("episode"), getattr(ep_item, "episode", ""),
+        ))
+        if ep_season == str(season) and ep_episode == str(episode):
+            return ep_item
+    return None
+
+
+def shape_stream(
+    channel, server_name, url, headers=None, quality=None, adaptive_hint=None, subtitle_url=None,
+    drm=None,
+):
     """Build one Stremio `stream` object (an entry of the
     `/stream/{type}/{id}.json` response's `streams[]` array) from one
     resolved Stream4Me play url.
@@ -221,6 +255,14 @@ def shape_stream(channel, server_name, url, headers=None, quality=None):
     `name` in its UI, so every stream from one channel visually groups
     together); `title` carries the more specific per-result detail
     (server/quality) users actually pick between.
+
+    `adaptive_hint` (`"hls"`/`"mpd"`/`None`, see `adaptive_manifest_type()`)
+    becomes `behaviorHints.rivuletManifestType` -- Rivulet's own player
+    reads it to pick inputstream.adaptive over a direct play, falling
+    back to sniffing the url's `.m3u8`/`.mpd` suffix only when it is
+    absent. `subtitle_url` (see `subtitle_url_from_entry()`) becomes a
+    single-entry `subtitles` array in the Stremio wire shape. `drm` (see
+    `drm_hint()`) becomes `behaviorHints.rivuletDrm`.
     """
     title_bits = [bit for bit in (server_name, quality) if bit]
     stream = {
@@ -228,15 +270,190 @@ def shape_stream(channel, server_name, url, headers=None, quality=None):
         "title": " - ".join(title_bits) if title_bits else channel,
         "url": url,
     }
+    behavior_hints = {}
     if headers:
         # notWebReady + proxyHeaders.request is the Stremio convention for
         # a direct-play url that needs custom request headers (referer/
         # cookie/user-agent) - see stremio-core's StreamBehaviorHints.
-        stream["behaviorHints"] = {
-            "notWebReady": True,
-            "proxyHeaders": {"request": dict(headers)},
-        }
+        behavior_hints["notWebReady"] = True
+        behavior_hints["proxyHeaders"] = {"request": dict(headers)}
+    if adaptive_hint:
+        behavior_hints["rivuletManifestType"] = adaptive_hint
+    if drm:
+        behavior_hints["rivuletDrm"] = dict(drm)
+    if behavior_hints:
+        stream["behaviorHints"] = behavior_hints
+    if subtitle_url:
+        stream["subtitles"] = [{"id": subtitle_url, "url": subtitle_url, "lang": "ita"}]
     return stream
+
+
+def drm_hint(drm_type, license_key):
+    """`{"type", "license"}` for Rivulet's player from a Stream4Me item's
+    `drm`/`license` fields, or `None` when either is missing.
+
+    Stream4Me sets them on items whose DASH is encrypted (Pluto TV:
+    `com.widevine.alpha` plus a license url carrying its own header and
+    `R{SSM}` request template) and hands both to inputstream.adaptive.
+    Without them ISA refuses the stream outright ("Unhandled encrypted
+    stream", observed live)."""
+    if isinstance(drm_type, str) and drm_type and isinstance(license_key, str) and license_key:
+        return {"type": drm_type, "license": license_key}
+    return None
+
+
+#: Stream4Me servers whose resolved url is unplayable outright, and no
+#: on-demand deferral (like mega's, see `bridge.py`'s
+#: `_shape_mega_stream()`) exists for them yet. Empty today: `mega` used
+#: to be the sole member (its megaserver proxy dies ~20s after this
+#: bridge resolved it at LIST time, and a second concurrent resolve
+#: clobbered `servers/mega.py`'s own module-global file list -- "Il
+#: padrino" was served "Le ali della libertà") -- kept as a real,
+#: `is_servable()`-checked set rather than deleted outright so a FUTURE
+#: server with no viable deferral has an established place to be listed
+#: instead of a bespoke special case.
+UNSERVABLE_SERVERS = frozenset()  # type: frozenset
+
+
+def is_servable(server, url):
+    """Whether a `(server, url)` Stream4Me server item can become a
+    playable Stremio stream. `UNSERVABLE_SERVERS` never can (see its own
+    docstring). A `torrent` item only can as a `magnet:` url, which
+    Rivulet hands to the streaming server; a `.torrent` http url is the
+    torrent FILE, which Kodi would try (and fail) to play as video."""
+    if server in UNSERVABLE_SERVERS:
+        return False
+    if server == "torrent":
+        return (url or "").startswith("magnet:")
+    return True
+
+
+def is_adaptive_entry(entry, manifest=None):
+    """Whether Stream4Me would play one `video_urls` entry (`[label, url,
+    ...]`) through inputstream.adaptive, per its own
+    `platformtools.get_video_seleccionado()`/`play_video()`: `mpd`/`hls`
+    in the label, a five-field entry, or the item's `manifest`."""
+    label = entry[0] if entry and isinstance(entry[0], str) else ""
+    return (
+        "mpd" in label or "hls" in label or len(entry) > 4
+        or manifest in ("mpd", "hls")
+    )
+
+
+def adaptive_manifest_type(entry, manifest=None):
+    """Which inputstream.adaptive manifest type one ALREADY-adaptive
+    `video_urls` entry (see `is_adaptive_entry()` -- call this only when
+    that already returned `True`) uses: `"mpd"` if its label mentions
+    mpd, it carries the five-field shape (a trailing DRM license after
+    the subtitle field), or the item's own `manifest` says so; `"hls"`
+    otherwise, Stream4Me's only other adaptive shape. Becomes
+    `behaviorHints.rivuletManifestType` in `shape_stream()` -- see the
+    Rivulet player's own fallback-to-url-suffix docstring for why this
+    hint exists at all."""
+    label = entry[0] if entry and isinstance(entry[0], str) else ""
+    if "mpd" in label or len(entry) > 4 or manifest == "mpd":
+        return "mpd"
+    return "hls"
+
+
+def subtitle_url_from_entry(entry):
+    """The subtitle url one `video_urls` entry carries at index 3 (`[label,
+    url, 0, subtitle]`, Stream4Me's own `platformtools.play_video()`
+    convention of handing that field straight to Kodi's
+    `ListItem.setSubtitles()`), or `None` when that field is missing, not
+    a string, or not a non-empty `http(s)` url -- some entries reuse
+    index 3 for an unrelated flag, and a non-url value there must never
+    become a bogus Stremio `subtitles[].url`."""
+    if not entry or len(entry) < 4:
+        return None
+    candidate = entry[3]
+    if isinstance(candidate, str) and candidate.startswith(("http://", "https://")):
+        return candidate
+    return None
+
+
+def playback_headers(server, page_url, referer, resolved_headers, user_agent, adaptive=False):
+    """The request headers the player must send for one resolved url,
+    mirroring Stream4Me's own `platformtools.play_video()`.
+
+    Its defaults are a browser User-Agent plus a Referer of the server
+    page (`referer` instead for a `directo` item). A progressive url gets
+    them only when the resolver attached none of its own (`url|Header=...`,
+    which then win outright) and the item did not set `referer` to
+    `False`. An adaptive (HLS/DASH) url ALWAYS gets them -- Stream4Me
+    hands them to inputstream.adaptive regardless of `referer` -- with any
+    resolver headers layered on top.
+
+    Not optional: vixcloud (every StreamingCommunity stream, whose channel
+    sets `referer=False`) and Pluto TV answer Kodi's own `Kodi/21.x`
+    User-Agent with 403 and serve the same url to a browser one."""
+    if not adaptive:
+        if resolved_headers:
+            return dict(resolved_headers)
+        if referer is False:
+            return {}
+    headers = {}
+    if user_agent:
+        headers["User-Agent"] = user_agent
+    chosen_referer = referer if server == "directo" and referer else page_url
+    if chosen_referer:
+        headers["Referer"] = chosen_referer
+    headers.update(resolved_headers or {})
+    return headers
+
+
+def guard_video_check(check):
+    """Wrap a Stream4Me server module's `test_video_exists()` so a raised
+    exception reads as "video does not exist" instead of "exists".
+
+    `core.servertools.resolve_video_urls_for_playing()` swallows an
+    exception from that check but leaves `video_exists = True`, then calls
+    `get_video_url()` -- which, for servers that hand state from the check
+    to the resolve through module globals (`mega`'s `files`,
+    `streamingcommunityws`'s `iframeParams`), returns whatever the
+    PREVIOUS successful check left behind: another title's stream. In
+    Stream4Me that needs two plays in one session; in this long-lived
+    bridge it is routine. Idempotent: an already-guarded check is returned
+    unchanged."""
+    if getattr(check, "_rivulet_guarded", False):
+        return check
+
+    def guarded(*args, **kwargs):
+        try:
+            return check(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - any failure means "no usable video"
+            return False, "video check failed: %r" % (exc,)
+
+    guarded._rivulet_guarded = True
+    return guarded
+
+
+class KeyedLocks:
+    """One `threading.Lock` per key, created on first use.
+
+    The bridge serializes resolves per Stream4Me server with these:
+    server modules pass state from `test_video_exists()` to
+    `get_video_url()` through module globals, so two threads resolving the
+    same server at once can each read the other's result."""
+
+    def __init__(self):
+        self._locks = {}
+        self._guard = threading.Lock()
+
+    def lock_for(self, key):
+        with self._guard:
+            return self._locks.setdefault(key, threading.Lock())
+
+
+def generate_play_key():
+    """A fresh, unguessable id for one bridge-issued `/play/<key>` mega
+    redirect (see `bridge.py`'s `_shape_mega_stream()`/`_resolve_mega_play()`
+    for the full deferred-resolve design this backs). `secrets.token_urlsafe`
+    keeps it filesystem/URL-safe and cryptographically unguessable (CWE-330
+    -- this bridge binds to `127.0.0.1` only, but ANY local process or
+    browser tab can still reach it, and a guessable key would let one
+    hijack another request's deferred mega resolve)."""
+    return secrets.token_urlsafe(16)
 
 
 def build_manifest():
@@ -314,6 +531,18 @@ def channels_for_type(channels, content_type):
     return tuple(selected)
 
 
+def match_cache_key(channel_id, content_type, tmdb_id, title, year):
+    """Cache key for one channel's per-show/movie search match -- see
+    `bridge.py`'s `_MATCH_CACHE`/`_streams_for_channel()` for why this is
+    cached independent of season/episode (a series' matched show item and
+    its `episodios()` list are reused across every episode request).
+    Prefers `tmdb_id` (the same, precise identity `result_matches()`
+    itself prefers); falls back to a normalized title/year pair when
+    absent, so two differently-cased/accented requests for the same
+    untagged title still share one cache entry."""
+    identity = str(tmdb_id) if tmdb_id else (normalize_title(title), str(year or ""))
+    return (channel_id, content_type, identity)
+
 
 class TTLCache:
     """Tiny per-key time-to-live cache. `clock` is injectable
@@ -326,39 +555,53 @@ class TTLCache:
     also sweeps out every already-expired entry -- not just the one
     key being written -- so a key that is never requested again (e.g. a
     title nobody re-queries) does not linger past its TTL just because
-    `get()` is the only thing that used to notice expiry."""
+    `get()` is the only thing that used to notice expiry.
+
+    Thread-safe: every public method holds one internal `threading.Lock`
+    for its whole body. Every instance of this class the bridge keeps
+    (`_BridgeState.cache`, the per-channel show/movie match cache, the
+    mega `/play/<key>` registry) is shared across every concurrent
+    request's worker threads, and `set()`'s own `_purge_expired()` sweep
+    iterates the backing `OrderedDict` -- unprotected, a concurrent
+    `get()`'s eviction on the very entry being iterated would raise
+    `RuntimeError: dictionary changed size during iteration`."""
 
     def __init__(self, ttl_seconds, clock=time.monotonic, max_size=256):
         self._ttl = ttl_seconds
         self._clock = clock
         self._max_size = max_size
         self._store = OrderedDict()
+        self._lock = threading.Lock()
 
     def get(self, key):
-        entry = self._store.get(key)
-        if entry is None:
-            return None
-        expires_at, value = entry
-        if self._clock() >= expires_at:
-            self._store.pop(key, None)
-            return None
-        return value
+        with self._lock:
+            entry = self._store.get(key)
+            if entry is None:
+                return None
+            expires_at, value = entry
+            if self._clock() >= expires_at:
+                self._store.pop(key, None)
+                return None
+            return value
 
     def set(self, key, value):
-        self._purge_expired()
-        self._store[key] = (self._clock() + self._ttl, value)
-        self._store.move_to_end(key)
-        while len(self._store) > self._max_size:
-            self._store.popitem(last=False)
+        with self._lock:
+            self._purge_expired()
+            self._store[key] = (self._clock() + self._ttl, value)
+            self._store.move_to_end(key)
+            while len(self._store) > self._max_size:
+                self._store.popitem(last=False)
 
     def _purge_expired(self):
+        # Caller must already hold self._lock.
         now = self._clock()
         expired = [k for k, (expires_at, _value) in self._store.items() if now >= expires_at]
         for k in expired:
             del self._store[k]
 
     def __len__(self):
-        return len(self._store)
+        with self._lock:
+            return len(self._store)
 
 
 class Budget:
@@ -375,6 +618,65 @@ class Budget:
 
     def expired(self):
         return self._clock() >= self._deadline
+
+
+class ChannelBackoff:
+    """Tracks consecutive pipeline failures per Stream4Me channel id and
+    puts a channel that reaches `failure_threshold` in a row into a
+    `cooldown_seconds` timeout -- a channel that is actually down (dead
+    host, broken code after an update) would otherwise still eat a
+    fan-out slot on EVERY single request until someone notices and fixes
+    it, wasting up to `_CHANNEL_IO_TIMEOUT_SECONDS` of wall-clock, and a
+    worker thread, on a channel with no chance of ever returning a
+    result. A channel that simply searched fine and found no match for
+    THIS title is never penalized -- see `bridge.py`'s `_channel_task()`,
+    the one place that decides "real breakage" from "legitimate miss" and
+    calls `record_success()`/`record_failure()` accordingly.
+
+    `clock` is injectable for deterministic tests. Thread-safe: one
+    `threading.Lock` guards every method's body, since `bridge.py` runs
+    one worker thread per channel per request, and two concurrent
+    requests can update the same channel's counter at once."""
+
+    def __init__(self, failure_threshold=3, cooldown_seconds=10 * 60, clock=time.monotonic):
+        self._threshold = failure_threshold
+        self._cooldown = cooldown_seconds
+        self._clock = clock
+        self._failures = {}
+        self._cooldown_until = {}
+        self._lock = threading.Lock()
+
+    def is_available(self, channel_id):
+        """False while `channel_id` is serving its cooldown. A channel
+        never recorded, or whose cooldown deadline has passed, is
+        available -- and a passed deadline also resets its failure
+        count, so one more failure right after does not instantly
+        re-trip a fresh cooldown."""
+        with self._lock:
+            deadline = self._cooldown_until.get(channel_id)
+            if deadline is None:
+                return True
+            if self._clock() < deadline:
+                return False
+            self._cooldown_until.pop(channel_id, None)
+            self._failures.pop(channel_id, None)
+            return True
+
+    def record_success(self, channel_id):
+        """Clears any failure streak/cooldown -- one working request is
+        enough to trust the channel again."""
+        with self._lock:
+            self._failures.pop(channel_id, None)
+            self._cooldown_until.pop(channel_id, None)
+
+    def record_failure(self, channel_id):
+        """Counts one more consecutive failure; the `failure_threshold`-th
+        one starts a fresh `cooldown_seconds` timeout from now."""
+        with self._lock:
+            count = self._failures.get(channel_id, 0) + 1
+            self._failures[channel_id] = count
+            if count >= self._threshold:
+                self._cooldown_until[channel_id] = self._clock() + self._cooldown
 
 
 #: Origins Stremio's own web client runs from -- the only cross-origin

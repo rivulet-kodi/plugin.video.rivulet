@@ -64,6 +64,20 @@ def _clear_catalog_cache():
     addoncatalogs._catalog_cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def _disable_builtin_addon_catalog_source(monkeypatch):
+    """Every test above this point (and most below it) was written
+    against a world with only installed-addon sources; leaving
+    `addoncatalogs.BUILTIN_ADDON_CATALOG_SOURCES` at its real,
+    always-on default here would give `_fetch_entries()` an extra HTTP
+    call none of those tests' `FakeSession(responses=[...])` queues
+    account for, raising an unrelated `AssertionError` ("no queued
+    response") instead of exercising what each test actually checks.
+    The handful of tests specifically about the built-in source
+    (below, under "built-in community source") restore it explicitly."""
+    monkeypatch.setattr(addoncatalogs, 'BUILTIN_ADDON_CATALOG_SOURCES', ())
+
+
 def _source_addon():
     """An installed addon (NOT Cinemeta) that publishes one
     addon_catalog - proves AddonCatalogWindow has no Cinemeta special-casing,
@@ -398,6 +412,167 @@ def test_oninit_collapses_cinemetas_eleven_pairs_into_exactly_two_fetches(load_a
     assert len(labels) == 3  # search row + one entry per collapsed source
     assert any('Official One' in label for label in labels)
     assert any('Community One' in label for label in labels)
+
+
+# ---------------------------------------------------------------------------
+# Built-in community source (stremio-addons.net) - merge/dedupe/adult filter
+# ---------------------------------------------------------------------------
+
+
+#: Distinct from `addoncatalogs.BUILTIN_ADDON_CATALOG_SOURCES`'s real
+#: production value so these tests never depend on, or accidentally
+#: validate, the real stremio-addons.net URL (that's
+#: `tests/test_addoncatalogs.py`'s job) - only that `_fetch_entries()`
+#: merges/dedupes/filters WHATEVER `addoncatalogs.
+#: BUILTIN_ADDON_CATALOG_SOURCES` currently holds.
+_TEST_BUILTIN_SOURCES = (
+    ('https://builtin.example/manifest.json', 'all', 'builtin', 'builtin-catalog'),
+)
+
+
+def _enable_test_builtin_source(monkeypatch):
+    monkeypatch.setattr(addoncatalogs, 'BUILTIN_ADDON_CATALOG_SOURCES', _TEST_BUILTIN_SOURCES)
+
+
+def test_builtin_source_entries_merge_alongside_installed_source_entries(load_addoncatalogwindow, monkeypatch):
+    ctx = load_addoncatalogwindow()
+    _enable_test_builtin_source(monkeypatch)
+    installed_envelope = {'addons': [
+        {'transportUrl': 'https://installed-listed.example/manifest.json',
+         'manifest': {'id': 'installed-listed', 'name': 'Installed Listed', 'version': '1.0.0'}},
+    ]}
+    builtin_envelope = {'addons': [
+        {'transportUrl': 'https://community.example/manifest.json',
+         'manifest': {'id': 'community', 'name': 'Community Addon', 'version': '1.0.0'}},
+    ]}
+    session = FakeSession(responses=[FakeResponse(installed_envelope), FakeResponse(builtin_envelope)])
+    _wire_store(ctx.addoncatalogwindow, _FakeStore(addons=[_source_addon()]))
+    _wire_client(ctx.addoncatalogwindow, _FakeClient(session=session))
+
+    win = _make_window(ctx.addoncatalogwindow)
+    win.onInit()
+
+    assert {call['url'] for call in session.calls} == {
+        'https://source.example/addon_catalog/movie/community.json',
+        'https://builtin.example/addon_catalog/all/builtin.json',
+    }
+    labels = [item.getLabel() for item in win.getControl(ctx.addoncatalogwindow.LIST).items]
+    assert any('Installed Listed' in label for label in labels)
+    assert any('Community Addon' in label for label in labels)
+
+
+def test_builtin_source_entry_deduped_in_favor_of_the_installed_source_entry(load_addoncatalogwindow, monkeypatch):
+    """Same addon (by transportUrl) listed by both an installed source and
+    the built-in one: the installed-source copy wins - see
+    `_fetch_entries()`'s docstring for why source ORDER (installed
+    fetched first) is what makes the plain first-seen dedup do this."""
+    ctx = load_addoncatalogwindow()
+    _enable_test_builtin_source(monkeypatch)
+    shared_url = 'https://shared.example/manifest.json'
+    installed_envelope = {'addons': [
+        {'transportUrl': shared_url, 'manifest': {'id': 'shared', 'name': 'Shared (installed)', 'version': '1.0.0'}},
+    ]}
+    builtin_envelope = {'addons': [
+        {'transportUrl': shared_url, 'manifest': {'id': 'shared', 'name': 'Shared (builtin)', 'version': '2.0.0'}},
+    ]}
+    session = FakeSession(url_responses={
+        'https://source.example/addon_catalog/movie/community.json': FakeResponse(installed_envelope),
+        'https://builtin.example/addon_catalog/all/builtin.json': FakeResponse(builtin_envelope),
+    })
+    _wire_store(ctx.addoncatalogwindow, _FakeStore(addons=[_source_addon()]))
+    _wire_client(ctx.addoncatalogwindow, _FakeClient(session=session))
+
+    win = _make_window(ctx.addoncatalogwindow)
+    win.onInit()
+
+    entry_rows = [item for item in win.getControl(ctx.addoncatalogwindow.LIST).items
+                  if item.getProperty('position').isdigit()]
+    assert len(entry_rows) == 1
+    labels = [item.getLabel() for item in entry_rows]
+    assert any('Shared (installed)' in label for label in labels)
+    assert not any('Shared (builtin)' in label for label in labels)
+
+
+def test_builtin_source_skipped_when_an_installed_addon_already_declares_the_same_source(
+    load_addoncatalogwindow, monkeypatch,
+):
+    """When an installed addon happens to declare the identical
+    `(transport_url, type, id)` triple the built-in source uses, that
+    source is fetched exactly once - not once per declaration."""
+    ctx = load_addoncatalogwindow()
+    monkeypatch.setattr(addoncatalogs, 'BUILTIN_ADDON_CATALOG_SOURCES', (
+        ('https://source.example/manifest.json', 'movie', 'community', 'builtin-catalog'),
+    ))
+    session = FakeSession(responses=[FakeResponse(CATALOG_ENVELOPE)])
+    _wire_store(ctx.addoncatalogwindow, _FakeStore(addons=[_source_addon()]))
+    _wire_client(ctx.addoncatalogwindow, _FakeClient(session=session))
+
+    win = _make_window(ctx.addoncatalogwindow)
+    win.onInit()
+
+    assert len(session.calls) == 1
+
+
+def test_builtin_source_failure_does_not_break_the_installed_sources_list(load_addoncatalogwindow, monkeypatch):
+    ctx = load_addoncatalogwindow(localized={30340: "Could not load %s's addon catalog"})
+    _enable_test_builtin_source(monkeypatch)
+    session = _PerUrlSession(
+        dead_url_prefix='https://builtin.example',
+        ok_response=FakeResponse(CATALOG_ENVELOPE),
+        exc=requests.exceptions.ConnectionError('dead'),
+    )
+    _wire_store(ctx.addoncatalogwindow, _FakeStore(addons=[_source_addon()]))
+    _wire_client(ctx.addoncatalogwindow, _FakeClient(session=session))
+
+    win = _make_window(ctx.addoncatalogwindow)
+    win.onInit()
+
+    entry_rows = [item for item in win.getControl(ctx.addoncatalogwindow.LIST).items
+                  if item.getProperty('position').isdigit()]
+    assert len(entry_rows) == len(CATALOG_ENVELOPE['addons'])  # installed source's rows, unhidden
+    assert ctx.env.notifications == [('Rivulet', "Could not load builtin-catalog's addon catalog", 'info', 4000)]
+
+
+def test_home_hide_adult_on_drops_adult_flagged_builtin_entries(load_addoncatalogwindow, monkeypatch):
+    ctx = load_addoncatalogwindow(settings={'home_hide_adult': 'true'})
+    _enable_test_builtin_source(monkeypatch)
+    envelope = {'addons': [
+        {'transportUrl': 'https://clean.example/manifest.json',
+         'manifest': {'id': 'clean', 'name': 'Clean Addon', 'version': '1.0.0'}},
+        {'transportUrl': 'https://adult.example/manifest.json',
+         'manifest': {'id': 'adult', 'name': 'Adult Video HD', 'version': '1.0.0',
+                      'behaviorHints': {'adult': True}}},
+    ]}
+    session = FakeSession(responses=[FakeResponse(envelope)])
+    _wire_store(ctx.addoncatalogwindow, _FakeStore(addons=[]))
+    _wire_client(ctx.addoncatalogwindow, _FakeClient(session=session))
+
+    win = _make_window(ctx.addoncatalogwindow)
+    win.onInit()
+
+    labels = [item.getLabel() for item in win.getControl(ctx.addoncatalogwindow.LIST).items]
+    assert any('Clean Addon' in label for label in labels)
+    assert not any('Adult Video HD' in label for label in labels)
+
+
+def test_home_hide_adult_off_keeps_adult_flagged_builtin_entries(load_addoncatalogwindow, monkeypatch):
+    ctx = load_addoncatalogwindow(settings={'home_hide_adult': 'false'})
+    _enable_test_builtin_source(monkeypatch)
+    envelope = {'addons': [
+        {'transportUrl': 'https://adult.example/manifest.json',
+         'manifest': {'id': 'adult', 'name': 'Adult Video HD', 'version': '1.0.0',
+                      'behaviorHints': {'adult': True}}},
+    ]}
+    session = FakeSession(responses=[FakeResponse(envelope)])
+    _wire_store(ctx.addoncatalogwindow, _FakeStore(addons=[]))
+    _wire_client(ctx.addoncatalogwindow, _FakeClient(session=session))
+
+    win = _make_window(ctx.addoncatalogwindow)
+    win.onInit()
+
+    labels = [item.getLabel() for item in win.getControl(ctx.addoncatalogwindow.LIST).items]
+    assert any('Adult Video HD' in label for label in labels)
+
 
 
 # ---------------------------------------------------------------------------

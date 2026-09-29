@@ -13,6 +13,7 @@ import requests
 
 from lib.stremio import addoncatalogs
 from lib.stremio.addoncatalogs import (
+    BUILTIN_ADDON_CATALOG_SOURCES,
     STATE_INSTALLABLE,
     STATE_INSTALLED,
     STATE_NEEDS_CONFIGURATION,
@@ -511,6 +512,39 @@ def test_fetch_addon_catalog_cached_evicts_oldest_entries_over_cap(monkeypatch):
         ("https://cap.example/manifest.json", "movie", x) for x in ("b", "c", "d")
     }
 
+
+# ---------------------------------------------------------------------------
+# BUILTIN_ADDON_CATALOG_SOURCES
+# ---------------------------------------------------------------------------
+
+
+def test_builtin_source_url_resolves_to_the_verified_stremio_addons_net_endpoint():
+    """The whole point of picking this particular transport_url: fed
+    through the same `fetch_addon_catalog()` path every other source
+    uses, it must resolve to exactly the live, verified
+    https://stremio-addons.net/api/addon_catalog/all/stremio-addons.net.json
+    endpoint - not some other stremio-addons.net path."""
+    from lib.stremio.addons import build_resource_url
+
+    for transport_url, type_, id_, _name in BUILTIN_ADDON_CATALOG_SOURCES:
+        url = build_resource_url(transport_url, "addon_catalog", type_, id_)
+        assert url == "https://stremio-addons.net/api/addon_catalog/all/stremio-addons.net.json"
+
+
+def test_builtin_source_fetches_through_the_normal_addon_catalog_path(monkeypatch):
+    """`BUILTIN_ADDON_CATALOG_SOURCES` entries are ordinary
+    `(transport_url, type_, id_)` triples: `fetch_addon_catalogs()` (what
+    `lib.ui.addoncatalogwindow` actually calls) must handle one exactly
+    like an installed-addon-declared source, with no special-casing."""
+    session = FakeSession(responses=[FakeResponse(ENVELOPE)])
+    client = _FakeClient(session)
+    sources = [(t, ty, i) for t, ty, i, _n in BUILTIN_ADDON_CATALOG_SOURCES]
+
+    entries, failures = fetch_addon_catalogs(client, sources)
+
+    assert failures == []
+    assert entries == ENVELOPE["addons"]
+    assert session.calls[0]["url"] == "https://stremio-addons.net/api/addon_catalog/all/stremio-addons.net.json"
 
 # ---------------------------------------------------------------------------
 # Kodi-independence

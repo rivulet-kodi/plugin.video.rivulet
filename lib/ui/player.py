@@ -25,6 +25,7 @@ from lib.stremio.subtitles import collect_subtitles, filter_subtitles
 from lib.ui.compat import (
     ADDON,
     L,
+    kodi_major_version,
     log,
     notify,
     set_video_cast,
@@ -39,12 +40,14 @@ from lib.ui.playbackmeta import (
     filename_from_url,
     format_hms,
     human_size,
+    is_adaptive_stream,
     mime_for,
     parse_duration_seconds,
     parse_rating,
     parse_year,
     resolve_art,
     sanitize_title,
+    split_embedded_headers,
 )
 
 #: Bounded (connect, read) timeouts for the pre-buffer network calls. The
@@ -975,6 +978,76 @@ def _apply_item_metadata(list_item, stream, stype, item_meta, filename):
     set_video_cast(list_item, meta.get('cast'))
 
 
+#: `xbmc.getCondVisibility()` addon id for the two boolean conditions
+#: `_inputstream_adaptive_available()` checks below.
+_ISA_ADDON_ID = 'inputstream.adaptive'
+
+
+def _inputstream_adaptive_available():
+    """Whether inputstream.adaptive is both installed AND enabled.
+
+    `System.HasAddon(id)` alone stopped being a safe proxy for "usable"
+    once it started returning True for a merely-installed-but-DISABLED
+    addon too (Kodi 19 Matrix changed this on purpose - see
+    xbmc/xbmc#16707 - so a skin could still offer to enable it); routing
+    an adaptive stream at ISA while it is disabled would just fail
+    playback outright. `System.AddonIsEnabled(id)` (added the same
+    release) is the other half of the check. Any unexpected
+    `getCondVisibility` failure degrades to "unavailable" - the existing
+    non-ISA path below is always a safe fallback, never a crash.
+    """
+    try:
+        if not xbmc.getCondVisibility('System.HasAddon(%s)' % _ISA_ADDON_ID):
+            return False
+        return bool(xbmc.getCondVisibility('System.AddonIsEnabled(%s)' % _ISA_ADDON_ID))
+    except Exception:  # noqa: BLE001 - a broken cond-visibility call must not crash playback
+        return False
+
+
+def _apply_isa_properties(list_item, manifest_type, request_headers, drm=None):
+    """Route `list_item` through inputstream.adaptive for an HLS/DASH
+    `manifest_type` ('hls'/'mpd', from `is_adaptive_stream()`) instead of
+    Kodi's ffmpeg demuxer, which routinely stalls/fails on the
+    multi-variant playlists bridged Stream4Me sources serve.
+
+    Mirrors Stream4Me's own `platformtools.play_video()`: `manifest_type`
+    only below Kodi 21 (ISA infers it from 21 on), and headers in the
+    property the running Kodi version actually consumes. Kodi 22 folded
+    the separate `stream_headers`/`manifest_headers` properties into a
+    single `common_headers` one; every earlier version needs both of the
+    old ones set to the SAME urlencoded value.
+
+    Below Kodi 22 an HLS stream also gets the headers as
+    `license_key='|<headers>|'`, again copying Stream4Me: stream/manifest
+    headers do not reach ISA's AES-128 key request there, and vixcloud
+    answers a header-less `enc.key` GET with 403 -- observed live, the
+    manifest parsed and every segment then failed to decrypt.
+
+    `drm` (`{'type': 'com.widevine.alpha', 'license': '<url>|...'}` from
+    the bridge's `behaviorHints.rivuletDrm`) sets the license properties
+    instead; without them ISA rejects an encrypted stream ("Unhandled
+    encrypted stream", Pluto TV's DASH).
+    """
+    list_item.setProperty('inputstream', 'inputstream.adaptive')
+    major = kodi_major_version()
+    if major < 21:
+        list_item.setProperty('inputstream.adaptive.manifest_type', manifest_type)
+    list_item.setMimeType('application/dash+xml' if manifest_type == 'mpd' else 'application/x-mpegURL')
+    encoded = urlencode(request_headers) if request_headers else ''
+    if encoded:
+        if major >= 22:
+            list_item.setProperty('inputstream.adaptive.common_headers', encoded)
+        else:
+            list_item.setProperty('inputstream.adaptive.stream_headers', encoded)
+            list_item.setProperty('inputstream.adaptive.manifest_headers', encoded)
+    drm = drm if isinstance(drm, dict) else {}
+    if drm.get('type') and drm.get('license'):
+        list_item.setProperty('inputstream.adaptive.license_type', drm['type'])
+        list_item.setProperty('inputstream.adaptive.license_key', drm['license'])
+    elif encoded and manifest_type == 'hls' and major < 22:
+        list_item.setProperty('inputstream.adaptive.license_key', '|%s|' % encoded)
+
+
 def _resolve_playable_item(stream, stype, sid, item_meta=None, video_id=None):
     """Resolve `stream` (Stremio Stream object for content `stype`/`sid`)
     to a `(url, list_item)` pair ready to hand to Kodi's player, or
@@ -1068,7 +1141,31 @@ def _resolve_playable_item(stream, stype, sid, item_meta=None, video_id=None):
             dialog.close()
 
     request_headers = (behavior_hints.get('proxyHeaders') or {}).get('request') or {}
-    if request_headers:
+    # `is_adaptive_stream()` checks the bridge's own hint first (see its
+    # docstring), falling back to the resolved url's own .m3u8/.mpd
+    # extension - either way, only actually ROUTE through ISA when it is
+    # both installed and enabled; otherwise this degrades to the
+    # pre-existing direct-url path below exactly as if no hint/extension
+    # had ever been seen.
+    manifest_type = is_adaptive_stream(behavior_hints, url)
+    use_isa = manifest_type is not None and _inputstream_adaptive_available()
+    if manifest_type is not None and not use_isa:
+        log(
+            'player: adaptive (%s) stream for %s/%s but inputstream.adaptive is unavailable - '
+            'falling back to direct playback' % (manifest_type, stype, sid),
+            xbmc.LOGINFO,
+        )
+    if use_isa:
+        # ISA reads its own Properties (set below), never a path suffix,
+        # so a resolved url baking its own "|urlencoded=headers" (some
+        # addons/resolvers do this directly, same convention this
+        # module's own non-ISA branch below bakes) must be split back
+        # apart here and merged into proxyHeaders - otherwise those
+        # headers are silently lost and ISA's manifest fetch can fail.
+        url, embedded_headers = split_embedded_headers(url)
+        if embedded_headers:
+            request_headers = dict(request_headers, **embedded_headers)
+    elif request_headers:
         # Kodi convention: "|urlencoded=headers" appended to the path makes
         # the player send these headers with every request for that URL.
         url = '%s|%s' % (url, urlencode(request_headers))
@@ -1082,9 +1179,14 @@ def _resolve_playable_item(stream, stype, sid, item_meta=None, video_id=None):
     # extension is known) gives Kodi the same information up front so the
     # probe was never needed.
     list_item.setContentLookup(False)
-    mime = mime_for(filename or filename_from_url(url))
-    if mime:
-        list_item.setMimeType(mime)
+    if use_isa:
+        _apply_isa_properties(
+            list_item, manifest_type, request_headers, drm=behavior_hints.get('rivuletDrm'),
+        )
+    else:
+        mime = mime_for(filename or filename_from_url(url))
+        if mime:
+            list_item.setMimeType(mime)
 
     _apply_item_metadata(list_item, stream, stype, item_meta, filename)
 

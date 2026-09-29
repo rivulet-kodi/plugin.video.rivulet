@@ -450,6 +450,230 @@ def test_play_leaves_mimetype_unset_for_unknown_or_absent_filename(kodi_stubs, m
     assert list_item.content_lookup is False
 
 
+# --- inputstream.adaptive routing: HLS/DASH streams (bridge hint or url ---
+# --- extension) get real segment/manifest handling instead of ffmpeg -----
+
+
+def _stub_isa_available(monkeypatch, kodi_stubs, available=True, installed=None):
+    """Wires `xbmc.getCondVisibility()` to answer ISA install/enabled
+    checks: `available=True` answers both `System.HasAddon`/
+    `System.AddonIsEnabled` True; `installed=False` (with `available`
+    ignored) models "installed but disabled" - HasAddon True,
+    AddonIsEnabled False."""
+    has_addon = True if installed is None else installed
+    enabled = available if installed is None else False
+
+    def cond(condition):
+        if condition == 'System.HasAddon(inputstream.adaptive)':
+            return has_addon
+        if condition == 'System.AddonIsEnabled(inputstream.adaptive)':
+            return enabled
+        return False
+
+    monkeypatch.setattr(kodi_stubs.player.xbmc, 'getCondVisibility', cond)
+
+
+def _stub_kodi_version(monkeypatch, kodi_stubs, build_version):
+    monkeypatch.setattr(
+        kodi_stubs.player.xbmc, 'getInfoLabel',
+        lambda label: build_version if label == 'System.BuildVersion' else '',
+    )
+
+
+def test_adaptive_hls_stream_below_kodi21_sets_manifest_type_and_split_headers(kodi_stubs, monkeypatch):
+    """Kodi 19/20: `inputstream.adaptive.manifest_type` is still required,
+    and the header property is the pre-Kodi-22 split pair
+    (stream_headers/manifest_headers), both holding the SAME urlencoded
+    value."""
+    env = kodi_stubs.env
+    _ServerScript(resolve_url='https://cdn.example/index.m3u8').install(monkeypatch, kodi_stubs.player)
+    _stub_isa_available(monkeypatch, kodi_stubs)
+    _stub_kodi_version(monkeypatch, kodi_stubs, '19.0 Git:abcdef')
+
+    stream = {'url': 'https://cdn.example/index.m3u8',
+              'behaviorHints': {'proxyHeaders': {'request': {'User-Agent': 'Rivulet'}}}}
+    kodi_stubs.player.play(50, stream, 'movie', 'tt50')
+
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (50, True)
+    # No '|urlencoded-headers' suffix baked onto the path - ISA reads its
+    # own Properties, not the path suffix.
+    assert list_item.path == 'https://cdn.example/index.m3u8'
+    assert list_item.properties['inputstream'] == 'inputstream.adaptive'
+    assert list_item.properties['inputstream.adaptive.manifest_type'] == 'hls'
+    assert list_item.properties['inputstream.adaptive.stream_headers'] == 'User-Agent=Rivulet'
+    assert list_item.properties['inputstream.adaptive.manifest_headers'] == 'User-Agent=Rivulet'
+    assert 'inputstream.adaptive.common_headers' not in list_item.properties
+    # AES key requests only get headers through license_key below Kodi 22.
+    assert list_item.properties['inputstream.adaptive.license_key'] == '|User-Agent=Rivulet|'
+    assert list_item.mimetype == 'application/x-mpegURL'
+
+
+def test_adaptive_dash_stream_kodi21_omits_manifest_type_property(kodi_stubs, monkeypatch):
+    """Kodi 21 (Omega) dropped `manifest_type` (ISA sniffs the manifest
+    itself); still Kodi <22 so headers stay the split pair."""
+    env = kodi_stubs.env
+    _ServerScript(resolve_url='https://cdn.example/manifest.mpd').install(monkeypatch, kodi_stubs.player)
+    _stub_isa_available(monkeypatch, kodi_stubs)
+    _stub_kodi_version(monkeypatch, kodi_stubs, '21.0 Git:abcdef')
+
+    stream = {'url': 'https://cdn.example/manifest.mpd', 'behaviorHints': {}}
+    kodi_stubs.player.play(51, stream, 'movie', 'tt51')
+
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (51, True)
+    assert 'inputstream.adaptive.manifest_type' not in list_item.properties
+    assert list_item.properties['inputstream'] == 'inputstream.adaptive'
+    assert list_item.mimetype == 'application/dash+xml'
+    # No proxyHeaders at all this time - no header Properties of any kind.
+    assert 'inputstream.adaptive.stream_headers' not in list_item.properties
+    assert 'inputstream.adaptive.common_headers' not in list_item.properties
+
+
+def test_adaptive_stream_kodi22_uses_single_common_headers_property(kodi_stubs, monkeypatch):
+    """Kodi 22 folded stream_headers/manifest_headers into one
+    common_headers property."""
+    env = kodi_stubs.env
+    _ServerScript(resolve_url='https://cdn.example/index.m3u8').install(monkeypatch, kodi_stubs.player)
+    _stub_isa_available(monkeypatch, kodi_stubs)
+    _stub_kodi_version(monkeypatch, kodi_stubs, '22.0 Git:abcdef')
+
+    stream = {'url': 'https://cdn.example/index.m3u8',
+              'behaviorHints': {'proxyHeaders': {'request': {'User-Agent': 'Rivulet'}}}}
+    kodi_stubs.player.play(52, stream, 'movie', 'tt52')
+
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (52, True)
+    assert list_item.properties['inputstream.adaptive.common_headers'] == 'User-Agent=Rivulet'
+    assert 'inputstream.adaptive.stream_headers' not in list_item.properties
+    assert 'inputstream.adaptive.manifest_headers' not in list_item.properties
+    assert 'inputstream.adaptive.license_key' not in list_item.properties
+
+
+def test_adaptive_dash_stream_with_bridge_drm_sets_license_properties(kodi_stubs, monkeypatch):
+    """Pluto TV's DASH is Widevine-encrypted: ISA refuses it ("Unhandled
+    encrypted stream") unless the bridge's rivuletDrm reaches it."""
+    env = kodi_stubs.env
+    _ServerScript(resolve_url='https://cdn.example/manifest.mpd').install(monkeypatch, kodi_stubs.player)
+    _stub_isa_available(monkeypatch, kodi_stubs)
+    _stub_kodi_version(monkeypatch, kodi_stubs, '21.0 Git:abcdef')
+
+    stream = {'url': 'https://cdn.example/manifest.mpd',
+              'behaviorHints': {
+                  'proxyHeaders': {'request': {'User-Agent': 'Rivulet'}},
+                  'rivuletDrm': {'type': 'com.widevine.alpha', 'license': 'https://lic|H=1|R{SSM}|'},
+              }}
+    kodi_stubs.player.play(53, stream, 'movie', 'tt53')
+
+    _handle, _succeeded, list_item = _resolved_one(env)
+    assert list_item.properties['inputstream.adaptive.license_type'] == 'com.widevine.alpha'
+    assert list_item.properties['inputstream.adaptive.license_key'] == 'https://lic|H=1|R{SSM}|'
+
+
+def test_adaptive_stream_uses_bridge_hint_even_when_url_has_no_manifest_extension(kodi_stubs, monkeypatch):
+    """The S4Me bridge's own `behaviorHints.rivuletManifestType` hint
+    (see resources/s4me_bridge/bridge_helpers.py's `is_adaptive_entry()`)
+    routes through ISA even when the resolved url's own extension gives
+    no clue at all (a bare, extensionless CDN url)."""
+    env = kodi_stubs.env
+    _ServerScript(resolve_url='https://cdn.example/stream').install(monkeypatch, kodi_stubs.player)
+    _stub_isa_available(monkeypatch, kodi_stubs)
+    _stub_kodi_version(monkeypatch, kodi_stubs, '21.0 Git:abcdef')
+
+    stream = {'url': 'https://cdn.example/stream', 'behaviorHints': {'rivuletManifestType': 'hls'}}
+    kodi_stubs.player.play(53, stream, 'movie', 'tt53')
+
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (53, True)
+    assert list_item.properties['inputstream'] == 'inputstream.adaptive'
+    assert list_item.mimetype == 'application/x-mpegURL'
+
+
+def test_adaptive_stream_strips_embedded_pipe_headers_and_merges_into_isa_properties(kodi_stubs, monkeypatch):
+    """Some addons/resolvers bake their own '|urlencoded=headers' suffix
+    straight onto the resolved url (the same convention this module's
+    own non-ISA branch bakes below). inputstream.adaptive never reads a
+    path suffix - only its own Properties - so that suffix must be
+    stripped off the ListItem path AND merged into the headers ISA
+    actually gets, on top of any proxyHeaders.request already present."""
+    env = kodi_stubs.env
+    resolve_url = 'https://cdn.example/index.m3u8|Referer=https%3A%2F%2Fsite.example'
+    _ServerScript(resolve_url=resolve_url).install(monkeypatch, kodi_stubs.player)
+    _stub_isa_available(monkeypatch, kodi_stubs)
+    _stub_kodi_version(monkeypatch, kodi_stubs, '22.0 Git:abcdef')
+
+    stream = {'url': resolve_url,
+              'behaviorHints': {'proxyHeaders': {'request': {'User-Agent': 'Rivulet'}}}}
+    kodi_stubs.player.play(55, stream, 'movie', 'tt55')
+
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (55, True)
+    assert list_item.path == 'https://cdn.example/index.m3u8'
+    assert list_item.properties['inputstream'] == 'inputstream.adaptive'
+    headers = dict(pair.split('=', 1) for pair in list_item.properties['inputstream.adaptive.common_headers'].split('&'))
+    assert headers == {'User-Agent': 'Rivulet', 'Referer': 'https%3A%2F%2Fsite.example'}
+
+
+def test_adaptive_stream_falls_back_to_direct_playback_when_isa_not_installed(kodi_stubs, monkeypatch):
+    """No inputstream.adaptive at all: the existing pre-ISA path is used
+    unchanged - headers baked as a '|urlencoded' path suffix, no ISA
+    Properties, and no setMimeType (`.m3u8` isn't in playbackmeta's
+    known-extension MIME table) - exactly today's behaviour for this
+    stream shape, plus an informational log line."""
+    env = kodi_stubs.env
+    _ServerScript(resolve_url='https://cdn.example/index.m3u8').install(monkeypatch, kodi_stubs.player)
+    _stub_isa_available(monkeypatch, kodi_stubs, available=False)
+
+    stream = {'url': 'https://cdn.example/index.m3u8',
+              'behaviorHints': {'proxyHeaders': {'request': {'User-Agent': 'Rivulet'}}}}
+    kodi_stubs.player.play(54, stream, 'movie', 'tt54')
+
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (54, True)
+    assert list_item.path == 'https://cdn.example/index.m3u8|User-Agent=Rivulet'
+    assert list_item.properties == {}
+    assert list_item.mimetype is None
+    assert any(
+        'inputstream.adaptive is unavailable' in msg and level == kodi_stubs.player.xbmc.LOGINFO
+        for msg, level in env.log_calls
+    )
+
+
+def test_adaptive_stream_falls_back_when_isa_installed_but_disabled(kodi_stubs, monkeypatch):
+    """`System.HasAddon` alone stopped implying "enabled" once Kodi
+    started returning True for a merely-installed-but-disabled addon
+    (xbmc/xbmc#16707) - `System.AddonIsEnabled` must ALSO be true."""
+    env = kodi_stubs.env
+    _ServerScript(resolve_url='https://cdn.example/index.m3u8').install(monkeypatch, kodi_stubs.player)
+    _stub_isa_available(monkeypatch, kodi_stubs, installed=True)
+
+    stream = {'url': 'https://cdn.example/index.m3u8', 'behaviorHints': {}}
+    kodi_stubs.player.play(55, stream, 'movie', 'tt55')
+
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (55, True)
+    assert list_item.properties == {}
+    assert list_item.mimetype is None
+
+
+def test_non_adaptive_stream_ignores_isa_entirely_even_when_available(kodi_stubs, monkeypatch):
+    """A plain, non-adaptive stream must never touch ISA at all, even
+    with inputstream.adaptive fully installed/enabled - the existing
+    extension-based setMimeType path stays exactly as before."""
+    env = kodi_stubs.env
+    env.addon.settings['buffer_enable'] = False
+    _ServerScript(resolve_url='http://server/x/0').install(monkeypatch, kodi_stubs.player)
+    _stub_isa_available(monkeypatch, kodi_stubs)
+
+    stream = _torrent_stream(fileIdx=0, behaviorHints={'filename': 'My.Movie.2020.mkv'})
+    kodi_stubs.player.play(56, stream, 'movie', 'tt56')
+
+    handle, succeeded, list_item = _resolved_one(env)
+    assert (handle, succeeded) == (56, True)
+    assert list_item.properties == {}
+    assert list_item.mimetype == 'video/x-matroska'
+
+
 def test_play_sets_title_and_mediatype_infolabels_for_movie(kodi_stubs, monkeypatch):
     env = kodi_stubs.env
     env.addon.settings['buffer_enable'] = False
@@ -974,6 +1198,32 @@ def test_mime_for_unknown_or_absent_extension_returns_none():
 def test_filename_from_url_strips_headers_and_query_string():
     url = 'http://server/x/0/Movie.mkv?token=1|User-Agent=test'
     assert playbackmeta.filename_from_url(url) == 'Movie.mkv'
+
+
+def test_is_adaptive_stream_prefers_bridge_hint_over_url_extension():
+    """The bridge's own `behaviorHints.rivuletManifestType` hint wins even
+    when the resolved url's own extension would say something else (or
+    nothing at all) - it already ran Stream4Me's own is_adaptive_entry()
+    check against the source entry, before this url even existed."""
+    hints = {'rivuletManifestType': 'mpd'}
+    assert playbackmeta.is_adaptive_stream(hints, 'https://cdn.example/plain.mp4') == 'mpd'
+
+
+def test_is_adaptive_stream_falls_back_to_url_extension():
+    assert playbackmeta.is_adaptive_stream({}, 'https://cdn.example/index.m3u8') == 'hls'
+    assert playbackmeta.is_adaptive_stream({}, 'https://cdn.example/manifest.mpd') == 'mpd'
+
+
+def test_is_adaptive_stream_extension_check_ignores_headers_and_query_suffix():
+    url = 'https://cdn.example/index.m3u8?token=1|User-Agent=test'
+    assert playbackmeta.is_adaptive_stream({}, url) == 'hls'
+
+
+def test_is_adaptive_stream_unknown_extension_or_hint_returns_none():
+    assert playbackmeta.is_adaptive_stream({}, 'https://cdn.example/movie.mkv') is None
+    assert playbackmeta.is_adaptive_stream({'rivuletManifestType': 'bogus'}, 'https://x/a.mkv') is None
+    assert playbackmeta.is_adaptive_stream(None, '') is None
+    assert playbackmeta.is_adaptive_stream(None, None) is None
 
 
 def test_extract_file_name_returns_name_at_index():

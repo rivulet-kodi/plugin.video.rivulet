@@ -372,8 +372,47 @@ class _FakeBridgeSupervisor:
         self.apply_calls = []
         _FakeBridgeSupervisor.instances.append(self)
 
-    def apply(self, enabled, port, has_addon_fn, launch_fn, store):
+    launched = None
+
+    def apply(self, enabled, port, has_addon_fn, launch_fn, store, log_fn=None):
         self.apply_calls.append((enabled, port, has_addon_fn(), launch_fn, store))
+
+    def launched_port(self):
+        return self.launched
+
+
+def test_main_stops_launched_s4me_bridge_on_exit(monkeypatch, tmp_path):
+    """Kodi does not deliver its abort to the RunScript bridge in time
+    (it hung Kodi's quit), so the service POSTs /shutdown on its way out."""
+    class _Launched(_FakeBridgeSupervisor):
+        launched = 11499
+
+    _FakeBridgeSupervisor.instances = []
+    monkeypatch.setattr(service_runner.s4me, "BridgeSupervisor", _Launched)
+    monkeypatch.setattr(service_runner, "probe_listening", lambda *a, **kw: True)
+    monkeypatch.setattr(service_runner, "_detect_italian_user", lambda xbmc: True)
+    shutdowns = []
+    monkeypatch.setattr(service_runner.s4me, "shutdown_bridge", shutdowns.append)
+
+    wait = _scripted_wait([], [None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}):
+        service_runner.main()
+
+    assert shutdowns == [11499]
+
+
+def test_main_skips_bridge_shutdown_when_never_launched(monkeypatch, tmp_path):
+    _FakeBridgeSupervisor.instances = []
+    monkeypatch.setattr(service_runner.s4me, "BridgeSupervisor", _FakeBridgeSupervisor)
+    monkeypatch.setattr(service_runner, "probe_listening", lambda *a, **kw: True)
+    shutdowns = []
+    monkeypatch.setattr(service_runner.s4me, "shutdown_bridge", shutdowns.append)
+
+    wait = _scripted_wait([], [None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}):
+        service_runner.main()
+
+    assert shutdowns == []
 
 
 def test_main_syncs_s4me_bridge_every_tick_with_current_settings(monkeypatch, tmp_path):

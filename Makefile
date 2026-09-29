@@ -31,7 +31,7 @@ parallel:
 	$(PYTHON) -m pytest tests/ -n auto
 
 lint:
-	$(PYTHON) -m ruff check lib tests
+	$(PYTHON) -m ruff check lib tests resources/s4me_bridge tools
 
 format:
 	$(PYTHON) -m ruff format lib tests

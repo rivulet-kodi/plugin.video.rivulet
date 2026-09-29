@@ -192,15 +192,34 @@ class AddonCatalogWindow(BaseWindow):
         per-addon isolation. Entries are de-duplicated by transportUrl,
         keeping the first one seen, so an addon listed by two different
         catalog sources shows once.
+
+        Sources are not only whatever installed addons declare:
+        `addoncatalogs.BUILTIN_ADDON_CATALOG_SOURCES` (stremio-addons.net,
+        ~650 addons) is always appended too, skipped only when an
+        installed addon already declares the identical
+        `(transport_url, type, id)` triple. It is appended AFTER every
+        installed-addon source, never before: `fetch_addon_catalogs()`
+        concatenates results in source order, so the transportUrl dedup
+        loop below - which keeps the FIRST entry seen per transportUrl -
+        always lets an installed source's own listing win over the
+        built-in one for the same addon. A dead built-in source is
+        isolated exactly like a dead installed one, above.
+
+        When resources/settings.xml's `home_hide_adult` setting is on
+        (the default - same toggle `lib.ui.views.iter_catalog_pages()`
+        reads), every fetched entry whose manifest looks adult
+        (`lib.stremio.contentrating.is_adult_manifest()`) is dropped
+        before dedup - the built-in source is the one realistic path an
+        adult addon reaches this window through, since Cinemeta's own
+        catalogs already exclude them.
         """
         import xbmc
 
-        from lib.stremio.addoncatalogs import (
-            fetch_addon_catalogs,
-            iter_unique_addon_catalogs,
-        )
+        from lib.stremio import addoncatalogs
+        from lib.stremio.addoncatalogs import fetch_addon_catalogs, iter_unique_addon_catalogs
         from lib.stremio.addons import addon_error_detail, safe_url_for_log
-        from lib.ui.compat import L, log, notify
+        from lib.stremio.contentrating import is_adult_manifest
+        from lib.ui.compat import L, log, notify, setting_bool
 
         sources = []
         names = {}
@@ -208,6 +227,14 @@ class AddonCatalogWindow(BaseWindow):
             source = (transport_url, addon_catalog.get('type'), addon_catalog.get('id'))
             sources.append(source)
             names.setdefault(transport_url, manifest.get('name', '?'))
+
+        installed_source_keys = set(sources)
+        for transport_url, type_, id_, name in addoncatalogs.BUILTIN_ADDON_CATALOG_SOURCES:
+            source = (transport_url, type_, id_)
+            if source in installed_source_keys:
+                continue
+            sources.append(source)
+            names.setdefault(transport_url, name)
 
         fetched, failures = fetch_addon_catalogs(get_client(), sources)
 
@@ -217,11 +244,15 @@ class AddonCatalogWindow(BaseWindow):
             ), xbmc.LOGWARNING)
             notify(L(30340) % names.get(transport_url, '?'))
 
+        hide_adult = setting_bool('home_hide_adult', True)
         seen = {}
         for entry in fetched:
             url = entry.get('transportUrl')
-            if url and url not in seen:
-                seen[url] = entry
+            if not url or url in seen:
+                continue
+            if hide_adult and is_adult_manifest(entry.get('manifest') or {}):
+                continue
+            seen[url] = entry
         return list(seen.values())
 
     def _visible_indices(self):

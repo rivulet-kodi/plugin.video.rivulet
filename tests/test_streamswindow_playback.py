@@ -767,14 +767,15 @@ def test_open_streams_reopens_even_when_playback_never_starts_within_the_timeout
     monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
     # ctx.env.player_is_playing defaults to False forever - Kodi's player
     # never actually reports playing, exhausting _wait_for_playback_end()'s
-    # default 20s/0.5s start-wait budget.
+    # default 45s/0.5s start-wait budget
+    # (streamswindow._PLAYBACK_START_TIMEOUT_SECONDS).
 
     result = sw.open_streams('movie', 'tt1')
 
     assert result is False
     assert len(start_calls) == 2  # reopened despite playback never starting
-    assert ctx.env.player_is_playing_calls == 40  # int(20.0 / 0.5) start-wait attempts
-    assert ctx.env.monitor_abort_calls == 41  # 40 start-wait ticks + the settle pause
+    assert ctx.env.player_is_playing_calls == 90  # int(45.0 / 0.5) start-wait attempts
+    assert ctx.env.monitor_abort_calls == 91  # 90 start-wait ticks + the settle pause
 
 
 def test_open_streams_monitor_abort_before_playing_returns_false_without_reopening(
