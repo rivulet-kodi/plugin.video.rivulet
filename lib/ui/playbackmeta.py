@@ -49,6 +49,41 @@ def filename_from_url(url):
     return base.rsplit('/', 1)[-1]
 
 
+#: `behaviorHints.rivuletManifestType` values the Stream4Me bridge sets
+#: (resources/s4me_bridge/bridge_helpers.py's `is_adaptive_entry()`)
+#: when it already determined Stream4Me itself would hand a resolved
+#: url to inputstream.adaptive rather than play it as a plain file -
+#: see `is_adaptive_stream()` below for how player.py acts on it.
+_ADAPTIVE_HINT_TYPES = ('hls', 'mpd')
+
+
+def is_adaptive_stream(behavior_hints, url):
+    """Whether `url` should be routed through inputstream.adaptive, and
+    which manifest type ('hls' or 'mpd') - or None for an ordinary file.
+
+    Prefers the bridge's own `behaviorHints.rivuletManifestType` hint:
+    the bridge already ran Stream4Me's own `is_adaptive_entry()` check
+    against the SOURCE `video_urls` entry, before the resolved url even
+    existed, so it knows things the url's own shape cannot show (a
+    label/entry-length-driven decision, not just an extension). Falling
+    back to the resolved url's own extension (`.m3u8` HLS, `.mpd` DASH,
+    via `filename_from_url()` - which already strips any baked
+    `|headers`/query suffix) covers any OTHER addon that resolves
+    straight to a manifest url without carrying that hint.
+    """
+    hint = (behavior_hints or {}).get('rivuletManifestType')
+    if hint in _ADAPTIVE_HINT_TYPES:
+        return hint
+    if not url:
+        return None
+    name = filename_from_url(url).lower()
+    if name.endswith('.mpd'):
+        return 'mpd'
+    if name.endswith('.m3u8'):
+        return 'hls'
+    return None
+
+
 def extract_file_name(stats, file_idx):
     """Best-effort filename for `file_idx` out of a `/create` stats
     dict's `files` array (`[{'name', 'path', 'length', 'offset'}, ...]` -

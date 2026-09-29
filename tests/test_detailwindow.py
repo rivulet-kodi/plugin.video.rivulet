@@ -1257,6 +1257,163 @@ def test_onclick_episode_in_non_default_season_resolves_via_video_by_id_across_s
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# _prefetch_s4me_streams(): background cache warm-up for the S4Me bridge
+# ---------------------------------------------------------------------------
+
+
+class _FakeAddonStore:
+    """lib.store.Store stand-in exposing only get_enabled_addons(), the
+    one method `_prefetch_s4me_streams()` calls."""
+
+    def __init__(self, addons):
+        self._addons = list(addons)
+
+    def get_enabled_addons(self):
+        return list(self._addons)
+
+
+class _FakePrefetchClient:
+    """lib.stremio.addons.AddonClient stand-in recording every
+    `streams(base, rtype, sid)` call - or raising `error`, when set."""
+
+    def __init__(self, error=None):
+        self.error = error
+        self.calls = []
+
+    def streams(self, base, rtype, sid):
+        self.calls.append((base, rtype, sid))
+        if self.error is not None:
+            raise self.error
+        return []
+
+
+def _spy_on_detailwindow_threads(monkeypatch, ctx):
+    """Like `test_infowindow.py`'s `recording_thread`: wraps
+    `detailwindow.threading.Thread` so every REAL thread it constructs is
+    recorded (for a deterministic `.join()`) rather than left to race the
+    assertions below."""
+    created = []
+    real_thread = ctx.detailwindow.threading.Thread
+
+    def _record(*args, **kwargs):
+        thread = real_thread(*args, **kwargs)
+        created.append(thread)
+        return thread
+
+    monkeypatch.setattr(ctx.detailwindow.threading, 'Thread', _record)
+    return created
+
+
+def test_prefetch_s4me_streams_fetches_via_the_builtin_addons_transport_url(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    created = _spy_on_detailwindow_threads(monkeypatch, ctx)
+    client = _FakePrefetchClient()
+    store = _FakeAddonStore([
+        {'transportUrl': 'https://other.example/manifest.json', 'flags': {}},
+        {'transportUrl': 'http://127.0.0.1:11480/manifest.json', 'flags': {'builtin': 's4me'}},
+    ])
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: store)
+    monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: client)
+
+    ctx.detailwindow._prefetch_s4me_streams('series', 'tt1:1:1')
+
+    assert len(created) == 1
+    assert created[0].daemon  # Kodi must never wait on a cache warm-up to exit
+    created[0].join(timeout=5)
+    assert client.calls == [('http://127.0.0.1:11480/manifest.json', 'series', 'tt1:1:1')]
+
+
+def test_prefetch_s4me_streams_noop_when_bridge_not_installed(load_detailwindow, monkeypatch):
+    """No `flags.builtin == 's4me'` entry at all (bridge disabled/not
+    installed) - the thread runs and returns without ever touching the
+    client."""
+    ctx = load_detailwindow()
+    created = _spy_on_detailwindow_threads(monkeypatch, ctx)
+    client = _FakePrefetchClient()
+    store = _FakeAddonStore([{'transportUrl': 'https://other.example/manifest.json', 'flags': {}}])
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: store)
+    monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: client)
+
+    ctx.detailwindow._prefetch_s4me_streams('series', 'tt1:1:1')
+
+    assert len(created) == 1
+    created[0].join(timeout=5)
+    assert client.calls == []
+
+
+def test_prefetch_s4me_streams_noop_for_falsy_video_id(load_detailwindow, monkeypatch):
+    """Nothing to prefetch (e.g. an empty season) - no thread spawned at
+    all, not even one that would immediately return."""
+    ctx = load_detailwindow()
+    created = _spy_on_detailwindow_threads(monkeypatch, ctx)
+
+    ctx.detailwindow._prefetch_s4me_streams('series', None)
+
+    assert created == []
+
+
+def test_prefetch_s4me_streams_swallows_client_exceptions(load_detailwindow, monkeypatch):
+    """A broken/slow bridge (or any raised error) inside the background
+    thread must never propagate - this exists purely to warm a cache, the
+    real fetch `lib.ui.streamswindow.open_streams()` makes later is what
+    must actually succeed or fail visibly."""
+    ctx = load_detailwindow()
+    created = _spy_on_detailwindow_threads(monkeypatch, ctx)
+    client = _FakePrefetchClient(error=RuntimeError('bridge unreachable'))
+    store = _FakeAddonStore(
+        [{'transportUrl': 'http://127.0.0.1:11480/manifest.json', 'flags': {'builtin': 's4me'}}],
+    )
+    monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: store)
+    monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: client)
+
+    ctx.detailwindow._prefetch_s4me_streams('movie', 'tt2')
+
+    assert len(created) == 1
+    created[0].join(timeout=5)
+    assert not created[0].is_alive()
+    assert client.calls  # it really did try, and the exception never left the thread
+
+
+def test_start_prefetches_the_default_seasons_first_episode(load_detailwindow, monkeypatch):
+    """`DetailWindow.start()` fires the prefetch for the FIRST episode of
+    the default (first non-Specials) season - the one already selected
+    (row 0) the moment this window is shown - not just the first video
+    in file order (which would be the Special here)."""
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    captured = []
+    monkeypatch.setattr(
+        ctx.detailwindow, '_prefetch_s4me_streams', lambda stype, vid: captured.append((stype, vid)),
+    )
+    meta = {
+        'id': 'tt1',
+        'videos': [
+            {'id': 'v-special', 'season': 0, 'episode': 1, 'title': 'A Special'},
+            {'id': 'v-1x02', 'season': 1, 'episode': 2, 'title': 'Ep Two'},
+            {'id': 'v-1x01', 'season': 1, 'episode': 1, 'title': 'Ep One'},
+        ],
+    }
+
+    win.start(meta, 'series')
+
+    assert captured == [('series', 'v-1x01')]
+
+
+def test_start_prefetches_none_for_a_season_with_no_episodes(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    captured = []
+    monkeypatch.setattr(
+        ctx.detailwindow, '_prefetch_s4me_streams', lambda stype, vid: captured.append((stype, vid)),
+    )
+
+    win.start({'id': 'tt1', 'videos': []}, 'series')
+
+    assert captured == [('series', None)]
+
+
+
 def test_start_produces_no_rows_for_a_meta_with_no_videos(load_detailwindow):
     ctx = load_detailwindow()
     win = _make_window(ctx.detailwindow)

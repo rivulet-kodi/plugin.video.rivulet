@@ -30,6 +30,8 @@ payloads `lib.library` builds (`library_add_payload`/
 `_open_context_menu()` for why the row wording is fetched live every
 time rather than cached.
 """
+import threading
+
 import xbmcgui
 
 from lib.ui.playbackmeta import episode_code as _pm_episode_code
@@ -286,6 +288,58 @@ def _watched_percent(progress):
     return min(100, int(round((position_ms / duration_ms) * 100)))
 
 
+def _prefetch_s4me_streams(stype, video_id):
+    """Best-effort, non-blocking warm-up of the S4Me bridge's own
+    per-stream cache (see resources/s4me_bridge/bridge.py's 30-minute
+    cache) for `video_id`, fired from a background daemon thread while
+    the user is still browsing this episode list rather than waiting on
+    it once they actually open the streams picker.
+
+    Only ever targets the builtin `flags.builtin == lib.s4me.BUILTIN_ID`
+    addon entry (see `lib.store.Store.set_builtin_addon`) - firing an
+    extra request at every OTHER installed addon just to warm one of
+    them would be needlessly invasive, and this addon's own transport
+    url/cache semantics are the only ones this is even trying to help.
+    `Store.get_enabled_addons()` already excludes a disabled/offline
+    entry, so a bridge the user turned off (or that is not currently
+    running) is silently skipped, exactly like every other addon fetch
+    already treats it.
+
+    No-ops immediately (no thread spawned) for a falsy `video_id` -
+    nothing to prefetch, e.g. a season with zero episodes. Every
+    failure inside the background thread (no such addon, a dead/slow
+    bridge, a malformed response) is swallowed silently, with no
+    `xbmc.log()` call from inside the thread at all: this exists purely
+    to warm a cache with no actionable signal of its own - the real,
+    user-visible fetch `lib.ui.streamswindow.open_streams()` makes
+    later is what must actually succeed or fail visibly, not this one -
+    and a background thread reaching back into `xbmc`/`lib.ui.compat`
+    well after this window (and its test harness, if any) may already
+    have torn down is one dependency fewer to get wrong.
+    """
+    if not video_id:
+        return
+
+    def _worker():
+        try:
+            from lib.s4me import BUILTIN_ID
+            from lib.ui.dependencies import get_client, get_store
+            addon = next(
+                (a for a in get_store().get_enabled_addons()
+                 if (a.get('flags') or {}).get('builtin') == BUILTIN_ID),
+                None,
+            )
+            transport_url = addon.get('transportUrl') if addon else None
+            if not transport_url:
+                return
+            get_client().streams(transport_url, stype, video_id)
+        except Exception:  # noqa: BLE001 - best-effort cache warm-up only, never surfaces
+            pass
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+
 class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
     """See module docstring. Built/run via `open_detail()` - only for a
     series (a title with episodes); a movie never reaches this window.
@@ -309,7 +363,10 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
     def start(self, meta, stype):
         """doModal() showing `meta`'s episode list. Returns True if
         playback started somewhere down the chain (the caller should
-        also close)."""
+        also close). Also fires `_prefetch_s4me_streams()` for the
+        first episode of the default season - the one already selected
+        (row 0) the moment this window is shown - so its cache entry is
+        warm by the time the user actually picks it."""
         self.meta = meta or {}
         self.stype = stype
         self.should_close_caller = False
@@ -318,6 +375,8 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         self._video_by_id = {video.get('id'): video for video in self.videos}
         self.season_groups = _group_by_season(self.meta.get('videos'))
         self.season_index = self._default_season_index()
+        active = self._active_videos()
+        _prefetch_s4me_streams(self.stype, active[0].get('id') if active else None)
         self.doModal()
         return self.should_close_caller
 

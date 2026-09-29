@@ -159,6 +159,50 @@ def is_adult_catalog(catalog, manifest=None):
     return False
 
 
+def is_adult_manifest(manifest):
+    """Whether `manifest` (a full Stremio addon manifest, as embedded in
+    an `addon_catalog` entry - see `lib.stremio.addoncatalogs`) looks
+    adult.
+
+    Signals are checked in order, and the first that gives a definite
+    answer wins - same shape as `is_adult_meta()`:
+
+    1. `manifest['behaviorHints']['adult']`, if present and parseable as
+       a bool - authoritative, same precedence `is_adult_meta()` gives
+       its own explicit `adult` field.
+    2. `manifest['types']` naming an adult type (`xxx`/`adult`, or a
+       marker word) - an addon that serves nothing BUT adult content is
+       adult even with an innocuously-named catalog.
+    3. `id`/`name`/`description` containing an adult marker word.
+    4. Any of `manifest['catalogs']` looking adult per
+       `is_adult_catalog()` - `addon_catalog` browsing
+       (`lib.ui.addoncatalogwindow`) installs a whole addon at once, so
+       one adult catalog is enough reason to keep the entire manifest
+       out of a hidden-adult listing, not just that one catalog.
+
+    Returns False for anything that isn't a dict (no signal to read).
+    """
+    if not isinstance(manifest, dict):
+        return False
+    behavior_hints = manifest.get('behaviorHints')
+    if isinstance(behavior_hints, dict) and behavior_hints.get('adult') is not None:
+        explicit = _coerce_bool(behavior_hints['adult'])
+        if explicit is not None:
+            return explicit
+    types = manifest.get('types') or []
+    if isinstance(types, str):
+        types = [types]
+    if any(_type_is_adult(t) for t in types):
+        return True
+    if (_contains_marker(manifest.get('id')) or _contains_marker(manifest.get('name'))
+            or _contains_marker(manifest.get('description'))):
+        return True
+    for catalog in manifest.get('catalogs') or []:
+        if is_adult_catalog(catalog, manifest):
+            return True
+    return False
+
+
 def filter_metas(metas):
     """The subset of `metas` for which `is_adult_meta()` is False, order
     preserved. Always returns a new list - never mutates `metas`."""

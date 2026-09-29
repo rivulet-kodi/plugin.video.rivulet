@@ -962,6 +962,7 @@ def main():
                 lambda: bool(xbmc.getCondVisibility("System.HasAddon(%s)" % s4me.S4ME_ADDON_ID)),
                 xbmc.executebuiltin,
                 store,
+                log_fn=lambda message: log(xbmc.LOGWARNING, "s4me bridge: %s" % message),
             )
         except Exception as exc:  # noqa: BLE001 - a bridge sync failure must never crash the service loop
             log(xbmc.LOGWARNING, f"s4me bridge sync failed: {exc}")
@@ -1487,6 +1488,19 @@ def main():
 
         if monitor.waitForAbort(interval):
             break
+
+    # Kodi never delivers the abort to the RunScript-launched bridge in
+    # time: observed live, its xbmc.Monitor was still polling
+    # waitForAbort() well after "Stopping the application", Kodi killed
+    # it after 5s and then hung on quit waiting for its threads. This
+    # service does see the abort, so it tells the bridge to stop itself
+    # over POST /shutdown, which runs the bridge's own cleanup.
+    try:
+        bridge_port = s4me_bridge.launched_port()
+        if bridge_port is not None:
+            s4me.shutdown_bridge(bridge_port)
+    except Exception as exc:  # noqa: BLE001 - shutdown must continue regardless
+        log(xbmc.LOGWARNING, "s4me bridge shutdown failed: %r" % (exc,))
 
     if state.proc is not None:
         log(xbmc.LOGINFO, "shutting down embedded server")

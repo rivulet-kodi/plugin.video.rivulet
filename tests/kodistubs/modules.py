@@ -54,7 +54,7 @@ def _declared_control_ids(xml_name):
     return ids
 
 
-def make_xbmc(env, info_labels=None):
+def make_xbmc(env, info_labels=None, cond_visibility=None):
     module = types.ModuleType('xbmc')
     module.LOGDEBUG = 0
     module.LOGINFO = 1
@@ -62,6 +62,15 @@ def make_xbmc(env, info_labels=None):
     module.LOGERROR = 3
 
     labels = dict(info_labels or {})
+    #: `xbmc.getCondVisibility()` fake: a plain dict of condition string ->
+    #: bool (unlisted conditions default to False, matching a real Kodi
+    #: with nothing special installed/enabled) - `lib.ui.player`'s
+    #: `_inputstream_adaptive_available()` is the only production caller
+    #: today.
+    conditions = dict(cond_visibility or {})
+
+    def getCondVisibility(condition):
+        return bool(conditions.get(condition, False))
 
     def log(msg, level=module.LOGDEBUG):
         env.log_calls.append((msg, level))
@@ -84,6 +93,7 @@ def make_xbmc(env, info_labels=None):
     module.log = log
     module.executebuiltin = executebuiltin
     module.getInfoLabel = getInfoLabel
+    module.getCondVisibility = getCondVisibility
     module.getLocalizedString = getLocalizedString
 
     class Monitor:

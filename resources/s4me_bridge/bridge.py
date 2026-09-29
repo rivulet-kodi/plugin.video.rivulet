@@ -23,7 +23,8 @@ ONLY when the opt-in `s4me_enable` setting is on AND
 `System.HasAddon(plugin.video.s4me)` is true. Serves the Stremio addon
 protocol on `127.0.0.1:<port>` for as long as this process's own
 `xbmc.Monitor` stays un-aborted (i.e. for the rest of the Kodi session, or
-until Kodi shuts down).
+until Kodi shuts down) OR until a `POST /shutdown` request arrives (see
+`_shutdown_cleanup()` -- the ONE cleanup path both exits share).
 
 `sys.argv[1]` is the port -- the ONLY thing passed as a `RunScript()` arg
 (see `lib.s4me.run_script_command`'s docstring for why a second
@@ -90,10 +91,14 @@ _MAX_CHANNEL_WORKERS = 6
 #: finish and cache its complete result (see `_cache_late()`).
 _LATE_COMPLETION_SECONDS = 60.0
 _SEARCH_LANGUAGE = "it"
-#: Overall wall-clock budget for one /stream request's whole channel
-#: fan-out -- "return whatever resolved in time" rather than block on a
-#: slow/dead channel.
-_REQUEST_BUDGET_SECONDS = 12.0
+#: Overall wall-clock budget for one /stream request, counted from its
+#: arrival (the TMDB title lookup included) -- "return whatever resolved
+#: in time" rather than block on a slow/dead channel. It must fit inside
+#: `lib.stremio.addons.AddonClient`'s 15s request timeout with room for
+#: the response itself: counted only from the fan-out's start, as it once
+#: was, a first request measured 13.4s end to end on a desktop, so on a
+#: slower box Rivulet gave up before the bridge answered.
+_REQUEST_BUDGET_SECONDS = 11.0
 #: Blocking-I/O ceiling applied to Stream4Me's own HTTP layer (see
 #: `_bound_channel_io_timeout()`) -- bounds every `core.httptools
 #: .downloadpage()` call a channel's search/findvideos/resolve makes
@@ -114,6 +119,21 @@ _REQUEST_BUDGET_SECONDS = 12.0
 #: channel fan-out makes, in this process alone.
 _CHANNEL_IO_TIMEOUT_SECONDS = 8.0
 _CACHE_TTL_SECONDS = 30 * 60
+
+#: A channel whose pipeline raises `_CHANNEL_FAILURE_THRESHOLD` times in
+#: a row is skipped for `_CHANNEL_COOLDOWN_SECONDS` -- see
+#: `bh.ChannelBackoff`'s own docstring and `_channel_task()` below for the
+#: success/failure boundary.
+_CHANNEL_FAILURE_THRESHOLD = 3
+_CHANNEL_COOLDOWN_SECONDS = 10 * 60
+
+#: How often the main loop wakes to check `_SHUTDOWN_EVENT` between
+#: `xbmc.Monitor.waitForAbort()` polls -- short enough that a `POST
+#: /shutdown` response (already sent before this is even noticed) is
+#: followed by an actual process exit within a fraction of a second,
+#: not the ~1s a coarser poll would risk added on top of Kodi's own
+#: "script didn't stop in 5 seconds" patience.
+_MONITOR_POLL_SECONDS = 0.5
 
 
 def _log(message, level_error=False, level_debug=False):
@@ -150,6 +170,29 @@ def _bound_channel_io_timeout():
         httptools.HTTPTOOLS_DEFAULT_DOWNLOAD_TIMEOUT = _CHANNEL_IO_TIMEOUT_SECONDS
     except Exception as exc:  # noqa: BLE001 - a best-effort timeout tweak must never block startup
         _log("could not bound Stream4Me's httptools timeout: %r" % (exc,), level_error=True)
+
+
+def _log_s4me_version(s4me_root):
+    """Log Stream4Me's own addon version and, if readable, the local git
+    commit its updater last synced to (`platformcode.updater`'s own
+    `trackingFile`, a `last_commit.txt` at its addon root) -- one line of
+    startup context a bug report against a specific S4Me install/fork
+    state otherwise has no way to recover, since nothing else this bridge
+    logs identifies which S4Me code it is actually running against.
+    Best-effort throughout: neither read is allowed to block startup."""
+    version = "unknown"
+    try:
+        import xbmcaddon
+        version = xbmcaddon.Addon(S4ME_ADDON_ID).getAddonInfo("version") or "unknown"
+    except Exception as exc:  # noqa: BLE001 - a version-read failure must never block startup
+        _log("could not read Stream4Me's addon version: %r" % (exc,), level_error=True)
+    commit = None
+    try:
+        with open(os.path.join(s4me_root, "last_commit.txt"), encoding="utf-8") as fh:
+            commit = fh.read().strip()
+    except OSError:
+        commit = None
+    _log("Stream4Me version %s (commit %s)" % (version, commit or "unknown"))
 
 
 def _install_s4me_path(s4me_root):
@@ -240,8 +283,10 @@ def _resolve_title(imdb_id, search_type):
 
 def _search_channel(channel_id, title, content_type):
     """Run one Stream4Me channel's own `search()` entry point. Returns its
-    raw itemlist (a list of `core.item.Item`), or `[]` on any failure --
-    an unavailable/broken channel must never abort the whole request."""
+    raw itemlist (a list of `core.item.Item`, possibly empty -- a
+    legitimate "no match on this channel"), or `None` if the call itself
+    raised: a real breakage `_channel_task()` counts against
+    `bh.ChannelBackoff`, unlike an empty result."""
     try:
         from core.item import Item
         module = __import__("channels.%s" % channel_id, None, None, ["channels.%s" % channel_id])
@@ -252,93 +297,354 @@ def _search_channel(channel_id, title, content_type):
         return module.search(item, title) or []
     except Exception as exc:  # noqa: BLE001 - one broken channel must never abort the request
         _log("channel %s search failed: %r" % (channel_id, exc), level_error=True)
-        return []
+        return None
 
 
-def _episodes_for(channel_id, show_item, season, episode):
-    """Call the channel's `episodios()` on the matched show item, and
-    return the single episode Item matching `(season, episode)`, or
-    `None`."""
+def _episodes_list(channel_id, show_item):
+    """Call the channel's `episodios()` on the matched show item once --
+    cached at show level by `_streams_for_channel()` alongside the match
+    itself (`_MATCH_CACHE`), so a second episode of the same show never
+    re-fetches it. Returns the raw itemlist (possibly empty), or `None`
+    if the call itself raised (see `_search_channel()`'s docstring for
+    the same empty-vs-`None` distinction and why it matters for
+    `bh.ChannelBackoff`)."""
     try:
         module = __import__("channels.%s" % channel_id, None, None, ["channels.%s" % channel_id])
-        episodes = module.episodios(show_item) or []
-        for ep_item in episodes:
-            ep_labels = getattr(ep_item, "infoLabels", {}) or {}
-            ep_season = str(bh.label_value_or(
-                ep_labels.get("season"), getattr(ep_item, "season", ""),
-            ))
-            ep_episode = str(bh.label_value_or(
-                ep_labels.get("episode"), getattr(ep_item, "episode", ""),
-            ))
-            if ep_season == str(season) and ep_episode == str(episode):
-                return ep_item
+        return module.episodios(show_item) or []
     except Exception as exc:  # noqa: BLE001 - never abort the request over one channel's listing
         _log("channel %s episodios failed: %r" % (channel_id, exc), level_error=True)
-    return None
+        return None
 
 
 def _find_videos(channel_id, item):
     """Call the channel's `findvideos()` on a matched movie/episode item.
-    Returns the resulting itemlist (server items), or `[]`."""
+    Returns the resulting itemlist (server items, possibly empty), or
+    `None` if the call itself raised (see `_search_channel()`'s
+    docstring)."""
     try:
         module = __import__("channels.%s" % channel_id, None, None, ["channels.%s" % channel_id])
         return module.findvideos(item) or []
     except Exception as exc:  # noqa: BLE001 - never abort the request over one channel's resolve
         _log("channel %s findvideos failed: %r" % (channel_id, exc), level_error=True)
-        return []
+        return None
+
+
+#: Serializes resolves per Stream4Me server -- see `bh.KeyedLocks`. Also
+#: guards `servers.mega`'s own module-global `c`/`files` state across
+#: `_resolve_mega_target()` calls -- see that function's docstring.
+_SERVER_LOCKS = bh.KeyedLocks()
+
+#: Per-(channel, show/movie identity) cache of `(matched_item, episodes)`
+#: -- see `bh.match_cache_key()`. `episodes` is the channel's own
+#: `episodios()` result for a series (`None` for a movie, or when not yet
+#: fetched), so a second episode of an already-matched show skips BOTH
+#: the search and the episodios() call, not just the search.
+_MATCH_CACHE = bh.TTLCache(_CACHE_TTL_SECONDS)
+
+#: Per-channel consecutive-failure tracker -- see `bh.ChannelBackoff` and
+#: `_channel_task()`.
+_CHANNEL_BACKOFF = bh.ChannelBackoff(
+    failure_threshold=_CHANNEL_FAILURE_THRESHOLD, cooldown_seconds=_CHANNEL_COOLDOWN_SECONDS,
+)
+
+#: This process's own listening port, set once by `main()` before it
+#: starts serving. Module-level rather than threaded through every call:
+#: `_shape_mega_stream()` needs to build a `/play/<key>` url from deep
+#: inside the per-channel resolve pipeline, and there is exactly one port
+#: for this whole process's lifetime.
+_BRIDGE_PORT = None
+
+#: key -> `(channel_id, raw_url)` for a mega server item awaiting its
+#: deferred `/play/<key>` resolve -- see `_shape_mega_stream()`'s
+#: docstring for why mega cannot resolve at LIST time like every other
+#: server. Shares `_CACHE_TTL_SECONDS` with `_BridgeState.cache`: a
+#: stream response offering this url can be served from that cache for
+#: just as long, so the key it references must stay valid at least that
+#: long too.
+_MEGA_PLAY_REGISTRY = bh.TTLCache(_CACHE_TTL_SECONDS)
+
+#: key -> `{"client": <servers.mega Client>, "target": url}`. NOT a
+#: `TTLCache`: entries are pruned by the megaserver `Client`'s own
+#: liveness (`.running`), not by time -- see `_resolve_mega_play()`.
+#: Guarded by `_SERVER_LOCKS.lock_for("mega")`, the same lock the
+#: module-global-clobbering resolve itself already needs.
+_MEGA_PLAY_SESSIONS = {}  # type: dict
+
+#: Signalled by `POST /shutdown` (see `_make_handler()`) so `main()`'s
+#: loop exits without waiting for `xbmc.Monitor.abortRequested()`.
+_SHUTDOWN_EVENT = threading.Event()
+
+
+def _browser_user_agent():
+    """Stream4Me's own browser User-Agent (`httptools.default_headers`),
+    the one its `play_video()` sends to the player; `None` if unavailable."""
+    try:
+        from core import httptools
+        return httptools.default_headers.get("User-Agent")
+    except Exception:  # noqa: BLE001 - a missing UA only costs the header, never the stream
+        return None
+
+
+def _guard_server_module(server):
+    """Install `bh.guard_video_check()` on `servers.<server>`'s
+    `test_video_exists()`. `core.servertools` imports the same cached
+    module object, so its resolve sees the guarded check. Call with that
+    server's `_SERVER_LOCKS` lock held."""
+    try:
+        module = __import__("servers.%s" % server, None, None, ["servers.%s" % server])
+    except Exception:  # noqa: BLE001 - servertools reports an unimportable server itself
+        return
+    check = getattr(module, "test_video_exists", None)
+    if check is not None:
+        module.test_video_exists = bh.guard_video_check(check)
+
+
+def _current_mega_client():
+    """The `Client` instance Stream4Me's own `servers.mega` module last
+    created. `test_video_exists()` sets it via a bare `global c`
+    assignment (exactly like the `files` module global `guard_video_check()`'s
+    docstring describes), so this is only ever meaningful right after a
+    resolve. `None` if that module was never imported/resolved."""
+    module = sys.modules.get("servers.mega")
+    return getattr(module, "c", None) if module is not None else None
+
+
+def _resolve_mega_target(raw_url):
+    """Run Stream4Me's own mega resolve chain (guarded
+    `test_video_exists()` + `get_video_url()`, via
+    `core.servertools.resolve_video_urls_for_playing()`) for one raw
+    server-item url. Returns the FIRST resolved play url -- the
+    megaserver proxy's own `http://127.0.0.1:80xx/...` address the
+    player must actually GET -- or `None` on any failure.
+
+    Must be called with `_SERVER_LOCKS.lock_for("mega")` held: like every
+    other server this shares that lock with, `servers/mega.py` hands
+    state from its check to its resolve through module globals (`c`,
+    `files`), so two concurrent resolves can each read the other's
+    result."""
+    try:
+        from core import servertools
+        _guard_server_module("mega")
+        video_urls, video_exists, _errors = servertools.resolve_video_urls_for_playing(
+            "mega", raw_url, muestra_dialogo=False,
+        )
+    except Exception as exc:  # noqa: BLE001 - never fail the redirect over one resolve's crash
+        _log("mega resolve failed: %r" % (exc,), level_error=True)
+        return None
+    if not video_exists or not video_urls:
+        return None
+    for entry in video_urls:
+        if isinstance(entry, (list, tuple)) and len(entry) >= 2 and entry[1]:
+            url, _resolved_headers = bh.split_kodi_url(entry[1])
+            return url
+    return None
+
+
+def _register_mega_play(channel_id, raw_url):
+    """Register one mega server item for on-demand `/play/<key>` resolve
+    -- see `_shape_mega_stream()`'s docstring. Returns the fresh key."""
+    key = bh.generate_play_key()
+    _MEGA_PLAY_REGISTRY.set(key, (channel_id, raw_url))
+    return key
+
+
+def _shape_mega_stream(channel_id, raw_url, quality):
+    """A mega server item becomes a stream pointing at THIS bridge's own
+    `/play/<key>` instead of a directly resolved url.
+
+    Resolving now (at LIST time, like every other server) would almost
+    certainly hand out a dead url: `servers/mega.py` resolves by starting
+    an in-process megaserver proxy on a random `127.0.0.1:80xx` port that
+    auto-shuts-down ~20s later unless a player connects (see
+    `lib.megaserver.client.Client`), but this bridge's response can sit in
+    `_BridgeState.cache` for up to `_CACHE_TTL_SECONDS` before anyone
+    plays it. Worse, a SECOND listing-time resolve (a different title, or
+    the same one re-listed) clobbers `servers/mega.py`'s own
+    module-global file list before the first title ever played --
+    observed live as "Il padrino" served "Le ali della libertà".
+
+    Deferring the resolve to the moment the player actually GETs the url
+    (`_resolve_mega_play()`) sidesteps both: at most one resolve happens
+    per key, exactly when its proxy is actually needed, and Kodi's own
+    re-GET on seek reuses that SAME proxy instead of starting another.
+
+    `description` mirrors `servers/mega.py`'s own `get_video_url()`
+    convention (`"<ext> [mega]"`) as closely as possible without knowing
+    the real filename ahead of the deferred resolve."""
+    key = _register_mega_play(channel_id, raw_url)
+    play_url = "http://127.0.0.1:%d/play/%s" % (_BRIDGE_PORT, key)
+    return bh.shape_stream(channel_id, "[mega]", play_url, quality=quality)
+
+
+def _resolve_mega_play(key):
+    """Resolve (or reuse) the actual megaserver proxy url one
+    `GET /play/<key>` request should redirect to. Returns the target url,
+    or `None` for an unknown/expired key or a failed resolve (the
+    handler turns that into a 404).
+
+    Reuses the PREVIOUS session's target while its megaserver `Client` is
+    still `.running` -- Kodi re-GETs the same url on every seek, and a
+    fresh resolve per seek would each start a brand new megaserver proxy
+    on a random port, orphaning the one already feeding the player mid-
+    playback. Once that `Client` has auto-shut-down, the next GET for the
+    same key resolves fresh (a new proxy, a new session)."""
+    entry = _MEGA_PLAY_REGISTRY.get(key)
+    if entry is None:
+        return None
+    _channel_id, raw_url = entry
+    with _SERVER_LOCKS.lock_for("mega"):
+        session = _MEGA_PLAY_SESSIONS.get(key)
+        if session is not None and getattr(session["client"], "running", False):
+            return session["target"]
+        target = _resolve_mega_target(raw_url)
+        if target is None:
+            _MEGA_PLAY_SESSIONS.pop(key, None)
+            return None
+        _MEGA_PLAY_SESSIONS[key] = {"client": _current_mega_client(), "target": target}
+        if len(_MEGA_PLAY_SESSIONS) > 256:
+            # Bounded: drop sessions whose registry entry has since
+            # expired (their stream response is long gone, so no future
+            # GET can possibly reuse them).
+            for stale_key in list(_MEGA_PLAY_SESSIONS):
+                if _MEGA_PLAY_REGISTRY.get(stale_key) is None:
+                    _MEGA_PLAY_SESSIONS.pop(stale_key, None)
+        return target
 
 
 def _resolve_streams_for_server_item(channel_id, server_item):
     """Resolve one server item (as produced by a channel's
-    `findvideos()`) into zero or more Stremio `stream` objects via
-    `core.servertools.resolve_video_urls_for_playing()`."""
+    `findvideos()`) into zero or more Stremio `stream` objects, carrying
+    the request headers Stream4Me's own player would send (see
+    `bh.playback_headers()`), the adaptive manifest hint (see
+    `bh.adaptive_manifest_type()`), and any subtitle url (see
+    `bh.subtitle_url_from_entry()`). `mega` items are deferred instead of
+    resolved here -- see `_shape_mega_stream()`."""
     server = getattr(server_item, "server", "") or ""
     raw_url = getattr(server_item, "url", "") or ""
-    if not server or not raw_url:
+    if not server or not raw_url or not bh.is_servable(server, raw_url):
         return []
-    url, headers = bh.split_kodi_url(raw_url)
+    quality = getattr(server_item, "quality", None)
+    if server == "torrent":
+        # Stream4Me's torrent "resolver" only echoes the url back (to hand
+        # it to Elementum); Rivulet streams a magnet itself.
+        return [bh.shape_stream(channel_id, "magnet [torrent]", raw_url, quality=quality)]
+    if server == "mega":
+        return [_shape_mega_stream(channel_id, raw_url, quality)]
+    page_url, _page_headers = bh.split_kodi_url(raw_url)
     try:
         from core import servertools
-        video_urls, video_exists, _errors = servertools.resolve_video_urls_for_playing(
-            server, url, muestra_dialogo=False,
-        )
+        with _SERVER_LOCKS.lock_for(server):
+            _guard_server_module(server)
+            # The raw url, headers and all, exactly as Stream4Me's own
+            # play path passes it (some servers parse the `|` suffix).
+            video_urls, video_exists, _errors = servertools.resolve_video_urls_for_playing(
+                server, raw_url, muestra_dialogo=False,
+            )
     except Exception as exc:  # noqa: BLE001 - never abort the request over one server's resolve
         _log("resolve failed for server %s: %r" % (server, exc), level_error=True)
         return []
     if not video_exists or not video_urls:
         return []
-    quality = getattr(server_item, "quality", None)
-    return [
-        bh.shape_stream(channel_id, description, resolved_url, headers=headers, quality=quality)
-        for description, resolved_url in video_urls
-        if resolved_url
-    ]
+    user_agent = _browser_user_agent()
+    referer = getattr(server_item, "referer", "")
+    manifest = getattr(server_item, "manifest", "")
+    drm = bh.drm_hint(getattr(server_item, "drm", ""), getattr(server_item, "license", ""))
+    streams = []
+    for entry in video_urls:
+        # Servers return [label, url] and sometimes extra trailing fields
+        # ([label, url, 0, subtitle]); only the first two matter for the
+        # url itself.
+        if not isinstance(entry, (list, tuple)) or len(entry) < 2 or not entry[1]:
+            continue
+        description, resolved = entry[0], entry[1]
+        url, resolved_headers = bh.split_kodi_url(resolved)
+        adaptive = bh.is_adaptive_entry(entry, manifest)
+        headers = bh.playback_headers(
+            server, page_url, referer, resolved_headers, user_agent, adaptive=adaptive,
+        )
+        adaptive_hint = bh.adaptive_manifest_type(entry, manifest) if adaptive else None
+        subtitle_url = bh.subtitle_url_from_entry(entry)
+        streams.append(bh.shape_stream(
+            channel_id, description, url, headers=headers, quality=quality,
+            adaptive_hint=adaptive_hint, subtitle_url=subtitle_url,
+            drm=drm if adaptive else None,
+        ))
+    return streams
 
 
 def _streams_for_channel(channel_id, imdb_id, title, year, tmdb_id, season, episode, content_type):
     """The full per-channel pipeline: search -> title/tmdb_id match ->
-    (episodios for a series) -> findvideos -> resolved streams. Every
-    step already wraps its own S4Me call defensively; this only sequences
-    them and applies the match filter."""
-    results = _search_channel(channel_id, title, content_type)
-    matched = None
-    for candidate in results:
-        info_labels = dict(getattr(candidate, "infoLabels", {}) or {})
-        if bh.result_matches(info_labels, tmdb_id, title, year):
-            matched = candidate
-            break
+    (episodios for a series) -> findvideos -> resolved streams.
+
+    The search match AND (for a series) the episodios() list are cached
+    together per show/movie identity (`_MATCH_CACHE`, keyed by
+    `bh.match_cache_key()`) independent of season/episode: a second
+    episode request for an already-matched show skips straight to
+    `bh.pick_episode()` and `findvideos()`, without re-searching or
+    re-listing episodes.
+
+    Raises if a Stream4Me call itself broke (see `_search_channel()`/
+    `_episodes_list()`/`_find_videos()`'s `None`-vs-empty-list
+    distinction) -- `_channel_task()` is the one place that catches this
+    to drive `bh.ChannelBackoff`; every OTHER "no result" path here
+    (`imdb_id` not found by this channel, no matching episode, no
+    servable server item) returns `[]` and must never count as a
+    failure."""
+    cache_key = bh.match_cache_key(channel_id, content_type, tmdb_id, title, year)
+    cached = _MATCH_CACHE.get(cache_key)
+    if cached is not None:
+        matched, episodes = cached
+    else:
+        results = _search_channel(channel_id, title, content_type)
+        if results is None:
+            raise RuntimeError("channel %s search() raised" % channel_id)
+        matched = None
+        for candidate in results:
+            info_labels = dict(getattr(candidate, "infoLabels", {}) or {})
+            if bh.result_matches(info_labels, tmdb_id, title, year):
+                matched = candidate
+                break
+        episodes = None
+        if matched is not None and season is not None and episode is not None:
+            episodes = _episodes_list(channel_id, matched)
+            if episodes is None:
+                raise RuntimeError("channel %s episodios() raised" % channel_id)
+        _MATCH_CACHE.set(cache_key, (matched, episodes))
+
     if matched is None:
         return []
 
     target_item = matched
     if season is not None and episode is not None:
-        target_item = _episodes_for(channel_id, matched, season, episode)
+        target_item = bh.pick_episode(episodes, season, episode)
         if target_item is None:
             return []
 
+    videos = _find_videos(channel_id, target_item)
+    if videos is None:
+        raise RuntimeError("channel %s findvideos() raised" % channel_id)
+
     streams = []
-    for server_item in _find_videos(channel_id, target_item):
+    for server_item in videos:
         streams.extend(_resolve_streams_for_server_item(channel_id, server_item))
+    return streams
+
+
+def _channel_task(channel_id, imdb_id, title, year, tmdb_id, season, episode, content_type):
+    """Wraps `_streams_for_channel()` to feed `_CHANNEL_BACKOFF`: a raised
+    exception counts as one consecutive failure (see `bh.ChannelBackoff`),
+    a normal return -- EMPTY or not -- resets it. This is the ONE place
+    that decides "channel really broke" apart from "channel searched
+    fine and simply found nothing", so a channel with no matching title
+    is never penalized for it."""
+    try:
+        streams = _streams_for_channel(
+            channel_id, imdb_id, title, year, tmdb_id, season, episode, content_type,
+        )
+    except Exception:
+        _CHANNEL_BACKOFF.record_failure(channel_id)
+        raise
+    _CHANNEL_BACKOFF.record_success(channel_id)
     return streams
 
 
@@ -383,23 +689,28 @@ def _handle_stream_request(state, content_type_param, id_param):
     if cached is not None:
         return {"streams": cached}
 
+    budget = bh.Budget(_REQUEST_BUDGET_SECONDS)
     search_type = "tv" if content_type_param == "series" else "movie"
     resolved = _resolve_title(imdb_id, search_type)
     if resolved is None:
         return {"streams": []}
     title, year, tmdb_id = resolved
 
-    budget = bh.Budget(_REQUEST_BUDGET_SECONDS)
     streams = []
     timed_out = False
-    if channels:
-        pool = ThreadPoolExecutor(max_workers=min(_MAX_CHANNEL_WORKERS, len(channels)))
+    # A channel currently serving its `bh.ChannelBackoff` cooldown is
+    # skipped outright -- not even submitted to the pool -- so a
+    # persistently broken channel costs this request nothing beyond one
+    # dict lookup, instead of a full worker slot and I/O timeout.
+    available_channels = tuple(c for c in channels if _CHANNEL_BACKOFF.is_available(c))
+    if available_channels:
+        pool = ThreadPoolExecutor(max_workers=min(_MAX_CHANNEL_WORKERS, len(available_channels)))
         tasks = {
             channel_id: partial(
-                _streams_for_channel, channel_id, imdb_id, title, year, tmdb_id,
+                _channel_task, channel_id, imdb_id, title, year, tmdb_id,
                 season, episode, content_type_param,
             )
-            for channel_id in channels
+            for channel_id in available_channels
         }
         try:
             def _cache_late(all_streams):
@@ -461,12 +772,33 @@ def _make_handler(state):
             self.end_headers()
             self.wfile.write(body)
 
+        def _redirect(self, target):
+            self.send_response(302)
+            self.send_header("Location", target)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler's own naming convention
             path = self.path.split("?", 1)[0]
             parts = [p for p in path.split("/") if p]
             try:
                 if path == "/manifest.json":
                     self._send_json(bh.build_manifest())
+                    return
+                if path == "/shutdown":
+                    # Only POST may trigger a shutdown: this server has no
+                    # other authentication, and a GET is exactly what a
+                    # third-party page's <img src="http://127.0.0.1:<port>/shutdown">
+                    # would issue -- see lib.s4me.shutdown_bridge()'s own
+                    # POST.
+                    self._send_json({"error": "method not allowed"}, status=405)
+                    return
+                if len(parts) == 2 and parts[0] == "play":
+                    target = _resolve_mega_play(parts[1])
+                    if target is None:
+                        self._send_json({"error": "not found"}, status=404)
+                        return
+                    self._redirect(target)
                     return
                 if len(parts) == 3 and parts[0] == "stream" and parts[2].endswith(".json"):
                     content_type_param = parts[1]
@@ -478,7 +810,63 @@ def _make_handler(state):
                 _log("request handler failed for %s: %r" % (self.path, exc), level_error=True)
                 self._send_json({"error": "internal error"}, status=500)
 
+        def do_POST(self):  # noqa: N802 - BaseHTTPRequestHandler's own naming convention
+            path = self.path.split("?", 1)[0]
+            try:
+                if path == "/shutdown":
+                    # Reply BEFORE signalling: lib.s4me.shutdown_bridge()
+                    # must see its {"ok": true} even though this process
+                    # is about to stop serving.
+                    self._send_json({"ok": True})
+                    _SHUTDOWN_EVENT.set()
+                    return
+                self._send_json({"error": "not found"}, status=404)
+            except Exception as exc:  # noqa: BLE001 - a handler crash must never take the whole server down
+                _log("request handler failed for %s: %r" % (self.path, exc), level_error=True)
+                self._send_json({"error": "internal error"}, status=500)
+
     return Handler
+
+
+def _shutdown_cleanup(server):
+    """Stop serving and best-effort close Stream4Me's own sqlitedict
+    worker (`core.db`) -- its own `service.py`/`platformcode/launcher.py`
+    do the exact same thing on every one of THEIR exit paths ("db need to
+    be closed when not used, it will cause freezes"), so this bridge
+    follows suit rather than leaving that connection's worker thread
+    (`lib.sqlitedict.SqliteMultithread`) to whatever its own daemon-thread
+    fate is. Shared by BOTH exit paths this script has -- Kodi's own
+    `xbmc.Monitor` abort AND `POST /shutdown` -- so neither skips it.
+
+    Logs every thread still alive afterwards at debug (mirrors
+    `launcher.py`'s own `logger.debug(threading.enumerate())`), so a slow
+    Kodi RunScript stop is diagnosable instead of a bare "script didn't
+    stop in 5 seconds" warning with no further clue."""
+    try:
+        server.shutdown()
+        server.server_close()
+    except Exception as exc:  # noqa: BLE001 - shutdown must proceed regardless
+        _log("error stopping HTTP server: %r" % (exc,), level_error=True)
+    try:
+        from core import db
+        db.close()
+    except Exception as exc:  # noqa: BLE001 - best-effort, mirrors Stream4Me's own db.close() call sites
+        _log("could not close Stream4Me's db: %r" % (exc,), level_error=True)
+    # Every megaserver proxy this bridge started runs its own HTTP server
+    # thread; stop them too rather than leave them for Kodi to kill.
+    clients = [session.get("client") for session in list(_MEGA_PLAY_SESSIONS.values())]
+    clients.append(_current_mega_client())
+    for client in clients:
+        try:
+            if client is not None and getattr(client, "running", False):
+                client.stop()
+        except Exception:  # noqa: BLE001 - best-effort, like db.close() above
+            pass
+    try:
+        remaining = [t.name for t in threading.enumerate()]
+        _log("threads remaining at shutdown: %r" % (remaining,), level_debug=True)
+    except Exception:  # noqa: BLE001 - logging must never crash shutdown
+        pass
 
 
 def main():
@@ -523,6 +911,7 @@ def main():
         _log("failed to import Stream4Me's core package, exiting: %r" % (exc,), level_error=True)
         sys.exit(1)
     _bound_channel_io_timeout()
+    _log_s4me_version(s4me_root)
     # Also mirrors Stream4Me's default.py: point TMPDIR at its temp dir so
     # anything it writes through tempfile lands where it expects.
     try:
@@ -532,20 +921,33 @@ def main():
         _log("could not set TMPDIR for Stream4Me: %r" % (exc,), level_error=True)
 
     state = _BridgeState(s4me_root)
-    server = ThreadingHTTPServer(("127.0.0.1", port), _make_handler(state))
+    global _BRIDGE_PORT
+    _BRIDGE_PORT = port
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", port), _make_handler(state))
+    except OSError as exc:
+        # A stale bridge still holding the port (lib.s4me.shutdown_bridge()
+        # not having taken effect yet, or a second Kodi instance) must
+        # exit quietly -- not with a raw traceback that looks like a bug
+        # in THIS bridge -- so BridgeSupervisor's own relaunch backoff is
+        # the only thing that retries it.
+        _log(
+            "could not bind 127.0.0.1:%d, port busy, another bridge is running: %r" % (port, exc),
+            level_error=True,
+        )
+        sys.exit(1)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     _log("serving on 127.0.0.1:%d" % port)
 
     monitor = xbmc.Monitor()
     try:
-        while not monitor.abortRequested():
-            if monitor.waitForAbort(1.0):
+        while not monitor.abortRequested() and not _SHUTDOWN_EVENT.is_set():
+            if monitor.waitForAbort(_MONITOR_POLL_SECONDS):
                 break
     finally:
         _log("shutting down")
-        server.shutdown()
-        server.server_close()
+        _shutdown_cleanup(server)
 
 
 if __name__ == "__main__":

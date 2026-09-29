@@ -69,6 +69,38 @@ STATE_UPDATE_AVAILABLE = 'update-available'
 STATE_INSTALLABLE = 'installable'
 STATE_NEEDS_CONFIGURATION = 'needs-configuration'
 
+#: Built-in community addon-catalog source, always offered by
+#: `lib.ui.addoncatalogwindow` alongside whatever installed addons
+#: declare, regardless of which addons are installed - unlike every
+#: other source this module knows about (`iter_addon_catalogs()`),
+#: nothing has to be installed first to browse it. Each tuple is
+#: `(transport_url, type_, id_, name)`: `transport_url` is fed straight
+#: into `build_resource_url()`/`fetch_addon_catalog()` exactly like an
+#: installed addon's own transportUrl would be, and `name` is only ever
+#: used for the "could not load %s's addon catalog" failure notify -
+#: this source publishes no manifest of its own for a real name to come
+#: from.
+#:
+#: stremio-addons.net aggregates ~650 addons (verified live, vs.
+#: Cinemeta's own ~100-entry "Community addons" catalog), including
+#: several explicitly adult ones - `lib.ui.addoncatalogwindow` is what
+#: filters those via `lib.stremio.contentrating.is_adult_manifest()`
+#: when `home_hide_adult` is on; this module stays a pure protocol
+#: client with no settings/Kodi dependency (module docstring) and does
+#: no filtering of its own.
+#:
+#: The URL below is NOT stremio-addons.net's actual manifest.json (it
+#: serves no Stremio resources of its own under that path) - it exists
+#: only so `build_resource_url(transport_url, 'addon_catalog', 'all',
+#: 'stremio-addons.net')` derives
+#: "https://stremio-addons.net/api/addon_catalog/all/stremio-addons.net.json",
+#: which IS a real, verified-live endpoint returning the standard
+#: `{"addons": [{transportUrl, transportName, manifest}, ...]}` envelope
+#: this module already knows how to parse.
+BUILTIN_ADDON_CATALOG_SOURCES = (
+    ('https://stremio-addons.net/api/manifest.json', 'all', 'stremio-addons.net', 'stremio-addons.net'),
+)
+
 
 def iter_addon_catalogs(addons):
     """Yield `(transport_url, manifest, addon_catalog)` for every

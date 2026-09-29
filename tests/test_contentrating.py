@@ -8,7 +8,12 @@ and the word-boundary matching that keeps a title merely containing an
 adult marker word as a substring (e.g. "Analyze That") from tripping a
 false positive.
 """
-from lib.stremio.contentrating import filter_metas, is_adult_catalog, is_adult_meta
+from lib.stremio.contentrating import (
+    filter_metas,
+    is_adult_catalog,
+    is_adult_manifest,
+    is_adult_meta,
+)
 
 # ---------------------------------------------------------------------------
 # is_adult_meta() - each signal independently
@@ -191,3 +196,88 @@ def test_filter_metas_returns_a_new_list_without_mutating_the_input():
 
 def test_filter_metas_of_empty_list_is_empty_list():
     assert filter_metas([]) == []
+
+
+# ---------------------------------------------------------------------------
+# is_adult_manifest()
+# ---------------------------------------------------------------------------
+
+
+def test_manifest_explicit_behavior_hints_adult_true_flags_manifest():
+    manifest = {'id': 'org.plain', 'name': 'Plain Addon', 'behaviorHints': {'adult': True}}
+    assert is_adult_manifest(manifest) is True
+
+
+def test_manifest_explicit_behavior_hints_adult_false_overrides_adult_type():
+    manifest = {'id': 'org.plain', 'name': 'Plain Addon', 'types': ['xxx'], 'behaviorHints': {'adult': False}}
+    assert is_adult_manifest(manifest) is False
+
+
+def test_manifest_types_naming_an_adult_type_flags_manifest():
+    manifest = {'id': 'org.plain', 'name': 'Untitled Provider', 'types': ['movie', 'xxx']}
+    assert is_adult_manifest(manifest) is True
+
+
+def test_manifest_types_as_a_bare_string_is_accepted():
+    manifest = {'id': 'org.plain', 'name': 'Untitled Provider', 'types': 'hentai'}
+    assert is_adult_manifest(manifest) is True
+
+
+def test_manifest_ordinary_types_do_not_flag_manifest():
+    manifest = {'id': 'org.plain', 'name': 'Plain Addon', 'types': ['movie', 'series']}
+    assert is_adult_manifest(manifest) is False
+
+
+def test_manifest_name_containing_marker_flags_manifest():
+    manifest = {'id': 'org.plain', 'name': 'MindGeek Adult Video HD'}
+    assert is_adult_manifest(manifest) is True
+
+
+def test_manifest_description_containing_marker_flags_manifest():
+    manifest = {'id': 'org.plain', 'name': 'Untitled', 'description': 'The best hentai streams around'}
+    assert is_adult_manifest(manifest) is True
+
+
+def test_manifest_catalog_looking_adult_flags_manifest():
+    manifest = {
+        'id': 'org.plain', 'name': 'Mixed Addon',
+        'catalogs': [{'id': 'top', 'name': 'Popular', 'type': 'movie'},
+                     {'id': 'xxx-top', 'name': 'Popular', 'type': 'movie'}],
+    }
+    assert is_adult_manifest(manifest) is True
+
+
+def test_manifest_ordinary_catalogs_do_not_flag_manifest():
+    manifest = {
+        'id': 'org.plain', 'name': 'Ordinary Addon',
+        'catalogs': [{'id': 'top', 'name': 'Popular', 'type': 'movie'}],
+    }
+    assert is_adult_manifest(manifest) is False
+
+
+def test_manifest_with_no_signals_at_all_is_not_adult():
+    manifest = {'id': 'org.plain', 'name': 'Plain Addon', 'description': 'A perfectly normal addon'}
+    assert is_adult_manifest(manifest) is False
+
+
+def test_manifest_analog_clocks_name_is_not_flagged_by_the_anal_marker():
+    """Same word-boundary false-positive guard `is_adult_meta()`/
+    `is_adult_catalog()` already prove, applied at the manifest level -
+    a real addon called "Analog Clocks" must not trip on "anal"."""
+    manifest = {'id': 'org.analog', 'name': 'Analog Clocks', 'description': 'Wall clock wallpapers'}
+    assert is_adult_manifest(manifest) is False
+
+
+def test_manifest_milford_sound_name_is_not_flagged_by_the_milf_marker():
+    manifest = {'id': 'org.milford', 'name': 'Milford Sound Documentaries'}
+    assert is_adult_manifest(manifest) is False
+
+
+def test_manifest_non_dict_behavior_hints_is_ignored():
+    manifest = {'id': 'org.plain', 'name': 'Plain Addon', 'behaviorHints': 'not-a-dict'}
+    assert is_adult_manifest(manifest) is False
+
+
+def test_non_dict_manifest_is_not_adult():
+    assert is_adult_manifest(None) is False
+    assert is_adult_manifest('not a dict') is False

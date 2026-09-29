@@ -76,7 +76,7 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
 
       - name: Lint (ruff check)
-        run: ruff check lib tests
+        run: ruff check lib tests resources/s4me_bridge tools
 
       - name: Type check (mypy)
         run: mypy

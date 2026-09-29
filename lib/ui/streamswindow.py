@@ -172,6 +172,21 @@ _FILTERS_MATCHED_NOTHING_STRING_ID = 30264
 #: each binge-watching auto-played episode, below.
 _REOPEN_SETTLE_SECONDS = 0.5
 
+#: `_wait_for_playback_end()`'s default `start_timeout` - how long it
+#: waits for `xbmc.Player().isPlaying()` to first report True before
+#: giving up on a stream that never actually started. Raised from an
+#: original 20.0: a live desktop measurement of an inputstream.adaptive
+#: (HLS/DASH) stream opening through Kodi's player showed a real 19.8s
+#: gap between `play_direct()` returning and `isPlaying()` finally going
+#: True - a slower device, or a plain ffmpeg-fallback stream competing
+#: for CPU with muxing, has essentially no margin left at 20.0. This is
+#: purely an upper BOUND on the give-up wait, not a floor a fast stream
+#: is held to: the poll loop below breaks the instant `isPlaying()` goes
+#: True, and every `tick`-second step still re-checks `monitor.
+#: waitForAbort()`, so a user cancel/Kodi shutdown during that wait
+#: exits within one `tick`, exactly as promptly as before this change.
+_PLAYBACK_START_TIMEOUT_SECONDS = 45.0
+
 #: resources/settings.xml keys for the two binge-watching controls.
 _BINGE_ENABLE_SETTING = 'binge_enable'
 _BINGE_COUNTDOWN_SETTING = 'binge_countdown'
@@ -759,7 +774,7 @@ def _close_for_player_handoff(picker):
     picker.close()
 
 
-def _wait_for_playback_end(player=None, monitor=None, start_timeout=20.0, tick=0.5):
+def _wait_for_playback_end(player=None, monitor=None, start_timeout=_PLAYBACK_START_TIMEOUT_SECONDS, tick=0.5):
     """Block until playback `open_streams()` just started has both begun
     and ended, so it can safely reopen the streams picker underneath
     Kodi's player instead of unwinding the whole custom-window stack.
@@ -767,12 +782,18 @@ def _wait_for_playback_end(player=None, monitor=None, start_timeout=20.0, tick=0
     `play_direct()`/`xbmc.Player().play()` is fire-and-forget - there is
     a short real-world gap before `xbmc.Player().isPlaying()` actually
     reports True - so this first polls up to `start_timeout` seconds (in
-    `tick`-second steps) waiting for playback to begin. If it never does
-    (resolution failed past the point `play_direct()` still returned
-    True, or Kodi itself couldn't play the url), there is nothing left
-    to wait out: the user already saw `play_direct()`'s own failure
-    notification, so this returns `(True, False)` (safe to reopen,
-    nothing played so nothing to binge into) once the budget runs out.
+    `tick`-second steps) waiting for playback to begin - see
+    `_PLAYBACK_START_TIMEOUT_SECONDS`'s own docstring for why the
+    default is 45.0, not the original 20.0 (inputstream.adaptive/
+    slow-start streams measured close to that ceiling on real
+    hardware); a user cancel/Kodi abort during this wait is still seen
+    within one `tick` either way - only the GIVE-UP ceiling for a
+    stream that never starts at all moved, not how quickly this loop
+    reacts to either. If it never does start (resolution failed past
+    the point `play_direct()` still returned True, or Kodi itself
+    couldn't play the url), there is nothing left to wait out: the user
+    already saw `play_direct()`'s own failure notification, so this
+    returns `(True, False)` (safe to reopen,
     Once playback DOES begin, it polls again until `isPlaying()` goes
     back to False (stopped/finished).
 
