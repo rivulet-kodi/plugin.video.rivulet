@@ -24,6 +24,17 @@ its own pure-logic helpers are deliberately duplicated in
 import os
 import time
 
+
+def _close_quietly(exc):
+    """Close an `HTTPError`'s response, ignoring failures: on Python 3.8 an
+    `HTTPError` built without a body (`fp=None`) raises `KeyError` from
+    `close()` (tempfile's wrapper has no `file`), which caught CI's 3.8 leg."""
+    try:
+        exc.close()
+    except Exception:  # noqa: BLE001 - closing is best-effort cleanup
+        pass
+
+
 #: Kodi addon id of the community Stream4Me addon this bridge wraps.
 S4ME_ADDON_ID = "plugin.video.s4me"
 
@@ -197,7 +208,7 @@ def probe_manifest_version(port, timeout=PROBE_TIMEOUT_SECONDS):
         try:
             body = exc.read()
         finally:
-            exc.close()
+            _close_quietly(exc)
     except (urllib.error.URLError, OSError, ValueError):
         return None
 
@@ -240,7 +251,7 @@ def shutdown_bridge(port, timeout=PROBE_TIMEOUT_SECONDS):
         with urllib.request.urlopen(request, timeout=timeout):
             pass
     except urllib.error.HTTPError as exc:
-        exc.close()
+        _close_quietly(exc)
     except (urllib.error.URLError, OSError, ValueError):
         pass
 
