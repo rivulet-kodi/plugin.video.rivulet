@@ -144,7 +144,7 @@ playback time — OpenSubtitles v3 is preinstalled — and sorted using the
 > **Android.** Kodi 19+ targets Android API 29 or newer, where Android 10+
 > forbids *executing* a binary from an app's own writable data directory
 > (SELinux W^X). Rivulet therefore installs the server in two forms from the
-> same integrity-checked `stremio-server_Android_arm64` / `_armv7` archive:
+> same integrity-checked `stremio-server_Android_{arm64,armv7,x86_64,i386}` archive:
 > the executable, and `libstremio-server.so`, the same server built as a
 > shared library. It tries the executable first; when Android denies it, the
 > service falls back to **library mode**, loading the `.so` into Kodi's own

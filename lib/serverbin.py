@@ -35,12 +35,12 @@ except ImportError:  # pragma: no cover - exercised only without the dependency
 from lib import procflags
 
 GITHUB_REPO = "M0Rf30/stremio-server-go"
-SERVER_TAG = "v0.16.1"
+SERVER_TAG = "v0.19.0"
 USER_AGENT = "plugin.video.rivulet"
 
 BINARY_NAME = "stremio-server"
 #: The optional stremio-server-go c-shared library build (cmd/libstremio),
-#: packaged inside the same Android arm64/armv7 release archives as
+#: packaged inside the same Android release archives as
 #: BINARY_NAME for c-shared library mode (see lib.libserver.LibraryServer)
 #: -- the SELinux-*enforcing* Android fallback for devices where
 #: verify_executable() finds exec() itself denied (see
@@ -67,7 +67,7 @@ TAG_STAMP_NAME = ".server-tag"
 #: never be slurped whole.
 TAG_STAMP_READ_LIMIT = 64
 # SHA-256 digests for every stremio-server-go SERVER_TAG release asset,
-# computed locally from the downloaded v0.16.1 assets on 2026-09-23 and
+# computed locally from the downloaded v0.19.0 assets on 2026-10-02 and
 # cross-checked against that release's checksums.txt (they agree), then
 # committed here instead of being re-fetched at runtime. Pinning matters
 # because:
@@ -81,7 +81,8 @@ TAG_STAMP_READ_LIMIT = 64
 #    this table (together with SERVER_TAG), so upgrading the bundled
 #    server is a deliberate, auditable decision, not an unattended fetch.
 #
-# The two Android rows arrived with v0.12.1 (re-verified for v0.16.1) and are what make an
+# The Android arm64/armv7 rows arrived with v0.12.1, x86_64/i386 with
+# v0.19.0 (all re-verified for v0.19.0), and are what make an
 # on-device server viable at all: unlike the Linux rows (pure-Go, static)
 # they are cgo builds linked against bionic, verified from the published
 # artifacts as `ELF pie executable ... dynamically linked` with NEEDED
@@ -95,15 +96,17 @@ TAG_STAMP_READ_LIMIT = 64
 # set) for library mode; the archive digest covers it. Re-check both
 # whenever SERVER_TAG moves.
 PINNED_SHA256 = {
-    ("Android", "arm64"): "ae1059b9d3f07822d6963684f74f8213c000d072185848026bc31bc56f1a1ae9",
-    ("Android", "armv7"): "6afea51557d8abbc2857054256c482b8e9390d492067116ba8b0177ff5ba78a6",
-    ("Darwin", "arm64"): "efaab51ec748670e54bb5b866305c8f41eefd02f5448aa151377beccc27471e3",
-    ("Darwin", "x86_64"): "98af45e34d5631a2cdc9974f8bc39101afdc942351290cad892cda5e59ecbc89",
-    ("Linux", "arm64"): "8291f8dacbe1315b6f6f9e45c3eae9238022a80c145917e81c6f49edffabb725",
-    ("Linux", "armv7"): "fb92a3255759af78d122172c2da546515d1c6518c974ca528e616b8831326e49",
-    ("Linux", "x86_64"): "51bd98295ae1d61eafa671f1b2883a21818fad2b42313dd401a53eda5298fbf1",
-    ("Windows", "arm64"): "740588a9839f0507466796ca9763a3c074f1f8cb44be44edf18111b585c15e89",
-    ("Windows", "x86_64"): "2aca16d92d214970ed92938964d6c0920ad66ae6f163bd115925e249b7c0b749",
+    ("Android", "arm64"): "3505190fdc8be56317df68438f6f5ebffa8182192d63ab5a29f267560eb24986",
+    ("Android", "armv7"): "379ed34afc04ff80a565ebfbddd0dfa4575336c931036d3046750cbb87c920a0",
+    ("Android", "i386"): "3ed673a600cad3e8c0271c6133eea60fbfb3bcec764a978f7d4d8f0c41ff268d",
+    ("Android", "x86_64"): "e803e32a0d5a3c565b9eba00e2e582e618aedaa2ef7264d942090c008b965135",
+    ("Darwin", "arm64"): "5c948da62712996d15338ae53c13ffbb8bb607910733292315e30dff868102f2",
+    ("Darwin", "x86_64"): "d1457715c0581035214783a834d2960f64ce60bcca2fd20041d65fc5d43876c0",
+    ("Linux", "arm64"): "cf515070e1217ff9437ccc2e794ad078cd66b61e2b103ef9cc3b1bde622af422",
+    ("Linux", "armv7"): "b9f66aba47f50d21f35d895c90af221fa69aca1cbc24be6316e63a1429ba5bef",
+    ("Linux", "x86_64"): "f4cf8fcdda103be1e3d26f14b4f867240cb7539b7321d2f5a9cc9e70b9791607",
+    ("Windows", "arm64"): "dd020bb2c7cb5a0a0803c6d8cd9fea6cd18dd38cf9e1ec0c63c0003aa26564c9",
+    ("Windows", "x86_64"): "34aae93c028576f8e61a81996eebdf96a1b90b4052bec91c7914779c31d5d169",
 }
 
 
@@ -175,7 +178,7 @@ def platform_key():
     """Return (os_name, arch) matching the goreleaser archive naming.
 
     os_name is one of {"Linux", "Darwin", "Windows", "Android", "iOS",
-    "tvOS"}; arch is one of {"x86_64", "arm64", "armv7"} (or the raw
+    "tvOS"}; arch is one of {"x86_64", "i386", "arm64", "armv7"} (or the raw
     `platform.machine()` value when it doesn't match a known mapping).
     Neither Android nor the Apple mobile systems can be recognised from
     `platform.system()` alone -- they report "Linux" and "Darwin" exactly
@@ -183,7 +186,7 @@ def platform_key():
     `_apple_mobile_os` for the signals that separate them).
 
     Android has pinned assets of its own for armv7/arm64 as of
-    SERVER_TAG v0.12.1 (cgo builds linked against bionic -- see
+    SERVER_TAG v0.12.1 (x86_64/i386 as of v0.19.0) (cgo builds linked against bionic -- see
     PINNED_SHA256's comment for why that matters); any other Android arch
     falls back to the matching Linux row (see select_asset()), and
     iOS/tvOS have no assets at all. The os_name value still lets callers
@@ -202,6 +205,10 @@ def platform_key():
     machine = (platform.machine() or "").lower()
     if machine in ("x86_64", "amd64"):
         arch = "x86_64"
+    elif machine in ("i386", "i686", "x86"):
+        # 32-bit x86: Android-x86 boxes and old emulators running Kodi's
+        # x86 APK. Only Android publishes an i386 asset.
+        arch = "i386"
     elif machine in ("aarch64", "arm64"):
         arch = "arm64"
     elif machine in ("armv7l", "armv6l", "armv8l"):

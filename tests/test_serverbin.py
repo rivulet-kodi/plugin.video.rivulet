@@ -86,6 +86,17 @@ def test_platform_key_android_armv8l_maps_to_armv7(monkeypatch):
     assert platform_key() == ("Android", "armv7")
 
 
+@pytest.mark.parametrize("machine", ["i686", "i386", "x86"])
+def test_platform_key_android_x86_maps_to_i386(monkeypatch, machine):
+    _set_platform(monkeypatch, "Linux", machine, android_root="/system")
+    assert platform_key() == ("Android", "i386")
+
+
+def test_platform_key_android_x86_64(monkeypatch):
+    _set_platform(monkeypatch, "Linux", "x86_64", android_root="/system")
+    assert platform_key() == ("Android", "x86_64")
+
+
 def test_platform_key_unknown_arch_falls_back_to_raw_lowercased_value(monkeypatch):
     _set_platform(monkeypatch, "Linux", "RISCV64")
     assert platform_key() == ("Linux", "riscv64")
@@ -164,29 +175,31 @@ def test_platform_key_macos_arm64_is_not_mistaken_for_apple_mobile(monkeypatch):
 
 # --- PINNED_SHA256 / select_asset -------------------------------------------
 
-# Exact digests reviewed against the v0.16.1 GitHub release: computed
+# Exact digests reviewed against the v0.19.0 GitHub release: computed
 # locally from the downloaded assets and cross-checked against that
 # release's checksums.txt. Any drift here (wrong tag, tampered digest,
 # added/removed platform) must be a deliberate, reviewed edit to
 # lib/serverbin.py.
 EXPECTED_PINNED_SHA256 = {
-    ("Android", "arm64"): "ae1059b9d3f07822d6963684f74f8213c000d072185848026bc31bc56f1a1ae9",
-    ("Android", "armv7"): "6afea51557d8abbc2857054256c482b8e9390d492067116ba8b0177ff5ba78a6",
-    ("Darwin", "arm64"): "efaab51ec748670e54bb5b866305c8f41eefd02f5448aa151377beccc27471e3",
-    ("Darwin", "x86_64"): "98af45e34d5631a2cdc9974f8bc39101afdc942351290cad892cda5e59ecbc89",
-    ("Linux", "arm64"): "8291f8dacbe1315b6f6f9e45c3eae9238022a80c145917e81c6f49edffabb725",
-    ("Linux", "armv7"): "fb92a3255759af78d122172c2da546515d1c6518c974ca528e616b8831326e49",
-    ("Linux", "x86_64"): "51bd98295ae1d61eafa671f1b2883a21818fad2b42313dd401a53eda5298fbf1",
-    ("Windows", "arm64"): "740588a9839f0507466796ca9763a3c074f1f8cb44be44edf18111b585c15e89",
-    ("Windows", "x86_64"): "2aca16d92d214970ed92938964d6c0920ad66ae6f163bd115925e249b7c0b749",
+    ("Android", "arm64"): "3505190fdc8be56317df68438f6f5ebffa8182192d63ab5a29f267560eb24986",
+    ("Android", "armv7"): "379ed34afc04ff80a565ebfbddd0dfa4575336c931036d3046750cbb87c920a0",
+    ("Android", "i386"): "3ed673a600cad3e8c0271c6133eea60fbfb3bcec764a978f7d4d8f0c41ff268d",
+    ("Android", "x86_64"): "e803e32a0d5a3c565b9eba00e2e582e618aedaa2ef7264d942090c008b965135",
+    ("Darwin", "arm64"): "5c948da62712996d15338ae53c13ffbb8bb607910733292315e30dff868102f2",
+    ("Darwin", "x86_64"): "d1457715c0581035214783a834d2960f64ce60bcca2fd20041d65fc5d43876c0",
+    ("Linux", "arm64"): "cf515070e1217ff9437ccc2e794ad078cd66b61e2b103ef9cc3b1bde622af422",
+    ("Linux", "armv7"): "b9f66aba47f50d21f35d895c90af221fa69aca1cbc24be6316e63a1429ba5bef",
+    ("Linux", "x86_64"): "f4cf8fcdda103be1e3d26f14b4f867240cb7539b7321d2f5a9cc9e70b9791607",
+    ("Windows", "arm64"): "dd020bb2c7cb5a0a0803c6d8cd9fea6cd18dd38cf9e1ec0c63c0003aa26564c9",
+    ("Windows", "x86_64"): "34aae93c028576f8e61a81996eebdf96a1b90b4052bec91c7914779c31d5d169",
 }
 
 
-def test_server_tag_is_pinned_to_v0_16_1():
-    assert SERVER_TAG == "v0.16.1"
+def test_server_tag_is_pinned_to_v0_19_0():
+    assert SERVER_TAG == "v0.19.0"
 
 
-def test_pinned_sha256_table_matches_reviewed_v0_16_1_digests_exactly():
+def test_pinned_sha256_table_matches_reviewed_v0_19_0_digests_exactly():
     assert PINNED_SHA256 == EXPECTED_PINNED_SHA256
 
 
@@ -207,7 +220,7 @@ def test_select_asset_returns_deterministic_name_url_and_pinned_digest(
     assert asset is not None
     assert asset["name"] == expected_name
     assert asset["url"] == (
-        "https://github.com/%s/releases/download/v0.16.1/%s" % (GITHUB_REPO, expected_name))
+        "https://github.com/%s/releases/download/v0.19.0/%s" % (GITHUB_REPO, expected_name))
     assert asset["sha256"] == EXPECTED_PINNED_SHA256[(os_name, arch)]
 
 
@@ -215,21 +228,22 @@ def test_select_asset_returns_deterministic_name_url_and_pinned_digest(
     ("Darwin", "armv7"),    # goreleaser ignores {goos: darwin, goarch: arm}
     ("Windows", "armv7"),   # goreleaser ignores {goos: windows, goarch: arm}
     ("Linux", "i386"),      # never built - goarch list is amd64/arm64/arm only
-    ("Android", "i386"),    # no pinned Android row, and no Linux/i386 fallback either
 ])
 def test_select_asset_returns_none_for_unpinned_combos(os_name, arch):
     assert select_asset(os_name, arch) is None
 
 
-def test_select_asset_falls_back_to_matching_linux_row_for_android():
-    """An Android arch upstream builds no asset for -- x86_64, as on an
-    Intel Android TV box -- must fall back to the ("Linux", arch) row
-    rather than refusing: that Linux binary is confirmed (empirically) to
-    exec() and serve correctly on Android once installed somewhere
-    exec-capable. It is pure-Go, so its DNS is broken there (see
-    select_asset()'s docstring), but a server that runs is still strictly
-    better than no server at all."""
-    assert ("Android", "x86_64") not in PINNED_SHA256
+def test_select_asset_falls_back_to_matching_linux_row_for_android(monkeypatch):
+    """An Android arch upstream builds no asset for must fall back to the
+    ("Linux", arch) row rather than refusing: that Linux binary is
+    confirmed (empirically) to exec() and serve correctly on Android once
+    installed somewhere exec-capable. It is pure-Go, so its DNS is broken
+    there (see select_asset()'s docstring), but a server that runs is still
+    strictly better than no server at all. Every arch now has an Android
+    row, so drop one to exercise the fallback."""
+    table = dict(PINNED_SHA256)
+    del table[("Android", "x86_64")]
+    monkeypatch.setattr(serverbin, "PINNED_SHA256", table)
     assert select_asset("Android", "x86_64") == select_asset("Linux", "x86_64")
 
 
@@ -238,11 +252,12 @@ def test_select_asset_prefers_the_pinned_android_row_over_the_linux_fallback():
     win over the same-arch Linux fallback -- that preference is the whole
     point of pinning them, since only those builds resolve DNS on
     Android."""
-    for arch in ("armv7", "arm64"):
+    for arch in ("armv7", "arm64", "x86_64", "i386"):
         asset = select_asset("Android", arch)
         assert asset["name"] == "stremio-server_Android_%s.tar.gz" % arch
         assert asset["sha256"] == EXPECTED_PINNED_SHA256[("Android", arch)]
-        assert asset != select_asset("Linux", arch)
+        if ("Linux", arch) in PINNED_SHA256:
+            assert asset != select_asset("Linux", arch)
 
 
 # --- install_binary --------------------------------------------------------
@@ -304,7 +319,7 @@ def test_install_binary_downloads_verifies_pinned_checksum_and_installs(
     assert progress_calls[-1][1] == len(archive_bytes)
     assert len(fake_requests.calls) == 1
     assert fake_requests.calls[0]["url"] == (
-        "https://github.com/%s/releases/download/v0.16.1/stremio-server_Linux_x86_64.tar.gz"
+        "https://github.com/%s/releases/download/v0.19.0/stremio-server_Linux_x86_64.tar.gz"
         % GITHUB_REPO)
     assert not (tmp_path / ".stremio-server.part").exists()
     assert not os.path.exists(result_path + ".part")
