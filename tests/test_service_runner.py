@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.service_runner's main() supervision loop: the
 xbmc.Monitor-driven loop that spawns/probes/restarts the embedded
 stremio-server-go child, the AutoloadTrigger that opens Rivulet's UI once

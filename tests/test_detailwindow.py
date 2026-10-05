@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.ui.detailwindow: `_episode_rows()`/`_group_by_season()`
 and `DetailWindow` (including its season-selector bar, id `SEASON_BAR`/
 30007), Rivulet's custom replacement for the classical `meta()`/

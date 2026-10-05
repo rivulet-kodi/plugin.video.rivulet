@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Static checks over `resources/skins/Default/1080i/*.xml`.
 
 The skin layer has no compiler: Kodi loads whatever is on disk and, for

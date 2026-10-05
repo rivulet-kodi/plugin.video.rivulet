@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.stremio.streaminfo (pure text/label formatting helpers).
 
 No network access; these functions are pure string/dict transforms over

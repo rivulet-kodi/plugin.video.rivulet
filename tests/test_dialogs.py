@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.ui.dialogs: RivuletProgress/RivuletBusy/RivuletCountdown
 (non-blocking, driven from a caller's own loop - see the module's own
 docstring for why) and confirm()/choose() (blocking doModal() request/

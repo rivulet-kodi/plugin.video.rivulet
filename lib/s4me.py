@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Kodi-independent glue for the optional Stream4Me (S4Me) bridge addon.
 
 Stream4Me (`plugin.video.s4me`, GPL-3, https://github.com/monkeynator/s4me

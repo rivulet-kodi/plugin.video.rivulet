@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Short-TTL disk cache for `views._fetch_meta()` results.
 
 Kodi runs every ``plugin://`` call in a fresh sub-interpreter, so an

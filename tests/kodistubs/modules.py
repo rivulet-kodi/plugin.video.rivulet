@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Factory functions building fresh, per-invocation `xbmc`/`xbmcgui`/
 `xbmcplugin`/`xbmcaddon`/`xbmcvfs` fake module objects, all wired to a
 single shared `Env` recorder (see `fakes.py`).

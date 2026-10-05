@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.ui.compat's Kodi 19 (Matrix, legacy ListItem API) vs
 Kodi >= 20 (Nexus+, InfoTagVideo API) version split.
 

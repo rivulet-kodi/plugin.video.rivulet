@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Process-wide UI dependency provider.
 
 Exactly one `Store`, one `AddonClient`, and one `StremioAPI` back the

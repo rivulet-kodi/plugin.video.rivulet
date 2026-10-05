@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Shared fake xbmc*/xbmcgui/xbmcplugin/xbmcaddon/xbmcvfs stub modules for
 the addon's Kodi-facing layer (`lib.ui.*`), plus a robust install/restore
 mechanism for injecting them into `sys.modules` around a test.

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Protocol tests for lib.stremio.server (streaming-server URL resolution).
 
 Reference: stremio-core src/types/resource/stream.rs (Stream::convert) and

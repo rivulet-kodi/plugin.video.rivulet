@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.ui.streamswindow: StreamsWindow's onInit()/onAction()/
 start() rendering contract - label/background/info-panel building in
 onInit(), the playback_* stream-filter view applied at render time

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """ShowcaseWindow: a fullscreen coverflow overlay for one catalog page.
 
 Ports the reference addon's `platformcode/xbmc_info_window.py::InfoWindow`

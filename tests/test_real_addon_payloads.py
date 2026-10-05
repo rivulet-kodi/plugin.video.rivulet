@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Regression tests for `lib.stremio.streaminfo` against REAL addon payloads.
 
 Every other streaminfo test uses hand-written strings that encode what we

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.ui.router: sys.argv -> action dispatch, exercised against
 the shared fake xbmc/xbmcgui/xbmcplugin/xbmcaddon/xbmcvfs stubs in
 tests/kodistubs (no real Kodi runtime, no network, no subprocess).

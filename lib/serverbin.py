@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Downloads and installs the stremio-server-go binary from GitHub releases.
 
 Pure Python (no Kodi imports) so this module can be exercised directly with

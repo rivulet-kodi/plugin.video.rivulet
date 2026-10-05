@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.procflags: the Windows-only subprocess kwargs that
 suppress the console window Windows would otherwise allocate for a
 console-subsystem child spawned from a GUI process (Kodi).

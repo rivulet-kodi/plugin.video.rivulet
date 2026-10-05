@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.newepisodes: pure "what's new to watch" logic, no Kodi
 imports, no store, no addon client - every branch is exercised here with
 plain dicts and a fixed `now`, mirroring tests/test_binge.py's style for

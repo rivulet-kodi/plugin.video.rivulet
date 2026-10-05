@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """New-episode detection for series the user follows.
 
 Pure Python -- no ``xbmc*`` imports, unit-testable in isolation, same as

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """AddonsWindow: a vertical list of every installed addon - Rivulet's
 add-on manager. Row 0 is a single "Add addons" row that opens a chooser
 for "Browse addon catalogs" (`_open_addon_catalog()`) or "Install from

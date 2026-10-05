@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Binge-watching: "what plays next" - pure logic, no Kodi imports, so
 every branch here is exercised directly by tests/test_binge.py with
 plain dicts (no tests/kodistubs fakes needed).

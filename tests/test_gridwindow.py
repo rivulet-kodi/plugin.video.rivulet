@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.ui.gridwindow: the merged "My Stuff" poster grid,
 exercised against the shared fake xbmc/xbmcgui stubs in tests/kodistubs
 (no real Kodi runtime, no network).

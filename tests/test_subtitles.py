@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.stremio.subtitles (pure Python subtitle discovery/sorting).
 
 collect_subtitles() is driven entirely through the injected `client` seam

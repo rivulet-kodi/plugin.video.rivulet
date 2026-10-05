@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 """Tests for resources/s4me_bridge/bridge_helpers.py: the pure,
 Kodi-independent AND Stream4Me-independent request/response shaping logic
 the S4Me bridge script uses.

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Cinemeta's `feed.json` as a ranking oracle for search results.
 
 `lib.ui.searchwindow._rank_by_title()` can order results by how the

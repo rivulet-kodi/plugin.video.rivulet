@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Suppress the console window Windows allocates for a console-subsystem
 child process spawned from a windowless GUI parent (issue #30).
 

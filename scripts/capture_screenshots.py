@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Capture a curated set of Rivulet screenshots for README.md/site/index.html.
 
 Drives a *running* `kodi-standalone` instance over its raw TCP JSON-RPC

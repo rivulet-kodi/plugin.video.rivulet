@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """open_my_stuff(): the merged "My Stuff" screen - one grid combining
 what the Home menu used to split across two rows ("Continue watching",
 `lib.ui.continuewatching`, and "Library", `lib.ui.librarywindow`) plus a

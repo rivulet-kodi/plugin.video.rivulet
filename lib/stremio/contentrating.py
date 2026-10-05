@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Heuristic adult-content detection for Stremio metas and catalogs.
 
 The Stremio addon protocol has NO official "this is adult content" flag.

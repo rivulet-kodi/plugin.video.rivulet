@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.ui.uicommon: the shared helpers every custom
 `WindowXML` screen (`HomeWindow`, `CatalogPickerWindow`, the coverflow,
 ...) builds on - `BACK_ACTIONS`, `dismiss_busy_dialog()`, `addon_skin_path()`,

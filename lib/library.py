@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Pure-Python LibraryItem construction and playback-progress merging --
 Rivulet's half of what stremio-core calls the "library" ctx layer (no
 ``xbmc*`` imports anywhere in this module, so it is safe to unit test

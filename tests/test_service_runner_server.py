@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for the pure process-management core of lib.service_runner:
 resolve_binary(), is_bundled_binary(), probe_listening(), and
 extra_env_from_settings()/EXTRA_ENV_SETTINGS, plus the ServerProcess class

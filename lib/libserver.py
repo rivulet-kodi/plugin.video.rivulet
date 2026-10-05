@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """ctypes-based supervisor for the stremio-server-go c-shared library
 (``libstremio-server.so``), the SELinux-*enforcing*-Android fallback for
 ``lib.service_runner.ServerProcess``'s fork+exec model. See

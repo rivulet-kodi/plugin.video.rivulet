@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Pure plugin:// URL construction and stream-token encoding.
 
 No dispatch state, no Kodi imports: `url_for()` takes the caller's base

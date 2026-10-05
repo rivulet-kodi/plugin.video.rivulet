@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.ui.binge: pure "what plays next" logic, no Kodi imports
 and no tests/kodistubs fakes needed - every case here is a plain dict in,
 plain dict/tuple out.

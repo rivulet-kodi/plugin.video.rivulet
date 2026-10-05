@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Plugin entry point for plugin.video.rivulet.
 
 Kodi invokes this script directly (not as an import), passing the

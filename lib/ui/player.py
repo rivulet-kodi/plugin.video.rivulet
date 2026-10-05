@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Playback resolution: turn a Stremio Stream object into a Kodi-playable URL.
 
 Kodi calls default.py -> router.run() -> here with the ADDON_HANDLE and the

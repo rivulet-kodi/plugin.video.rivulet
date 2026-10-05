@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Pure, Kodi-independent metadata/formatting helpers for playback resolution.
 
 No xbmc*/network/buffering code here - just string/number transforms over

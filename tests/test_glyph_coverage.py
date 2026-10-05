@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Guard against tofu boxes: text Kodi renders with a font that has no
 glyph for it.
 

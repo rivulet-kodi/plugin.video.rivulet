@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Client for the Stremio account API (https://api.strem.io).
 
 Pure Python -- no ``xbmc*`` imports. Every call is a POST to

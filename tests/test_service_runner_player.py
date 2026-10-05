@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for the playback-progress half of lib.service_runner: the
 _RivuletPlayer subclass built by build_progress_player() -- resume seeks
 (onAVStarted), local progress caching, and remote library sync (push) --

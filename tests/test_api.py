@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Protocol tests for lib.stremio.api.StremioAPI (api.strem.io).
 
 Reference: stremio-core src/types/api/request.rs (APIRequest/AuthRequest/

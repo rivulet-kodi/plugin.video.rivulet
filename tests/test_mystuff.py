@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.ui.mystuff's merge logic - the pure half of the merged
 "My Stuff" screen (`merge_entries()`, `latest_by_title()`,
 `percent_watched()`, `_band_for()`, `resolve_next_up()`), which takes

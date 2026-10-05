@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """DetailWindow: one series title's episode list, shown so the user
 can pick which episode to play before opening the stream picker.
 

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Stdlib-only validation for `resources/language/*/strings.po` catalogs and
 for production references to those catalogs' numeric string ids.
 

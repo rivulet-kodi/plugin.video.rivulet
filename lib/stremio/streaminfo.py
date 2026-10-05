@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Stream label/metadata parsing for the streams view (pure Python, no
 ``xbmc*`` imports).
 

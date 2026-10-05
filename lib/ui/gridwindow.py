@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """GridWindow: the merged "Continue" screen, opened via `open_grid()` -
 one labelled, horizontally-scrolling poster row per band of
 `lib.ui.mystuff`'s merge, stacked vertically in `GridWindow.xml`'s

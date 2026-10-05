@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Installs the addon's recommended advancedsettings.xml template into the
 user's Kodi userdata directory.
 

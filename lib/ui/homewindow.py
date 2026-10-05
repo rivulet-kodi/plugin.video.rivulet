@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """HomeWindow: Rivulet's custom entry-point screen. A vertical menu
 over the addon's fanart; picking a row opens the next screen as a
 nested modal (see `lib.ui.uicommon`'s module docstring for the

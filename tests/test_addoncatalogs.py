@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.stremio.addoncatalogs: the `addon_catalog` protocol
 client and installed-addon-catalog aggregation.
 

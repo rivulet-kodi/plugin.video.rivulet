@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """StreamsWindow: the resolved-source picker for one title/episode -
 Rivulet's custom replacement for the classical `streams()` directory.
 

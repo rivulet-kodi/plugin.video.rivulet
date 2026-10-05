@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Local JSON persistence for installed Stremio addons and account auth.
 
 Pure Python -- no ``xbmc*`` imports, unit-testable in isolation. Two flat

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Kodi-independent addon-setting parsing, shared by the UI process
 (`lib.ui.compat`) and the background service (`lib.service_runner`).
 

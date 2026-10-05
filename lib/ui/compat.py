@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Kodi version-compatibility helpers.
 
 Centralizes the bits that differ between Kodi 19 (Matrix, Python 3 /

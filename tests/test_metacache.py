@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.ui.metacache: the short-TTL disk cache _fetch_meta()
 sits behind. Pure filesystem tests, no Kodi stubs needed - the module
 has no xbmc dependency."""

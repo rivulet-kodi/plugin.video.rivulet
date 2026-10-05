@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """SearchWindow: a persistent search-history/new-query picker. Unlike
 the old bare `open_search()` function (which opened the coverflow
 directly with no window underneath it, so Back from the results fell all

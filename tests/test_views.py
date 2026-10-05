@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.ui.views: the shared addon-fetch/sync helpers
 (`_fetch_meta`, `_fetch_catalog`, `_sync_addons_if_logged_in`,
 `_refresh_addon_manifests`) the custom WindowXML dialogs import lazily,

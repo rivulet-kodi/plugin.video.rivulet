@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.stremio.contentrating (pure heuristic adult-content
 detection - no Kodi imports, no network).
 

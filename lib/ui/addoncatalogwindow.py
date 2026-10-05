@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """AddonCatalogWindow: browse and install addons Rivulet's OWN installed addons
 publish through the `addon_catalog` protocol resource, instead of
 requiring a manifest URL typed with a remote control (`AddonsWindow`'s

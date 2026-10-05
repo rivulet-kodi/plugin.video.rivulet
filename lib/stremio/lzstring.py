@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Dependency-free LZ-String codec: `compress_to_encoded_uri_component` /
 `decompress_from_encoded_uri_component`. Pure stdlib, no Kodi imports.
 

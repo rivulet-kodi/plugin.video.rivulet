@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Rivulet-styled replacements for xbmcgui's native progress/busy/yesno/
 select dialogs (see "Turn 2 — dialogs for 1a" of the UI design).
 

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Shared pytest fixtures for the pure-Python (non-xbmc) layer.
 
 No test in this suite may touch the network. Every HTTP-capable module under

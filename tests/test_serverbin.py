@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.serverbin (stremio-server-go binary download/install).
 
 Asset names/URLs are derived deterministically from GITHUB_REPO/SERVER_TAG;

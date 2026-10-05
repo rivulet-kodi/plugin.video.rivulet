@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Protocol/persistence tests for lib.store.Store.
 
 Reference: DEFAULT_ADDONS should mirror stremio-core's OFFICIAL_ADDONS baseline

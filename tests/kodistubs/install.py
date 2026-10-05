@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Install/restore mechanism for injecting the fake xbmc* modules into
 `sys.modules` around a test, and (re)importing the `lib.ui.*` modules that
 need to bind against them.

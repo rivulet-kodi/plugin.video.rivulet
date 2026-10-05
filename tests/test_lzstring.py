@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.stremio.lzstring (LZ-String codec).
 
 No network access - the reference vectors in

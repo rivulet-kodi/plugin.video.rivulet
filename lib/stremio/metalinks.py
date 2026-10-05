@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Parsing for Stremio Meta Link objects (pure Python, no Kodi imports).
 
 Implements the addon SDK's Meta Link object (`docs/api/responses/meta.md`,

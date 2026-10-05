@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Protocol tests for lib.stremio.addons.
 
 Reference: stremio-core src/types/addon/manifest.rs (Manifest::is_resource_supported),

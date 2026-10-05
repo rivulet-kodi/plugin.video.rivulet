@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Subtitle discovery for playback (pure Python, no ``xbmc*`` imports).
 
 Queries every installed Stremio addon that declares subtitle support for

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.libserver: the ctypes-based supervisor for
 libstremio-server.so (c-shared library mode, the SELinux-enforcing-
 Android fallback for lib.service_runner.ServerProcess's fork+exec model).

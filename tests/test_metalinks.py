@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.stremio.metalinks (Stremio Meta Link parsing).
 
 Pure Python (no Kodi imports), same rationale as tests/test_lzstring.py /

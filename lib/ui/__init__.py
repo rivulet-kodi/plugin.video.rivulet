@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Kodi-facing UI layer for plugin.video.rivulet.
 
 Everything importing xbmc*/xbmcgui/xbmcplugin/xbmcvfs lives under this

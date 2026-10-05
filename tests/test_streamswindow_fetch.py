@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.ui.streamswindow's addon-fetch side of open_streams():
 _supported_stream_addons()/_query_addon_streams() aggregation, the
 safe-category failure-reason contract (_safe_failure_reason()) that

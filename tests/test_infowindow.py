@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.ui.infowindow: the fullscreen coverflow overlay
 (ShowcaseWindow) opened via `open_showcase()` over one catalog page,
 exercised against the shared fake xbmc/xbmcgui stubs in tests/kodistubs

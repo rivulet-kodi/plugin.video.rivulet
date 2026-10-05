@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Kodi background service: supervises a local stremio-server-go process.
 
 Launch interface verified against ~/M0Rf30/stremio-server-go @ cmd/stremio-server/main.go:

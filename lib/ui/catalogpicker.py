@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """CatalogPickerWindow: a vertical list of every installed addon's
 catalogs. Picking a row opens the coverflow (`lib.ui.infowindow`) over
 that catalog's items; picking a TITLE from the coverflow opens

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Plugin URL router: sys.argv -> action dispatch.
 
 Kodi invokes default.py with argv = [base_url, handle, "?querystring"].

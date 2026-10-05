@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Shared helpers for Rivulet's custom `WindowXML` screens.
 
 Rivulet's UI is moving from Kodi directory listings to a small stack of

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Live smoke test for a running Stream4Me bridge. Run before every release.
 
 The bridge leans on Stream4Me internals (channel `search()`/`episodios()`/

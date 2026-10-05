@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.ui.catalogpicker: CatalogPickerWindow, Rivulet's custom
 replacement for the classical `discover()` directory, exercised against the
 shared fake xbmc/xbmcgui stubs in tests/kodistubs (no real Kodi runtime, no

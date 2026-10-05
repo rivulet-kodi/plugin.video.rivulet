@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Recorder + configurable fake objects shared by every fake xbmc* module.
 
 `Env` is the one recorder instance a single `install_kodi_stubs()` call

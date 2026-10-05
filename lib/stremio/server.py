@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """stremio-server-go client (pure Python, no Kodi imports).
 
 Turns Stream protocol objects (stremio-protocol-spec.md #3, stremio-core

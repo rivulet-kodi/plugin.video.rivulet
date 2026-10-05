@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.library: pure-Python LibraryItem construction and
 playback-progress merging (no `xbmc*` imports, no network).
 

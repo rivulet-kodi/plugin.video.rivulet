@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Behavioral tests for the two real Kodi entry-point scripts, `default.py`
 and `service.py`: Kodi invokes each of these as a standalone script (never
 imports them as a module), so they're exercised the same way here, via

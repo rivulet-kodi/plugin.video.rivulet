@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Stremio addon-protocol HTTP client (pure Python, no Kodi imports).
 
 Implements the addon resource protocol exactly as stremio-core does it:

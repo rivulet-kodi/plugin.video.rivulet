@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.ui.searchwindow: SearchWindow, Rivulet's custom
 persistent search-history/new-query picker that replaces the old bare
 `open_search()` function. The old function opened the results coverflow

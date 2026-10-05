@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.advancedsettings (opt-in advancedsettings.xml installer).
 
 Pure Python (no Kodi imports), same rationale as lib/serverbin.py /

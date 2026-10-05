@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.ui.addonswindow: AddonsWindow, Rivulet's add-on
 manager, exercised against the shared fake xbmc/xbmcgui stubs in
 tests/kodistubs (no real

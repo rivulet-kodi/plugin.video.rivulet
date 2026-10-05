@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.ui.addoncatalogwindow: AddonCatalogWindow, Rivulet's addon
 addon-catalog browser (see the module docstring), exercised against the
 shared fake xbmc/xbmcgui stubs in tests/kodistubs (no real Kodi runtime,

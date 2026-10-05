@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.ui.streamswindow's playback round trip: StreamsWindow.
 onClick() (resolving the focused pair and dispatching to play_direct(),
 including the on_ready teardown hook for GH-2), _wait_for_playback_end()

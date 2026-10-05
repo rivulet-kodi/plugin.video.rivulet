@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Tests for lib.s4me: the Kodi-independent S4Me bridge glue (manifest/
 descriptor shape, RunScript() command construction, and BridgeSupervisor's
 launch/store-sync state machine)."""

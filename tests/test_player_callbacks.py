@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 # ruff: noqa: F811
 """Tests for lib.ui.player's resume/now-playing/playback-callback behavior.
 

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 M0Rf30
+# SPDX-License-Identifier: MIT
+
 """Stremio `addon_catalog` protocol client (pure Python, no Kodi imports).
 
 An addon can catalog OTHER addons for a user to browse and install,
