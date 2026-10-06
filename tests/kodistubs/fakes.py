@@ -69,6 +69,7 @@ _DEFAULT_LOCALIZED = {
     30341: '%s needs configuration. Open %s in a browser, configure it, then paste the resulting manifest URL',
     30348: 'Showing %d of %d',
     30360: 'New episodes: %d',
+    30383: 'Search incomplete, no answer from: %s',
 }
 
 class FakeClock:

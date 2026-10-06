@@ -973,3 +973,19 @@ msgstr "ブリッジのポート"
 msgctxt "#30374"
 msgid "Channels (comma-separated, blank = every active channel)"
 msgstr "チャンネル（カンマ区切り、空欄 = すべてのアクティブなチャンネル）"
+
+msgctxt "#30380"
+msgid "No results found"
+msgstr "結果が見つかりません"
+
+msgctxt "#30381"
+msgid "No enabled addon supports search. Enable one, such as Cinemeta."
+msgstr "検索に対応した有効なアドオンがありません。Cinemeta のようなアドオンを有効にしてください。"
+
+msgctxt "#30382"
+msgid "Search failed: no addon answered. Try again or enable another search addon, such as Cinemeta."
+msgstr "検索に失敗しました。応答したアドオンがありません。もう一度お試しいただくか、Cinemeta のような別の検索対応アドオンを有効にしてください。"
+
+msgctxt "#30383"
+msgid "Search incomplete, no answer from: %s"
+msgstr "検索が不完全です。応答なし: %s"

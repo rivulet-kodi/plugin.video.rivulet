@@ -973,3 +973,19 @@ msgstr "桥接端口"
 msgctxt "#30374"
 msgid "Channels (comma-separated, blank = every active channel)"
 msgstr "频道（逗号分隔，留空 = 所有活跃频道）"
+
+msgctxt "#30380"
+msgid "No results found"
+msgstr "未找到结果"
+
+msgctxt "#30381"
+msgid "No enabled addon supports search. Enable one, such as Cinemeta."
+msgstr "没有已启用的插件支持搜索。请启用一个，例如 Cinemeta。"
+
+msgctxt "#30382"
+msgid "Search failed: no addon answered. Try again or enable another search addon, such as Cinemeta."
+msgstr "搜索失败：没有插件响应。请重试，或启用另一个支持搜索的插件，例如 Cinemeta。"
+
+msgctxt "#30383"
+msgid "Search incomplete, no answer from: %s"
+msgstr "搜索不完整，无响应：%s"

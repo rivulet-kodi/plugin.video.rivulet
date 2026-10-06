@@ -973,3 +973,19 @@ msgstr "Porta da ponte"
 msgctxt "#30374"
 msgid "Channels (comma-separated, blank = every active channel)"
 msgstr "Canais (separados por vírgula, vazio = todos os canais ativos)"
+
+msgctxt "#30380"
+msgid "No results found"
+msgstr "Nenhum resultado encontrado"
+
+msgctxt "#30381"
+msgid "No enabled addon supports search. Enable one, such as Cinemeta."
+msgstr "Nenhum addon ativado oferece suporte à busca. Ative um, como o Cinemeta."
+
+msgctxt "#30382"
+msgid "Search failed: no addon answered. Try again or enable another search addon, such as Cinemeta."
+msgstr "Falha na busca: nenhum addon respondeu. Tente novamente ou ative outro addon de busca, como o Cinemeta."
+
+msgctxt "#30383"
+msgid "Search incomplete, no answer from: %s"
+msgstr "Busca incompleta, sem resposta de: %s"

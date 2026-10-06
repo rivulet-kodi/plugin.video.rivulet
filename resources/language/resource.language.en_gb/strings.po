@@ -973,3 +973,19 @@ msgstr ""
 msgctxt "#30374"
 msgid "Channels (comma-separated, blank = every active channel)"
 msgstr ""
+
+msgctxt "#30380"
+msgid "No results found"
+msgstr ""
+
+msgctxt "#30381"
+msgid "No enabled addon supports search. Enable one, such as Cinemeta."
+msgstr ""
+
+msgctxt "#30382"
+msgid "Search failed: no addon answered. Try again or enable another search addon, such as Cinemeta."
+msgstr ""
+
+msgctxt "#30383"
+msgid "Search incomplete, no answer from: %s"
+msgstr ""

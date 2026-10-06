@@ -973,3 +973,19 @@ msgstr "Порт моста"
 msgctxt "#30374"
 msgid "Channels (comma-separated, blank = every active channel)"
 msgstr "Каналы (через запятую, пусто = все активные каналы)"
+
+msgctxt "#30380"
+msgid "No results found"
+msgstr "Результаты не найдены"
+
+msgctxt "#30381"
+msgid "No enabled addon supports search. Enable one, such as Cinemeta."
+msgstr "Ни один включённый аддон не поддерживает поиск. Включите такой аддон, например Cinemeta."
+
+msgctxt "#30382"
+msgid "Search failed: no addon answered. Try again or enable another search addon, such as Cinemeta."
+msgstr "Поиск не удался: ни один аддон не ответил. Повторите попытку или включите другой аддон с поиском, например Cinemeta."
+
+msgctxt "#30383"
+msgid "Search incomplete, no answer from: %s"
+msgstr "Поиск неполный, нет ответа от: %s"

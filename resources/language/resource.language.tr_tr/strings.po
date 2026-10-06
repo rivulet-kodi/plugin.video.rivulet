@@ -973,3 +973,19 @@ msgstr "Köprü portu"
 msgctxt "#30374"
 msgid "Channels (comma-separated, blank = every active channel)"
 msgstr "Kanallar (virgülle ayrılmış, boş = tüm etkin kanallar)"
+
+msgctxt "#30380"
+msgid "No results found"
+msgstr "Sonuç bulunamadı"
+
+msgctxt "#30381"
+msgid "No enabled addon supports search. Enable one, such as Cinemeta."
+msgstr "Aramayı destekleyen etkin bir eklenti yok. Cinemeta gibi bir eklentiyi etkinleştirin."
+
+msgctxt "#30382"
+msgid "Search failed: no addon answered. Try again or enable another search addon, such as Cinemeta."
+msgstr "Arama başarısız: hiçbir eklenti yanıt vermedi. Yeniden deneyin veya Cinemeta gibi başka bir arama eklentisi etkinleştirin."
+
+msgctxt "#30383"
+msgid "Search incomplete, no answer from: %s"
+msgstr "Arama eksik, yanıt vermeyenler: %s"

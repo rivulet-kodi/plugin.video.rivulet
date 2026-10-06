@@ -973,3 +973,19 @@ msgstr "브리지 포트"
 msgctxt "#30374"
 msgid "Channels (comma-separated, blank = every active channel)"
 msgstr "채널(쉼표로 구분, 비워두면 모든 활성 채널)"
+
+msgctxt "#30380"
+msgid "No results found"
+msgstr "결과를 찾을 수 없음"
+
+msgctxt "#30381"
+msgid "No enabled addon supports search. Enable one, such as Cinemeta."
+msgstr "검색을 지원하는 활성화된 애드온이 없습니다. Cinemeta처럼 검색을 지원하는 애드온을 활성화하세요."
+
+msgctxt "#30382"
+msgid "Search failed: no addon answered. Try again or enable another search addon, such as Cinemeta."
+msgstr "검색 실패: 응답한 애드온이 없습니다. 다시 시도하거나 Cinemeta처럼 검색을 지원하는 다른 애드온을 활성화하세요."
+
+msgctxt "#30383"
+msgid "Search incomplete, no answer from: %s"
+msgstr "검색이 불완전함, 응답 없음: %s"

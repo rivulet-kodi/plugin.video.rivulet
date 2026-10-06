@@ -973,3 +973,19 @@ msgstr "Brugpoort"
 msgctxt "#30374"
 msgid "Channels (comma-separated, blank = every active channel)"
 msgstr "Kanalen (kommagescheiden, leeg = alle actieve kanalen)"
+
+msgctxt "#30380"
+msgid "No results found"
+msgstr "Geen resultaten gevonden"
+
+msgctxt "#30381"
+msgid "No enabled addon supports search. Enable one, such as Cinemeta."
+msgstr "Geen ingeschakelde addon ondersteunt zoeken. Schakel er een in, zoals Cinemeta."
+
+msgctxt "#30382"
+msgid "Search failed: no addon answered. Try again or enable another search addon, such as Cinemeta."
+msgstr "Zoeken mislukt: geen enkele addon heeft geantwoord. Probeer het opnieuw of schakel een andere zoekaddon in, zoals Cinemeta."
+
+msgctxt "#30383"
+msgid "Search incomplete, no answer from: %s"
+msgstr "Zoekopdracht onvolledig, geen antwoord van: %s"

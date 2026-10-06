@@ -973,3 +973,19 @@ msgstr "Bridge-Port"
 msgctxt "#30374"
 msgid "Channels (comma-separated, blank = every active channel)"
 msgstr "Kanäle (durch Kommas getrennt, leer = alle aktiven Kanäle)"
+
+msgctxt "#30380"
+msgid "No results found"
+msgstr "Keine Ergebnisse gefunden"
+
+msgctxt "#30381"
+msgid "No enabled addon supports search. Enable one, such as Cinemeta."
+msgstr "Kein aktiviertes Addon unterstützt die Suche. Aktiviere eines, z. B. Cinemeta."
+
+msgctxt "#30382"
+msgid "Search failed: no addon answered. Try again or enable another search addon, such as Cinemeta."
+msgstr "Suche fehlgeschlagen: Kein Addon hat geantwortet. Versuche es erneut oder aktiviere ein weiteres Such-Addon, z. B. Cinemeta."
+
+msgctxt "#30383"
+msgid "Search incomplete, no answer from: %s"
+msgstr "Suche unvollständig, keine Antwort von: %s"

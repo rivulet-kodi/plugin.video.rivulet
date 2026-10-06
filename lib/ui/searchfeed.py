@@ -119,19 +119,36 @@ def _read_cached(data_dir):
 def _fetch(session, timeout):
     """GET the feed. Returns the record list, or None on any failure -
     ranking is an enhancement, so a feed that will not load must leave
-    search working exactly as it did without it."""
+    search working exactly as it did without it.
+
+    The body is streamed and counted against `MAX_FEED_BYTES` AS IT
+    ARRIVES (as `lib.stremio.addons.AddonClient._get_json()` does for
+    addon responses), not measured after `response.content` has already
+    buffered all of it: the cap exists to bound what a confused or
+    compromised host can make this addon hold, and a check that only runs
+    once everything is in memory bounds the disk write, not the memory
+    this ~1GB-RAM-class target is short of."""
+    response = None
     try:
-        response = session.get(FEED_URL, timeout=timeout)
+        response = session.get(FEED_URL, timeout=timeout, stream=True)
         response.raise_for_status()
+        body = bytearray()
+        for chunk in response.iter_content(chunk_size=65536):
+            body += chunk
+            if len(body) > MAX_FEED_BYTES:
+                log('searchfeed: feed too large (over %d bytes), ignoring' % MAX_FEED_BYTES, xbmc.LOGWARNING)
+                return None
     except Exception as exc:  # noqa: BLE001 - never let ranking break search
         log('searchfeed: fetch failed: %s' % type(exc).__name__, xbmc.LOGWARNING)
         return None
-    content_length = len(response.content or b'')
-    if content_length > MAX_FEED_BYTES:
-        log('searchfeed: feed too large (%d bytes), ignoring' % content_length, xbmc.LOGWARNING)
-        return None
+    finally:
+        if response is not None:
+            try:
+                response.close()
+            except Exception:  # noqa: BLE001 - closing a failed response must not mask the failure
+                pass
     try:
-        records = response.json()
+        records = json.loads(bytes(body))
     except ValueError:
         log('searchfeed: feed returned invalid JSON', xbmc.LOGWARNING)
         return None

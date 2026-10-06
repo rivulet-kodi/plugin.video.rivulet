@@ -973,3 +973,19 @@ msgstr "Puerto del puente"
 msgctxt "#30374"
 msgid "Channels (comma-separated, blank = every active channel)"
 msgstr "Canales (separados por comas, vacío = todos los canales activos)"
+
+msgctxt "#30380"
+msgid "No results found"
+msgstr "No se encontraron resultados"
+
+msgctxt "#30381"
+msgid "No enabled addon supports search. Enable one, such as Cinemeta."
+msgstr "Ningún addon activado admite la búsqueda. Activa uno, como Cinemeta."
+
+msgctxt "#30382"
+msgid "Search failed: no addon answered. Try again or enable another search addon, such as Cinemeta."
+msgstr "Error en la búsqueda: ningún addon respondió. Inténtalo de nuevo o activa otro addon de búsqueda, como Cinemeta."
+
+msgctxt "#30383"
+msgid "Search incomplete, no answer from: %s"
+msgstr "Búsqueda incompleta, sin respuesta de: %s"

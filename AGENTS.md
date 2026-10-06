@@ -32,7 +32,7 @@ Browsing: `lib/ui/views.py` fans a request across installed addons -> `lib/strem
 
 **Counted strings must be count-neutral.** These `.po` files carry no plural-form machinery: the code picks between a singular id and a non-singular one, which is wrong for Polish, Russian, Arabic and Turkish at most values. Write `Label: %d` constructions rather than inflecting the counted noun, and do not build plural selection. Any `%`-formatted id that production code formats must also be registered in `tests/kodistubs/fakes.py`'s `_DEFAULT_LOCALIZED`, or the fake returns a placeholder-free `STR<id>` and `L(id) % n` raises `TypeError` under test.
 
-**Fan-out is bounded per call site, deliberately.** `lib/ui/views.py:38` sets `_MAX_ADDON_WORKERS = 8`; `lib/ui/streamswindow.py:103` and `lib/stremio/subtitles.py:92` each carry their *own* local copy. `streamswindow.py:103-107` explains why: every fan-out point bounds its own pool because this runs on low-power ARM boxes. Do not "DRY" these into one shared constant.
+**Fan-out is bounded per call site, deliberately.** `lib/ui/views.py:38` sets `_MAX_ADDON_WORKERS = 8`; `lib/ui/streamswindow.py:103`, `lib/ui/searchwindow.py` (`_MAX_SEARCH_WORKERS`) and `lib/stremio/subtitles.py:92` each carry their *own* local copy. `streamswindow.py:103-107` explains why: every fan-out point bounds its own pool because this runs on low-power ARM boxes. Do not "DRY" these into one shared constant. `run_query()` merges its answers in catalog order, never arrival order, so which copy of a duplicate title wins does not depend on request speed.
 
 ## Key Directories
 
@@ -83,7 +83,7 @@ make parallel    # pytest -n auto
 - `log(msg, level=xbmc.LOGDEBUG)` (`compat.py:54`), prefixed automatically.
 - `setting_bool(key, default)` / `setting_int(key, default, minimum=None)` (`compat.py:64,79`) parse the **raw `getSetting()` string on purpose** — `getSettingBool()` was observed misbehaving live. Do not "simplify" these to the typed API.
 
-**Error handling.** Typed exceptions per domain (`AddonError`, `DownloadError`, `UnsupportedPlatformError`); `B904` (`raise ... from exc`) is intentionally disabled for `lib/*` in `pyproject.toml:55-58`. URLs are never logged raw — use `safe_url_for_log()` from `lib/stremio/addons.py`.
+**Error handling.** Typed exceptions per domain (`AddonError`, `DownloadError`, `UnsupportedPlatformError`); `B904` (`raise ... from exc`) is intentionally disabled for `lib/*` in `pyproject.toml:55-58`. URLs are never logged raw — use `safe_url_for_log()` from `lib/stremio/addons.py`. **An HTTP 200 can still be a failure:** AIOStreams answers a failing catalog/meta request with one synthetic `aiostreamserror.<json>` meta (`is_error_meta()`); `AddonClient.catalog()`/`meta()` turn it into an `AddonError` (category `addon reported error (HTTP nnn)`) so every `except AddonError` site reports it — left alone it surfaced as a "1 results" coverflow whose only title was the error. Errors raised while a response body streams are converted too; never let a bare `requests` exception escape `AddonClient`.
 
 **String formatting is printf-style.** `UP031` is globally ignored (`pyproject.toml:44-48`); ~198 sites use `"%s" %`. Consistent with the 3.8 floor. Do not modernize them.
 

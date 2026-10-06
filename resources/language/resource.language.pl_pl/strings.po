@@ -973,3 +973,19 @@ msgstr "Port mostka"
 msgctxt "#30374"
 msgid "Channels (comma-separated, blank = every active channel)"
 msgstr "Kanały (oddzielone przecinkami, puste = wszystkie aktywne kanały)"
+
+msgctxt "#30380"
+msgid "No results found"
+msgstr "Nie znaleziono wyników"
+
+msgctxt "#30381"
+msgid "No enabled addon supports search. Enable one, such as Cinemeta."
+msgstr "Żaden włączony dodatek nie obsługuje wyszukiwania. Włącz jeden, np. Cinemeta."
+
+msgctxt "#30382"
+msgid "Search failed: no addon answered. Try again or enable another search addon, such as Cinemeta."
+msgstr "Wyszukiwanie nie powiodło się: żaden dodatek nie odpowiedział. Spróbuj ponownie lub włącz inny dodatek wyszukiwania, np. Cinemeta."
+
+msgctxt "#30383"
+msgid "Search incomplete, no answer from: %s"
+msgstr "Wyszukiwanie niekompletne, brak odpowiedzi od: %s"

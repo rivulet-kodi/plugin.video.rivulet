@@ -44,6 +44,9 @@ actual skin rendering is Kodi-skin-engine-only and is NOT, and cannot be,
 exercised by this suite.
 """
 import contextlib
+import threading
+import time
+import types
 
 import pytest
 
@@ -271,7 +274,7 @@ def test_onclick_numeric_position_reruns_that_historys_exact_query(load_searchwi
 
 def test_new_search_cancelled_dialog_never_runs_search_or_touches_the_store(load_searchwindow, monkeypatch):
     ctx = load_searchwindow()  # default dialog_inputs=None -> Dialog.input() returns ''
-    store = _FakeStore()
+    store = _FakeStore(addons=[_search_catalog_descriptor('https://a.example/manifest.json')])
     _wire_store(ctx.searchwindow, store)
     win = _make_window(ctx.searchwindow)
     win.onInit()
@@ -287,7 +290,7 @@ def test_new_search_cancelled_dialog_never_runs_search_or_touches_the_store(load
 
 def test_new_search_with_a_query_runs_search_with_it(load_searchwindow, monkeypatch):
     ctx = load_searchwindow(dialog_inputs=['batman'])
-    _wire_store(ctx.searchwindow, _FakeStore())
+    _wire_store(ctx.searchwindow, _FakeStore(addons=[_search_catalog_descriptor('https://a.example/manifest.json')]))
     win = _make_window(ctx.searchwindow)
     win.onInit()
     calls = []
@@ -296,6 +299,34 @@ def test_new_search_with_a_query_runs_search_with_it(load_searchwindow, monkeypa
     win._new_search()
 
     assert calls == ['batman']
+
+
+def test_new_search_strips_the_typed_query_before_searching_and_recording_it(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow(dialog_inputs=['  batman \u00a0'])
+    _wire_store(ctx.searchwindow, _FakeStore(addons=[_search_catalog_descriptor('https://a.example/manifest.json')]))
+    win = _make_window(ctx.searchwindow)
+    win.onInit()
+    calls = []
+    monkeypatch.setattr(win, '_run_search', lambda query: calls.append(query))
+
+    win._new_search()
+
+    assert calls == ['batman']
+
+
+def test_new_search_blank_entry_is_a_cancel_not_a_search_for_nothing(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow(dialog_inputs=['   '])
+    store = _FakeStore(addons=[_search_catalog_descriptor('https://a.example/manifest.json')])
+    _wire_store(ctx.searchwindow, store)
+    win = _make_window(ctx.searchwindow)
+    win.onInit()
+    calls = []
+    monkeypatch.setattr(win, '_run_search', lambda query: calls.append(query))
+
+    win._new_search()
+
+    assert calls == []
+    assert store.search_queries == []
 
 
 # ---------------------------------------------------------------------------
@@ -551,7 +582,7 @@ def test_run_search_addonerror_from_one_addon_is_skipped_others_still_aggregate(
 
     assert captured['metas'] == metas_b
     assert store.search_queries == ['batman']
-    assert client.calls == [
+    assert sorted(client.calls, key=lambda call: call[0]) == [
         (transport_a, 'movie', 'search', [('search', 'batman')]),
         (transport_b, 'movie', 'search', [('search', 'batman')]),
     ]
@@ -594,7 +625,7 @@ def test_run_search_records_query_even_when_every_addon_fails(load_searchwindow,
     win._run_search('nomatch')
 
     assert store.search_queries == ['nomatch']
-    assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
+    assert ctx.env.notifications == [('Rivulet', 'STR30382', 'info', 6000)]
 
 
 def test_run_search_no_results_notifies_and_does_not_open_the_coverflow(load_searchwindow, monkeypatch):
@@ -610,7 +641,7 @@ def test_run_search_no_results_notifies_and_does_not_open_the_coverflow(load_sea
     win._run_search('nomatch')
 
     assert opened == []
-    assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
+    assert ctx.env.notifications == [('Rivulet', 'STR30381', 'info', 6000)]
     assert win.closed is False
 
 
@@ -634,7 +665,7 @@ def test_run_search_all_adult_results_filtered_out_hits_the_same_no_results_path
     win._run_search('batman')
 
     assert opened == []
-    assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
+    assert ctx.env.notifications == [('Rivulet', 'STR30380', 'info', 4000)]
     assert win.closed is False
 
 
@@ -784,6 +815,709 @@ def test_run_search_coverflow_open_failure_is_logged_notified_and_does_not_close
     assert win.should_close_caller is False
     assert win.closed is False
     assert ctx.env.notifications == [('Rivulet', 'STR30032', 'info', 4000)]
+
+
+# ---------------------------------------------------------------------------
+# run_query() - concurrent fan-out, cancel-awareness, SearchReport
+# ---------------------------------------------------------------------------
+
+
+class _ScriptedClient:
+    """Fake `AddonClient` whose `catalog()` runs a per-transport callable
+    INSIDE the worker thread `run_query()` dispatched it on - so a test
+    can make one catalog block, sleep, raise or rendezvous with another,
+    which a plain canned-result fake cannot."""
+
+    def __init__(self, handlers):
+        self._handlers = handlers
+        self.calls = []
+
+    def catalog(self, transport, ctype, cid, extra=None):
+        self.calls.append((transport, ctype, cid, extra))
+        return self._handlers[transport]()
+
+
+def _addons(*names):
+    """A store holding one search-capable addon per name, and their
+    transport urls in the same order."""
+    transports = ['https://%s.example/manifest.json' % name.lower() for name in names]
+    store = _FakeStore(addons=[_search_catalog_descriptor(t, n) for t, n in zip(transports, names)])
+    return store, transports
+
+
+def _meta(meta_id, name=None, **extra):
+    meta = {'id': meta_id, 'name': name or meta_id, 'type': 'movie'}
+    meta.update(extra)
+    return meta
+
+
+def _raising(exc):
+    """A `_ScriptedClient` handler that raises `exc` from the worker thread."""
+    def _handler():
+        raise exc
+    return _handler
+
+
+def test_run_query_requests_every_catalog_concurrently(load_searchwindow):
+    """A barrier only opens once all three requests are in flight AT THE
+    SAME TIME: the serial loop this replaced would sit on the first one
+    until the barrier timed out, and every catalog would come back failed."""
+    ctx = load_searchwindow()
+    store, (ta, tb, tc) = _addons('A', 'B', 'C')
+    barrier = threading.Barrier(3, timeout=5)
+
+    def _meet(meta_id):
+        def _handler():
+            barrier.wait()
+            return [_meta(meta_id)]
+        return _handler
+
+    client = _ScriptedClient({ta: _meet('tt1'), tb: _meet('tt2'), tc: _meet('tt3')})
+    report = ctx.searchwindow.SearchReport()
+
+    result = ctx.searchwindow.run_query(store, client, 'x', report=report)
+
+    assert sorted(m['id'] for m in result) == ['tt1', 'tt2', 'tt3']
+    assert report.failures == []
+
+
+def test_run_query_merges_answers_in_catalog_order_not_arrival_order(load_searchwindow):
+    """Addon order is the user's priority and decides which copy of a
+    duplicate title wins `_dedupe()` - that must not depend on which
+    request happened to be fastest. A answers LAST here, yet its copy wins
+    and B's extra field is still merged in."""
+    ctx = load_searchwindow()
+    store, (ta, tb) = _addons('A', 'B')
+    b_answered = threading.Event()
+
+    def _slow_first():
+        assert b_answered.wait(5)
+        time.sleep(0.1)  # let B's answer reach the queue first
+        return [_meta('tt1', 'From A'), _meta('tt3', 'Only A')]
+
+    def _fast_second():
+        b_answered.set()
+        return [_meta('tt1', 'From B', poster='https://p.example/p.jpg'), _meta('tt2', 'Only B')]
+
+    result = ctx.searchwindow.run_query(store, _ScriptedClient({ta: _slow_first, tb: _fast_second}), 'zzz')
+
+    assert [m['id'] for m in result] == ['tt1', 'tt3', 'tt2']
+    assert result[0]['name'] == 'From A'
+    assert result[0]['poster'] == 'https://p.example/p.jpg'
+
+
+def test_run_query_never_runs_more_than_the_worker_cap_at_once(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow()
+    monkeypatch.setattr(ctx.searchwindow, '_MAX_SEARCH_WORKERS', 2)
+    store, transports = _addons('A', 'B', 'C', 'D', 'E', 'F')
+    lock = threading.Lock()
+    state = {'active': 0, 'peak': 0}
+
+    def _handler():
+        with lock:
+            state['active'] += 1
+            state['peak'] = max(state['peak'], state['active'])
+        time.sleep(0.02)
+        with lock:
+            state['active'] -= 1
+        return []
+
+    client = _ScriptedClient({t: _handler for t in transports})
+
+    ctx.searchwindow.run_query(store, client, 'x')
+
+    assert len(client.calls) == 6
+    assert 1 <= state['peak'] <= 2
+
+
+def test_run_query_isolates_a_non_addon_error_and_never_logs_its_text(load_searchwindow):
+    """A worker thread that raised would die before queueing an answer and
+    wedge the collector - any exception must cost one catalog, no more."""
+    ctx = load_searchwindow()
+    store, (ta, tb) = _addons('A', 'B')
+
+    client = _ScriptedClient({
+        ta: _raising(RuntimeError('boom https://user:hunter2@secret.example/private?token=abc')),
+        tb: lambda: [_meta('tt1')],
+    })
+    report = ctx.searchwindow.SearchReport()
+
+    result = ctx.searchwindow.run_query(store, client, 'x', report=report)
+
+    assert [m['id'] for m in result] == ['tt1']
+    assert report.failures == [('A', 'RuntimeError')]
+    messages = ' '.join(msg for msg, _level in ctx.env.log_calls)
+    assert 'RuntimeError' in messages
+    assert 'hunter2' not in messages and 'secret.example' not in messages and 'token=abc' not in messages
+
+
+def test_run_query_skips_entries_that_are_not_metas(load_searchwindow):
+    ctx = load_searchwindow()
+    store, (ta,) = _addons('A')
+    client = _ScriptedClient({ta: lambda: [None, 'tt-str', 42, _meta('tt1')]})
+
+    result = ctx.searchwindow.run_query(store, client, 'x')
+
+    assert [m['id'] for m in result] == ['tt1']
+
+
+def test_run_query_report_counts_catalogs_and_names_failures(load_searchwindow):
+    ctx = load_searchwindow()
+    store, (ta, tb) = _addons('A', 'B')
+    adult_transport = 'https://adult.example/manifest.json'
+    store._addons.append(_adult_search_catalog_descriptor(adult_transport, 'Adult'))
+    client = _ScriptedClient({
+        ta: _raising(AddonError('down', category='HTTP 500')),
+        tb: lambda: [_meta('tt1')],
+        adult_transport: _raising(AssertionError('an adult catalog must never be requested')),
+    })
+    report = ctx.searchwindow.SearchReport()
+
+    ctx.searchwindow.run_query(store, client, 'x', report=report)
+
+    assert report.total_catalogs == 3
+    assert report.queried == 2
+    assert report.failures == [('A', 'HTTP 500')]
+    assert report.failed_addon_names() == ['A']
+    assert report.unanswered == []
+    assert report.canceled is False
+    assert report.all_failed is False
+
+
+def test_run_query_failure_reason_falls_back_to_the_exception_type_without_a_category(load_searchwindow):
+    ctx = load_searchwindow()
+    store, (ta,) = _addons('A')
+    client = _ScriptedClient({ta: _raising(AddonError('upstream down'))})
+    report = ctx.searchwindow.SearchReport()
+
+    ctx.searchwindow.run_query(store, client, 'x', report=report)
+
+    assert report.failures == [('A', 'AddonError')]
+    assert report.all_failed is True
+
+
+def test_search_report_dedupes_failed_addon_names_and_only_counts_a_full_outage_as_all_failed(load_searchwindow):
+    ctx = load_searchwindow()
+    report = ctx.searchwindow.SearchReport()
+    assert report.all_failed is False  # nothing asked is not an outage
+
+    report.queried = 3
+    report.failures = [('A', 'x'), ('A', 'y'), ('B', 'z')]
+
+    assert report.failed_addon_names() == ['A', 'B']
+    assert report.all_failed is True
+    report.queried = 4
+    assert report.all_failed is False
+
+
+def test_run_query_reusing_a_report_starts_from_a_clean_slate(load_searchwindow):
+    ctx = load_searchwindow()
+    store, (ta,) = _addons('A')
+    report = ctx.searchwindow.SearchReport()
+    report.failures = [('stale', 'x')]
+    report.unanswered = ['stale']
+    report.canceled = True
+
+    ctx.searchwindow.run_query(store, _ScriptedClient({ta: lambda: [_meta('tt1')]}), 'x', report=report)
+
+    assert (report.failures, report.unanswered, report.canceled) == ([], [], False)
+
+
+def test_run_query_cancel_stops_waiting_and_reports_the_unanswered_addons(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow()
+    store, (ta, tb) = _addons('A', 'B')
+    release = threading.Event()
+
+    def _blocked():
+        release.wait(5)
+        return []
+
+    client = _ScriptedClient({ta: _blocked, tb: _blocked})
+    monkeypatch.setattr(ctx.dialogs.RivuletBusy, 'iscanceled', lambda self: True)
+    report = ctx.searchwindow.SearchReport()
+
+    started = time.monotonic()
+    result = ctx.searchwindow.run_query(store, client, 'x', report=report)
+    elapsed = time.monotonic() - started
+    release.set()
+
+    assert result == []
+    assert report.canceled is True
+    assert report.unanswered == ['A', 'B']
+    assert report.failures == []
+    assert elapsed < 4  # did not sit out the blocked requests
+
+
+def test_run_query_cancel_still_returns_what_had_already_arrived(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow()
+    store, (ta, tb) = _addons('A', 'B')
+    release = threading.Event()
+
+    def _blocked():
+        release.wait(5)
+        return []
+
+    client = _ScriptedClient({ta: lambda: [_meta('tt1')], tb: _blocked})
+    began = time.monotonic()
+    monkeypatch.setattr(ctx.dialogs.RivuletBusy, 'iscanceled', lambda self: time.monotonic() - began > 0.5)
+    report = ctx.searchwindow.SearchReport()
+
+    result = ctx.searchwindow.run_query(store, client, 'x', report=report)
+    release.set()
+
+    assert [m['id'] for m in result] == ['tt1']
+    assert report.canceled is True
+    assert report.unanswered == ['B']
+
+
+def test_run_query_opens_no_busy_dialog_when_nothing_can_search(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow()
+    created = []
+    monkeypatch.setattr(ctx.dialogs.RivuletBusy, 'create', lambda self, heading, message='': created.append(heading))
+    report = ctx.searchwindow.SearchReport()
+
+    result = ctx.searchwindow.run_query(_FakeStore(addons=[]), _FakeAddonClient({}), 'x', report=report)
+
+    assert result == []
+    assert created == []
+    assert report.total_catalogs == 0
+
+
+def test_run_query_logs_one_summary_line_with_the_counts(load_searchwindow):
+    """A short or empty result used to leave NOTHING in the log: no
+    failure line, no count. The summary is what makes the next "1
+    results" report diagnosable from a default-level kodi.log."""
+    ctx = load_searchwindow()
+    import xbmc
+
+    store, (ta, tb) = _addons('A', 'B')
+    client = _ScriptedClient({
+        ta: _raising(AddonError('down', category='HTTP 503')),
+        tb: lambda: [_meta('tt1')],
+    })
+
+    ctx.searchwindow.run_query(store, client, 'private query text')
+
+    infos = [msg for msg, level in ctx.env.log_calls if level == xbmc.LOGINFO]
+    assert any('2 catalog(s) declared, 2 asked, 2 answered, 1 failed, 0 unanswered -> 1 result(s)' in m for m in infos)
+    assert any('failed catalogs: A (HTTP 503)' in m for m in infos)
+    assert 'private query text' not in ' '.join(msg for msg, _level in ctx.env.log_calls)
+
+
+# ---------------------------------------------------------------------------
+# run_query() - the ranking feed is loaded off the UI path
+# ---------------------------------------------------------------------------
+
+
+def test_run_query_loads_the_ranking_feed_while_the_catalogs_are_in_flight(load_searchwindow, monkeypatch):
+    """The feed used to be fetched after the busy dialog had closed, so
+    the one search a day with a stale cache froze the UI behind no
+    spinner. The catalog handler below can only succeed if the feed
+    thread has ALREADY started when its request is running."""
+    ctx = load_searchwindow()
+    store, (ta,) = _addons('A')
+    store.data_dir = '/does/not/matter'
+    feed_started = threading.Event()
+    sentinel = object()
+
+    def _fake_feed_index(store_arg, client_arg):
+        feed_started.set()
+        return sentinel
+
+    def _handler():
+        assert feed_started.wait(5), 'the ranking feed was not being loaded during the fan-out'
+        return [_meta('tt1')]
+
+    seen = {}
+
+    def _fake_rank(metas, query, feed_index=None):
+        seen['feed_index'] = feed_index
+        return metas
+
+    monkeypatch.setattr(ctx.searchwindow, '_feed_index', _fake_feed_index)
+    monkeypatch.setattr(ctx.searchwindow, '_rank_by_title', _fake_rank)
+    client = _ScriptedClient({ta: _handler})
+    client.session = object()
+
+    result = ctx.searchwindow.run_query(store, client, 'x')
+
+    assert [m['id'] for m in result] == ['tt1']
+    assert seen['feed_index'] is sentinel
+
+
+def _feed_loader(ctx, monkeypatch, feed_index):
+    monkeypatch.setattr(ctx.searchwindow, '_feed_index', feed_index)
+    store = types.SimpleNamespace(data_dir='/does/not/matter')
+    client = types.SimpleNamespace(session=object())
+    return ctx.searchwindow._FeedIndexLoader(store, client)
+
+
+def test_feed_loader_gives_up_on_a_slow_feed_without_blocking_then_serves_it_later(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow()
+    release = threading.Event()
+    loader = _feed_loader(ctx, monkeypatch, lambda store, client: 'late' if release.wait(5) else None)
+    dialog = types.SimpleNamespace(iscanceled=lambda: False)
+
+    assert loader.wait(dialog, timeout=0.05) is None
+    release.set()
+    assert loader.wait(dialog, timeout=2) == 'late'
+
+
+def test_feed_loader_wait_stops_as_soon_as_the_user_cancels(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow()
+    release = threading.Event()
+    loader = _feed_loader(ctx, monkeypatch, lambda store, client: release.wait(5))
+    dialog = types.SimpleNamespace(iscanceled=lambda: True)
+
+    started = time.monotonic()
+    assert loader.wait(dialog, timeout=4) is None
+    release.set()
+
+    assert time.monotonic() - started < 2
+
+
+def test_feed_loader_swallows_a_feed_failure_and_ranks_without_it(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow()
+    import xbmc
+
+    def _broken(store, client):
+        raise ValueError('corrupt feed')
+
+    loader = _feed_loader(ctx, monkeypatch, _broken)
+    dialog = types.SimpleNamespace(iscanceled=lambda: False)
+
+    assert loader.wait(dialog, timeout=2) is None
+    warnings = [msg for msg, level in ctx.env.log_calls if level == xbmc.LOGWARNING]
+    assert any('ranking feed failed: ValueError' in m for m in warnings)
+    assert not any('corrupt feed' in m for m in warnings)
+
+
+def test_feed_loader_is_idle_without_a_data_dir_or_a_session(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow()
+    called = []
+    monkeypatch.setattr(ctx.searchwindow, '_feed_index', lambda store, client: called.append(1))
+
+    for store, client in (
+        (types.SimpleNamespace(), types.SimpleNamespace(session=object())),
+        (types.SimpleNamespace(data_dir='/x'), types.SimpleNamespace()),
+    ):
+        loader = ctx.searchwindow._FeedIndexLoader(store, client)
+        assert loader._done.is_set()  # nothing to wait for - no thread was started
+        assert loader.wait(types.SimpleNamespace(iscanceled=lambda: False), timeout=0) is None
+    assert called == []
+
+
+# ---------------------------------------------------------------------------
+# run_query()/_run_search() - telling the user what went wrong
+# ---------------------------------------------------------------------------
+
+
+def test_run_query_without_a_report_notifies_a_total_outage_itself(load_searchwindow):
+    """`open_credits_picker()` calls run_query() with no report: it must
+    not be left presenting an outage as an empty search."""
+    ctx = load_searchwindow()
+    store, (ta,) = _addons('A')
+
+    result = ctx.searchwindow.run_query(
+        store, _FakeAddonClient({ta: AddonError('down', category='HTTP 500')}), 'x',
+    )
+
+    assert result == []
+    assert ctx.env.notifications == [('Rivulet', 'STR30382', 'info', 6000)]
+
+
+def test_run_query_without_a_report_notifies_a_partial_failure_itself(load_searchwindow):
+    ctx = load_searchwindow()
+    store, (ta, tb) = _addons('A', 'B')
+
+    result = ctx.searchwindow.run_query(
+        store, _FakeAddonClient({ta: AddonError('down'), tb: [_meta('tt1')]}), 'x',
+    )
+
+    assert [m['id'] for m in result] == ['tt1']
+    assert ctx.env.notifications == [('Rivulet', 'Search incomplete, no answer from: A', 'info', 6000)]
+
+
+def test_run_query_with_a_report_leaves_the_notification_to_the_caller(load_searchwindow):
+    ctx = load_searchwindow()
+    store, (ta,) = _addons('A')
+
+    ctx.searchwindow.run_query(
+        store, _FakeAddonClient({ta: AddonError('down')}), 'x', report=ctx.searchwindow.SearchReport(),
+    )
+
+    assert ctx.env.notifications == []
+
+
+def test_run_query_without_a_report_says_nothing_about_a_clean_search(load_searchwindow):
+    ctx = load_searchwindow()
+    store, (ta,) = _addons('A')
+
+    ctx.searchwindow.run_query(store, _FakeAddonClient({ta: []}), 'x')
+
+    assert ctx.env.notifications == []
+
+
+def test_run_search_nothing_enabled_can_search_hints_at_enabling_an_addon(load_searchwindow, monkeypatch):
+    """Cinemeta switched off in the addon manager leaves no search addon at
+    all: that is not "no results"."""
+    ctx = load_searchwindow()
+    disabled = _search_catalog_descriptor('https://cinemeta.example/manifest.json', 'Cinemeta')
+    disabled['flags'] = {'disabled': True}
+    store = _FakeStore(addons=[disabled])
+    _wire_store(ctx.searchwindow, store)
+    _wire_client(ctx.searchwindow, _FakeAddonClient({}))
+    win = _make_window(ctx.searchwindow)
+    win.onInit()
+
+    win._run_search('batman')
+
+    assert ctx.env.notifications == [('Rivulet', 'STR30381', 'info', 6000)]
+
+
+def test_new_search_with_nothing_able_to_search_hints_before_the_keyboard_opens(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow(dialog_inputs=['batman'])
+    store = _FakeStore(addons=[])
+    _wire_store(ctx.searchwindow, store)
+    win = _make_window(ctx.searchwindow)
+    win.onInit()
+    calls = []
+    monkeypatch.setattr(win, '_run_search', lambda query: calls.append(query))
+
+    win._new_search()
+
+    assert ctx.env.dialog_input_prompts == []
+    assert calls == []
+    assert store.search_queries == []
+    assert ctx.env.notifications == [('Rivulet', 'STR30381', 'info', 6000)]
+
+
+def test_run_search_genuinely_empty_search_says_no_results_found(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow()
+    store, (ta,) = _addons('A')
+    _wire_store(ctx.searchwindow, store)
+    _wire_client(ctx.searchwindow, _FakeAddonClient({ta: []}))
+    win = _make_window(ctx.searchwindow)
+    win.onInit()
+    opened = []
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: opened.append(m))
+
+    win._run_search('nomatch')
+
+    assert opened == []
+    assert ctx.env.notifications == [('Rivulet', 'STR30380', 'info', 4000)]
+
+
+def test_run_search_some_failed_and_nothing_found_reports_the_failure_not_no_results(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow()
+    store, (ta, tb) = _addons('A', 'B')
+    _wire_store(ctx.searchwindow, store)
+    _wire_client(ctx.searchwindow, _FakeAddonClient({ta: AddonError('down'), tb: []}))
+    win = _make_window(ctx.searchwindow)
+    win.onInit()
+
+    win._run_search('nomatch')
+
+    assert ctx.env.notifications == [('Rivulet', 'Search incomplete, no answer from: A', 'info', 6000)]
+
+
+def test_run_search_partial_failure_is_announced_before_the_coverflow_opens(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow()
+    store, (ta, tb) = _addons('A', 'B')
+    _wire_store(ctx.searchwindow, store)
+    metas = [_meta('tt1', 'Batman')]
+    _wire_client(ctx.searchwindow, _FakeAddonClient({ta: AddonError('down'), tb: metas}))
+    win = _make_window(ctx.searchwindow)
+    win.onInit()
+    seen = {}
+
+    def _fake_open_showcase(passed, catalog_title=None):
+        seen['metas'] = passed
+        seen['notified_before'] = list(ctx.env.notifications)
+        return None
+
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', _fake_open_showcase)
+
+    win._run_search('batman')
+
+    assert seen['metas'] == metas
+    assert seen['notified_before'] == [('Rivulet', 'Search incomplete, no answer from: A', 'info', 6000)]
+
+
+def test_run_search_names_at_most_three_failing_addons_and_escapes_their_names(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow()
+    store, transports = _addons('[B]Evil[/B]', 'B', 'C', 'D', 'E', 'Good')
+    _wire_store(ctx.searchwindow, store)
+    results = {t: AddonError('down') for t in transports[:-1]}
+    results[transports[-1]] = [_meta('tt1')]
+    _wire_client(ctx.searchwindow, _FakeAddonClient(results))
+    win = _make_window(ctx.searchwindow)
+    win.onInit()
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: None)
+
+    win._run_search('x')
+
+    evil = ctx.uicommon.escape_label('[B]Evil[/B]')
+    assert ctx.env.notifications == [
+        ('Rivulet', 'Search incomplete, no answer from: %s, B, C, +2' % evil, 'info', 6000),
+    ]
+
+
+def test_run_search_an_addon_whose_catalogs_all_fail_is_named_once(load_searchwindow, monkeypatch):
+    """One aggregator failing several of its search catalogs is ONE name in
+    the toast, not one per catalog."""
+    ctx = load_searchwindow()
+    multi = 'https://multi.example/manifest.json'
+    good = 'https://good.example/manifest.json'
+    store = _FakeStore(addons=[
+        {
+            'transportUrl': multi,
+            'manifest': {'name': 'Multi', 'catalogs': [
+                {'type': 'movie', 'id': 'one', 'extra': [{'name': 'search'}]},
+                {'type': 'series', 'id': 'two', 'extra': [{'name': 'search'}]},
+            ]},
+        },
+        _search_catalog_descriptor(good, 'Good'),
+    ])
+    _wire_store(ctx.searchwindow, store)
+    _wire_client(ctx.searchwindow, _FakeAddonClient({multi: AddonError('down'), good: [_meta('tt1')]}))
+    win = _make_window(ctx.searchwindow)
+    win.onInit()
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: None)
+
+    win._run_search('x')
+
+    assert ctx.env.notifications == [('Rivulet', 'Search incomplete, no answer from: Multi', 'info', 6000)]
+
+
+def test_run_search_cancelled_with_nothing_arrived_says_nothing_and_opens_nothing(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow()
+    store, (ta,) = _addons('A')
+    _wire_store(ctx.searchwindow, store)
+    release = threading.Event()
+
+    def _blocked():
+        release.wait(5)
+        return []
+
+    _wire_client(ctx.searchwindow, _ScriptedClient({ta: _blocked}))
+    monkeypatch.setattr(ctx.dialogs.RivuletBusy, 'iscanceled', lambda self: True)
+    win = _make_window(ctx.searchwindow)
+    win.onInit()
+    opened = []
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: opened.append(m))
+
+    win._run_search('x')
+    release.set()
+
+    assert opened == []
+    assert ctx.env.notifications == []
+    assert store.search_queries == ['x']  # the query is still worth remembering
+
+
+def test_run_search_cancelled_with_partial_results_still_shows_them_without_a_failure_toast(load_searchwindow, monkeypatch):
+    ctx = load_searchwindow()
+    store, (ta, tb) = _addons('A', 'B')
+    _wire_store(ctx.searchwindow, store)
+    release = threading.Event()
+
+    def _blocked():
+        release.wait(5)
+        return []
+
+    _wire_client(ctx.searchwindow, _ScriptedClient({ta: lambda: [_meta('tt1')], tb: _blocked}))
+    began = time.monotonic()
+    monkeypatch.setattr(ctx.dialogs.RivuletBusy, 'iscanceled', lambda self: time.monotonic() - began > 0.5)
+    win = _make_window(ctx.searchwindow)
+    win.onInit()
+    opened = []
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: opened.append(m))
+
+    win._run_search('x')
+    release.set()
+
+    assert [[m['id'] for m in batch] for batch in opened] == [['tt1']]
+    assert ctx.env.notifications == []
+
+
+# ---------------------------------------------------------------------------
+# End to end through the real AddonClient: AIOStreams' error placeholder
+# ---------------------------------------------------------------------------
+
+
+def _aiostreams_error_meta(description='404 - Not Found'):
+    """What `StremioTransformer.createErrorMeta` (AIOStreams) answers a
+    failing catalog with: HTTP 200, one meta, id `aiostreamserror.<json>`."""
+    import json
+    from urllib.parse import quote
+
+    from lib.stremio.addons import ERROR_META_ID_PREFIX
+
+    payload = json.dumps({'errorTitle': '[X] AIOStreams', 'errorDescription': description}, separators=(',', ':'))
+    return {
+        'id': ERROR_META_ID_PREFIX + quote(payload, safe=''),
+        'name': '[X] AIOStreams',
+        'description': description,
+        'type': 'movie',
+    }
+
+
+def _aiostreams_like_store():
+    transport = 'https://aio.example/stremio/token/manifest.json'
+    manifest = {'name': 'AIOStreams', 'catalogs': [
+        {'type': 'movie', 'id': 'search.movie', 'extra': [{'name': 'search', 'isRequired': True}]},
+        {'type': 'series', 'id': 'search.series', 'extra': [{'name': 'search', 'isRequired': True}]},
+        {'type': 'anime.series', 'id': 'search.anime_series', 'extra': [{'name': 'search', 'isRequired': True}]},
+    ]}
+    return _FakeStore(addons=[{'transportUrl': transport, 'manifest': manifest}])
+
+
+def test_run_search_error_placeholders_are_a_failed_search_not_a_one_result_coverflow(load_searchwindow, monkeypatch):
+    """The reported "opening coverflow (1 results)" with nothing in the
+    log: a throttled AIOStreams answered EVERY search catalog with the same
+    HTTP-200 placeholder, `_dedupe()` folded the lot into one entry, and
+    the coverflow showed the error as its only title."""
+    from lib.stremio.addons import AddonClient
+    from tests.conftest import FakeResponse, FakeSession
+
+    ctx = load_searchwindow()
+    store = _aiostreams_like_store()
+    _wire_store(ctx.searchwindow, store)
+    client = AddonClient()
+    client.session = FakeSession(responses=[FakeResponse({'metas': [_aiostreams_error_meta()]}) for _ in range(3)])
+    _wire_client(ctx.searchwindow, client)
+    win = _make_window(ctx.searchwindow)
+    win.onInit()
+    opened = []
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda m, catalog_title=None: opened.append(m))
+
+    win._run_search('batman')
+
+    assert opened == []
+    assert ctx.env.notifications == [('Rivulet', 'STR30382', 'info', 6000)]
+    errors = [msg for msg, _level in ctx.env.log_calls if 'failed' in msg and 'aio.example' in msg]
+    assert len(errors) == 3 and all('addon reported error (HTTP 404)' in m for m in errors)
+
+
+def test_run_query_drops_an_error_placeholder_appended_to_real_results(load_searchwindow):
+    from lib.stremio.addons import AddonClient
+    from tests.conftest import FakeResponse, FakeSession
+
+    ctx = load_searchwindow()
+    store = _aiostreams_like_store()
+    client = AddonClient()
+    real = _meta('tt1', 'Batman')
+    client.session = FakeSession(responses=[
+        FakeResponse({'metas': [real, _aiostreams_error_meta('Request timed out')]}),
+        FakeResponse({'metas': []}),
+        FakeResponse({'metas': []}),
+    ])
+    report = ctx.searchwindow.SearchReport()
+
+    result = ctx.searchwindow.run_query(store, client, 'batman', report=report)
+
+    assert [m['id'] for m in result] == ['tt1']
+    assert report.failures == []
 
 
 # ---------------------------------------------------------------------------

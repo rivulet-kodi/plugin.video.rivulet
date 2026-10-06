@@ -973,3 +973,19 @@ msgstr "منفذ الجسر"
 msgctxt "#30374"
 msgid "Channels (comma-separated, blank = every active channel)"
 msgstr "القنوات (مفصولة بفواصل، فارغ = جميع القنوات النشطة)"
+
+msgctxt "#30380"
+msgid "No results found"
+msgstr "لم يتم العثور على نتائج"
+
+msgctxt "#30381"
+msgid "No enabled addon supports search. Enable one, such as Cinemeta."
+msgstr "لا توجد إضافة مفعّلة تدعم البحث. فعّل واحدة، مثل Cinemeta."
+
+msgctxt "#30382"
+msgid "Search failed: no addon answered. Try again or enable another search addon, such as Cinemeta."
+msgstr "فشل البحث: لم ترد أي إضافة. أعد المحاولة أو فعّل إضافة بحث أخرى، مثل Cinemeta."
+
+msgctxt "#30383"
+msgid "Search incomplete, no answer from: %s"
+msgstr "البحث غير مكتمل، لا ردّ من: %s"

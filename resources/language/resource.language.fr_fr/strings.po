@@ -973,3 +973,19 @@ msgstr "Port de la passerelle"
 msgctxt "#30374"
 msgid "Channels (comma-separated, blank = every active channel)"
 msgstr "Chaînes (séparées par des virgules, vide = toutes les chaînes actives)"
+
+msgctxt "#30380"
+msgid "No results found"
+msgstr "Aucun résultat trouvé"
+
+msgctxt "#30381"
+msgid "No enabled addon supports search. Enable one, such as Cinemeta."
+msgstr "Aucun addon activé ne prend en charge la recherche. Activez-en un, comme Cinemeta."
+
+msgctxt "#30382"
+msgid "Search failed: no addon answered. Try again or enable another search addon, such as Cinemeta."
+msgstr "Échec de la recherche : aucun addon n'a répondu. Réessayez ou activez un autre addon de recherche, comme Cinemeta."
+
+msgctxt "#30383"
+msgid "Search incomplete, no answer from: %s"
+msgstr "Recherche incomplète, aucune réponse de : %s"
