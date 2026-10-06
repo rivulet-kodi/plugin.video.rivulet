@@ -293,6 +293,23 @@ def _resolve_title(imdb_id, search_type):
         return None
 
 
+class _ChannelStageFailed(RuntimeError):
+    """A Stream4Me call of one channel (search/episodios/findvideos)
+    raised. The stage helper already logged the REAL cause with its
+    repr, so `_log_channel_error()` stays quiet for this type: logging it
+    again as `channel X raised: RuntimeError('... raised')` only added a
+    second, information-free line per failing channel per request."""
+
+
+def _log_channel_error(channel_id, exc):
+    """`bh.collect_with_budget()`'s `on_error` hook. Logs an UNEXPECTED
+    exception out of a channel's pipeline; a `_ChannelStageFailed` was
+    already logged with its cause where it happened (see its docstring)."""
+    if isinstance(exc, _ChannelStageFailed):
+        return
+    _log("channel %s raised: %r" % (channel_id, exc), level_error=True)
+
+
 def _search_channel(channel_id, title, content_type):
     """Run one Stream4Me channel's own `search()` entry point. Returns its
     raw itemlist (a list of `core.item.Item`, possibly empty -- a
@@ -609,7 +626,7 @@ def _streams_for_channel(channel_id, imdb_id, title, year, tmdb_id, season, epis
     else:
         results = _search_channel(channel_id, title, content_type)
         if results is None:
-            raise RuntimeError("channel %s search() raised" % channel_id)
+            raise _ChannelStageFailed("channel %s search() raised" % channel_id)
         matched = None
         for candidate in results:
             info_labels = dict(getattr(candidate, "infoLabels", {}) or {})
@@ -620,7 +637,7 @@ def _streams_for_channel(channel_id, imdb_id, title, year, tmdb_id, season, epis
         if matched is not None and season is not None and episode is not None:
             episodes = _episodes_list(channel_id, matched)
             if episodes is None:
-                raise RuntimeError("channel %s episodios() raised" % channel_id)
+                raise _ChannelStageFailed("channel %s episodios() raised" % channel_id)
         _MATCH_CACHE.set(cache_key, (matched, episodes))
 
     if matched is None:
@@ -634,7 +651,7 @@ def _streams_for_channel(channel_id, imdb_id, title, year, tmdb_id, season, epis
 
     videos = _find_videos(channel_id, target_item)
     if videos is None:
-        raise RuntimeError("channel %s findvideos() raised" % channel_id)
+        raise _ChannelStageFailed("channel %s findvideos() raised" % channel_id)
 
     streams = []
     for server_item in videos:
@@ -648,13 +665,19 @@ def _channel_task(channel_id, imdb_id, title, year, tmdb_id, season, episode, co
     a normal return -- EMPTY or not -- resets it. This is the ONE place
     that decides "channel really broke" apart from "channel searched
     fine and simply found nothing", so a channel with no matching title
-    is never penalized for it."""
+    is never penalized for it. The failure that trips the cooldown is
+    logged here (once per cooldown), so a dead channel's silence in the
+    following requests is explained in kodi.log."""
     try:
         streams = _streams_for_channel(
             channel_id, imdb_id, title, year, tmdb_id, season, episode, content_type,
         )
     except Exception:
-        _CHANNEL_BACKOFF.record_failure(channel_id)
+        if _CHANNEL_BACKOFF.record_failure(channel_id):
+            _log(
+                "channel %s failed %d times in a row, skipping it for %d minutes"
+                % (channel_id, _CHANNEL_FAILURE_THRESHOLD, _CHANNEL_COOLDOWN_SECONDS // 60),
+            )
         raise
     _CHANNEL_BACKOFF.record_success(channel_id)
     return streams
@@ -737,9 +760,7 @@ def _handle_stream_request(state, content_type_param, id_param):
 
             streams, timed_out = bh.collect_with_budget(
                 pool, tasks, budget,
-                on_error=lambda channel_id, exc: _log(
-                    "channel %s raised: %r" % (channel_id, exc), level_error=True,
-                ),
+                on_error=_log_channel_error,
                 on_late_complete=_cache_late,
                 late_timeout=_LATE_COMPLETION_SECONDS,
             )

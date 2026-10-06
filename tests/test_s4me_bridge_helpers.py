@@ -1135,6 +1135,13 @@ def test_channel_backoff_unknown_channel_is_available():
     assert bh.ChannelBackoff().is_available("never-seen") is True
 
 
+def test_channel_backoff_record_failure_reports_only_the_cooldown_start():
+    backoff = bh.ChannelBackoff(failure_threshold=2, cooldown_seconds=100)
+    assert backoff.record_failure("ch") is False
+    assert backoff.record_failure("ch") is True  # this one tripped the cooldown
+    assert backoff.record_failure("ch") is False  # already cooling down
+
+
 def test_channel_backoff_is_thread_safe_under_concurrent_updates():
     backoff = bh.ChannelBackoff(failure_threshold=1000000, cooldown_seconds=100)
     errors = []
@@ -1550,6 +1557,66 @@ def test_handle_stream_request_skips_channels_in_cooldown(monkeypatch):
 
     assert calls == ["up"]
     assert result["streams"] == [{"url": "u-up"}]
+
+
+def test_channel_task_logs_the_cooldown_start_exactly_once(monkeypatch):
+    backoff = bh.ChannelBackoff(failure_threshold=2, cooldown_seconds=600)
+    monkeypatch.setattr(bridge, "_CHANNEL_BACKOFF", backoff)
+    monkeypatch.setattr(bridge, "_CHANNEL_FAILURE_THRESHOLD", 2)
+    monkeypatch.setattr(bridge, "_CHANNEL_COOLDOWN_SECONDS", 600)
+    logged = []
+    monkeypatch.setattr(bridge, "_log", lambda message, **k: logged.append(message))
+
+    def _boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(bridge, "_streams_for_channel", _boom)
+    for _ in range(3):
+        with pytest.raises(RuntimeError):
+            bridge._channel_task("ch", "tt1", "T", "2000", "1", None, None, "movie")
+
+    assert logged == ["channel ch failed 2 times in a row, skipping it for 10 minutes"]
+
+
+def test_failing_channel_is_logged_once_with_its_real_cause(monkeypatch):
+    """`_search_channel()` logs the real exception; the pipeline's own
+    follow-up `RuntimeError('... raised')` must not be logged a second
+    time by the fan-out's error hook (one line per failing channel per
+    request, not two)."""
+    monkeypatch.setattr(bridge, "_CHANNEL_BACKOFF", bh.ChannelBackoff())
+    monkeypatch.setattr(bridge, "_MATCH_CACHE", bh.TTLCache(1800))
+    monkeypatch.setattr(bridge, "_resolve_title", lambda imdb_id, search_type: ("Title", "1999", "603"))
+    logged = []
+    monkeypatch.setattr(bridge, "_log", lambda message, **k: logged.append(message))
+
+    def _search(item, title):
+        raise AttributeError("type object 'HTTPResponse' has no attribute 'cookies'")
+
+    _install_fake_channel_module(monkeypatch, "broken", search_fn=_search)
+    result = bridge._handle_stream_request(_FakeState(("broken",)), "movie", "tt1234567")
+
+    assert result == {"streams": []}
+    assert len(logged) == 1
+    assert logged[0].startswith("channel broken search failed: AttributeError(")
+
+
+def test_unexpected_channel_exception_is_still_logged_by_the_fan_out(monkeypatch):
+    """Only the already-logged stage failures are silenced: anything else
+    escaping a channel's pipeline keeps its `raised` line."""
+    monkeypatch.setattr(bridge, "_CHANNEL_BACKOFF", bh.ChannelBackoff())
+    monkeypatch.setattr(bridge, "_resolve_title", lambda imdb_id, search_type: ("Title", "1999", "603"))
+    logged = []
+    monkeypatch.setattr(bridge, "_log", lambda message, **k: logged.append(message))
+
+    def _boom(*a, **k):
+        raise ValueError("unexpected")
+
+    monkeypatch.setattr(bridge, "_streams_for_channel", _boom)
+    bridge._handle_stream_request(_FakeState(("odd",)), "movie", "tt1234567")
+
+    assert logged == ["channel odd raised: ValueError('unexpected')"]
+
+
 
 
 # --- bridge.py: _streams_for_channel show/movie match caching --------------

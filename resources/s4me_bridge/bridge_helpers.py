@@ -671,12 +671,16 @@ class ChannelBackoff:
 
     def record_failure(self, channel_id):
         """Counts one more consecutive failure; the `failure_threshold`-th
-        one starts a fresh `cooldown_seconds` timeout from now."""
+        one starts a fresh `cooldown_seconds` timeout from now. Returns
+        True exactly when THIS call started that cooldown, so the caller
+        can log the one line that explains why the channel goes quiet."""
         with self._lock:
             count = self._failures.get(channel_id, 0) + 1
             self._failures[channel_id] = count
             if count >= self._threshold:
                 self._cooldown_until[channel_id] = self._clock() + self._cooldown
+                return count == self._threshold
+            return False
 
 
 #: Origins Stremio's own web client runs from -- the only cross-origin
