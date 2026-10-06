@@ -531,6 +531,73 @@ def test_open_catalog_addon_error_still_closes_the_busy_dialog(load_catalogpicke
     assert windows[0].closed is True
 
 
+def _aiostreams_placeholder(description='404 - Not Found'):
+    """The meta AIOStreams answers a failing catalog with (HTTP 200, id
+    `aiostreamserror.<json>` - see `lib.stremio.addons.ERROR_META_ID_PREFIX`)."""
+    from lib.stremio.addons import ERROR_META_ID_PREFIX
+
+    return {
+        'id': ERROR_META_ID_PREFIX + '%7B%22errorTitle%22%3A%22%5BX%5D%20AIOStreams%22%7D',
+        'name': '[X] AIOStreams',
+        'description': description,
+        'type': 'movie',
+    }
+
+
+def test_open_catalog_that_is_only_an_error_placeholder_fails_instead_of_opening_a_one_title_coverflow(
+    load_catalogpicker, monkeypatch,
+):
+    """Logged as "opening coverflow (1 results, paging in background)":
+    Prime/Apple TV+/Paramount+ catalogs of a throttled AIOStreams each
+    answered one HTTP-200 placeholder, which the picker took for a
+    one-title catalog - and, since the catalog declares `skip`, went on to
+    page it. It is a failed fetch: notify, open nothing, request nothing
+    further."""
+    from lib.stremio.addons import AddonClient
+    from tests.conftest import FakeResponse, FakeSession, wire_client
+
+    ctx = load_catalogpicker()
+    win = _make_window(ctx.catalogpicker)
+    client = AddonClient()
+    client.session = FakeSession(responses=[FakeResponse({'metas': [_aiostreams_placeholder()]})])
+    wire_client(ctx.views, client)
+    opened = []
+    monkeypatch.setattr(
+        ctx.infowindow, 'open_showcase', lambda m, catalog_title=None, more_pages=None: opened.append(m),
+    )
+
+    win._open_catalog(
+        'https://a.example/manifest.json', {'name': 'Addon A'},
+        {'type': 'movie', 'id': 'streaming.amp', 'extra': [{'name': 'skip'}]},
+    )
+
+    assert opened == []
+    assert ctx.env.notifications == [('Rivulet', 'STR30032', 'info', 4000)]
+    assert len(client.session.calls) == 1
+    assert any('addon reported error (HTTP 404)' in msg for msg, _level in ctx.env.log_calls)
+
+
+def test_open_catalog_drops_an_error_placeholder_appended_to_real_titles(load_catalogpicker, monkeypatch):
+    from lib.stremio.addons import AddonClient
+    from tests.conftest import FakeResponse, FakeSession, wire_client
+
+    ctx = load_catalogpicker()
+    win = _make_window(ctx.catalogpicker)
+    client = AddonClient()
+    real = [{'id': 'tt1', 'name': 'One', 'type': 'movie'}, {'id': 'tt2', 'name': 'Two', 'type': 'movie'}]
+    client.session = FakeSession(responses=[FakeResponse({'metas': real + [_aiostreams_placeholder('Request timed out')]})])
+    wire_client(ctx.views, client)
+    shown = []
+    monkeypatch.setattr(
+        ctx.infowindow, 'open_showcase',
+        lambda m, catalog_title=None, more_pages=None: shown.append(list(m)),
+    )
+
+    win._open_catalog('https://a.example/manifest.json', {'name': 'Addon A'}, {'type': 'movie', 'id': 'top'})
+
+    assert shown == [real]
+
+
 # ---------------------------------------------------------------------------
 # CatalogPickerWindow.start() - the doModal()/empty-catalogs contract
 # ---------------------------------------------------------------------------

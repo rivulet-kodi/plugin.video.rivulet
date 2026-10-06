@@ -149,11 +149,12 @@ class AddonError(Exception):
 
     `category` is an optional, safe-by-construction detail alongside the
     (possibly unsafe) `message`: it MUST only ever be a value produced by
-    `_request_error_category()` or a fixed literal such as 'invalid JSON'
-    - never raw exception text, never a url - so log sites can surface it
-    via `addon_error_detail()` without repeating the credential/path/query
-    leakage `message` may carry (raise sites elsewhere in the codebase
-    build `message` from arbitrary, unsanitized text).
+    `_request_error_category()`/`error_meta_category()` or a fixed
+    literal such as 'invalid JSON' - never raw exception text, never a
+    url - so log sites can surface it via `addon_error_detail()` without
+    repeating the credential/path/query leakage `message` may carry
+    (raise sites elsewhere in the codebase build `message` from
+    arbitrary, unsanitized text).
     """
 
     def __init__(self, message, category=None):
@@ -270,6 +271,52 @@ def addon_error_detail(exc):
     return type(exc).__name__
 
 
+#: Id prefix of the synthetic "meta" AIOStreams answers a failing
+#: catalog/meta request with (`StremioTransformer.createErrorMeta` in
+#: Viren070/AIOStreams: `id: 'aiostreamserror.' + encodeURIComponent(
+#: JSON.stringify({errorTitle, errorDescription}))`, `name: errorTitle`,
+#: `description: errorDescription`, `type: 'movie'`). It is returned
+#: with HTTP 200 inside an otherwise ordinary `{"metas": [...]}`
+#: envelope - alone when the upstream catalog failed outright, appended
+#: after the real entries when only some sources did (unless the
+#: instance owner set `hideErrors`) - so `raise_for_status()` never sees
+#: it and, unrecognised, it is rendered as a title called "[X] AIOStreams".
+#:
+#: Measured against a public instance that had started throttling: every
+#: search catalog answered `{"metas": [<this placeholder, "404 - Not
+#: Found">]}`. All of them carry the SAME id, so `searchwindow._dedupe()`
+#: folded the lot into a single entry and the coverflow opened on "1
+#: results" with nothing in the log - no request had failed as far as the
+#: client could tell. The catalog picker showed the same one-tile
+#: coverflow for every catalog the instance could not serve.
+ERROR_META_ID_PREFIX = 'aiostreamserror.'
+
+
+def is_error_meta(meta):
+    """Whether `meta` is an addon-synthesised error placeholder (see
+    `ERROR_META_ID_PREFIX`) rather than a real title. Never raises: a
+    non-dict or id-less entry is simply not one."""
+    if not isinstance(meta, dict):
+        return False
+    meta_id = meta.get('id')
+    return isinstance(meta_id, str) and meta_id.startswith(ERROR_META_ID_PREFIX)
+
+
+def error_meta_category(meta):
+    """A safe-by-construction `AddonError.category` for an error
+    placeholder: the fixed literal `'addon reported error'`, plus the
+    HTTP status the addon quotes at the start of its own description
+    (`'404 - Not Found'`) when there is one. Only that three-digit
+    number is ever copied out - the rest of the description is free text
+    from a third party and may repeat a URL or credential, so it never
+    reaches a log line (see `AddonError`'s `category` contract)."""
+    text = str(meta.get('description') or '').strip() if isinstance(meta, dict) else ''
+    code = text[:3]
+    if code.isascii() and code.isdigit() and not text[3:4].isalnum():
+        return 'addon reported error (HTTP %s)' % code
+    return 'addon reported error'
+
+
 class AddonClient:
     """Thin HTTP client for the addon manifest/catalog/meta/stream/subtitles
     resources. One `requests.Session()` per client instance (stored as
@@ -333,6 +380,18 @@ class AddonClient:
                 return json.loads(bytes(body))
             except ValueError:
                 raise AddonError('GET %s returned invalid JSON' % safe, category='invalid JSON')
+        except requests.RequestException as exc:
+            # Raised by `iter_content()` while the body is still arriving
+            # (a read timeout after the headers landed, a reset, a
+            # truncated chunked body). `requests` only wraps those for
+            # the `get()`/`raise_for_status()` pair above, so without
+            # this branch a stalled-mid-body addon escaped as a bare
+            # `requests.ConnectionError`: no `except AddonError` site
+            # (search, the catalog picker, `views._fetch_meta()`'s worker
+            # thread) caught it, and the first uncaught one aborted the
+            # whole search with a traceback instead of costing one addon.
+            category = _request_error_category(exc)
+            raise AddonError('GET %s failed mid-stream: %s' % (safe, category), category=category)
         finally:
             resp.close()
 
@@ -376,14 +435,45 @@ class AddonClient:
         return self._get_json(transport_url)
 
     def catalog(self, base, rtype, cid, extra=None):
-        """GET a catalog resource -> list of meta preview objects (resp['metas'])."""
+        """GET a catalog resource -> list of meta preview objects (resp['metas']).
+
+        Addon-synthesised error placeholders (`is_error_meta()`) never
+        reach the caller as titles. When a catalog ALSO carries real
+        entries they are simply dropped; when the placeholder is ALL
+        the addon sent, the request is a failure like any other and
+        raises `AddonError` (category from `error_meta_category()`), so
+        every `except AddonError` site - search, the catalog picker,
+        discover links - reports it instead of showing "[X] AIOStreams"
+        as the one result of a 1-title coverflow."""
         url = build_resource_url(base, 'catalog', rtype, cid, extra)
-        return self._get_field(url, 'metas', 'list')
+        metas = self._get_field(url, 'metas', 'list')
+        real = [meta for meta in metas if not is_error_meta(meta)]
+        if len(real) == len(metas):
+            return metas
+        if real:
+            return real
+        raise AddonError(
+            'GET %s answered with an error placeholder instead of a catalog' % safe_url_for_log(url),
+            category=error_meta_category(metas[0]),
+        )
 
     def meta(self, base, rtype, mid):
-        """GET a meta resource -> the meta object (resp['meta'])."""
+        """GET a meta resource -> the meta object (resp['meta']).
+
+        An addon-synthesised error placeholder (`is_error_meta()`) raises
+        `AddonError` rather than being returned as the title:
+        `views._fetch_meta()` takes the first usable answer across addons,
+        so a placeholder from a throttled aggregator would otherwise
+        outrank a perfectly good meta from a later addon and open the
+        detail screen on "[X] AIOStreams"."""
         url = build_resource_url(base, 'meta', rtype, mid)
-        return self._get_field(url, 'meta', 'meta')
+        meta = self._get_field(url, 'meta', 'meta')
+        if is_error_meta(meta):
+            raise AddonError(
+                'GET %s answered with an error placeholder instead of a meta' % safe_url_for_log(url),
+                category=error_meta_category(meta),
+            )
+        return meta
 
     def streams(self, base, rtype, sid):
         """GET a stream resource -> list of Stream objects (resp['streams'])."""

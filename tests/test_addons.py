@@ -11,6 +11,7 @@ import pytest
 
 from lib.stremio.addons import (
     _MAX_RESPONSE_BYTES,
+    ERROR_META_ID_PREFIX,
     AddonClient,
     AddonError,
     _base_type,
@@ -22,6 +23,8 @@ from lib.stremio.addons import (
     catalog_required_extra_names,
     catalog_supports_extra,
     encode_extra,
+    error_meta_category,
+    is_error_meta,
     iter_catalogs,
     safe_url_for_log,
     validate_transport_url,
@@ -957,3 +960,159 @@ def test_addon_client_parses_normal_sized_chunked_body():
         responses=[_SizedResp([b'{"id": "org.test"}'])]
     )
     assert client.manifest(MANIFEST_URL) == {"id": "org.test"}
+
+
+# --- mid-body failures stay AddonErrors ----------------------------------
+
+
+class _StallingResp(_SizedResp):
+    """A streamed response whose body dies after the headers landed: yields
+    its chunks, then raises `error` from inside `iter_content()` - exactly
+    where `requests` surfaces a read timeout, reset or truncated chunked
+    body on a real `stream=True` response."""
+
+    def __init__(self, chunks, error):
+        super().__init__(chunks)
+        self._error = error
+
+    def iter_content(self, chunk_size=None):
+        yield from self._chunks
+        raise self._error
+
+
+@pytest.mark.parametrize('error_name', ['ConnectionError', 'ChunkedEncodingError', 'ContentDecodingError'])
+def test_get_json_body_stream_failure_is_an_addon_error_with_a_safe_category(error_name):
+    """`iter_content()` raises `requests` exceptions OUTSIDE the
+    `get()`/`raise_for_status()` guard. Unwrapped they escaped every
+    `except AddonError` site - the first one aborted a whole search."""
+    import requests
+
+    error = getattr(requests.exceptions, error_name)('Read timed out. token=SECRET')
+    response = _StallingResp([b'{"metas": ['], error)
+    client = AddonClient()
+    client.session = FakeSession(responses=[response])
+
+    with pytest.raises(AddonError) as exc_info:
+        client.catalog('https://addon.example/manifest.json?token=SECRET', 'movie', 'top')
+
+    exc = exc_info.value
+    assert exc.category == error_name
+    assert 'SECRET' not in str(exc)
+    assert str(exc) == 'GET https://addon.example failed mid-stream: %s' % error_name
+    assert response.closed is True
+
+
+# --- addon-synthesised error placeholders (AIOStreams `aiostreamserror.`) ---
+
+
+def _error_placeholder(description='404 - Not Found', title='[X] AIOStreams'):
+    """The meta `StremioTransformer.createErrorMeta` builds in AIOStreams."""
+    import json
+    from urllib.parse import quote
+
+    payload = json.dumps({'errorTitle': title, 'errorDescription': description}, separators=(',', ':'))
+    return {
+        'id': ERROR_META_ID_PREFIX + quote(payload, safe=''),
+        'name': title,
+        'description': description,
+        'type': 'movie',
+    }
+
+
+def test_is_error_meta_recognises_the_placeholder_and_nothing_else():
+    assert is_error_meta(_error_placeholder()) is True
+    assert is_error_meta({'id': 'tt0111161', 'name': 'The Shawshank Redemption'}) is False
+    assert is_error_meta({'name': 'no id'}) is False
+    assert is_error_meta({'id': 12345}) is False
+    assert is_error_meta(None) is False
+    assert is_error_meta('aiostreamserror.x') is False
+
+
+@pytest.mark.parametrize('description,expected', [
+    ('404 - Not Found', 'addon reported error (HTTP 404)'),
+    ('  503', 'addon reported error (HTTP 503)'),
+    ('429: Too Many Requests', 'addon reported error (HTTP 429)'),
+    ('Request timed out after https://user:pw@host/x', 'addon reported error'),
+    ('4041 odd', 'addon reported error'),
+    ('404x', 'addon reported error'),
+    ('\u0664\u0660\u0664 - Arabic-Indic digits', 'addon reported error'),
+    ('', 'addon reported error'),
+    (None, 'addon reported error'),
+])
+def test_error_meta_category_copies_only_a_leading_ascii_status_code(description, expected):
+    meta = {'id': ERROR_META_ID_PREFIX + 'x', 'description': description}
+    assert error_meta_category(meta) == expected
+
+
+def test_error_meta_category_tolerates_a_non_dict():
+    assert error_meta_category(None) == 'addon reported error'
+
+
+def test_catalog_that_is_only_an_error_placeholder_raises_addon_error():
+    """HTTP 200 + a lone placeholder is a FAILED request, not a 1-title
+    catalog (the "1 results" coverflow)."""
+    client = AddonClient()
+    client.session = FakeSession(responses=[_json_response({'metas': [_error_placeholder('404 - Not Found')]})])
+
+    with pytest.raises(AddonError) as exc_info:
+        client.catalog('https://addon.example/manifest.json', 'movie', 'search', extra=[('search', 'batman')])
+
+    exc = exc_info.value
+    assert exc.category == 'addon reported error (HTTP 404)'
+    assert addon_error_detail(exc) == 'AddonError (addon reported error (HTTP 404))'
+    assert 'batman' not in str(exc)
+    assert 'Not Found' not in str(exc)
+
+
+def test_catalog_with_several_identical_placeholders_still_raises():
+    placeholder = _error_placeholder()
+    client = AddonClient()
+    client.session = FakeSession(responses=[_json_response({'metas': [placeholder, dict(placeholder)]})])
+
+    with pytest.raises(AddonError):
+        client.catalog('https://addon.example/manifest.json', 'movie', 'top')
+
+
+def test_catalog_drops_placeholders_appended_after_real_entries():
+    """AIOStreams appends its error entries behind whatever DID load
+    (partial failure): keep the titles, lose the placeholder."""
+    real = [{'id': 'tt1', 'name': 'One'}, {'id': 'tt2', 'name': 'Two'}]
+    client = AddonClient()
+    client.session = FakeSession(responses=[_json_response({'metas': real + [_error_placeholder('Request timed out')]})])
+
+    assert client.catalog('https://addon.example/manifest.json', 'movie', 'top') == real
+
+
+def test_catalog_without_placeholders_is_returned_untouched():
+    real = [{'id': 'tt1', 'name': 'One'}, 'not-a-dict', {'name': 'no id'}]
+    client = AddonClient()
+    client.session = FakeSession(responses=[_json_response({'metas': real})])
+
+    assert client.catalog('https://addon.example/manifest.json', 'movie', 'top') == real
+
+
+def test_empty_catalog_is_still_an_empty_list_not_an_error():
+    client = AddonClient()
+    client.session = FakeSession(responses=[_json_response({'metas': []})])
+
+    assert client.catalog('https://addon.example/manifest.json', 'movie', 'search') == []
+
+
+def test_meta_that_is_an_error_placeholder_raises_addon_error():
+    """`views._fetch_meta()` takes the first usable answer: a placeholder
+    returned as the meta would beat a good one from a later addon."""
+    client = AddonClient()
+    client.session = FakeSession(responses=[_json_response({'meta': _error_placeholder('500 - Server Error')})])
+
+    with pytest.raises(AddonError) as exc_info:
+        client.meta('https://addon.example/manifest.json', 'movie', 'tt1')
+
+    assert exc_info.value.category == 'addon reported error (HTTP 500)'
+
+
+def test_meta_that_is_a_real_meta_is_returned():
+    meta = {'id': 'tt1', 'name': 'One', 'type': 'movie'}
+    client = AddonClient()
+    client.session = FakeSession(responses=[_json_response({'meta': meta})])
+
+    assert client.meta('https://addon.example/manifest.json', 'movie', 'tt1') == meta
