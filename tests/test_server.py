@@ -93,7 +93,9 @@ def test_resolve_stream_forwards_sources_when_announce_absent():
     `#[serde(alias = "sources")]` (stream.rs:812) - Torrentio/AIOStreams-
     style addons ship trackers under `sources`, not `announce`. Live bug
     fix: resolve_stream must fall back to `sources` so the server actually
-    receives tracker URLs (it strips "tracker:"/ignores "dht:" itself)."""
+    receives tracker URLs - as bare announce URLs: the server's `tr=` path
+    drops a `tracker:`-wrapped value as a host-less URL (verified live
+    against v0.20.0) and has no use for `dht:` entries."""
     client = make_client()
     stream = {
         "infoHash": "cc" * 20,
@@ -101,9 +103,8 @@ def test_resolve_stream_forwards_sources_when_announce_absent():
         "sources": ["tracker:udp://tracker1/announce", "dht:" + "cc" * 20],
     }
     resolved = client.resolve_stream(stream)
-    assert resolved == client.torrent_url(
-        "cc" * 20, 26, ["tracker:udp://tracker1/announce", "dht:" + "cc" * 20]
-    )
+    assert resolved == client.torrent_url("cc" * 20, 26, ["udp://tracker1/announce"])
+    assert resolved == BASE + "/" + "cc" * 20 + "/26?" + urlencode([("tr", "udp://tracker1/announce")])
 
 
 def test_resolve_stream_prefers_announce_over_sources_when_both_present():
@@ -583,6 +584,29 @@ def test_guess_file_idx_garbage_file_entries_treated_as_zero_length():
     assert guess_file_idx(stats) == 4
 
 
+def test_guess_file_idx_prefers_largest_video_over_a_bigger_non_video_file():
+    """The server's GuessFileIdx picks the largest VIDEO file; the
+    client-side fallback must agree, or Kodi would be pointed at e.g. a
+    soundtrack archive that happens to be bigger than the movie."""
+    stats = {"files": [
+        {"name": "Soundtrack.flac", "path": "Extras/Soundtrack.flac", "length": 900},
+        {"name": "Movie.MKV", "path": "Movie.MKV", "length": 500},
+        {"name": "Sample.mkv", "path": "Sample/Sample.mkv", "length": 50},
+        {"name": "poster.jpg", "path": "poster.jpg", "length": 5},
+    ]}
+    assert guess_file_idx(stats) == 1
+
+
+def test_guess_file_idx_falls_back_to_largest_file_when_nothing_looks_like_video():
+    stats = {"files": [{"path": "a.bin", "length": 10}, {"path": "b.iso", "length": 30}, {"path": "c.txt", "length": 20}]}
+    assert guess_file_idx(stats) == 1
+
+
+def test_guess_file_idx_video_ties_pick_first_and_use_path_or_name():
+    stats = {"files": [{"name": "x.zip", "length": 99}, {"name": "a.mp4", "length": 40}, {"path": "dir/b.m2ts", "length": 40}]}
+    assert guess_file_idx(stats) == 1
+
+
 # ============================================================================
 # iter_front: front-priming readiness probe (live-verified fix)
 #
@@ -1022,3 +1046,108 @@ def test_resolve_stream_player_frame_url_raises_unsupported():
 
 def test_unsupported_stream_error_is_a_server_error():
     assert issubclass(UnsupportedStreamError, ServerError)
+
+
+# --- tracker forwarding on create/front reads (stremio-server-go `tr=`) --------
+
+from lib.stremio.server import stream_trackers  # noqa: E402
+
+_TR_HASH = "aabbccddeeff00112233445566778899aabbccdd"
+
+
+def test_normalize_trackers_strips_tracker_wrapper_and_drops_dht_entries():
+    """Torrentio/AIOStreams `sources`: "tracker:<announce url>" wrappers
+    must reach the server as bare URLs (it drops the wrapped form as a
+    host-less URL) and "dht:<hash>" entries carry no announce URL."""
+    sources = [
+        "tracker:udp://tracker.opentrackr.org:1337/announce",
+        "dht:" + _TR_HASH,
+        "tracker:udp%3A%2F%2Fencoded.example%3A80%2Fannounce",  # wrapper + percent-encoded URL
+        "  tracker:  http://spaced.example/announce  ",
+        "udp://tracker.opentrackr.org:1337/announce",  # same URL as the first entry, unwrapped
+        "tracker:",
+        "dht:",
+        "",
+        None,
+    ]
+    assert normalize_trackers(sources) == [
+        "udp://tracker.opentrackr.org:1337/announce",
+        "udp://encoded.example:80/announce",
+        "http://spaced.example/announce",
+    ]
+
+
+def test_stream_trackers_prefers_announce_then_sources_then_empty():
+    assert stream_trackers({"announce": ["a"], "sources": ["b"]}) == ["a"]
+    assert stream_trackers({"sources": ["b"]}) == ["b"]
+    assert stream_trackers({"announce": [], "sources": ["b"]}) == ["b"]
+    assert stream_trackers({}) == []
+    assert stream_trackers(None) == []
+
+
+def test_create_engine_posts_peer_search_body_with_trackers():
+    """The GET form's query string is not read by the server's /create, so a
+    stream's trackers travel the way stremio-core's CreateTorrentRequest sends
+    them: POST {"peerSearch": {"sources": ["dht:<hash>", "tracker:<url>", ...]}}
+    (honoured by handleCreate since v0.1.0)."""
+    client = make_client()
+    client.session = FakeSession(responses=[_json_response({"infoHash": _TR_HASH})])
+    stats = client.create_engine(
+        _TR_HASH.upper(), timeout=(3.05, 8),
+        trackers=["tracker:udp://t1/announce", "dht:" + _TR_HASH, "udp://t2/announce"],
+    )
+    assert stats == {"infoHash": _TR_HASH}
+    call = client.session.calls[0]
+    assert call["method"] == "POST"
+    assert call["url"] == BASE + "/" + _TR_HASH + "/create"
+    assert call["kwargs"]["json"] == {"peerSearch": {
+        "min": 40, "max": 200,
+        "sources": ["dht:" + _TR_HASH, "tracker:udp://t1/announce", "tracker:udp://t2/announce"],
+    }}
+    assert call["kwargs"]["timeout"] == (3.05, 8)
+
+
+def test_create_engine_without_usable_trackers_stays_a_plain_get():
+    client = make_client()
+    client.session = FakeSession(responses=[_json_response({}), _json_response({})])
+    client.create_engine(_TR_HASH, trackers=["dht:" + _TR_HASH])
+    client.create_engine(_TR_HASH, trackers=None)
+    assert [(call["method"], call["url"]) for call in client.session.calls] == [
+        ("GET", BASE + "/" + _TR_HASH + "/create")
+    ] * 2
+
+
+def test_create_engine_with_trackers_error_message_names_post_and_hides_credentials():
+    client = ServerClient("http://admin:" + "s3cr3t" + "@127.0.0.1:11470")
+    client.session = FakeSession(exc=requests.exceptions.ConnectionError("refused"))
+    with pytest.raises(ServerError) as excinfo:
+        client.create_engine(_TR_HASH, trackers=["udp://t1/announce"])
+    assert "s3cr3t" not in str(excinfo.value)
+    assert str(excinfo.value).startswith("POST http://127.0.0.1:11470/" + _TR_HASH + "/create failed")
+
+
+def test_create_engine_with_trackers_raises_server_error_on_invalid_json():
+    client = make_client()
+    client.session = FakeSession(responses=[_bad_json_response()])
+    with pytest.raises(ServerError):
+        client.create_engine(_TR_HASH, trackers=["udp://t1/announce"])
+
+
+def test_iter_front_sends_trackers_as_tr_params_and_keeps_range():
+    client = make_client()
+    client.session = FakeSession(responses=[_StreamResp([b"a" * 1024])])
+
+    assert list(client.iter_front(_TR_HASH, 3, want_bytes=1024, start_byte=0, trackers=["tracker:udp://t1/announce"])) == [1024]
+
+    call = client.session.calls[0]
+    assert call["url"] == BASE + "/" + _TR_HASH + "/3?" + urlencode([("tr", "udp://t1/announce")])
+    assert call["kwargs"]["headers"] == {"Range": "bytes=0-1023"}
+
+
+def test_iter_front_error_message_with_trackers_never_leaks_base_url_credentials():
+    client = ServerClient("http://admin:" + "s3cr3t" + "@127.0.0.1:11470")
+    client.session = FakeSession(exc=requests.exceptions.ConnectionError("refused"))
+    with pytest.raises(ServerError) as excinfo:
+        list(client.iter_front(_TR_HASH, 0, want_bytes=1, trackers=["udp://t1/announce"]))
+    assert "s3cr3t" not in str(excinfo.value)
+    assert "admin" not in str(excinfo.value)

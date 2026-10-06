@@ -182,8 +182,10 @@ class _ServerScript:
         self.torrent_url_result = torrent_url_result
         self.is_available_calls = 0
         self.create_engine_calls = []
+        self.create_engine_trackers = []
         self.iter_front_calls = []
         self.iter_front_start_bytes = []
+        self.iter_front_trackers = []
         self.torrent_url_calls = []
 
     def build_class(self):
@@ -206,8 +208,9 @@ class _ServerScript:
                     raise script.resolve_error
                 return script.resolve_url
 
-            def create_engine(self, info_hash, timeout=None):
+            def create_engine(self, info_hash, timeout=None, trackers=None):
                 script.create_engine_calls.append(info_hash)
+                script.create_engine_trackers.append(trackers)
                 if script.create_engine_error is not None:
                     raise script.create_engine_error
                 results = script.create_engine_results
@@ -216,9 +219,11 @@ class _ServerScript:
                 idx = len(script.create_engine_calls) - 1
                 return results[idx] if idx < len(results) else results[-1]
 
-            def iter_front(self, info_hash, file_idx, want_bytes, chunk_size=1048576, timeout=60, start_byte=0):
+            def iter_front(self, info_hash, file_idx, want_bytes, chunk_size=1048576, timeout=60, start_byte=0,
+                           trackers=None):
                 script.iter_front_calls.append((info_hash, file_idx, want_bytes))
                 script.iter_front_start_bytes.append(start_byte)
+                script.iter_front_trackers.append(trackers)
                 idx = len(script.iter_front_calls) - 1
                 attempts = script.iter_front_attempts
                 if not attempts:

@@ -23,6 +23,7 @@ from lib.stremio.server import (
     UnsupportedStreamError,
     guess_file_idx,
     normalize_info_hash,
+    stream_trackers,
 )
 from lib.stremio.subtitles import collect_subtitles, filter_subtitles
 from lib.ui.compat import (
@@ -309,7 +310,7 @@ def _stats_line(stats):
     return _lfmt(30082, speed, peers)
 
 
-def _poll_stats_best_effort(server, info_hash):
+def _poll_stats_best_effort(server, info_hash, trackers=None):
     """Live stats snapshot for the buffering dialog's second line - the
     SAME `/create` poll `_await_file_idx` uses for its own speed/peers
     line, reused here so a torrent already past metadata resolution still
@@ -321,7 +322,7 @@ def _poll_stats_best_effort(server, info_hash):
     break the front-priming loop itself.
     """
     try:
-        return server.create_engine(info_hash, timeout=_METADATA_TIMEOUT)
+        return server.create_engine(info_hash, timeout=_METADATA_TIMEOUT, trackers=trackers)
     except Exception as exc:  # noqa: BLE001 - stats are a bonus, never fatal to buffering
         log('player: buffer stats poll failed for %s: %r' % (info_hash, exc), xbmc.LOGWARNING)
         return None
@@ -571,19 +572,23 @@ def _await_file_idx(server, stream, info_hash, url, dialog, monitor):
     guessed from, threaded back out so the caller can recover a real
     filename (`extract_file_name`) without an extra `/create` round-trip.
     """
+    # The stream's own trackers ride on every poll: this loop is the first
+    # thing to name the torrent to the server, so they must join peer
+    # discovery for the metadata wait itself, not only once Kodi opens the
+    # final URL (see `ServerClient.create_engine`).
+    trackers = stream_trackers(stream)
     for attempt in range(_MAX_METADATA_ATTEMPTS):
         if dialog.iscanceled():
             return UNKNOWN_FILE_IDX, url, False, None
 
         try:
-            stats = server.create_engine(info_hash, timeout=_METADATA_TIMEOUT)
+            stats = server.create_engine(info_hash, timeout=_METADATA_TIMEOUT, trackers=trackers)
         except Exception as exc:  # noqa: BLE001 - a slow/failed poll just means "try again"
             log('player: metadata poll failed for %s: %r' % (info_hash, exc), xbmc.LOGWARNING)
             stats = None
 
         idx = guess_file_idx(stats)
         if idx is not None:
-            trackers = stream.get('announce') or stream.get('sources') or []
             rebuilt = server.torrent_url(stream['infoHash'], idx, trackers)
             return idx, rebuilt, True, stats
 
@@ -645,6 +650,11 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=None):
     # by normalize_info_hash) polled the wrong URL and playback was
     # refused even though the actual play URL was fine.
     info_hash = normalize_info_hash(stream['infoHash']) or stream['infoHash']
+    # Same tracker list `resolve_stream()` put into the final play URL; sent
+    # on the engine warm, the stats polls and every front read below so the
+    # engine has them from its very first request (pre-buffer is where a cold
+    # torrent spends nearly all of its start-up time).
+    trackers = stream_trackers(stream)
     try:
         if dialog.iscanceled():
             return False, url, None
@@ -673,7 +683,7 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=None):
             # filename (see `extract_file_name`) - no extra request needed.
             dialog.update(_ENGINE_WARM_PERCENT, L(30089))
             try:
-                warm_stats = server.create_engine(info_hash, timeout=_METADATA_TIMEOUT)
+                warm_stats = server.create_engine(info_hash, timeout=_METADATA_TIMEOUT, trackers=trackers)
                 filename = extract_file_name(warm_stats, file_idx)
                 file_length_bytes = _stats_file_length(warm_stats, file_idx)
             except Exception as exc:  # noqa: BLE001 - front reads drive the engine regardless
@@ -687,6 +697,15 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=None):
 
         buffer_mb = setting_int('buffer_mb', 20, minimum=5)
         target = buffer_mb * 1024 * 1024
+        # A file shorter than the target can never reach it: the first front
+        # read returns the whole file, and every retry then asks for a Range
+        # that starts at EOF, which the server answers with HTTP 416 (verified
+        # live) - so the loop would idle until the early-start gate or the
+        # `_TARGET_WAIT_SECONDS` budget let it go, and a file under
+        # `_HEADER_MIN_BYTES` could never start at all. Know the size
+        # (`/create` already told us) -> aim at the whole file instead.
+        if file_length_bytes:
+            target = min(target, int(file_length_bytes))
         # Formatted once: target never changes for the rest of this call, so
         # every per-chunk update below reuses this instead of paying
         # human_size() again per chunk (see the throttle comment in the
@@ -735,7 +754,7 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=None):
             # `_poll_stats_best_effort`'s docstring). Re-checked right
             # after so a slow poll never delays the next cancel check
             # past the front-read call that follows it.
-            stats = _poll_stats_best_effort(server, info_hash)
+            stats = _poll_stats_best_effort(server, info_hash, trackers)
             stats_line = _stats_line(stats)
             if dialog.iscanceled():
                 return False, url, None
@@ -767,6 +786,7 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=None):
             try:
                 for chunk_len in server.iter_front(
                     info_hash, file_idx, target, timeout=_FRONT_TIMEOUT, start_byte=total_got,
+                    trackers=trackers,
                 ):
                     total_got += chunk_len
                     percent = min(100, _BUFFER_PERCENT_BASE + total_got * _BUFFER_PERCENT_SPAN // target) if target else 100

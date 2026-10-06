@@ -107,6 +107,95 @@ def test_prebuffer_normalizes_uppercase_infohash_before_polling(kodi_stubs, monk
     handle, succeeded, list_item = _resolved_one(env)
     assert (handle, succeeded) == (2, True)
 
+def test_prebuffer_forwards_stream_trackers_to_every_server_call(kodi_stubs, monkeypatch):
+    """Pre-buffer is the first thing to name the torrent to the server, so
+    the stream's own trackers must ride on the engine warm, the stats poll
+    and the front read - not only on the final play URL Kodi opens after
+    pre-buffer (by which time a cold torrent has already spent its start-up
+    time on DHT plus the server's built-in tracker list)."""
+    env = kodi_stubs.env
+    env.addon.settings['buffer_mb'] = 1
+    half = DEFAULT_TARGET_BYTES // 2
+    trackers = ['udp://tracker.example:80', 'udp://tracker2.example:6969/announce']
+    script = _ServerScript(
+        resolve_url='http://server/x/0',
+        iter_front_attempts=[[half, half]],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(2, _torrent_stream(fileIdx=0, announce=trackers), 'movie', 'tt2')
+
+    assert script.create_engine_trackers == [trackers, trackers]  # engine warm + buffering stats poll
+    assert script.iter_front_trackers == [trackers]
+    handle, succeeded, _ = _resolved_one(env)
+    assert (handle, succeeded) == (2, True)
+
+
+def test_prebuffer_falls_back_to_sources_for_tracker_forwarding(kodi_stubs, monkeypatch):
+    """Torrentio/AIOStreams-style streams carry trackers under `sources`
+    (stremio-core's `announce` serde alias); the raw list is handed to the
+    client, whose `normalize_trackers()` reduces the "tracker:"/"dht:"
+    wrappers to bare announce URLs."""
+    env = kodi_stubs.env
+    env.addon.settings['buffer_mb'] = 1
+    half = DEFAULT_TARGET_BYTES // 2
+    sources = ['tracker:udp://s1.example:80/announce', 'dht:' + INFO_HASH]
+    script = _ServerScript(
+        resolve_url='http://server/x/0',
+        iter_front_attempts=[[half, half]],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(2, _torrent_stream(fileIdx=0, announce=None, sources=sources), 'movie', 'tt2')
+
+    assert script.create_engine_trackers == [sources, sources]
+    assert script.iter_front_trackers == [sources]
+
+
+def test_metadata_wait_polls_carry_the_stream_trackers(kodi_stubs, monkeypatch):
+    """The /create metadata-wait loop (no fileIdx) is where a cold magnet
+    spends its first seconds: every poll must carry the trackers, and so
+    must the front read once an index is guessed."""
+    env = kodi_stubs.env
+    env.addon.settings['buffer_mb'] = 1
+    trackers = ['udp://tracker.example:80']
+    script = _ServerScript(
+        resolve_url='http://server/x/-1',
+        create_engine_results=[{}, {'guessedFileIdx': 2}],
+        iter_front_attempts=[[DEFAULT_TARGET_BYTES]],
+        torrent_url_result='http://server/x/2',
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(2, _torrent_stream(announce=trackers), 'movie', 'tt2')  # fileIdx missing
+
+    assert script.create_engine_trackers[:2] == [trackers, trackers]  # both metadata polls
+    assert all(t == trackers for t in script.create_engine_trackers)
+    assert script.iter_front_trackers == [trackers]
+    assert script.torrent_url_calls == [(INFO_HASH, 2, tuple(trackers))]
+
+
+@pytest.mark.parametrize('file_len', [1_000_000, 1_514], ids=['above_header_floor', 'below_header_floor'])
+def test_prebuffer_aims_at_the_whole_file_when_it_is_shorter_than_the_target(kodi_stubs, monkeypatch, file_len):
+    """A file smaller than `buffer_mb` can never reach the target: the first
+    front read returns the whole file and each retry's Range starts at EOF
+    (HTTP 416 live), so the loop used to idle for up to 45s - and a file
+    under the 512 KiB header floor could not start at all. With the size
+    known from /create the target is clamped to it: one read, done."""
+    env = kodi_stubs.env
+    env.addon.settings['buffer_mb'] = 1  # 5 MiB floor, far above file_len
+    files = [{'name': 'clip.mkv', 'path': 'clip.mkv', 'length': file_len, 'offset': 0}]
+    script = _ServerScript(
+        resolve_url='http://server/x/0',
+        create_engine_result={'files': files},
+        iter_front_attempts=[[file_len]],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(2, _torrent_stream(fileIdx=0), 'movie', 'tt2')
+
+    assert script.iter_front_calls == [(INFO_HASH, 0, file_len)]  # asks for the whole file, once
+    assert [percent for percent, _, _, _ in env.dialog_updates if percent >= 40][-1] == 100
+    assert env.monitor_abort_calls == 0  # no retry pause
+    handle, succeeded, _ = _resolved_one(env)
+    assert (handle, succeeded) == (2, True)
+
 
 
 def test_partial_front_above_header_floor_resolves_true_without_reaching_target(kodi_stubs, monkeypatch):
@@ -424,7 +513,9 @@ def test_metadata_arrives_on_third_create_poll(kodi_stubs, monkeypatch):
     stream = _torrent_stream()  # fileIdx missing -> UNKNOWN_FILE_IDX
     no_metadata_yet = {'peers': 2}
     still_no_metadata = {'peers': 5}
-    resolved = {'files': [{'length': 100}, {'length': 900}]}
+    # Realistic sizes (both well above the 5 MiB target): the pre-buffer target is
+    # clamped to the chosen file's length, so byte-sized fixtures would shrink it.
+    resolved = {'files': [{'length': 100 * 1024 * 1024}, {'length': 900 * 1024 * 1024}]}
     script = _ServerScript(
         resolve_url='http://server/x/-1',
         create_engine_results=[no_metadata_yet, still_no_metadata, resolved],

@@ -13,10 +13,16 @@ local stremio-server-go instance, mirroring stremio-core's Stream::convert
   internal/api/api.go (`trackers := q["tr"]`) and docs/swagger.yaml's
   `/{infoHash}/{fileIdx}` streaming endpoint. `infoHash` accepts either
   the 40-char hex `hex::encode` form or a magnet's 32-char RFC 4648
-  Base32 form (upstream e200aff9); trackers are percent-decoded and
-  deduped before becoming `tr=` params (`normalize_peer_search_sources`,
-  streaming_server/request.rs:86-98, upstream 87b65391/bc5aa9d8) - see
-  `normalize_info_hash`/`normalize_trackers` below.
+  Base32 form (upstream e200aff9); trackers are percent-decoded,
+  reduced to bare announce URLs (a `tracker:` wrapper is stripped and
+  `dht:` entries dropped) and deduped before becoming `tr=` params
+  (`normalize_peer_search_sources`, streaming_server/request.rs:86-98,
+  upstream 87b65391/bc5aa9d8) - see
+  `normalize_info_hash`/`normalize_trackers` below. The same trackers
+  also ride on the `/{infoHash}/create` warm-up (as a stremio-core style
+  `peerSearch` POST - see `create_engine`) and on the pre-buffer front
+  reads (as `tr=`), so the engine knows the stream's own trackers from
+  its very first request instead of only once Kodi opens the final URL.
 - YouTube (ytId) -> GET {server}/yt/{ytId} (swagger `/yt/{id}`).
 - Plain url: validated against `_DIRECT_URL_SCHEMES` and returned
   unchanged when allowed (see that constant for the exact scheme
@@ -110,6 +116,12 @@ _YT_SAFE_CHARS = "-_.!~*'()"
 #: auto-select the largest file in the torrent (stream.rs:
 #: `file_idx.map_or_else(|| "-1".to_string(), ...)`). NOT 0.
 UNKNOWN_FILE_IDX = -1
+
+#: File extensions stremio-server-go's GuessFileIdx treats as playable
+#: (internal/engine/engine.go `videoExts`); `guess_file_idx()` mirrors it.
+_VIDEO_EXTENSIONS = (
+    '.mkv', '.mp4', '.avi', '.mov', '.m4v', '.webm', '.flv', '.wmv', '.mpg', '.mpeg', '.ts', '.m2ts',
+)
 
 #: Lengths, in characters, of the two info-hash encodings a magnet or a
 #: Stream object's `infoHash` may carry - `normalize_info_hash()` accepts
@@ -205,25 +217,52 @@ def normalize_info_hash(value):
 
 
 def normalize_trackers(values):
-    """Percent-decode, drop empty entries, and dedupe (order-preserving)
-    a raw `announce`/`sources` tracker list before it becomes one or
-    more `tr=` query params (mirrors `normalize_peer_search_sources`,
-    stremio-core src/types/streaming_server/request.rs:86-98, upstream
-    87b65391/bc5aa9d8): some addons ship a tracker/source entry that is
-    itself percent-encoded (e.g. a `tracker:<percent-encoded-url>`
-    wrapper), which must be decoded before stremio-server-go sees it.
+    """Reduce a raw `announce`/`sources` tracker list to bare, deduped
+    announce URLs ready to become `tr=` query params (mirrors
+    `normalize_peer_search_sources`, stremio-core src/types/
+    streaming_server/request.rs:86-98, upstream 87b65391/bc5aa9d8):
+
+    - percent-decoded, since some addons ship a tracker/source entry that
+      is itself percent-encoded (e.g. a `tracker:<percent-encoded-url>`
+      wrapper);
+    - a `tracker:` wrapper is stripped. Torrentio/AIOStreams-style
+      `sources` lists wrap every announce URL that way, and stremio-core
+      forwards them verbatim, but stremio-server-go <= v0.20.0 treated a
+      `tracker:udp://...` value as a host-less URL and dropped it (verified
+      live: `tr=tracker:udp://x` never reached the engine's announce
+      list, `tr=udp://x` did), so the wrapped form silently carried no
+      trackers at all;
+    - `dht:<infohash>` entries are dropped: they carry no announce URL
+      (the server's DHT finds peers on its own);
+    - empty entries are dropped and duplicates removed, order preserved.
     """
     seen = set()
     normalized = []
     for value in values or []:
         if not isinstance(value, str):
             continue
-        decoded = unquote(value)
+        decoded = unquote(value).strip()
+        if decoded.startswith('dht:'):
+            continue
+        if decoded.startswith('tracker:'):
+            decoded = decoded[len('tracker:'):].strip()
         if not decoded or decoded in seen:
             continue
         seen.add(decoded)
         normalized.append(decoded)
     return normalized
+
+
+def stream_trackers(stream):
+    """The raw tracker list of a torrent Stream object: `announce`, falling
+    back to `sources` when absent - stremio-core deserializes torrent
+    trackers with `#[serde(alias = "sources")]` (stream.rs:812), and
+    Torrentio/AIOStreams-style addons ship them under `sources` (e.g.
+    "tracker:udp://host:port/announce", "dht:<hash>"). Feed the result to
+    `normalize_trackers()` (every URL builder here does) before use.
+    """
+    stream = stream or {}
+    return stream.get('announce') or stream.get('sources') or []
 
 
 def _is_ftp_url(value):
@@ -344,6 +383,16 @@ class ServerClient:
                 continue
         return False
 
+    @staticmethod
+    def _tr_query(trackers):
+        """`?tr=...&tr=...` for `trackers` (normalized and encoded the way
+        Rust's `url::Url::query_pairs_mut()` does - see `torrent_url`), or
+        '' when there are none."""
+        normalized = normalize_trackers(trackers)
+        if not normalized:
+            return ''
+        return '?' + urlencode([('tr', tracker) for tracker in normalized])
+
     def torrent_url(self, info_hash, file_idx, announce=None):
         """Build `{base}/{infoHash}/{fileIdx}[?tr=...&tr=...]`, or None if
         `info_hash` can't be normalized to a usable hash.
@@ -361,11 +410,7 @@ class ServerClient:
         normalized_hash = normalize_info_hash(info_hash)
         if normalized_hash is None:
             return None
-        url = '%s/%s/%s' % (self.base_url, normalized_hash, file_idx)
-        trackers = normalize_trackers(announce)
-        if trackers:
-            url += '?' + urlencode([('tr', tracker) for tracker in trackers])
-        return url
+        return '%s/%s/%s%s' % (self.base_url, normalized_hash, file_idx, self._tr_query(announce))
 
     def _magnet_to_torrent_url(self, magnet):
         """Parse `magnet:?dn=...&xt=urn:btih:<hash>&tr=...` (the exact shape
@@ -381,10 +426,11 @@ class ServerClient:
             return None
         return self.torrent_url(info_hash, UNKNOWN_FILE_IDX, query.get('tr', []))
 
-    def create_engine(self, info_hash, timeout=100):
-        """GET `{base}/{infoHash}/create` - start/attach the torrent engine.
+    def create_engine(self, info_hash, timeout=100, trackers=None):
+        """`GET {base}/{infoHash}/create` (or, with `trackers`, `POST` the
+        same path with a `peerSearch` body) - start/attach the torrent engine.
 
-        Per stremio-server-go's handleCreate (internal/api/api.go:697-750,
+        Per stremio-server-go's handleCreate (internal/api/api.go,
         docs/swagger.yaml `/{infoHash}/create`), the server calls
         EnsureEngine + Ready() with a 90s timeout blocking until torrent
         metadata is available, then returns `types.Stats` including
@@ -393,19 +439,39 @@ class ServerClient:
         budget); callers polling in a cancellable UI loop pass a short
         timeout instead so a slow /create can't freeze the loop between
         cancel checks (each timeout just re-polls the same warming engine).
+
+        `trackers` (a raw announce/sources list, normalized by
+        `normalize_trackers()`) makes the request the way stremio-core's
+        CreateTorrentRequest does: `POST {"peerSearch": {"min": 40, "max":
+        200, "sources": ["dht:<hash>", "tracker:<url>", ...]}}`
+        (streaming_server/request.rs, statistics.rs `PeerSearch::new`).
+        handleCreate has merged `peerSearch.sources` trackers into the
+        engine since v0.1.0 - the GET form's query string is NOT read, so
+        this is the only way to hand a stream's own trackers to the server
+        during the metadata wait on every released server version. The
+        merge also applies to an engine that already exists, so repeating
+        it on every poll is harmless. Without trackers it stays the plain
+        body-less GET.
         """
         if requests is None:
             raise ServerError('the "requests" package is required for ServerClient')
-        url = '%s/%s/create' % (self.base_url, str(info_hash).lower())
+        normalized_hash = str(info_hash).lower()
+        url = '%s/%s/create' % (self.base_url, normalized_hash)
+        sources = ['tracker:%s' % tracker for tracker in normalize_trackers(trackers)]
+        method = 'POST' if sources else 'GET'
         try:
-            resp = self.session.get(url, timeout=timeout)
+            if sources:
+                body = {'peerSearch': {'min': 40, 'max': 200, 'sources': ['dht:%s' % normalized_hash] + sources}}
+                resp = self.session.post(url, json=body, timeout=timeout)
+            else:
+                resp = self.session.get(url, timeout=timeout)
             resp.raise_for_status()
         except requests.RequestException as exc:
-            raise ServerError('GET %s failed: %s' % (_redact_error_url(self.base_url, url), _request_error_category(exc)))
+            raise ServerError('%s %s failed: %s' % (method, _redact_error_url(self.base_url, url), _request_error_category(exc)))
         try:
             return resp.json()
         except ValueError as exc:
-            raise ServerError('GET %s returned invalid JSON: %s' % (_redact_error_url(self.base_url, url), exc))
+            raise ServerError('%s %s returned invalid JSON: %s' % (method, _redact_error_url(self.base_url, url), exc))
 
     def file_stats(self, info_hash, file_idx):
         """GET `{base}/{infoHash}/{fileIdx}/stats.json` - per-file buffer stats.
@@ -432,7 +498,8 @@ class ServerClient:
         except ValueError as exc:
             raise ServerError('GET %s returned invalid JSON: %s' % (_redact_error_url(self.base_url, url), exc))
 
-    def iter_front(self, info_hash, file_idx, want_bytes, chunk_size=16384, timeout=60, start_byte=0):
+    def iter_front(self, info_hash, file_idx, want_bytes, chunk_size=16384, timeout=60, start_byte=0,
+                   trackers=None):
         """Stream the FRONT of a torrent file from `start_byte`, yielding
         each chunk's length as it arrives - the pre-buffer readiness probe.
 
@@ -455,6 +522,22 @@ class ServerClient:
         `lib.ui.player._prebuffer_torrent`'s buffering loop, which tracks
         cumulative bytes across attempts for exactly this.
 
+        `trackers` (raw announce/sources list, see `normalize_trackers()`)
+        is appended as `tr=` params, exactly like the stream URL handed to
+        Kodi later. The pre-buffer reads are the first requests that name
+        this torrent when its metadata is already cached, so without them
+        the engine would only learn the stream's own trackers once the
+        player opens the final URL.
+
+        Reading the failure modes: stremio-server-go withholds the 206
+        headers until the first body byte exists, so `ReadTimeout` here
+        means "the swarm has not delivered the first piece yet" (a cold
+        torrent - normal for its first few attempts), not a dead server.
+        `requests` also reports urllib3's `ReadTimeoutError` raised while
+        reading the BODY as a plain `ConnectionError`, so "failed
+        mid-stream: ConnectionError" is the same stall after the headers
+        arrived (silence for the whole read timeout), not a reset.
+
         `chunk_size` defaults small (16 KiB), NOT large: `requests`'
         `iter_content()` does one `raw.read(chunk_size)` per chunk, and if
         the connection closes before a FULL chunk_size of bytes has
@@ -469,7 +552,7 @@ class ServerClient:
         """
         if requests is None:
             raise ServerError('the "requests" package is required for ServerClient')
-        url = '%s/%s/%s' % (self.base_url, str(info_hash).lower(), file_idx)
+        url = '%s/%s/%s%s' % (self.base_url, str(info_hash).lower(), file_idx, self._tr_query(trackers))
         headers = {'Range': 'bytes=%d-%d' % (start_byte, want_bytes - 1)}
         try:
             resp = self.session.get(url, headers=headers, stream=True, timeout=timeout)
@@ -635,13 +718,16 @@ class ServerClient:
           returns None for one that can't be. Missing `fileIdx` defaults
           to UNKNOWN_FILE_IDX (-1), matching stremio-core, NOT 0.
           Trackers come from `announce`, falling back to `sources` when
-          absent - stremio-core deserializes torrent trackers with
-          `#[serde(alias = "sources")]` (stream.rs:812), and
+          absent (`stream_trackers()`) - stremio-core deserializes torrent
+          trackers with `#[serde(alias = "sources")]` (stream.rs:812), and
           Torrentio/AIOStreams-style addons ship them under `sources`
           (e.g. "tracker:udp://host:port/announce", "dht:<hash>").
-          stremio-server-go strips the "tracker:" prefix and ignores
-          "dht:" entries itself (engine.go mergeTrackers), so forwarding
-          raw sources entries as `tr=` is correct as-is.
+          `normalize_trackers()` strips the "tracker:" wrapper and drops
+          "dht:" entries before they become `tr=` params: unlike the
+          `peerSearch.sources` body of POST /create (see engine.go
+          mergeTrackers / api.go trackersFromSources), the server's
+          `tr=` query path did not strip the wrapper up to v0.20.0, so a
+          raw "tracker:udp://..." value was dropped as a host-less URL.
         - `ytId`: -> `{base}/yt/{ytId}`.
         - `rarUrls`/`zipUrls`/`7zipUrls`/`tgzUrls`/`tarUrls` (+
           `fileIdx`/`fileMustInclude`): -> `_archive_create_url()`.
@@ -666,7 +752,7 @@ class ServerClient:
             file_idx = stream.get('fileIdx')
             if file_idx is None:
                 file_idx = UNKNOWN_FILE_IDX
-            announce = stream.get('announce') or stream.get('sources') or []
+            announce = stream_trackers(stream)
             return self.torrent_url(info_hash, file_idx, announce)
 
         yt_id = stream.get('ytId')
@@ -726,10 +812,13 @@ def guess_file_idx(stats):
 
     Prefers an explicit non-negative int `guessedFileIdx` when present -
     server builds that still emit it up front win outright. Otherwise,
-    when `files` is a non-empty list, picks the index of the entry with
-    the largest `length` (ties keep the first/lowest index), the same
-    "biggest file is the movie" heuristic the server used to apply
-    itself. Returns None when neither is usable.
+    when `files` is a non-empty list, picks the entry with the largest
+    `length` among those with a video extension (ties keep the
+    first/lowest index), falling back to the largest of any kind when none
+    has one - the same rule as the server's own guess
+    (engine.GuessFileIdx; the rivulet-side pick used to be "largest file
+    of any kind", which a bundled soundtrack/ISO bigger than the movie
+    would win). Returns None when neither is usable.
 
     Tolerates garbage input throughout rather than raising - this feeds
     a playback pre-buffer poll that must never crash on an unexpected
@@ -749,6 +838,7 @@ def guess_file_idx(stats):
         return None
 
     best_idx, best_length = None, -1
+    best_video_idx, best_video_length = None, -1
     for idx, entry in enumerate(files):
         length = entry.get('length') if isinstance(entry, dict) else None
         try:
@@ -757,4 +847,19 @@ def guess_file_idx(stats):
             length = 0
         if length > best_length:
             best_idx, best_length = idx, length
-    return best_idx
+        if length > best_video_length and _is_video_entry(entry):
+            best_video_idx, best_video_length = idx, length
+    # Same preference as the server's own guess (engine.GuessFileIdx): the
+    # largest VIDEO file, only then the largest file of any kind - a bundled
+    # soundtrack/ISO/extras archive bigger than the movie must not win.
+    return best_video_idx if best_video_idx is not None else best_idx
+
+
+def _is_video_entry(entry):
+    """True if a `/create` `files[]` entry names a playable video file,
+    by the same extension set stremio-server-go's GuessFileIdx uses
+    (engine.go `videoExts`)."""
+    if not isinstance(entry, dict):
+        return False
+    name = entry.get('path') or entry.get('name')
+    return isinstance(name, str) and name.lower().endswith(_VIDEO_EXTENSIONS)
