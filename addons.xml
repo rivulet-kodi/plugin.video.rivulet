@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.26.0" provider-name="M0RF30">
+<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.27.0" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0" />
     <import addon="script.module.requests" version="2.22.0" />
@@ -12,7 +12,16 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse and search catalogs by type, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote stremio-server-go streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.26.0:
+    <news>v0.27.0:
+- Fix: searches and catalogs could show a single result called "[X] AIOStreams", or nothing at all. That entry was an error message from a busy AIOStreams server, not a title. Rivulet now treats it as a failed request and shows the results from your other addons.
+- Improved: search asks all your addons at the same time instead of one after another, so one slow addon no longer holds up the rest. Back now cancels a search right away.
+- Improved: when a search finds nothing, Rivulet tells you why: none of your addons can search (enable Cinemeta), every addon failed, or which addons did not answer. "No streams found" no longer appears for an empty search.
+- Fix: while preparing a torrent stream, Rivulet now passes the source's own trackers to the streaming server, so torrents find peers sooner. It also picks the largest video file in a torrent, not the largest file of any kind, and files smaller than the buffer size no longer stall before playback.
+- Fix: the position where you stopped watching was not saved when playback ended. It is now.
+- Fix: the built-in streaming server accepted connections from other devices on your network without a password. It now listens only on this device, unless DLNA or a public proxy URL is turned on.
+- Changed: the built-in streaming server is updated to stremio-server-go v0.20.1. It reports real download speed and peer counts, keeps more downloaded torrents in its cache, no longer re-reads the end of a video on every seek, and brings a long list of stability and security fixes.
+- Improved: the bridge addon writes one log line per failing source instead of two.
+v0.26.0:
 - New: the built-in streaming server now runs on Intel/AMD Android devices (x86_64 and 32-bit x86), such as Android-x86 boxes, Chromebooks and emulators. On x86_64 these used a generic Linux build that could not look up any address, so torrents never connected; 32-bit x86 was not supported at all.
 - Changed: the built-in streaming server is updated to stremio-server-go v0.19.0.
 v0.25.0:
