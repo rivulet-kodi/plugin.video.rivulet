@@ -989,3 +989,7 @@ msgstr "Zoeken mislukt: geen enkele addon heeft geantwoord. Probeer het opnieuw 
 msgctxt "#30383"
 msgid "Search incomplete, no answer from: %s"
 msgstr "Zoekopdracht onvolledig, geen antwoord van: %s"
+
+msgctxt "#30390"
+msgid "Loading subtitles…"
+msgstr "Ondertitels laden…"

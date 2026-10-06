@@ -989,3 +989,7 @@ msgstr "검색 실패: 응답한 애드온이 없습니다. 다시 시도하거�
 msgctxt "#30383"
 msgid "Search incomplete, no answer from: %s"
 msgstr "검색이 불완전함, 응답 없음: %s"
+
+msgctxt "#30390"
+msgid "Loading subtitles…"
+msgstr "자막 불러오는 중…"

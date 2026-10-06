@@ -989,3 +989,7 @@ msgstr "Arama başarısız: hiçbir eklenti yanıt vermedi. Yeniden deneyin veya
 msgctxt "#30383"
 msgid "Search incomplete, no answer from: %s"
 msgstr "Arama eksik, yanıt vermeyenler: %s"
+
+msgctxt "#30390"
+msgid "Loading subtitles…"
+msgstr "Altyazılar yükleniyor…"

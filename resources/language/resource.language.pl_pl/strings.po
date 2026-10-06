@@ -989,3 +989,7 @@ msgstr "Wyszukiwanie nie powiodło się: żaden dodatek nie odpowiedział. Spró
 msgctxt "#30383"
 msgid "Search incomplete, no answer from: %s"
 msgstr "Wyszukiwanie niekompletne, brak odpowiedzi od: %s"
+
+msgctxt "#30390"
+msgid "Loading subtitles…"
+msgstr "Wczytywanie napisów…"

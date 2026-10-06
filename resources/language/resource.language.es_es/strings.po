@@ -989,3 +989,7 @@ msgstr "Error en la búsqueda: ningún addon respondió. Inténtalo de nuevo o a
 msgctxt "#30383"
 msgid "Search incomplete, no answer from: %s"
 msgstr "Búsqueda incompleta, sin respuesta de: %s"
+
+msgctxt "#30390"
+msgid "Loading subtitles…"
+msgstr "Cargando subtítulos…"

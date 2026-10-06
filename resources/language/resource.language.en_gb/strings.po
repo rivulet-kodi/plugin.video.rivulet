@@ -989,3 +989,7 @@ msgstr ""
 msgctxt "#30383"
 msgid "Search incomplete, no answer from: %s"
 msgstr ""
+
+msgctxt "#30390"
+msgid "Loading subtitles…"
+msgstr ""

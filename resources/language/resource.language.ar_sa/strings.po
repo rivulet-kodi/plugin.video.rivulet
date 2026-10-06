@@ -989,3 +989,7 @@ msgstr "فشل البحث: لم ترد أي إضافة. أعد المحاولة 
 msgctxt "#30383"
 msgid "Search incomplete, no answer from: %s"
 msgstr "البحث غير مكتمل، لا ردّ من: %s"
+
+msgctxt "#30390"
+msgid "Loading subtitles…"
+msgstr "جارٍ تحميل الترجمة…"

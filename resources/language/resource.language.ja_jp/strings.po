@@ -989,3 +989,7 @@ msgstr "検索に失敗しました。応答したアドオンがありません
 msgctxt "#30383"
 msgid "Search incomplete, no answer from: %s"
 msgstr "検索が不完全です。応答なし: %s"
+
+msgctxt "#30390"
+msgid "Loading subtitles…"
+msgstr "字幕を読み込み中…"

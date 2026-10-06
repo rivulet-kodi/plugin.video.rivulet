@@ -1122,6 +1122,137 @@ def test_attach_subtitles_never_dispatches_to_a_disabled_addon(kodi_stubs, monke
     assert list_item.subtitles == ['https://enabled.example/manifest.json/sub.srt']
 
 
+# --- addon subtitles during resolve: looked up alongside stream preparation
+# --- and awaited (bounded) while the "Preparing stream" dialog is still up.
+# --- kodi.log: the lookup used to run AFTER the dialog closed, a cold
+# --- OpenSubtitles took 30s, and picks made on the idle-looking stream list
+# --- meanwhile were replayed once playback had started.
+
+
+class _ScriptedSubtitleFetch:
+    """Synchronous stand-in for lib.ui.player._SubtitleFetch: `done()`
+    turns True after `done_after` calls (never, when None)."""
+
+    def __init__(self, urls=None, done_after=0):
+        self.urls = None
+        self._final_urls = urls
+        self._done_after = done_after
+        self.done_calls = 0
+
+    def done(self):
+        self.done_calls += 1
+        finished = self._done_after is not None and self.done_calls > self._done_after
+        if finished:
+            self.urls = self._final_urls
+        return finished
+
+
+def _install_subtitle_fetch(monkeypatch, player_module, fetch, order=None):
+    def start(behavior_hints, stype, sid):
+        if order is not None:
+            order.append('subtitles')
+        return fetch
+
+    monkeypatch.setattr(player_module._SubtitleFetch, 'start', staticmethod(start))
+
+
+def test_subtitle_fetch_runs_on_a_background_thread_and_exposes_its_urls(kodi_stubs, monkeypatch):
+    import threading
+
+    kodi_stubs.env.addon.settings['subs_enable'] = True
+    caller = threading.current_thread()
+    ran_on = []
+
+    def fetch_urls(behavior_hints, stype, sid):
+        ran_on.append(threading.current_thread())
+        return ['https://x/%s.srt' % sid]
+
+    monkeypatch.setattr(kodi_stubs.player, '_fetch_subtitle_urls', fetch_urls)
+
+    fetch = kodi_stubs.player._SubtitleFetch.start({}, 'movie', 'tt90')
+
+    assert fetch._done.wait(5)
+    assert fetch.done() is True
+    assert fetch.urls == ['https://x/tt90.srt']
+    assert ran_on and ran_on[0] is not caller
+
+
+def test_subtitle_fetch_is_not_started_when_addon_subtitles_are_off(kodi_stubs, monkeypatch):
+    kodi_stubs.env.addon.settings['subs_enable'] = False
+    calls = []
+    monkeypatch.setattr(kodi_stubs.player, '_fetch_subtitle_urls', lambda *a: calls.append(a) or [])
+
+    assert kodi_stubs.player._SubtitleFetch.start({}, 'movie', 'tt91') is None
+    assert calls == []
+
+
+def test_resolve_starts_the_subtitle_lookup_before_the_torrent_prebuffer(kodi_stubs, monkeypatch):
+    order = []
+    _ServerScript(resolve_url='http://127.0.0.1:11470/%s/0' % INFO_HASH).install(monkeypatch, kodi_stubs.player)
+    _install_subtitle_fetch(monkeypatch, kodi_stubs.player, _ScriptedSubtitleFetch(['https://x/en.srt']), order)
+
+    def fake_prebuffer(server, stream, url, dialog, monitor, item_meta=None):
+        order.append('prebuffer')
+        return True, url, None
+
+    monkeypatch.setattr(kodi_stubs.player, '_prebuffer_torrent', fake_prebuffer)
+
+    assert kodi_stubs.player.play_direct({'infoHash': INFO_HASH, 'fileIdx': 0}, 'movie', 'tt92') is True
+
+    assert order == ['subtitles', 'prebuffer']
+    _url, list_item = kodi_stubs.env.player_play_calls[0]
+    assert list_item.subtitles == ['https://x/en.srt']
+
+
+def test_resolve_waits_for_late_subtitles_under_the_dialog_then_attaches_them(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+    fetch = _ScriptedSubtitleFetch(['https://x/late.srt'], done_after=3)
+    _install_subtitle_fetch(monkeypatch, kodi_stubs.player, fetch)
+    closed_before_play = []
+    monkeypatch.setattr(
+        kodi_stubs.player, '_record_now_playing_and_maybe_resume',
+        lambda *a: closed_before_play.append(env.dialog_closed_count),
+    )
+
+    assert kodi_stubs.player.play_direct({'url': 'https://example.com/a.mp4'}, 'movie', 'tt93') is True
+
+    subtitle_updates = [u for u in env.dialog_updates if u[1] == kodi_stubs.player.L(30390)]
+    assert subtitle_updates and subtitle_updates[0][0] == kodi_stubs.player._SUBTITLE_PERCENT
+    assert closed_before_play == [1]  # the dialog was closed only after the wait
+    _url, list_item = env.player_play_calls[0]
+    assert list_item.subtitles == ['https://x/late.srt']
+
+
+def test_resolve_gives_up_on_subtitles_after_the_grace_and_still_plays(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+    _install_subtitle_fetch(monkeypatch, kodi_stubs.player, _ScriptedSubtitleFetch(done_after=None))
+
+    assert kodi_stubs.player.play_direct({'url': 'https://example.com/a.mp4'}, 'movie', 'tt94') is True
+
+    grace = kodi_stubs.player._SUBTITLE_GRACE_SECONDS
+    poll = kodi_stubs.player._SUBTITLE_POLL_SECONDS
+    waited = sum(t for t in env.wait_calls if t == poll)
+    assert grace <= waited < grace + 2 * poll
+    _url, list_item = env.player_play_calls[0]
+    assert list_item.subtitles is None
+    assert any('starting without them' in msg for msg, _level in env.log_calls)
+
+
+def test_resolve_cancelled_while_waiting_for_subtitles_never_plays(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    _ServerScript(resolve_url='https://example.com/a.mp4').install(monkeypatch, kodi_stubs.player)
+    _install_subtitle_fetch(monkeypatch, kodi_stubs.player, _ScriptedSubtitleFetch(done_after=None))
+    # Not cancelled through resolve; cancelled once the subtitle wait is showing.
+    env.cancel = lambda: any(u[1] == kodi_stubs.player.L(30390) for u in env.dialog_updates)
+
+    assert kodi_stubs.player.play_direct({'url': 'https://example.com/a.mp4'}, 'movie', 'tt95') is False
+
+    assert env.player_play_calls == []
+    assert env.dialog_closed_count == 1
+
+
 # --- play_direct(on_ready=...): fires immediately before xbmc.Player().play(),
 # --- only on successful resolution, and never blocks playback on its own -
 

@@ -161,6 +161,19 @@ _ENGINE_WARM_PERCENT = 38
 _BUFFER_PERCENT_BASE = 40
 _BUFFER_PERCENT_SPAN = 60  # 40-100%
 
+#: Shown while the dialog waits on subtitle addons (`_await_subtitles`):
+#: the stream itself is ready by then.
+_SUBTITLE_PERCENT = 100
+
+#: How long the "Preparing stream" dialog keeps waiting, once the stream is
+#: ready, for subtitle addons that are still answering (see `_SubtitleFetch`).
+#: The lookup starts with preparation, so a torrent's pre-buffer time is
+#: already behind it; this only bounds what is left over.
+_SUBTITLE_GRACE_SECONDS = 8.0
+
+#: Cancel/abort poll interval during that wait.
+_SUBTITLE_POLL_SECONDS = 0.2
+
 # Stream source kinds that require the local streaming server to produce a
 # playable URL at all (see stremio-protocol-spec.md gotcha #3).
 _SERVER_DEPENDENT_KEYS = (
@@ -252,20 +265,19 @@ def _record_now_playing_and_maybe_resume(stype, sid, video_id, item_meta):
         log('player: recording now-playing context failed for %s/%s: %r' % (stype, sid, exc), xbmc.LOGWARNING)
 
 
-def _attach_subtitles(list_item, behavior_hints, stype, sid):
-    """Best-effort addon-subtitle lookup: never raises, never blocks
-    playback - a broken subtitle addon just means a missing subtitle track.
+def _fetch_subtitle_urls(behavior_hints, stype, sid):
+    """The addon subtitle URLs to attach for `stype`/`sid`, or `[]`.
 
-    Only tracks in the user's `subs_language` are attached. Kodi reads an
+    Only tracks in the user's `subs_language` are kept. Kodi reads an
     external subtitle's language from its filename, and addon subtitle
     URLs end in opaque numeric ids, so every attached track arrives with
     an empty language and Kodi's auto-selection picks arbitrarily among
     them (issue #6). A single-language list makes that pick correct;
     when nothing matches, nothing is attached and the file's own embedded
     tracks - which do carry language metadata - are left to Kodi.
+
+    Never raises: a broken subtitle addon just means no subtitle track.
     """
-    if not setting_bool('subs_enable', True):
-        return
     try:
         extra = []
         if 'videoSize' in behavior_hints:
@@ -276,11 +288,99 @@ def _attach_subtitles(list_item, behavior_hints, stype, sid):
             get_client(), get_store().get_enabled_addons(), stype, sid, extra=extra or None
         )
         subs = filter_subtitles(subs, ADDON.getSetting('subs_language') or 'en')
-        urls = [sub['url'] for sub in subs[:20]]
-        if urls:
-            list_item.setSubtitles(urls)
+        return [sub['url'] for sub in subs[:20]]
     except Exception as exc:  # noqa: BLE001 - subtitles are a bonus, never fatal
         log('player: subtitle fetch failed for %s/%s: %r' % (stype, sid, exc), xbmc.LOGWARNING)
+        return []
+
+
+def _attach_subtitles(list_item, behavior_hints, stype, sid):
+    """Best-effort, blocking addon-subtitle lookup straight onto
+    `list_item` (see `_fetch_subtitle_urls()` for the language filter).
+    `_resolve_playable_item()` uses `_SubtitleFetch` instead so the
+    lookup overlaps stream preparation; this stays the one-shot form."""
+    if not setting_bool('subs_enable', True):
+        return
+    urls = _fetch_subtitle_urls(behavior_hints, stype, sid)
+    if urls:
+        list_item.setSubtitles(urls)
+
+
+class _SubtitleFetch:
+    """Addon subtitle lookup on a background thread, started when stream
+    preparation starts so it overlaps the server resolve and the torrent
+    pre-buffer instead of running after them.
+
+    It used to run after the "Preparing stream" dialog had closed and
+    before `xbmc.Player().play()`, with no bound of its own: every
+    subtitle addon is asked and waited for (`collect_subtitles()`), and an
+    addon trickling its answer never trips the per-read timeout. Measured
+    on a live install, a cold OpenSubtitles v3 answered in 30s and an
+    AIOStreams instance in 46s. For that long the stream list sat on
+    screen looking idle while playback was already decided; picks made
+    in that window were queued and replayed after playback started
+    (kodi.log: a second "Preparing stream" for another source opened
+    150ms after VideoPlayer::OpenFile, then reopened five times).
+
+    `urls` is None until the lookup finishes, then the list (possibly
+    empty) `_fetch_subtitle_urls()` returned.
+    """
+
+    def __init__(self, behavior_hints, stype, sid):
+        self.urls = None
+        self._done = threading.Event()
+        self._args = (behavior_hints, stype, sid)
+
+    @classmethod
+    def start(cls, behavior_hints, stype, sid):
+        """A running fetch, or None when addon subtitles are switched off
+        (or the thread could not be started - subtitles never block play)."""
+        if not setting_bool('subs_enable', True):
+            return None
+        fetch = cls(behavior_hints, stype, sid)
+        try:
+            threading.Thread(target=fetch._run, name='rivulet-subtitles', daemon=True).start()
+        except Exception as exc:  # noqa: BLE001 - subtitles are a bonus, never fatal
+            log('player: subtitle lookup could not start for %s/%s: %r' % (stype, sid, exc), xbmc.LOGWARNING)
+            return None
+        return fetch
+
+    def _run(self):
+        try:
+            self.urls = _fetch_subtitle_urls(*self._args)
+        finally:
+            self._done.set()
+
+    def done(self):
+        return self._done.is_set()
+
+
+def _await_subtitles(fetch, dialog, monitor, grace=None):
+    """Give a still-running `_SubtitleFetch` up to `grace` seconds
+    (`_SUBTITLE_GRACE_SECONDS` by default) more, with the "Preparing
+    stream" dialog still up and saying so. Returns False only when the
+    user cancels or Kodi is shutting down; running out of grace returns
+    True and playback starts without the late subtitles."""
+    if fetch is None or fetch.done():
+        return True
+    grace = _SUBTITLE_GRACE_SECONDS if grace is None else grace
+    dialog.update(_SUBTITLE_PERCENT, L(30390))
+    waited = 0.0
+    while not fetch.done():
+        if dialog.iscanceled():
+            return False
+        if waited >= grace:
+            log(
+                'player: subtitle addons still answering after a %.0fs grace - starting without them' % grace,
+                xbmc.LOGINFO,
+            )
+            return True
+        # waitForAbort() sleeps the interval (and is when Kodi delivers the
+        # dialog's Back press), so the sum of intervals is the time waited.
+        if monitor.waitForAbort(_SUBTITLE_POLL_SECONDS):
+            return False
+        waited += _SUBTITLE_POLL_SECONDS
+    return True
 
 
 def _lfmt(string_id, *args):
@@ -1119,6 +1219,9 @@ def _resolve_playable_item(stream, stype, sid, item_meta=None, video_id=None):
     dialog = RivuletProgress()
     dialog.create(L(30080), title)
     resolved_filename = None
+    # Started before anything else so the lookup overlaps the resolve and
+    # the pre-buffer; awaited (bounded) below while the dialog is still up.
+    subtitle_fetch = _SubtitleFetch.start(behavior_hints, stype, sid)
     try:
         monitor = xbmc.Monitor()
 
@@ -1156,6 +1259,12 @@ def _resolve_playable_item(stream, stype, sid, item_meta=None, video_id=None):
             proceed, url, resolved_filename = _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=item_meta)
             if not proceed:
                 return None, None
+
+        # Everything up to Player().play() happens under the dialog: once it
+        # closes the stream list is live again, and a pick made there would
+        # be queued and replayed after playback had already started.
+        if not _await_subtitles(subtitle_fetch, dialog, monitor):
+            return None, None
     finally:
         # A raising close() must never replace an exception already
         # unwinding through this try (e.g. a cancel/notify path above) -
@@ -1213,7 +1322,8 @@ def _resolve_playable_item(stream, stype, sid, item_meta=None, video_id=None):
 
     _apply_item_metadata(list_item, stream, stype, item_meta, filename)
 
-    _attach_subtitles(list_item, behavior_hints, stype, sid)
+    if subtitle_fetch is not None and subtitle_fetch.urls:
+        list_item.setSubtitles(subtitle_fetch.urls)
 
     _record_now_playing_and_maybe_resume(stype, sid, video_id, item_meta)
 
