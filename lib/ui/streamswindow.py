@@ -245,6 +245,9 @@ class StreamsWindow(BaseWindow):
         #: after the user backed out (or after playback started) never
         #: touches a torn-down window. See close()/add_pairs().
         self._closed = False
+        #: True while `onClick()` is preparing a pick - see onClick() for
+        #: why a second pick arriving meanwhile is dropped.
+        self._pick_in_progress = False
         #: Guards `_pending_batches`/`_pending_loading` below - written
         #: by add_pairs()/set_loading() from a background fetch thread,
         #: drained by `_merge_pending()` on the GUI thread only. Mirrors
@@ -312,6 +315,7 @@ class StreamsWindow(BaseWindow):
         self.played = False
         self.played_pair = None
         self._closed = False
+        self._pick_in_progress = False
         if not self.pairs:
             return False
         self.doModal()
@@ -674,6 +678,12 @@ class StreamsWindow(BaseWindow):
         from lib.ui.compat import L, addon_fanart
         from lib.ui.playbackmeta import resolve_art
 
+        # Open again: ModalStackWindow.doModal() reopens a screen that
+        # close_windows_for_playback() force-closed without going through
+        # start(), and onClick() refuses picks on a closed window.
+        with self._pending_lock:
+            self._closed = False
+
         # Pick up anything open_streams() queued via set_loading()/
         # add_pairs() before doModal() actually opened this window, so
         # the ONE initial build below already reflects it.
@@ -710,6 +720,28 @@ class StreamsWindow(BaseWindow):
     def onClick(self, control_id):
         if control_id != LIST:
             return
+        # Kodi queues a window's click callbacks and delivers them on this
+        # script thread the next time it calls into Kodi - including from
+        # inside a pick that is still preparing (the dialog's update(),
+        # Monitor.waitForAbort(), Player.play()) and after this window was
+        # closed for the player handoff. Replayed, each queued click started
+        # its own "Preparing stream" for another source, nested inside the
+        # first and competing with it for the same server (kodi.log: five
+        # reopenings in 25s while the first stream failed to open). A pick
+        # only counts on an open window with no pick already in progress.
+        if self._closed or self._pick_in_progress:
+            import xbmc
+
+            from lib.ui.compat import log
+            log('streamswindow: ignoring a pick queued while another was in progress', xbmc.LOGINFO)
+            return
+        self._pick_in_progress = True
+        try:
+            self._play_focused()
+        finally:
+            self._pick_in_progress = False
+
+    def _play_focused(self):
         focused = self.getControl(LIST).getSelectedItem()
         if focused is None:
             return

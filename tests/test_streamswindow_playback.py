@@ -404,6 +404,91 @@ def test_onclick_closes_every_rivulet_modal_including_the_picker_before_player_p
     assert win.played_pair == (info, stream)
 
 
+def test_onclick_ignores_a_pick_replayed_while_the_first_is_still_preparing(load_streamswindow, monkeypatch):
+    """Kodi delivers queued click callbacks on the script thread whenever it
+    calls into Kodi, including from inside a pick still preparing its
+    stream. kodi.log showed each queued click starting its own "Preparing
+    stream" for another source, nested in the first; only the first counts."""
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    stream_a = {'url': 'https://a.example/a.mp4'}
+    stream_b = {'url': 'https://b.example/b.mp4'}
+    win.pairs = [({'raw': 'A'}, stream_a), ({'raw': 'B'}, stream_b)]
+    win.onInit()
+    played = []
+
+    def fake_play_direct(stream, stype, sid, item_meta=None, on_ready=None, video_id=None):
+        played.append(stream)
+        win.getControl(ctx.streamswindow.LIST).selected_index = 1
+        win.onClick(ctx.streamswindow.LIST)  # the queued click, replayed mid-preparation
+        return False  # e.g. the user cancelled the first one
+
+    monkeypatch.setattr(ctx.player, 'play_direct', fake_play_direct)
+
+    win.onClick(ctx.streamswindow.LIST)
+
+    assert played == [stream_a]
+    assert any('ignoring a pick' in msg for msg, _level in ctx.env.log_calls)
+
+
+def test_onclick_after_a_cancelled_pick_plays_again(load_streamswindow, monkeypatch):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = [({'raw': 'A'}, {'url': 'https://a.example/a.mp4'})]
+    win.onInit()
+    results = [False, True]
+    calls = []
+    monkeypatch.setattr(
+        ctx.player, 'play_direct', lambda stream, *a, **k: calls.append(stream) or results.pop(0),
+    )
+
+    win.onClick(ctx.streamswindow.LIST)
+    win.onClick(ctx.streamswindow.LIST)
+
+    assert len(calls) == 2
+    assert win.played is True
+
+
+def test_onclick_ignores_a_pick_delivered_after_the_window_was_handed_to_the_player(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = [({'raw': 'A'}, {'url': 'https://a.example/a.mp4'})]
+    win.onInit()
+    calls = []
+
+    def fake_play_direct(stream, stype, sid, item_meta=None, on_ready=None, video_id=None):
+        calls.append(stream)
+        on_ready()
+        return True
+
+    monkeypatch.setattr(ctx.player, 'play_direct', fake_play_direct)
+
+    win.onClick(ctx.streamswindow.LIST)
+    win.onClick(ctx.streamswindow.LIST)  # queued before the handoff, delivered after it
+
+    assert len(calls) == 1
+
+
+def test_onclick_works_again_once_a_force_closed_picker_is_reopened(load_streamswindow, monkeypatch):
+    """ModalStackWindow.doModal() reopens a screen close_windows_for_playback()
+    force-closed without going through start(); onInit() must make it
+    pickable again."""
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = [({'raw': 'A'}, {'url': 'https://a.example/a.mp4'})]
+    win.onInit()
+    win.close()
+    win.onInit()  # reopened
+    calls = []
+    monkeypatch.setattr(ctx.player, 'play_direct', lambda stream, *a, **k: calls.append(stream) or False)
+
+    win.onClick(ctx.streamswindow.LIST)
+
+    assert len(calls) == 1
+
+
 def test_open_streams_opens_on_the_first_addon_without_waiting_for_a_slower_one(
     load_streamswindow, monkeypatch,
 ):
