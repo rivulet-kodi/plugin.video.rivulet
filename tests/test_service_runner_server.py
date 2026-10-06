@@ -558,6 +558,34 @@ def test_build_env_overlays_extra_env_passed_at_construction(tmp_path):
     assert 'STREMIO_BT_ANONYMOUS' not in os.environ
 
 
+def test_build_env_binds_loopback_when_server_url_is_loopback(tmp_path, monkeypatch):
+    """The server is unauthenticated and listens on every interface unless
+    BIND_ADDRESS says otherwise (internal/app/app.go): a default install
+    (server_url=http://127.0.0.1:11470) must not expose it to the LAN."""
+    monkeypatch.delenv('BIND_ADDRESS', raising=False)
+    env = _server_process(tmp_path, server_url='http://127.0.0.1:9090').build_env()
+    assert env['BIND_ADDRESS'] == '127.0.0.1'
+    assert 'BIND_ADDRESS' not in os.environ
+
+
+def test_build_env_does_not_pin_loopback_for_a_lan_server_url(tmp_path, monkeypatch):
+    monkeypatch.delenv('BIND_ADDRESS', raising=False)
+    env = _server_process(tmp_path, server_url='http://192.168.1.20:9090').build_env()
+    assert 'BIND_ADDRESS' not in env
+
+
+def test_build_env_keeps_lan_reachability_when_dlna_is_enabled(tmp_path, monkeypatch):
+    monkeypatch.delenv('BIND_ADDRESS', raising=False)
+    env = _server_process(tmp_path, extra_env={'STREMIO_ENABLE_DLNA': 'true'}).build_env()
+    assert 'BIND_ADDRESS' not in env
+
+
+def test_build_env_inherited_bind_address_is_not_overridden(tmp_path, monkeypatch):
+    monkeypatch.setenv('BIND_ADDRESS', '0.0.0.0')
+    env = _server_process(tmp_path).build_env()
+    assert env['BIND_ADDRESS'] == '0.0.0.0'
+
+
 def test_start_is_a_noop_while_already_running(fake_popen, tmp_path):
     sp = _server_process(tmp_path)
     sp.start()
@@ -883,6 +911,21 @@ def test_stop_reaps_already_exited_child_without_terminate_or_kill(fake_popen, t
     assert fake_proc.terminate_calls == 0
     assert fake_proc.kill_calls == 0
     assert fake_proc.wait_calls == [None]  # reaped via a bare wait(), no timeout
+
+
+def test_stop_default_grace_outlasts_the_servers_5s_http_drain(fake_popen, tmp_path):
+    """stremio-server-go drains its listeners for 5s on SIGTERM before it
+    closes the torrent client, so with a stream open it exits ~5.02s after the
+    signal (measured). A 5.0s default grace SIGKILLed it inside that window."""
+    sp = _server_process(tmp_path)
+    sp.start()
+    fake_proc = fake_popen[0]['proc']
+
+    sp.stop()
+
+    assert service_runner.STOP_GRACE_SECONDS > 5.5
+    assert fake_proc.wait_calls == [service_runner.STOP_GRACE_SECONDS]
+    assert fake_proc.kill_calls == 0
 
 
 def test_stop_is_safe_when_never_started(tmp_path):

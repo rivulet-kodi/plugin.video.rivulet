@@ -380,6 +380,110 @@ def test_onplaybackended_flushes_local_cache_and_clears_context():
     assert store.get_now_playing() is None
 
 
+_NOT_PLAYING = 'Kodi is not playing any media file'
+
+
+def _player_unreadable_after_stop(env, position_s=50.0, total_s=100.0):
+    """Mimic Kodi: `getTime()`/`getTotalTime()` work while playing and raise
+    `RuntimeError("Kodi is not playing any media file")` once playback has
+    stopped - which is when `onPlayBackStopped`/`Ended`/`Error` run (kodi.log:
+    the exception lands ~0.1s after `CVideoPlayer::CloseFile()`). Returns the
+    callable that flips the fake player to the stopped state."""
+    state = {'stopped': False}
+
+    def _read(value):
+        def _get(_calls):
+            if state['stopped']:
+                raise RuntimeError(_NOT_PLAYING)
+            return value
+        return _get
+
+    env.player_is_playing = True
+    env.player_get_time = _read(position_s)
+    env.player_get_total_time = _read(total_s)
+
+    def stop():
+        state['stopped'] = True
+        env.player_is_playing = False
+    return stop
+
+
+@pytest.mark.parametrize('callback', ['onPlayBackStopped', 'onPlayBackEnded', 'onPlayBackError'])
+def test_final_flush_replays_last_periodic_sample_when_player_is_already_closed(callback):
+    """The final flush used to call `getTime()` from the stop/end callback,
+    where Kodi always raises 'Kodi is not playing any media file' (live log:
+    one "playback sample failed" warning per playback) - so the last position
+    was never recorded or pushed. It must replay the newest periodic sample
+    instead, quietly."""
+    store = _FakeProgressStore(now_playing=_CONTEXT, auth={'authKey': 'tok'})
+    api = _FakeProgressAPI()
+    with _progress_player_env(store, api, sync_enabled=True) as (env, player, logs):
+        player.onAVStarted()
+        stop = _player_unreadable_after_stop(env, position_s=50.0, total_s=100.0)
+        player.sample_if_playing()  # periodic tick while still playing: caches 50s/100s
+        assert len(store.progress_calls) == 1
+        stop()
+        getattr(player, callback)()
+        warnings = [msg for level, msg in logs if level == sys.modules['xbmc'].LOGWARNING]
+    # Final flush bypasses both throttles: a second local write + a second push.
+    assert [call[3:5] for call in store.progress_calls] == [(50000, 100000), (50000, 100000)]
+    assert len(api.datastore_put_calls) == 2
+    assert store.get_now_playing() is None
+    assert warnings == []
+
+
+def test_final_flush_without_any_prior_sample_is_quiet_and_still_cleans_up():
+    """Playback that ended before the first periodic tick has nothing to
+    replay: nothing is written, nothing alarming is logged, and the
+    unconditional now-playing/resume-offset cleanup still runs."""
+    store = _FakeProgressStore(now_playing=_CONTEXT, resume_offset_ms=45000)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()
+        stop = _player_unreadable_after_stop(env)
+        stop()
+        player.onPlayBackStopped()
+        warnings = [msg for level, msg in logs if level == sys.modules['xbmc'].LOGWARNING]
+    assert store.progress_calls == []
+    assert store.get_now_playing() is None
+    assert store.get_resume_offset_ms() is None
+    assert warnings == []
+
+
+def test_final_flush_never_replays_a_previous_playbacks_sample():
+    """The cached sample belongs to one accepted playback: after it ends, a
+    new playback that stops before its own first tick must not inherit it."""
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()
+        stop = _player_unreadable_after_stop(env, position_s=50.0)
+        player.sample_if_playing()
+        stop()
+        player.onPlayBackStopped()  # first playback: replays its own sample
+        assert len(store.progress_calls) == 2
+
+        store.set_now_playing(dict(_CONTEXT, id='tt2', started_at=service_runner.library.iso8601_utc()))
+        player.onAVStarted()  # accepts the second playback
+        player.onPlayBackStopped()  # stops before any tick; the player is unreadable
+    assert len(store.progress_calls) == 2  # nothing written for tt2
+
+
+def test_periodic_sample_read_failure_is_still_a_warning():
+    """Only the final flush treats an unreadable player as expected: a
+    periodic read that fails while Kodi claims to be playing is unexpected
+    and stays visible."""
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()
+        env.player_is_playing = True
+
+        def _boom(_calls):
+            raise RuntimeError(_NOT_PLAYING)
+        env.player_get_time = _boom
+        player.sample_if_playing()
+    assert store.progress_calls == []
+    assert any('playback sample failed' in msg for _level, msg in logs)
+
+
 def test_onplaybackstopped_noop_when_no_rivulet_context_active():
     store = _FakeProgressStore(now_playing=None)
     with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):

@@ -11,7 +11,10 @@ Launch interface verified against ~/M0Rf30/stremio-server-go @ cmd/stremio-serve
       HTTP_PORT  - enginefs HTTP API port, default 11470 (main.go:150)
     (APP_PATH and HTTP_PORT are pinned internally so the addon and the child
     process agree on where data lives and which port `server_url` points at;
-    every other env var main.go reads is exposed as its own Kodi setting via
+    BIND_ADDRESS defaults to loopback whenever `server_url` is a loopback
+    address, because the server is unauthenticated and otherwise listens on
+    every interface -- see lib/serverenv.py; every other env var main.go
+    reads is exposed as its own Kodi setting via
     EXTRA_ENV_SETTINGS/extra_env_from_settings below instead of being pinned.)
   - Logging goes to os.Stderr via internal/logging (logging.go:28-29), text or
     json per STREMIO_LOG_FORMAT/STREMIO_LOG_LEVEL -- there is no built-in log
@@ -36,7 +39,7 @@ import subprocess
 import time
 from urllib.parse import urlparse
 
-from lib import library, procflags, s4me
+from lib import library, procflags, s4me, serverenv
 from lib import settings as _settings
 from lib.store import Store
 from lib.stremio.api import StremioAPI
@@ -84,6 +87,16 @@ LOG_ROTATE_BYTES = 5 * 1024 * 1024
 # property intact for every tick except one: 288 stats/day instead of 43200
 # (one per 2s tick) for the exact same detection latency that matters here.
 LOG_ROTATE_CHECK_INTERVAL = 300.0
+
+# Default `ServerProcess.stop()` grace. stremio-server-go answers SIGTERM by
+# draining its HTTP/HTTPS listeners for up to 5s (`shutOne` in
+# internal/app/app.go) and only THEN closing the torrent client, so whenever a
+# connection is still open - a stream being played or pre-buffered, the
+# keep-alive pin - it exits ~5.02s after the signal (measured, 3/3 runs; an
+# idle server exits in ~3ms). The old 5.0s grace expired inside that window and
+# SIGKILLed the server just before its engine/bolt state was closed. Leave
+# generous headroom over the drain (upstream's systemd unit allows 20s).
+STOP_GRACE_SECONDS = 10.0
 
 IDLE_POLL_INTERVAL = 2.0
 HEALTHY_POLL_INTERVAL = 2.0
@@ -260,6 +273,22 @@ def http_port_from_url(server_url, default=DEFAULT_HTTP_PORT):
     return port if port is not None else default
 
 
+def server_url_for_log(server_url):
+    """`scheme://host[:port]` of `server_url` for the service log: the
+    credentials/path/query a free-text `server_url` may carry (it is
+    documented as the way to reach an arbitrary external instance) never
+    reach kodi.log."""
+    try:
+        parsed = urlparse(server_url)
+        host = parsed.hostname or ""
+        port = parsed.port
+    except (ValueError, AttributeError):
+        return "<invalid server_url>"
+    if ":" in host:  # IPv6 literal: urlparse strips the brackets
+        host = "[%s]" % host
+    return "%s://%s%s" % (parsed.scheme, host, (":%d" % port) if port is not None else "")
+
+
 def _bundled_bin_dirs(addon_data_dir):
     """Yield, in order and de-duplicated, the directories resolve_binary()/
     is_bundled_binary() must treat as "ours": the plain `<addon_data_dir>/bin`
@@ -409,6 +438,9 @@ class ServerProcess:
         env = os.environ.copy()
         env["APP_PATH"] = self.app_path
         env["HTTP_PORT"] = str(http_port_from_url(self.server_url))
+        # Before extra_env so an explicit BIND_ADDRESS setting still wins; see
+        # lib.serverenv for why the default must be loopback, not "everywhere".
+        env.update(serverenv.bind_address_overlay(self.server_url, self.extra_env, env))
         env.update(self.extra_env)
         return env
 
@@ -554,7 +586,7 @@ class ServerProcess:
             return None
         return time.monotonic() - self._started_at
 
-    def stop(self, grace=5.0):
+    def stop(self, grace=STOP_GRACE_SECONDS):
         """Terminate the child, escalating to kill() after `grace` seconds.
 
         Log-file cleanup always runs, in `finally`, even when the child
@@ -732,6 +764,14 @@ def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn):
             self._last_pushed_at = None
             self._last_local_write_at = None
             self._accepted_key = None
+            #: `(context_key, position_ms, duration_ms)` of the newest
+            #: successful live read. Kodi's `xbmc.Player.getTime()` raises
+            #: `RuntimeError("Kodi is not playing any media file")` once
+            #: playback has stopped, and `onPlayBackStopped`/`Ended`/`Error`
+            #: only fire AFTER that point (kodi.log: the exception lands
+            #: ~0.1s after `CVideoPlayer::CloseFile()`), so the final flush can
+            #: never read the player itself - it replays this instead.
+            self._last_sample = None
 
         def onAVStarted(self):
             context = store.get_now_playing()
@@ -744,6 +784,7 @@ def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn):
                 return
             self._accepted_key = _context_key(context)
             self._last_local_write_at = None
+            self._last_sample = None
             offset_ms = store.get_resume_offset_ms()
             if not offset_ms:
                 return
@@ -782,6 +823,7 @@ def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn):
                 except Exception as exc:  # noqa: BLE001 - final flush is best-effort; cleanup below is unconditional
                     log_fn(xbmc_module.LOGWARNING, "final flush failed: %r" % (exc,))
             self._accepted_key = None
+            self._last_sample = None
             self._last_local_write_at = None
             store.set_now_playing(None)
             store.set_resume_offset_ms(None)
@@ -823,13 +865,29 @@ def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn):
             `context` via `store.get_now_playing()` themselves -- to
             check `_accepted_key` before ever calling here -- so this
             takes it as a parameter instead of re-reading it from disk a
-            second time within the same tick/callback."""
+            second time within the same tick/callback.
+
+            The final flush runs from Kodi's stop/end/error callbacks, when
+            the player can no longer be read (see `_last_sample`): it then
+            falls back to the last periodic sample for the same context.
+            That is the expected path, not a failure, so nothing is logged
+            above debug level. A periodic (non-final) read that fails
+            mid-playback is still a warning."""
+            key = _context_key(context)
             try:
                 position_ms = int(self.getTime() * library.MS_PER_SECOND)
                 duration_ms = int(self.getTotalTime() * library.MS_PER_SECOND)
             except Exception as exc:  # noqa: BLE001 - getTime()/getTotalTime() must never crash the service
-                log_fn(xbmc_module.LOGWARNING, "playback sample failed: %r" % (exc,))
-                return
+                cached = self._last_sample if self._last_sample and self._last_sample[0] == key else None
+                if not final:
+                    log_fn(xbmc_module.LOGWARNING, "playback sample failed: %r" % (exc,))
+                    return
+                if cached is None:
+                    log_fn(xbmc_module.LOGDEBUG, "no playback sample to flush at stop: %r" % (exc,))
+                    return
+                _, position_ms, duration_ms = cached
+            else:
+                self._last_sample = (key, position_ms, duration_ms)
             if duration_ms <= 0:
                 return
             now = datetime.datetime.now(datetime.timezone.utc)
@@ -1202,6 +1260,10 @@ def main():
             # tag, and re-arming it there would let a user toggling
             # settings during a GitHub outage re-download on every toggle.
             self.upgrade_attempted = False
+            # Which kind of server this session is using, so the "not our
+            # server" note below is logged once per change, not once per tick:
+            # None (unknown yet), "embedded", "external" or "disabled".
+            self.server_mode = None
 
     def _tick_progress_and_restart(state):
         """Phase B: sample playback progress, then apply a pending
@@ -1220,12 +1282,33 @@ def main():
                 if _stop_process(state.proc):
                     state.proc = None
             state.backoff_idx = 0
+            state.server_mode = None
             state.notified_missing = False
             state.unsupported_platform = False
             state.download_backoff_idx = 0
             state.next_download_at = None
             state.download_attempt_notified = False
             state.download_failure_notified = False
+
+    def _note_server_mode(state, mode):
+        """Log, once per change, that streaming goes through a server this
+        addon does not own. Everything under Settings -> Torrent engine /
+        Streaming proxy / Integrations (`EXTRA_ENV_SETTINGS`) is handed to the
+        server as environment variables at spawn time, and the addon never
+        POSTs /settings, so none of it can reach an external or manually
+        started server - which used to be completely invisible in kodi.log."""
+        if state.server_mode == mode:
+            return
+        state.server_mode = mode
+        target = server_url_for_log(monitor.server_url)
+        if mode == "disabled":
+            log(xbmc.LOGINFO,
+                f"embedded server disabled (server_enable is off): streaming through the server at {target}; "
+                f"the torrent-engine/proxy settings are not applied to it")
+        else:
+            log(xbmc.LOGINFO,
+                f"using the stremio-server already listening at {target} instead of spawning one; "
+                f"the torrent-engine/proxy settings are not applied to it")
 
     def _dispatch_supervision(state):
         """Phase C: enabled/healthy/nothing-running dispatch, including
@@ -1238,6 +1321,7 @@ def main():
         interval = IDLE_POLL_INTERVAL
 
         if not monitor.enabled:
+            _note_server_mode(state, "disabled")
             if state.proc is not None:
                 log(xbmc.LOGINFO, "embedded server disabled, stopping")
                 if _stop_process(state.proc):
@@ -1245,6 +1329,7 @@ def main():
         elif state.proc is not None:
             code = state.proc.poll()
             if code is None:
+                state.server_mode = "embedded"
                 interval = HEALTHY_POLL_INTERVAL
                 state.proc.maybe_rotate_log()
             else:
@@ -1265,6 +1350,7 @@ def main():
             # detecting that is exactly what probe_listening() is for.
             if probe_listening(monitor.server_url):
                 state.notified_missing = False
+                _note_server_mode(state, "external")
                 interval = EXTERNAL_RECHECK_INTERVAL
             elif monitor.force_library and (library_path := _resolve_library_candidate(profile_dir)) is not None:
                 # Explicit opt-out of the exec()-based path entirely (see

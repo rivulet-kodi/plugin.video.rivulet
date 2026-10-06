@@ -359,6 +359,53 @@ def test_main_external_server_already_listening_skips_spawn(monkeypatch, tmp_pat
     assert not any('shutting down' in msg for msg, _level in ctx.env.log_calls)
 
 
+def test_main_notes_once_that_an_external_server_ignores_the_engine_settings(monkeypatch, tmp_path):
+    """Settings -> Torrent engine/proxy are env vars for the child the addon
+    spawns; an already-running server never sees them. That used to be
+    invisible in kodi.log - say so once (not once per 10s recheck), without
+    leaking credentials from the free-text server URL."""
+    monkeypatch.setattr(service_runner, 'probe_listening', lambda *a, **kw: True)
+    factory, _spawned = _make_process_factory([])
+    monkeypatch.setattr(service_runner, 'ServerProcess', factory)
+
+    wait = _scripted_wait([], [None, None, None])
+    settings = {'server_enable': True, 'server_url': 'http://user:s3cr3t@192.168.1.5:11470/some/path?k=v'}
+    with _main_env(tmp_path, wait, settings=settings) as ctx:
+        service_runner.main()
+
+    notes = [msg for msg, _level in ctx.env.log_calls if 'already listening' in msg]
+    assert len(notes) == 1  # three ticks, one note
+    assert 'http://192.168.1.5:11470' in notes[0]
+    assert 'not applied' in notes[0]
+    assert not any('s3cr3t' in msg or 'some/path' in msg for msg, _level in ctx.env.log_calls)
+
+
+def test_main_notes_once_when_the_embedded_server_is_disabled(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        service_runner, 'probe_listening',
+        lambda *a, **kw: pytest.fail('a disabled embedded server must not probe'),
+    )
+
+    wait = _scripted_wait([], [None, None, None])
+    with _main_env(tmp_path, wait, settings={'server_enable': False}) as ctx:
+        service_runner.main()
+
+    notes = [msg for msg, _level in ctx.env.log_calls if 'server_enable is off' in msg]
+    assert len(notes) == 1
+    assert service_runner.DEFAULT_SERVER_URL in notes[0]
+    assert 'not applied' in notes[0]
+
+
+@pytest.mark.parametrize('url, expected', [
+    ('http://127.0.0.1:11470', 'http://127.0.0.1:11470'),
+    ('https://user:pw@example.org/path?q=1', 'https://example.org'),
+    ('http://[::1]:11470/x', 'http://[::1]:11470'),
+    ('http://[::1', '<invalid server_url>'),
+    (12345, '<invalid server_url>'),
+])
+def test_server_url_for_log_drops_credentials_and_path(url, expected):
+    assert service_runner.server_url_for_log(url) == expected
+
 
 # --- s4me bridge hook: main() syncs BridgeSupervisor every tick -------------
 

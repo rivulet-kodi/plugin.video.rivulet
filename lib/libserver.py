@@ -46,6 +46,8 @@ import threading
 import time
 from urllib.parse import urlparse
 
+from lib import serverenv
+
 try:
     import ctypes
 except ImportError:  # pragma: no cover - no known CPython build lacks ctypes
@@ -68,6 +70,11 @@ LIBRARY_SUPPORTED = ctypes is not None
 #: if either ever changes.
 LOG_ROTATE_BYTES = 5 * 1024 * 1024
 LOG_ROTATE_CHECK_INTERVAL = 300.0
+
+#: Same duplication rationale: mirrors lib.service_runner.STOP_GRACE_SECONDS
+#: (see there for why the old 5.0s was too short). `ServerStop()` drains for
+#: 5s internally, so joining the run thread for just 5s raced that drain.
+STOP_GRACE_SECONDS = 10.0
 
 #: Same duplication rationale as the rotation constants above, mirroring
 #: lib.service_runner.DEFAULT_HTTP_PORT.
@@ -193,6 +200,9 @@ class LibraryServer:
         lib.service_runner.extra_env_from_settings()).
         """
         env = {"APP_PATH": self.app_path, "HTTP_PORT": str(_http_port_from_url(self.server_url))}
+        # Same loopback-by-default policy as ServerProcess.build_env(); see
+        # lib.serverenv.
+        env.update(serverenv.bind_address_overlay(self.server_url, self.extra_env))
         env.update(self.extra_env)
         return env
 
@@ -296,7 +306,7 @@ class LibraryServer:
             return None
         return time.monotonic() - self._started_at
 
-    def stop(self, grace=5.0):
+    def stop(self, grace=STOP_GRACE_SECONDS):
         """Call `ServerStop()` (graceful, with its own 5s internal
         timeout per the c-shared contract) and join the run thread.
 

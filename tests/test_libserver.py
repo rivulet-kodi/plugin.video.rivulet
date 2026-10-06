@@ -156,8 +156,22 @@ def test_build_env_pins_app_path_and_http_port_and_overlays_extra_env():
     assert env == {
         "APP_PATH": "/app",
         "HTTP_PORT": "9999",
+        "BIND_ADDRESS": "127.0.0.1",  # loopback server_url -> loopback listeners (lib.serverenv)
         "STREMIO_DISABLE_TRACKERS": "true",
     }
+
+
+def test_build_env_leaves_listen_address_alone_for_a_non_loopback_server_url():
+    server = LibraryServer("/fake/libstremio-server.so", "http://192.168.1.20:11470", "/app", "/log")
+    assert "BIND_ADDRESS" not in server.build_env()
+
+
+def test_build_env_explicit_bind_address_wins_over_the_loopback_default():
+    server = LibraryServer(
+        "/fake/libstremio-server.so", "http://127.0.0.1:11470", "/app", "/log",
+        extra_env={"BIND_ADDRESS": "0.0.0.0"},
+    )
+    assert server.build_env()["BIND_ADDRESS"] == "0.0.0.0"
 
 
 def test_build_env_does_not_inherit_this_process_os_environ(monkeypatch):
@@ -292,6 +306,19 @@ def test_library_server_stop_is_safe_when_never_started():
     server = LibraryServer("/fake/libstremio-server.so", "http://127.0.0.1:11470", "/app", "/log")
     server.stop()  # must not raise
     assert server.running is False
+
+
+def test_library_stop_default_grace_outlasts_the_servers_5s_drain():
+    """ServerStop() drains for up to 5s internally; joining the run thread for
+    exactly 5s raced that drain, so the default must leave headroom."""
+    import inspect
+
+    from lib import service_runner
+
+    assert libserver.STOP_GRACE_SECONDS > 5.5
+    assert inspect.signature(LibraryServer.stop).parameters['grace'].default == libserver.STOP_GRACE_SECONDS
+    # Duplicated on purpose (see libserver's module comment): keep them equal.
+    assert libserver.STOP_GRACE_SECONDS == service_runner.STOP_GRACE_SECONDS
 
 
 def test_library_server_poll_reports_nonzero_when_run_thread_raises(monkeypatch, tmp_path):
