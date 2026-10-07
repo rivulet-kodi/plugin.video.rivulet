@@ -26,6 +26,7 @@ manual cleanup is needed here.
 """
 import runpy
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -59,8 +60,10 @@ def load_default(monkeypatch):
     is `tests.kodistubs`' namespace (`.env`, `.router`, `.homewindow`, ...)
     plus `.run_calls`/`.open_home_calls`.
     """
-    def _load(argv, open_home=None):
+    def _load(argv, open_home=None, before=None):
         with install_kodi_stubs(reload=_RELOAD_MODULE_NAMES) as ctx:
+            if before is not None:
+                before(ctx)
             ctx.run_calls = []
             monkeypatch.setattr(ctx.router, 'run', lambda: ctx.run_calls.append(True))
 
@@ -168,6 +171,92 @@ def test_home_action_falls_back_to_container_update_on_homewindow_error(load_def
     assert any('HomeWindow failed' in msg for msg, _level in ctx.env.log_calls)
     expected_url = urlutil.url_for(ctx.router.BASE_URL, 'home_classical')
     assert ctx.env.executed_builtins[-1] == 'Container.Update(%s)' % expected_url
+
+
+# ---------------------------------------------------------------------------
+# action == 'home': Kodi re-running the plugin root while a UI is alive
+# ---------------------------------------------------------------------------
+#
+# After playback stops Kodi re-activates the Videos window the addon was
+# launched from, and CGUIMediaWindow::OnInitWindow() re-fetches a plugin path
+# (kodi.log 01:07:59.987 -> 01:08:00.189): a second interpreter running
+# default.py with the bare root. It must satisfy the directory handle and
+# exit - no HomeWindow, and no Dialog.Close(all), which would close the
+# picker that just came back.
+
+_HEARTBEAT = 'rivulet.ui.heartbeat'
+_PHASE = 'rivulet.ui.phase'
+
+
+def _owner(ctx, age=0.0, phase=None):
+    props = ctx.env.window_properties.setdefault(10000, {})
+    props[_HEARTBEAT] = 'tok|%.3f' % (time.time() - age)
+    if phase is not None:
+        props[_PHASE] = phase
+
+
+def _assert_launch_ignored(ctx):
+    assert ctx.open_home_calls == []
+    assert 'Dialog.Close(all, true)' not in ctx.env.executed_builtins
+    assert len(ctx.env.end_of_directory) == 1  # the handle is still satisfied, once
+    assert not any('Container.Update' in cmd for cmd in ctx.env.executed_builtins)
+
+
+def test_bare_launch_during_the_player_phase_is_a_noop(load_default):
+    # Phase 2: the player owns the screen. Even if Kodi reports something
+    # playing (a refresh mid-playback), no second UI.
+    def before(ctx):
+        _owner(ctx, phase='player')
+        ctx.env.player_is_playing = True
+
+    _ns, ctx = load_default(['plugin://plugin.video.rivulet/', '5', '?action=home'], before=before)
+    _assert_launch_ignored(ctx)
+
+
+def test_bare_launch_while_a_ui_is_alive_and_nothing_plays_is_a_noop(load_default):
+    # Phase 3 just started: the old UI ended the phase and reopened the
+    # picker, then Kodi's delayed refresh arrives.
+    _ns, ctx = load_default(
+        ['plugin://plugin.video.rivulet/', '5', '?action=home'],
+        before=lambda ctx: _owner(ctx, phase='addon'),
+    )
+    _assert_launch_ignored(ctx)
+    assert any('already running' in msg for msg, _level in ctx.env.log_calls)
+
+
+def test_bare_launch_with_a_live_ui_but_background_playback_still_opens_home(load_default):
+    # Kodi IS playing and the earlier session is in its addon phase: a
+    # deliberate launch from Kodi's menus, honoured.
+    def before(ctx):
+        _owner(ctx, phase='addon')
+        ctx.env.player_is_playing = True
+
+    _ns, ctx = load_default(['plugin://plugin.video.rivulet/', '5', '?action=home'], before=before)
+    assert ctx.open_home_calls == [True]
+
+
+def test_a_stale_ui_marker_never_locks_the_user_out(load_default):
+    # The interpreter was killed: its stamp stays on Window(10000) forever,
+    # in whichever phase it died. Past the age limit it counts for nothing.
+    _ns, ctx = load_default(
+        ['plugin://plugin.video.rivulet/', '5', '?action=home'],
+        before=lambda ctx: _owner(ctx, age=60.0, phase='player'),
+    )
+    assert ctx.open_home_calls == [True]
+
+
+def test_a_first_launch_with_no_marker_opens_home(load_default):
+    _ns, ctx = load_default(['plugin://plugin.video.rivulet/', '5', '?action=home'])
+    assert ctx.open_home_calls == [True]
+    assert 'Dialog.Close(all, true)' in ctx.env.executed_builtins
+
+
+def test_a_garbled_marker_is_ignored(load_default):
+    def before(ctx):
+        ctx.env.window_properties[10000] = {_HEARTBEAT: 'garbage', _PHASE: 'player'}
+
+    _ns, ctx = load_default(['plugin://plugin.video.rivulet/', '5', '?action=home'], before=before)
+    assert ctx.open_home_calls == [True]
 
 
 # ---------------------------------------------------------------------------

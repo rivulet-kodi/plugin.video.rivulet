@@ -45,7 +45,14 @@ import xbmc
 import xbmcgui
 
 from lib.ui.compat import log
-from lib.ui.uicommon import BACK_ACTIONS, BaseWindow, escape_label, open_window
+from lib.ui.uicommon import (
+    BACK_ACTIONS,
+    BaseWindow,
+    escape_label,
+    open_window,
+    register_transient_dialog,
+    unregister_transient_dialog,
+)
 
 # ProgressDialog.xml
 PROGRESS_HEADING = 30300
@@ -207,11 +214,23 @@ class _TransientDialog(xbmcgui.WindowXMLDialog):
         self._canceled = False
 
     def onAction(self, action):
+        # Phase 2 ("player", see uicommon's phase notes): Kodi's player owns
+        # the input. This spinner/progress dialog is still on screen for the
+        # instant between `close_windows_for_playback()` and its owner's
+        # `finally: close()` - a Back delivered then belongs to the OSD, not
+        # to a "Preparing stream" nobody is polling any more.
+        from lib.ui.uicommon import input_suppressed
+
+        if input_suppressed():
+            return
         if action.getId() in BACK_ACTIONS:
             self._canceled = True
 
     def iscanceled(self):
         return self._canceled
+
+    def cancel(self):
+        self._canceled = True
 
 
 class RivuletProgress:
@@ -234,6 +253,7 @@ class RivuletProgress:
 
     def create(self, heading, message=''):
         self._window = open_window(_TransientDialog, 'ProgressDialog.xml')
+        register_transient_dialog(self)
         self._window.show()
         self._panel = _Panel(self._window, self._CONTROLS)
         self._percent = None
@@ -263,7 +283,13 @@ class RivuletProgress:
     def iscanceled(self):
         return self._window.iscanceled() if self._window is not None else False
 
+    def cancel(self):
+        """Mark cancelled, exactly as a Back on the dialog would."""
+        if self._window is not None:
+            self._window.cancel()
+
     def close(self):
+        unregister_transient_dialog(self)
         if self._window is None:
             return
         with contextlib.suppress(Exception):
@@ -289,6 +315,7 @@ class RivuletBusy:
 
     def create(self, heading, message=''):
         self._window = open_window(_TransientDialog, 'BusyDialog.xml')
+        register_transient_dialog(self)
         self._window.show()
         self._panel = _Panel(self._window, self._CONTROLS)
         self._panel.label(BUSY_HEADING, heading)
@@ -312,7 +339,13 @@ class RivuletBusy:
     def iscanceled(self):
         return self._window.iscanceled() if self._window is not None else False
 
+    def cancel(self):
+        """Mark cancelled, exactly as a Back on the dialog would."""
+        if self._window is not None:
+            self._window.cancel()
+
     def close(self):
+        unregister_transient_dialog(self)
         if self._window is None:
             return
         with contextlib.suppress(Exception):
@@ -334,6 +367,11 @@ class _CountdownWindow(xbmcgui.WindowXMLDialog):
         self._skipped = False
 
     def onAction(self, action):
+        # Deliberately NOT gated by `uicommon.input_suppressed()`, unlike
+        # `_TransientDialog`: the countdown is a phase-3 screen (it runs
+        # after an episode ended and the player is gone) and must always
+        # take Back/OK. It also never exists during phase 2, so there is
+        # no stale player-era input for it to swallow.
         action_id = action.getId()
         if action_id in BACK_ACTIONS:
             self._canceled = True

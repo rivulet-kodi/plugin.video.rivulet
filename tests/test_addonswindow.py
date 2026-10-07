@@ -424,7 +424,7 @@ def test_onclick_toggle_never_calls_sync_addons(load_addonswindow, monkeypatch):
     store = _FakeStore(addons=[descriptor])
     _wire_store(ctx.addonswindow, store)
     sync_calls = []
-    monkeypatch.setattr(ctx.views, '_sync_addons_if_logged_in', lambda s: sync_calls.append(s))
+    monkeypatch.setattr(ctx.views, '_sync_addons_if_logged_in', lambda s, **kw: sync_calls.append((s, kw)))
     win = _make_window(ctx.addonswindow)
     win.onInit()
     win.getControl(ctx.addonswindow.LIST).selected_index = 1
@@ -492,7 +492,7 @@ def test_onclick_move_down_row_reorders_list_and_pushes_sync(load_addonswindow, 
     store = _FakeStore(addons=[first, second])
     _wire_store(ctx.addonswindow, store)
     sync_calls = []
-    monkeypatch.setattr(ctx.views, '_sync_addons_if_logged_in', lambda s: sync_calls.append(s))
+    monkeypatch.setattr(ctx.views, '_sync_addons_if_logged_in', lambda s, **kw: sync_calls.append((s, kw)))
     win = _make_window(ctx.addonswindow)
     win.onInit()
     win.getControl(ctx.addonswindow.LIST).selected_index = 1  # first addon row (Addon A)
@@ -500,7 +500,7 @@ def test_onclick_move_down_row_reorders_list_and_pushes_sync(load_addonswindow, 
     win.onClick(ctx.addonswindow.LIST)
 
     assert store.move_calls == [('https://a.example/manifest.json', 1)]
-    assert sync_calls == [store]
+    assert sync_calls == [(store, {'cancellable': True})]
     assert [a['transportUrl'] for a in store.addons] == [
         'https://b.example/manifest.json', 'https://a.example/manifest.json',
     ]

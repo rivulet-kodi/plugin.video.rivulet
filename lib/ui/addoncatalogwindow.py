@@ -56,7 +56,7 @@ import threading
 import xbmcgui
 
 from lib.ui.dependencies import get_client, get_store
-from lib.ui.uicommon import BACK_ACTIONS, BaseWindow, busy_dialog, open_window
+from lib.ui.uicommon import BACK_ACTIONS, CANCELLED, BaseWindow, open_window, run_cancellable
 
 LIST = 30360
 
@@ -155,8 +155,16 @@ class AddonCatalogWindow(BaseWindow):
         # screen with no feedback, hence the spinner every other
         # fetch-driven Rivulet screen already opens for this
         # (lib.ui.uicommon.busy_dialog's own docstring).
-        with busy_dialog(L(30033)):
-            self.entries = self._fetch_entries(installed)
+        entries = run_cancellable(lambda: self._fetch_entries(installed), L(30033))
+        if entries is CANCELLED:
+            # Back on the spinner. Nothing to show on a first load -> leave
+            # the screen (the one Back the user pressed); on a RELOAD
+            # (after an install/refresh) keep what is already listed.
+            if not self.entries:
+                self.close()
+                return
+        else:
+            self.entries = entries
 
         from lib.stremio.addoncatalogs import descriptor_state
 
@@ -582,7 +590,7 @@ class AddonCatalogWindow(BaseWindow):
 
         if not self._guard_mutation(lambda: self.store.install_addon(transport_url, manifest)):
             return
-        _sync_addons_if_logged_in(self.store)
+        _sync_addons_if_logged_in(self.store, cancellable=True)
         notify(L(30012))
         self._reload()
 
@@ -605,6 +613,8 @@ class AddonCatalogWindow(BaseWindow):
             return
 
         configured_manifest, pasted_transport_url, error_id = fetch_and_validate_addon(get_client(), pasted_url)
+        if error_id is CANCELLED:
+            return
         if error_id:
             notify(L(error_id))
             return
@@ -613,7 +623,7 @@ class AddonCatalogWindow(BaseWindow):
 
         if not self._guard_mutation(lambda: self.store.install_addon(pasted_transport_url, configured_manifest)):
             return
-        _sync_addons_if_logged_in(self.store)
+        _sync_addons_if_logged_in(self.store, cancellable=True)
         notify(L(30012))
         self._reload()
 

@@ -34,7 +34,7 @@ from lib.stremio.addons import (
     safe_url_for_log,
 )
 from lib.ui.dependencies import get_store
-from lib.ui.uicommon import BACK_ACTIONS, BaseWindow, busy_dialog, open_window
+from lib.ui.uicommon import BACK_ACTIONS, CANCELLED, BaseWindow, open_window, run_cancellable
 
 LIST = 30002
 HEADING = 30006
@@ -306,12 +306,19 @@ class CatalogPickerWindow(BaseWindow):
         pages = iter_catalog_pages(
             transport_url, ctype, catalog.get('id'), extra=extra, catalog=catalog, manifest=manifest,
         )
+        # Run on a worker under a cancellable spinner: this first page is
+        # the one place the user waits on a remote addon with nothing to
+        # look at (kodi.log: a 45 s wait during which every Back press was
+        # ignored). Back returns to this picker within ~0.2 s; the orphaned
+        # worker's page is discarded, so no coverflow can open for it later.
         try:
-            with busy_dialog(L(30033)):
-                metas = next(pages, [])
+            metas = run_cancellable(lambda: next(pages, []), L(30033))
         except AddonError as exc:
             log('catalogpicker: %s failed: %s' % (safe_url_for_log(transport_url), addon_error_detail(exc)), xbmc.LOGERROR)
             notify(L(30032))
+            return
+        if metas is CANCELLED:
+            log('catalogpicker: %s (%s) load cancelled by the user' % (catalog_name, ctype), xbmc.LOGINFO)
             return
         if not metas:
             log('catalogpicker: %s (%s) returned no results' % (catalog_name, ctype), xbmc.LOGINFO)
@@ -522,7 +529,13 @@ def open_catalog_picker(types=None, heading=''):
     # it.
     new_episode_items = []
     if wanted == _SERIES_SCREEN_TYPES and setting_bool('home_show_new_episodes', True):
-        new_episode_items = _new_episode_items(store)
+        # A meta fan-out (soft-bounded, but still seconds on a bad link)
+        # that used to run with no spinner and no way out: Back on the
+        # spinner returns to Home instead of waiting it out.
+        new_episode_items = run_cancellable(lambda: _new_episode_items(store), L(30033))
+        if new_episode_items is CANCELLED:
+            log('catalogpicker: Series screen cancelled while computing New Episodes', xbmc.LOGINFO)
+            return False
 
     log('catalogpicker: opening CatalogPickerWindow (%d catalogs)' % len(catalogs), xbmc.LOGINFO)
     win = None

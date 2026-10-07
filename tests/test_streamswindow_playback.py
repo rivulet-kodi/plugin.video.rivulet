@@ -1396,3 +1396,239 @@ def test_open_streams_binge_watch_a_movie_without_video_id_never_triggers_it(loa
     assert result is False
     assert start_calls == ['tt-movie', 'tt-movie']
     assert [call[2] for call in client.calls] == ['tt-movie']  # no second fetch was ever attempted
+
+
+# ---------------------------------------------------------------------------
+# The three phases and the transitions between them
+#
+#   1 addon   Rivulet screens own the input (before playback)
+#   2 player  every screen closed, Kodi's VideoPlayer/OSD owns the input
+#   3 addon   the player is truly gone: ONE coherent stack comes back
+#
+# Real Kodi flips `isPlaying()` to False at the START of CVideoPlayer::
+# CloseFile() but announces onPlayBackStopped/Ended/Error only after it
+# returned (kodi.log 01:07:53.96 CloseFile ... 01:07:59.98 finished, service
+# callback 01:08:00.137 - the cache thread cannot cancel a blocked HTTP read).
+# `_SlowClosingKodi` reproduces exactly that ordering; the fake Player's own
+# immediate dispatch would hide it.
+# ---------------------------------------------------------------------------
+
+
+class _SlowClosingKodi:
+    """Patches the fake `xbmc.Player`/`Monitor` so the stop callback arrives
+    `close_ticks` `waitForAbort()` ticks AFTER `isPlaying()` went False, like
+    real Kodi, and runs `on_tick(tick_number, kodi)` on every tick (the
+    script thread calling into Kodi - which is when Kodi delivers queued
+    window callbacks). `.playing_polls` is how many polls report True."""
+
+    def __init__(self, ctx, monkeypatch, playing_polls=2, close_ticks=3, reason='stopped', on_tick=None):
+        import sys
+
+        self.ctx = ctx
+        self.players = []
+        self.on_tick = on_tick
+        self.close_ticks = close_ticks
+        self.reason = reason
+        self.closing_ticks = None  # None = not closing; else ticks since isPlaying() went False
+        self.callback_at_tick = None
+        self.ticks = 0
+        xbmc = sys.modules['xbmc']
+        kodi = self
+        real_init = xbmc.Player.__init__
+
+        def init(player):
+            real_init(player)
+            kodi.players.append(player)
+
+        def is_playing(player):
+            env = ctx.env
+            env.player_is_playing_calls += 1
+            result = env.player_is_playing_calls <= playing_polls
+            if player._was_playing and not result and kodi.closing_ticks is None:
+                kodi.closing_ticks = 0  # CloseFile() started
+            player._was_playing = result
+            return result
+
+        monkeypatch.setattr(xbmc.Player, '__init__', init)
+        monkeypatch.setattr(xbmc.Player, 'isPlaying', is_playing)
+        ctx.env.monitor_abort = self._tick
+
+    def _tick(self, _call_number):
+        self.ticks += 1
+        if self.closing_ticks is not None:
+            self.closing_ticks += 1
+            if self.closing_ticks >= self.close_ticks:
+                self.closing_ticks = None
+                self.callback_at_tick = self.ticks
+                for player in self.players:
+                    getattr(player, 'onPlayBackStopped' if self.reason == 'stopped' else 'onPlayBackEnded')()
+        if self.on_tick is not None:
+            self.on_tick(self.ticks, self)
+        return False
+
+
+def test_wait_for_playback_end_waits_for_the_closed_callback_not_just_isplaying_false(
+    load_streamswindow, monkeypatch,
+):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    kodi = _SlowClosingKodi(ctx, monkeypatch, playing_polls=2, close_ticks=4, reason='stopped')
+
+    result = sw._wait_for_playback_end(start_timeout=5.0, tick=0.5)
+
+    assert result == (True, False)
+    assert kodi.callback_at_tick is not None
+    assert kodi.ticks == kodi.callback_at_tick  # returned the very tick the callback landed, not before
+    assert kodi.closing_ticks is None
+
+
+def test_wait_for_playback_end_reports_a_natural_end_only_after_its_callback(load_streamswindow, monkeypatch):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    _SlowClosingKodi(ctx, monkeypatch, playing_polls=1, close_ticks=2, reason='ended')
+
+    assert sw._wait_for_playback_end(start_timeout=5.0, tick=0.5) == (True, True)
+
+
+def test_wait_for_playback_end_gives_up_waiting_for_a_callback_that_never_comes(load_streamswindow, monkeypatch):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    _SlowClosingKodi(ctx, monkeypatch, playing_polls=1, close_ticks=10 ** 9)  # CloseFile never finishes
+
+    result = sw._wait_for_playback_end(start_timeout=5.0, tick=0.5)
+
+    assert result == (True, False)  # reopen anyway rather than strand the user on an empty screen
+    assert any('no player-closed callback' in msg for msg, _lvl in ctx.env.log_calls)
+    assert sum(ctx.env.wait_calls) == pytest.approx(sw._PLAYER_CLOSE_TIMEOUT_SECONDS)
+
+
+def test_wait_for_playback_end_aborts_while_the_player_is_still_closing(load_streamswindow, monkeypatch):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    kodi = _SlowClosingKodi(ctx, monkeypatch, playing_polls=1, close_ticks=10 ** 9)
+    real_tick = kodi._tick
+    ctx.env.monitor_abort = lambda n: real_tick(n) or kodi.ticks >= 3  # Kodi quits mid-teardown
+
+    assert sw._wait_for_playback_end(start_timeout=5.0, tick=0.5) == (False, False)
+
+
+def test_full_play_stop_cycle_phase1_to_phase2_to_phase3(load_streamswindow, monkeypatch):
+    """Pick -> player -> stop -> picker back, with everything that used to
+    go wrong along the way injected at the moment it went wrong."""
+    import time
+
+    ctx = load_streamswindow()
+    import xbmc
+    import xbmcgui
+    sw = ctx.streamswindow
+    uic = ctx.uicommon
+    _wire_single_supported_addon(sw)
+    # Another interpreter's Home heartbeat, as in the live log (Home runs
+    # in the interpreter that owns this stack).
+    ctx.env.window_properties.setdefault(10000, {})['rivulet.ui.heartbeat'] = 'tok|%.3f' % time.time()
+    ctx.env.window_properties[10000]['rivulet.ui.phase'] = 'addon'
+
+    class Ancestor(uic.BaseWindow):
+        """Stands for Detail/Showcase/Home sitting under the picker."""
+
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.clicks = 0
+            self.backs = 0
+
+        def onClick(self, control_id):
+            self.clicks += 1  # in real life: opens another screen / another pick
+
+        def onAction(self, action):
+            if action.getId() in uic.BACK_ACTIONS:
+                self.backs += 1
+            super().onAction(action)
+
+    ancestor = Ancestor('Detail.xml', '/addon/path', 'Default', '1080i')
+    uic._MODAL_WINDOW_STACK.append(ancestor)
+    log = []
+    start_calls = []
+
+    def on_tick(tick, kodi):
+        # Phase 2: Kodi delivers a Back and a click queued before the
+        # handoff, and refreshes the Videos container (re-running default.py).
+        if kodi.callback_at_tick is None:
+            log.append(('tick', tick, uic.input_suppressed()))
+            ancestor.onAction(xbmcgui.Action(92))
+            ancestor.onClick(30002)
+            assert uic.is_duplicate_launch() is True
+
+    kodi = _SlowClosingKodi(ctx, monkeypatch, playing_polls=3, close_ticks=3, on_tick=on_tick)
+
+    class RecordingWindow(sw.StreamsWindow):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
+            self.pairs = list(pairs)
+            start_calls.append(1)
+            if len(start_calls) == 1:
+                # Phase 1 -> 2: exactly what StreamsWindow.onClick() does.
+                log.append(('phase1', uic.input_suppressed()))
+                sw._close_for_player_handoff(self)
+                xbmc.Player().play('http://127.0.0.1:11470/x/0')
+                log.append(('handoff', uic.input_suppressed(), ancestor._closed_for_playback, self.closed))
+                return True
+            # Phase 3: the picker is back.
+            log.append(('phase3', uic.input_suppressed(), kodi.callback_at_tick is not None))
+            return False
+
+    monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+
+    result = sw.open_streams('movie', 'tt1', heading='Some Movie')
+
+    assert result is False
+    assert len(start_calls) == 2  # exactly ONE picker reopened - no duplicate UI
+    assert log[0] == ('phase1', False)
+    assert log[1] == ('handoff', True, True, True)  # silent, ancestor flagged for lazy restore, picker closed
+    ticks = [entry for entry in log if entry[0] == 'tick']
+    assert ticks and all(entry[2] for entry in ticks)  # input suppressed on every phase-2 tick
+    assert ancestor.clicks == 0 and ancestor.backs == 0  # nothing replayed into a closed screen
+    assert ancestor._closed_for_playback is True  # still flagged: restored lazily when the stack unwinds
+    # 2 -> 3: reopened only once Kodi announced the player closed, after the drain.
+    assert log[-1] == ('phase3', False, True)
+    assert ctx.env.window_properties[10000]['rivulet.ui.phase'] == 'addon'
+    assert 'Dialog.Close(all, true)' not in ctx.env.executed_builtins
+    # ...and input is live again for the next Back/click.
+    ancestor.onClick(30002)
+    ancestor.onAction(xbmcgui.Action(92))
+    assert (ancestor.clicks, ancestor.backs) == (1, 1)
+
+
+def test_a_play_that_fails_after_the_handoff_never_leaves_the_player_phase_stuck(load_streamswindow, monkeypatch):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    _wire_single_supported_addon(sw)
+
+    class RecordingWindow(sw.StreamsWindow):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
+            self.pairs = list(pairs)
+            ctx.uicommon.close_windows_for_playback(exclude=self)
+            return False  # Player.play() raised: onClick unwound without `played`
+
+    monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+
+    assert sw.open_streams('movie', 'tt1') is False
+
+    assert ctx.uicommon.input_suppressed() is False
+
+
+def test_aborting_during_the_wait_ends_the_player_phase(load_streamswindow, monkeypatch):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    _wire_single_supported_addon(sw)
+
+    class RecordingWindow(sw.StreamsWindow):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
+            self.pairs = list(pairs)
+            ctx.uicommon.close_windows_for_playback(exclude=self)
+            return True
+
+    monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+    ctx.env.monitor_abort = True
+
+    assert sw.open_streams('movie', 'tt1') is False
+
+    assert ctx.uicommon.input_suppressed() is False

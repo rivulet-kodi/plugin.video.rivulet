@@ -479,11 +479,12 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
 
         from lib.ui.compat import L
         from lib.ui.dependencies import get_client, get_store
-        from lib.ui.uicommon import busy_dialog
+        from lib.ui.uicommon import CANCELLED, run_cancellable
         from lib.ui.views import _fetch_meta
 
-        with busy_dialog(L(30033)):
-            full_meta = _fetch_meta(stype, sid)
+        full_meta = run_cancellable(lambda: _fetch_meta(stype, sid), L(30033))
+        if full_meta is CANCELLED:
+            return
         open_credits_picker(get_store(), get_client(), full_meta)
 
     def close(self):
@@ -833,11 +834,20 @@ def open_credits_picker(store, client, meta):
         if hide_adult and is_adult_catalog({'id': parsed['catalog_id'], 'type': parsed['type']}):
             _open_results([])
             return
+        from lib.ui.uicommon import CANCELLED, run_cancellable
+
         try:
-            metas = _fetch_catalog(parsed['transport_url'], parsed['type'], parsed['catalog_id'], extra=parsed['extra'])
+            metas = run_cancellable(
+                lambda: _fetch_catalog(
+                    parsed['transport_url'], parsed['type'], parsed['catalog_id'], extra=parsed['extra'],
+                ),
+                L(30033),
+            )
         except AddonError as exc:
             log('infowindow: discover fetch %s failed: %s' % (safe_url_for_log(parsed['transport_url']), addon_error_detail(exc)), xbmc.LOGERROR)
             notify(L(30032))
+            return
+        if metas is CANCELLED:
             return
         if hide_adult:
             metas = filter_metas(metas)

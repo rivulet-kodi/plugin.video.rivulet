@@ -37,6 +37,7 @@ during that call - new `xbmc.Monitor().abortRequested()` support in
 tests/kodistubs backs the "Kodi is shutting down" case.
 """
 import contextlib
+import time
 
 import pytest
 
@@ -360,6 +361,223 @@ def test_domodal_does_not_reopen_when_kodi_is_shutting_down(load_uicommon, monke
     assert calls == [1]  # abortRequested() stopped the loop before a 2nd attempt
     assert win._closed_for_playback is True  # left set - nothing left to reopen into
     assert ctx.uicommon._MODAL_WINDOW_STACK == []
+
+
+# ---------------------------------------------------------------------------
+# UI phases (addon / player): the marker, the input gate, the heartbeat
+# ---------------------------------------------------------------------------
+#
+# Phase `player` = every Rivulet screen closed, Kodi's VideoPlayer/OSD owns
+# the input. Rivulet must be silent then: no screen reacts to a (stale,
+# queued) Back/click, and a Kodi refresh of the plugin root is a no-op.
+
+
+class _ProbeWindow:
+    """Built per test on the freshly reloaded uicommon: a screen defining
+    its own onAction/onClick/onInit, the way HomeWindow/DetailWindow do."""
+
+    @staticmethod
+    def build(uicommon_mod):
+        class Probe(uicommon_mod.BaseWindow):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                self.clicks = []
+                self.actions = []
+                self.inits = 0
+
+            def onInit(self):
+                self.inits += 1
+
+            def onClick(self, control_id):
+                self.clicks.append(control_id)
+
+            def onAction(self, action):
+                self.actions.append(action.getId())
+                super().onAction(action)
+
+        return Probe('Some.xml', '/addon/path', 'Default', '1080i')
+
+
+def test_phase_defaults_to_addon_and_input_is_live(load_uicommon):
+    ctx = load_uicommon()
+    assert ctx.uicommon.input_suppressed() is False
+    assert ctx.uicommon.player_phase_active() is False
+
+
+def test_begin_and_end_player_phase_flip_the_flag_and_publish_it(load_uicommon):
+    ctx = load_uicommon()
+    props = ctx.env.window_properties
+
+    ctx.uicommon.begin_player_phase()
+    assert ctx.uicommon.input_suppressed() is True
+    assert props[10000]['rivulet.ui.phase'] == 'player'
+
+    ctx.uicommon.end_player_phase()
+    assert ctx.uicommon.input_suppressed() is False
+    assert props[10000]['rivulet.ui.phase'] == 'addon'
+
+    ctx.uicommon.end_player_phase()  # idempotent
+    assert ctx.uicommon.input_suppressed() is False
+
+
+def test_close_windows_for_playback_enters_the_player_phase_even_with_no_screens(load_uicommon):
+    ctx = load_uicommon()
+    assert ctx.uicommon._MODAL_WINDOW_STACK == []
+
+    ctx.uicommon.close_windows_for_playback()
+
+    assert ctx.uicommon.input_suppressed() is True
+    assert ctx.env.window_properties[10000]['rivulet.ui.phase'] == 'player'
+
+
+def test_screens_ignore_queued_back_and_clicks_during_the_player_phase(load_uicommon):
+    ctx = load_uicommon()
+    import xbmcgui
+    win = _ProbeWindow.build(ctx.uicommon)
+
+    ctx.uicommon.begin_player_phase()
+    win.onAction(xbmcgui.Action(92))  # a Back queued before the handoff, replayed by waitForAbort()
+    win.onClick(30002)
+
+    assert win.actions == [] and win.clicks == []  # neither callback body ran
+    assert win.closed is False  # nor BaseWindow's own back handling
+
+    ctx.uicommon.end_player_phase()
+    win.onClick(30002)
+    win.onAction(xbmcgui.Action(92))
+
+    assert win.clicks == [30002]
+    assert win.actions == [92]
+    assert win.closed is True  # input is live again in phase 3
+
+
+def test_the_input_gate_covers_every_stack_screen_class_and_leaves_oninit_alone(load_uicommon):
+    ctx = load_uicommon()
+    win = _ProbeWindow.build(ctx.uicommon)
+
+    ctx.uicommon.begin_player_phase()
+    win.onInit()  # building a screen is not input
+
+    assert win.inits == 1
+
+    class Direct(ctx.uicommon.ModalStackWindow, ctx.uicommon.xbmcgui.WindowXMLDialog):
+        # DetailWindow/ShowcaseWindow shape: the mixin without BaseWindow.
+        def onClick(self, control_id):
+            raise AssertionError('must not run during the player phase')
+
+    Direct('Some.xml', '/addon/path', 'Default', '1080i').onClick(1)
+
+
+def test_domodal_ends_the_player_phase_so_a_missed_end_can_never_leave_screens_deaf(
+    load_uicommon, monkeypatch,
+):
+    ctx = load_uicommon()
+    win = _make_stack_window(ctx.uicommon)
+    ctx.uicommon.begin_player_phase()
+    seen = []
+    monkeypatch.setattr(
+        ctx.uicommon.xbmcgui.WindowXMLDialog, 'doModal',
+        lambda self: seen.append(ctx.uicommon.input_suppressed()),
+    )
+
+    win.doModal()
+
+    assert seen == [False]  # a screen on screen means phase 3
+
+
+def test_ui_owner_alive_is_false_without_a_stamp_or_with_a_garbled_one(load_uicommon):
+    ctx = load_uicommon()
+    assert ctx.uicommon.ui_owner_alive() is False
+    ctx.env.window_properties[10000] = {'rivulet.ui.heartbeat': 'no-separator'}
+    assert ctx.uicommon.ui_owner_alive() is False
+    ctx.env.window_properties[10000] = {'rivulet.ui.heartbeat': 'tok|not-a-number'}
+    assert ctx.uicommon.ui_owner_alive() is False
+
+
+@pytest.mark.parametrize('age,alive', [(0.0, True), (9.0, True), (11.0, False), (3600.0, False),
+                                       (-5.0, True), (-3600.0, False)])
+def test_ui_owner_alive_honours_the_age_limit_in_both_directions(load_uicommon, age, alive):
+    ctx = load_uicommon()
+    now = 1_000_000.0
+    ctx.env.window_properties[10000] = {'rivulet.ui.heartbeat': 'tok|%.3f' % (now - age)}
+
+    assert ctx.uicommon.ui_owner_alive(clock=lambda: now) is alive
+
+
+def test_heartbeat_publishes_refreshes_and_clears_its_own_stamp(load_uicommon):
+    ctx = load_uicommon()
+    ticks = iter(range(1000, 2000))
+    beat = ctx.uicommon.UiHeartbeat(interval=0.005, clock=lambda: float(next(ticks)))
+    props = ctx.env.window_properties.setdefault(10000, {})
+
+    with beat:
+        first = props['rivulet.ui.heartbeat']
+        assert first.startswith(beat._token + '|')
+        deadline = time.time() + 5
+        while props['rivulet.ui.heartbeat'] == first and time.time() < deadline:
+            time.sleep(0.005)
+        assert props['rivulet.ui.heartbeat'] != first  # the daemon thread refreshed it
+        assert beat._thread.is_alive()
+
+    assert 'rivulet.ui.heartbeat' not in props
+    assert 'rivulet.ui.phase' not in props
+    assert beat._thread is None  # joined
+
+
+def test_heartbeat_stop_never_clears_a_newer_interpreters_stamp(load_uicommon):
+    ctx = load_uicommon()
+    beat = ctx.uicommon.UiHeartbeat(interval=60.0)
+    props = ctx.env.window_properties.setdefault(10000, {})
+    beat.start()
+    props['rivulet.ui.heartbeat'] = 'other-token|123.000'  # a newer UI took over
+
+    beat.stop()
+
+    assert props['rivulet.ui.heartbeat'] == 'other-token|123.000'
+
+
+def test_heartbeat_start_clears_a_phase_left_stuck_by_a_dead_session(load_uicommon):
+    ctx = load_uicommon()
+    ctx.uicommon.begin_player_phase()  # a killed interpreter never ended it
+    beat = ctx.uicommon.UiHeartbeat(interval=60.0)
+    props = ctx.env.window_properties[10000]
+
+    with beat:
+        assert props['rivulet.ui.phase'] == 'addon'
+        assert ctx.uicommon.input_suppressed() is False
+
+
+def test_window_property_failures_degrade_to_no_marker(load_uicommon, monkeypatch):
+    ctx = load_uicommon()
+
+    def boom(_window_id):
+        raise RuntimeError('no window manager yet')
+
+    monkeypatch.setattr(ctx.uicommon.xbmcgui, 'Window', boom)
+
+    ctx.uicommon.begin_player_phase()  # must not raise
+    ctx.uicommon.end_player_phase()
+    assert ctx.uicommon.ui_owner_alive() is False
+    assert ctx.uicommon.is_duplicate_launch() is False
+
+
+@pytest.mark.parametrize('alive,phase,playing,duplicate', [
+    (False, 'player', True, False),   # no owner at all: a genuine launch
+    (False, 'addon', False, False),
+    (True, 'player', False, True),    # the post-stop refresh, mid CloseFile
+    (True, 'player', True, True),     # a refresh while the video still plays
+    (True, 'addon', False, True),     # the same refresh landing just after phase 3 began
+    (True, 'addon', True, False),     # background playback + deliberate launch
+])
+def test_is_duplicate_launch_matrix(load_uicommon, alive, phase, playing, duplicate):
+    ctx = load_uicommon()
+    props = ctx.env.window_properties.setdefault(10000, {})
+    props['rivulet.ui.phase'] = phase
+    if alive:
+        props['rivulet.ui.heartbeat'] = 'tok|%.3f' % time.time()
+    ctx.env.player_is_playing = playing
+
+    assert ctx.uicommon.is_duplicate_launch() is duplicate
 
 # ---------------------------------------------------------------------------
 # BaseWindow.onAction() - the shared back-navigation contract

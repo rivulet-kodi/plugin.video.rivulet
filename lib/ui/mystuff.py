@@ -409,13 +409,19 @@ def open_my_stuff():
     import xbmc
 
     from lib.ui.compat import L, log, notify
-    from lib.ui.uicommon import busy_dialog
+    from lib.ui.uicommon import CANCELLED, run_cancellable
 
     store = get_store()
-    with busy_dialog(L(30033)):
+
+    def _load():
         merged = merge_entries(store.get_progress_entries(), _fetch_library_entries(store))
         items = _enrich(merged)
         _label_next_episodes(items)
+        return items
+
+    items = run_cancellable(_load, L(30033))
+    if items is CANCELLED:
+        return False
 
     if not items:
         notify(L(30030))

@@ -31,6 +31,12 @@ real defect it would have caught:
    `<focusedlayout>` disagree on row height makes the focused row jump
    size; a list height that is not a whole multiple of its row height
    clips the last row (hit once in `DetailWindow.xml`).
+9. No `WindowClose` animation - `CGUIWindowManager::HandleAction` returns
+   early ("ignoring action N, because topmost modal dialog closing
+   animation is running") for EVERY action while the topmost modal
+   dialog plays one, so a Back pressed as a spinner or screen closes is
+   swallowed, never queued (kodi.log: Back dropped at 00:39:49 right as
+   a 45 s busy dialog closed).
 """
 import glob
 import os
@@ -636,3 +642,34 @@ def test_uncentred_mixed_font_labels_are_rejected_regression(tmp_path):
     assert total == 1
     assert len(offenders) == 2
     assert all("aligny='unset'" in o for o in offenders)
+
+
+def _window_close_animations(path):
+    """Every `<animation type="WindowClose">` element in one file."""
+    return [el for el in ET.parse(path).iter('animation') if el.get('type') == 'WindowClose']
+
+
+def test_no_skin_window_plays_a_close_animation():
+    """Kodi's `CGUIWindowManager::HandleAction()` drops (returns true for,
+    after a LOGWARNING) every action while the topmost modal dialog has a
+    running `ANIM_TYPE_WINDOW_CLOSE` animation. Every Rivulet window is a
+    `WindowXMLDialog`, and the busy spinner closes the instant a fetch
+    ends, so a 160 ms fade-out was a 160 ms window in which the user's
+    next Back press vanished (the Showcase slide+fade was 320 ms). Open
+    animations are fine - they do not gate input."""
+    offenders = [os.path.basename(p) for p in _skin_files() if _window_close_animations(p)]
+    assert offenders == []
+
+
+def test_window_close_animation_is_rejected_regression(tmp_path):
+    """Regression: the exact markup every window used to carry must be
+    detected, or the rule above could never fail."""
+    bad = tmp_path / 'Bad.xml'
+    bad.write_text(
+        '<window><animation type="WindowClose" reversible="false">'
+        '<effect type="fade" start="100" end="0" time="160" /></animation>'
+        '<animation type="WindowOpen"><effect type="fade" end="100" time="200" /></animation>'
+        '<controls/></window>',
+        encoding='utf-8',
+    )
+    assert len(_window_close_animations(str(bad))) == 1

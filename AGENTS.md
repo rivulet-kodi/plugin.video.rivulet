@@ -97,6 +97,8 @@ make parallel    # pytest -n auto
 
 **Window infrastructure.** `lib/ui/uicommon.py` provides the modal stack (`_MODAL_WINDOW_STACK`), `BaseWindow`, and `BACK_ACTIONS = frozenset({9, 10, 92})` (`uicommon.py:74`). `close_windows_for_playback()` must force-close the stack before playback and reopen after.
 
+**UI phases.** A session is addon -> player -> addon (`uicommon.py` "UI phases"). `close_windows_for_playback()` starts the *player* phase (every screen ignores input via `ModalStackWindow.__init_subclass__`'s gate; `default.py` ignores a Kodi re-run of the plugin root via `is_duplicate_launch()` - Kodi re-fetches the Videos container when playback stops); `streamswindow._wait_for_playback_end()` ends it only after Kodi's stop/end/error callback, which fires after `CVideoPlayer::CloseFile()` returned (`isPlaying()` is False seconds earlier). `open_home()` holds a `UiHeartbeat` (Window(10000) stamp + daemon thread) so a killed interpreter can never lock the user out. Never call `Player.getTime()`/`getTotalTime()` from a stop/end/error callback: Kodi logs `EXCEPTION: Kodi is not playing any media file` even when caught.
+
 **Localization.** 232 ids spanning `#30000`-`#30360` (gaps are normal — never renumber, and allocate above the current maximum) in `resources/language/resource.language.en_gb/strings.po`, the source of truth. Adding a user-visible string means adding it to **all 14 locales**, with `msgctxt "#3XXXX"`. Skin XML reads them as `$LOCALIZE(30360)`.
 
 **Settings.** `resources/settings.xml`, ids are `<category>_<feature>` (`home_show_movies`, `server_enable`, `bt_listen_port`). `server_enable` is first in its category on purpose: Kodi otherwise opens Settings inside the `server_url` text box, trapping the arrow keys.

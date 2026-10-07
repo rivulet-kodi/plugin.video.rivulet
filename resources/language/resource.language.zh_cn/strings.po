@@ -993,3 +993,7 @@ msgstr "搜索不完整，无响应：%s"
 msgctxt "#30390"
 msgid "Loading subtitles…"
 msgstr "正在加载字幕…"
+
+msgctxt "#30410"
+msgid "Syncing addons…"
+msgstr "正在同步插件…"

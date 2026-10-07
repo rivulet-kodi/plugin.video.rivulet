@@ -993,3 +993,7 @@ msgstr "البحث غير مكتمل، لا ردّ من: %s"
 msgctxt "#30390"
 msgid "Loading subtitles…"
 msgstr "جارٍ تحميل الترجمة…"
+
+msgctxt "#30410"
+msgid "Syncing addons…"
+msgstr "جارٍ مزامنة الإضافات…"

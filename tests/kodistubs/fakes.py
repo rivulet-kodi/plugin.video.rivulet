@@ -198,6 +198,12 @@ class Env:
         # xbmcaddon.Addon.openSettings recorder
         self.opened_settings = False
 
+        # xbmcgui.Window(<id>) property store: {window_id: {key: value}}.
+        # Shared by every fake Window instance of the same id, as real Kodi's
+        # window properties are - the one channel two script interpreters
+        # (default.py vs the running UI) can see each other through.
+        self.window_properties = {}
+
         # scripted behavior consulted by DialogProgress.iscanceled()/
         # xbmc.Monitor.waitForAbort()/xbmc.Player().isPlaying()
         self.cancel = cancel

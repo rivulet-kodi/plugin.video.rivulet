@@ -225,6 +225,35 @@ def test_busy_iscanceled_and_close(load_dialogs):
     assert busy._window is None
 
 
+@pytest.mark.parametrize('action_id', [92, 10, 9])
+def test_busy_and_progress_treat_every_back_id_as_cancel(load_dialogs, action_id):
+    """Backspace (92), Esc (10) and 9 all cancel, on both transient dialogs."""
+    d = load_dialogs().dialogs
+    for dialog in (d.RivuletBusy(), d.RivuletProgress()):
+        dialog.create('Loading')
+        dialog._window.onAction(_FakeAction(action_id))
+        assert dialog.iscanceled() is True
+
+
+def test_transient_dialogs_ignore_input_while_the_player_owns_it(load_dialogs):
+    """Phase 2 (`uicommon.input_suppressed()`): the Preparing-stream dialog
+    is still up for the instant between the screen handoff and its owner's
+    close(); a Back delivered then is the OSD's, not a cancel - and once the
+    player phase ends the same dialog type cancels normally again."""
+    ctx = load_dialogs()
+    d = ctx.dialogs
+    progress = d.RivuletProgress()
+    progress.create('Preparing stream')
+
+    ctx.uicommon.begin_player_phase()
+    progress._window.onAction(_FakeAction(92))
+    assert progress.iscanceled() is False
+
+    ctx.uicommon.end_player_phase()
+    progress._window.onAction(_FakeAction(92))
+    assert progress.iscanceled() is True
+
+
 # ---------------------------------------------------------------------------
 # RivuletCountdown
 # ---------------------------------------------------------------------------

@@ -14,7 +14,7 @@ catalog/stream fan-out call site walks in order. Built/run via
 import xbmcgui
 
 from lib.ui.dependencies import get_client, get_store
-from lib.ui.uicommon import BaseWindow, open_window
+from lib.ui.uicommon import CANCELLED, BaseWindow, open_window
 
 LIST = 30002
 
@@ -159,6 +159,8 @@ class AddonsWindow(BaseWindow):
             return
 
         manifest, transport_url, error_string_id = fetch_and_validate_addon(get_client(), url)
+        if error_string_id is CANCELLED:
+            return
         if error_string_id is not None:
             notify(L(error_string_id))
             return
@@ -167,7 +169,7 @@ class AddonsWindow(BaseWindow):
 
         if not self._guard_mutation(lambda: self.store.install_addon(transport_url, manifest)):
             return
-        _sync_addons_if_logged_in(self.store)
+        _sync_addons_if_logged_in(self.store, cancellable=True)
         notify(L(30012))
         self._reload()
 
@@ -205,7 +207,7 @@ class AddonsWindow(BaseWindow):
             notify(L(_PROTECTED_MESSAGE_STRING_ID))
             return
 
-        _sync_addons_if_logged_in(self.store)
+        _sync_addons_if_logged_in(self.store, cancellable=True)
         notify(L(30013))
         self._reload()
 
@@ -272,7 +274,7 @@ class AddonsWindow(BaseWindow):
         except ValueError:
             notify(L(_NOT_INSTALLED_MESSAGE_STRING_ID))
             return
-        _sync_addons_if_logged_in(self.store)
+        _sync_addons_if_logged_in(self.store, cancellable=True)
         self._reload(focus_transport_url=transport_url)
 
 

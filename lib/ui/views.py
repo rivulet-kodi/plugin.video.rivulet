@@ -40,6 +40,7 @@ from lib.stremio.contentrating import filter_metas, is_adult_catalog
 from lib.ui import compat, dialogs, router, urlutil
 from lib.ui.compat import L, log, notify
 from lib.ui.dependencies import get_client, get_store
+from lib.ui.uicommon import CANCELLED, run_cancellable
 
 #: Cap on concurrent addon HTTP calls per fan-out (`_fetch_meta()` and
 #: `_refresh_addon_manifests()`) - bounded so a user with dozens of
@@ -502,7 +503,7 @@ def fetch_catalog_pages(transport, ctype, cid, extra=None, catalog=None, manifes
     return metas
 
 
-def _sync_addons_if_logged_in(store, notify_success=False):
+def _sync_addons_if_logged_in(store, notify_success=False, cancellable=False):
     """Best-effort push of the local addon collection back to Stremio's
     remote sync API when the user is logged in. A failed push is
     notified (not just logged) - previously silent, which made a real
@@ -525,7 +526,15 @@ def _sync_addons_if_logged_in(store, notify_success=False):
     docstring at the top of lib/store.py), never part of the Stremio
     addon-collection schema. Pushing it as-is would leak a purely local
     "hidden in this install" toggle into the account, so every other
-    Stremio client syncing that account would see the addon vanish too."""
+    Stremio client syncing that account would see the addon vanish too.
+
+    `cancellable=True` (the addon windows, which are on screen) runs the
+    push under a "Syncing addons…" spinner so Back honours within ~0.2 s
+    instead of freezing the screen for the request timeout. A cancelled
+    push is neither a success nor a failure: nothing is notified, the
+    auth is untouched, and the return value is False - the local change
+    already happened and the next sync pushes the whole collection
+    anyway (it is a full-collection set, not a delta)."""
     auth = store.get_auth()
     if not auth:
         if notify_success:
@@ -541,7 +550,21 @@ def _sync_addons_if_logged_in(store, notify_success=False):
                 del flags['disabled']
                 descriptor['flags'] = flags
             payload.append(descriptor)
-        StremioAPI().addon_collection_set(auth.get('authKey'), payload)
+        auth_key = auth.get('authKey')
+
+        def push():
+            StremioAPI().addon_collection_set(auth_key, payload)
+
+        if cancellable:
+            # Only the network push runs on the worker; every notify/
+            # set_auth below stays on this thread AFTER the outcome is
+            # known, so a push the user backed out of can never report
+            # success or failure (or clear the auth) behind their back.
+            if run_cancellable(push, L(30410)) is CANCELLED:
+                log('views._sync_addons_if_logged_in: cancelled by user', xbmc.LOGINFO)
+                return False
+        else:
+            push()
     except ApiError as exc:
         log('views._sync_addons_if_logged_in: %r' % (exc,), xbmc.LOGERROR)
         if exc.is_auth_error:

@@ -53,6 +53,7 @@ from lib.ui.playbackmeta import (
     sanitize_title,
     split_embedded_headers,
 )
+from lib.ui.uicommon import CANCELLED, deliver_queued_input, wait_cancellable
 
 #: Bounded (connect, read) timeouts for the pre-buffer network calls. The
 #: SHORT read timeout is what makes the "Preparing stream" dialog
@@ -64,6 +65,16 @@ from lib.ui.playbackmeta import (
 #: aborts a genuinely-progressing (even very slow) download.
 _FRONT_TIMEOUT = (3.05, 5)
 _METADATA_TIMEOUT = (3.05, 8)
+
+#: Minimum gap between two `deliver_queued_input()` calls inside the chunk
+#: loop below. Kodi hands a script its queued Back press only from inside
+#: a `Monitor.waitForAbort()` call, and a pre-buffer that is receiving
+#: bytes continuously never reaches the `waitForAbort()` between attempts
+#: - so `dialog.iscanceled()` polled per chunk was blind until the whole
+#: pre-buffer finished. A pump per chunk would cost >= 1 ms x ~1300
+#: chunks; four per second is invisible and still honours Back inside
+#: ~0.25 s.
+_CANCEL_PUMP_SECONDS = 0.25
 
 #: Pause between retry attempts; also the abort-poll interval.
 _ATTEMPT_PAUSE_SECONDS = 2.0
@@ -410,7 +421,7 @@ def _stats_line(stats):
     return _lfmt(30082, speed, peers)
 
 
-def _poll_stats_best_effort(server, info_hash, trackers=None):
+def _poll_stats_best_effort(server, info_hash, trackers=None, dialog=None, monitor=None):
     """Live stats snapshot for the buffering dialog's second line - the
     SAME `/create` poll `_await_file_idx` uses for its own speed/peers
     line, reused here so a torrent already past metadata resolution still
@@ -420,9 +431,22 @@ def _poll_stats_best_effort(server, info_hash, trackers=None):
     stats-server hammering loop. A failure here is purely cosmetic - the
     dialog just shows no stats line for that attempt - and must never
     break the front-priming loop itself.
+
+    With `dialog` (the Preparing dialog) the call runs under
+    `wait_cancellable()` (pumping `monitor`): the poll can block for
+    `_METADATA_TIMEOUT` and a plain call parks this thread where Kodi cannot
+    deliver the queued Back, so Back used to be ignored until it returned. Cancelled (or Kodi
+    quitting) -> None; the caller re-checks `dialog.iscanceled()`.
     """
     try:
-        return server.create_engine(info_hash, timeout=_METADATA_TIMEOUT, trackers=trackers)
+        if dialog is None:
+            return server.create_engine(info_hash, timeout=_METADATA_TIMEOUT, trackers=trackers)
+        stats = wait_cancellable(
+            lambda: server.create_engine(info_hash, timeout=_METADATA_TIMEOUT, trackers=trackers),
+            dialog,
+            monitor,
+        )
+        return None if stats is CANCELLED else stats
     except Exception as exc:  # noqa: BLE001 - stats are a bonus, never fatal to buffering
         log('player: buffer stats poll failed for %s: %r' % (info_hash, exc), xbmc.LOGWARNING)
         return None
@@ -854,7 +878,7 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=None):
             # `_poll_stats_best_effort`'s docstring). Re-checked right
             # after so a slow poll never delays the next cancel check
             # past the front-read call that follows it.
-            stats = _poll_stats_best_effort(server, info_hash, trackers)
+            stats = _poll_stats_best_effort(server, info_hash, trackers, dialog, monitor)
             stats_line = _stats_line(stats)
             if dialog.iscanceled():
                 return False, url, None
@@ -883,6 +907,7 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=None):
             # regresses.
             last_size = None
             last_percent = None
+            last_pump = time.monotonic()
             try:
                 for chunk_len in server.iter_front(
                     info_hash, file_idx, target, timeout=_FRONT_TIMEOUT, start_byte=total_got,
@@ -894,6 +919,11 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=None):
                     if size != last_size or percent != last_percent:
                         last_size, last_percent = size, percent
                         dialog.update(percent, _lfmt(30081, size, target_size), stats=stats_line)
+                    now = time.monotonic()
+                    if now - last_pump >= _CANCEL_PUMP_SECONDS:
+                        last_pump = now
+                        if deliver_queued_input(monitor):
+                            return False, url, None
                     if dialog.iscanceled():
                         return False, url, None
                     if total_got >= target:

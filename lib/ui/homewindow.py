@@ -22,7 +22,7 @@ permanent top-level row (see `catalogpicker.open_catalog_picker()` and
 import xbmcgui
 
 from lib.ui.dependencies import get_store
-from lib.ui.uicommon import BaseWindow, open_window
+from lib.ui.uicommon import BaseWindow, UiHeartbeat, open_window
 
 BACKGROUND = 30000
 LIST = 30002
@@ -339,7 +339,11 @@ def open_home():
     only logs it for diagnostics and
     guarantees the window is closed (it may not have had a chance to
     self-close, e.g. if onInit() or doModal() itself raised) before
-    re-raising."""
+    re-raising.
+
+    The whole session runs under `uicommon.UiHeartbeat`, the liveness marker
+    `default.py` consults before opening another Home (see `uicommon`'s
+    "UI phases" notes)."""
     import xbmc
 
     from lib.ui.compat import log
@@ -353,22 +357,28 @@ def open_home():
     # never stop Home from opening, even if Store construction itself
     # fails (e.g. an unwritable profile directory).
     _migrate_mystuff_setting()
-    try:
-        _notify_if_updated(get_store())
-    except Exception as exc:
-        log('homewindow: update-notification store unavailable: %r' % (exc,), xbmc.LOGWARNING)
-    win = open_window(HomeWindow, 'HomeWindow.xml')
-    try:
-        win.doModal()
-    except Exception as exc:  # default.py's caller falls back to the recovery directory
-        log('homewindow: HomeWindow failed: %r' % (exc,), xbmc.LOGERROR)
-        raise
-    finally:
-        # A normal return means HomeWindow already closed itself; close()
-        # again here is a safe no-op. Only a raised exception makes this
-        # the window's one chance to close.
+    with UiHeartbeat():
+        # Everything below runs under the heartbeat, so a second interpreter
+        # (Kodi re-running the plugin root after playback - see
+        # uicommon's phase notes) can tell a live UI is already up and
+        # `default.py` does not open another HomeWindow over it. The
+        # heartbeat is cleared and its thread joined on every exit path.
         try:
-            win.close()
-        except Exception:
-            pass
+            _notify_if_updated(get_store())
+        except Exception as exc:
+            log('homewindow: update-notification store unavailable: %r' % (exc,), xbmc.LOGWARNING)
+        win = open_window(HomeWindow, 'HomeWindow.xml')
+        try:
+            win.doModal()
+        except Exception as exc:  # default.py's caller falls back to the recovery directory
+            log('homewindow: HomeWindow failed: %r' % (exc,), xbmc.LOGERROR)
+            raise
+        finally:
+            # A normal return means HomeWindow already closed itself; close()
+            # again here is a safe no-op. Only a raised exception makes this
+            # the window's one chance to close.
+            try:
+                win.close()
+            except Exception:
+                pass
     log('homewindow: HomeWindow closed', xbmc.LOGINFO)

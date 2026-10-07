@@ -43,10 +43,21 @@ if _action == 'home':
     )
     try:
         from lib.ui.homewindow import open_home
-        from lib.ui.uicommon import dismiss_busy_dialog
+        from lib.ui.uicommon import dismiss_busy_dialog, is_duplicate_launch
 
-        dismiss_busy_dialog()
-        open_home()
+        if is_duplicate_launch():
+            # Kodi re-ran the plugin root (it re-fetches the Videos container
+            # the addon was started from whenever that window is activated
+            # again - e.g. when playback stops: kodi.log 01:07:59.987 ->
+            # 01:08:00.189) while another interpreter's UI is alive. The
+            # directory handle is satisfied above; opening Home here would
+            # stack a second UI over the restored picker, and
+            # dismiss_busy_dialog() would close that picker. See
+            # lib.ui.uicommon's "UI phases" notes for the exact rule.
+            log('default: a Rivulet UI is already running - ignoring bare launch', xbmc.LOGINFO)
+        else:
+            dismiss_busy_dialog()
+            open_home()
     except Exception as exc:  # the custom UI must never leave the addon unusable
         log(
             'default: HomeWindow failed, falling back to classical home: %r' % (exc,),

@@ -867,26 +867,30 @@ def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn):
             takes it as a parameter instead of re-reading it from disk a
             second time within the same tick/callback.
 
-            The final flush runs from Kodi's stop/end/error callbacks, when
-            the player can no longer be read (see `_last_sample`): it then
-            falls back to the last periodic sample for the same context.
-            That is the expected path, not a failure, so nothing is logged
-            above debug level. A periodic (non-final) read that fails
-            mid-playback is still a warning."""
+            The final flush runs from Kodi's stop/end/error callbacks, which
+            fire only after the player has closed (see `_last_sample`), so
+            it must NEVER call `getTime()`/`getTotalTime()`: they raise
+            `RuntimeError`, and Kodi's Python layer logs every such raise as
+            `EXCEPTION: Kodi is not playing any media file` (kodi.log
+            01:08:00.137) even though this code catches it. It replays the
+            last periodic sample for the same context instead - that is the
+            expected path, not a failure, so a missing sample is only a debug
+            line. A periodic (non-final) read that fails mid-playback is
+            still a warning."""
             key = _context_key(context)
-            try:
-                position_ms = int(self.getTime() * library.MS_PER_SECOND)
-                duration_ms = int(self.getTotalTime() * library.MS_PER_SECOND)
-            except Exception as exc:  # noqa: BLE001 - getTime()/getTotalTime() must never crash the service
+            if final:
                 cached = self._last_sample if self._last_sample and self._last_sample[0] == key else None
-                if not final:
-                    log_fn(xbmc_module.LOGWARNING, "playback sample failed: %r" % (exc,))
-                    return
                 if cached is None:
-                    log_fn(xbmc_module.LOGDEBUG, "no playback sample to flush at stop: %r" % (exc,))
+                    log_fn(xbmc_module.LOGDEBUG, "no playback sample to flush at stop")
                     return
                 _, position_ms, duration_ms = cached
             else:
+                try:
+                    position_ms = int(self.getTime() * library.MS_PER_SECOND)
+                    duration_ms = int(self.getTotalTime() * library.MS_PER_SECOND)
+                except Exception as exc:  # noqa: BLE001 - getTime()/getTotalTime() must never crash the service
+                    log_fn(xbmc_module.LOGWARNING, "playback sample failed: %r" % (exc,))
+                    return
                 self._last_sample = (key, position_ms, duration_ms)
             if duration_ms <= 0:
                 return

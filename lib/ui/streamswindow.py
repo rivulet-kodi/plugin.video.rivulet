@@ -25,6 +25,13 @@ callers stay open underneath for the round trip's "reopen" to sit on
 top of, and simply resume (natural Back navigation) once
 `open_streams()` finally returns.
 
+The wait between "play" and "reopen" is phase 2 of `lib.ui.uicommon`'s
+three UI phases (see its "UI phases" notes): from the handoff until Kodi
+has announced the player closed - which is after CVideoPlayer::CloseFile()
+returned, up to seconds after `isPlaying()` went False - every Rivulet
+screen ignores input and a Kodi re-run of the plugin root is a no-op. Only
+then does the phase end and ONE picker open.
+
 `open_streams()`/`StreamsWindow.start()` also take optional `heading`/
 `art` context kwargs (`heading='<title>'`, `art={'poster': ...,
 'fanart': ...}`) - the pre-agreed cross-agent contract `DetailWindow`
@@ -92,6 +99,8 @@ from lib.ui.uicommon import (
     BaseWindow,
     busy_dialog,
     close_windows_for_playback,
+    deliver_queued_input,
+    end_player_phase,
     escape_label,
     open_window,
 )
@@ -169,10 +178,13 @@ _HIDDEN_STRING_ID = 30262
 _HIDDEN_PLURAL_STRING_ID = 30263
 _FILTERS_MATCHED_NOTHING_STRING_ID = 30264
 
-#: Brief settle pause before reopening the picker after playback ends -
-#: gives Kodi's player teardown a moment to finish before a fresh modal
-#: window is drawn on top of it. Also reused as the settle pause after
-#: each binge-watching auto-played episode, below.
+#: Settle pause between "Kodi announced the player closed"
+#: (`_wait_for_playback_end()`) and the player phase ending
+#: (`uicommon.end_player_phase()`): spent calling into Kodi, which is what
+#: delivers - to screens still ignoring input - whatever was queued while
+#: the player owned the screen, so none of it reaches the picker that opens
+#: right after. Also reused after each binge-watching auto-played episode,
+#: below.
 _REOPEN_SETTLE_SECONDS = 0.5
 
 #: `_wait_for_playback_end()`'s default `start_timeout` - how long it
@@ -189,6 +201,21 @@ _REOPEN_SETTLE_SECONDS = 0.5
 #: waitForAbort()`, so a user cancel/Kodi shutdown during that wait
 #: exits within one `tick`, exactly as promptly as before this change.
 _PLAYBACK_START_TIMEOUT_SECONDS = 45.0
+
+#: Upper bound on how long `_wait_for_playback_end()` waits, AFTER
+#: `isPlaying()` went False, for Kodi's stop/end/error callback. Kodi flips
+#: `isPlaying()` at the START of CVideoPlayer::CloseFile() but announces the
+#: callbacks only once it RETURNED - and CloseFile() cannot return while the
+#: HTTP cache thread is blocked in a read it has no way to cancel (kodi.log
+#: 01:07:53.96 CloseFile -> 01:07:59.98 "finished waiting": 6s, against a
+#: torrent whose next piece had not arrived; the service's callback landed at
+#: 01:08:00.137). The reopen must wait for that, or the new window is queued
+#: behind a frozen GUI thread and the Videos window's own refresh lands on top
+#: of it. Generous because a stalled stream can take the whole
+#: `curllowspeedtime` (resources/advancedsettings.xml); on expiry the wait
+#: gives up and reopens anyway, so a callback that never comes cannot strand
+#: the user on an empty screen.
+_PLAYER_CLOSE_TIMEOUT_SECONDS = 60.0
 
 #: resources/settings.xml keys for the two binge-watching controls.
 _BINGE_ENABLE_SETTING = 'binge_enable'
@@ -830,7 +857,12 @@ def _wait_for_playback_end(player=None, monitor=None, start_timeout=_PLAYBACK_ST
     already saw `play_direct()`'s own failure notification, so this
     returns `(True, False)` (safe to reopen,
     Once playback DOES begin, it polls again until `isPlaying()` goes
-    back to False (stopped/finished).
+    back to False (stopped/finished), then until Kodi has ANNOUNCED the
+    player closed (`_await_player_closed()`: the stop/end/error callback,
+    fired only after CVideoPlayer::CloseFile() returned - `isPlaying()`
+    already reads False at the start of CloseFile(), up to seconds earlier).
+    That also guarantees `ended_naturally` is read AFTER the callback that
+    sets it, never before it could have been delivered.
 
     Returns a `(proceed, ended_naturally)` tuple rather than a bare
     bool, since `isPlaying()` alone cannot tell a natural end apart from
@@ -869,20 +901,31 @@ def _wait_for_playback_end(player=None, monitor=None, start_timeout=_PLAYBACK_ST
     class _PlaybackEndWatcher(xbmc.Player):
         """Distinguishes a natural end from a user stop/failure, which
         `isPlaying()` alone cannot - it reports False as soon as
-        playback stops for ANY reason."""
+        playback stops for ANY reason - and records that Kodi has
+        announced the player closed (`playback_finished`), which is the
+        only signal that CVideoPlayer::CloseFile() has returned."""
 
         def __init__(self):
             super().__init__()
             self.ended_naturally = False
+            self.playback_finished = False
+
+        def onAVStarted(self):
+            # A new item replaced one that was playing (Kodi calls the old
+            # item's stop callback first): only a stop AFTER this start counts.
+            self.playback_finished = False
 
         def onPlayBackEnded(self):
             self.ended_naturally = True
+            self.playback_finished = True
 
         def onPlayBackStopped(self):
             self.ended_naturally = False
+            self.playback_finished = True
 
         def onPlayBackError(self):
             self.ended_naturally = False
+            self.playback_finished = True
 
     try:
         if player is None:
@@ -905,10 +948,38 @@ def _wait_for_playback_end(player=None, monitor=None, start_timeout=_PLAYBACK_ST
         while player.isPlaying():
             if monitor.waitForAbort(tick):
                 return False, False
+        if not _await_player_closed(player, monitor, tick):
+            return False, False
         return True, getattr(player, 'ended_naturally', False)
     except Exception as exc:  # noqa: BLE001 - a wait hiccup must never crash onClick()
         log('streamswindow: wait-for-playback-end failed: %r (treating as stop)' % (exc,), xbmc.LOGWARNING)
         return False, False
+
+
+def _await_player_closed(player, monitor, tick):
+    """Block until `player` has announced it is closed (`playback_finished`,
+    set by `_wait_for_playback_end()`'s watcher from Kodi's stop/end/error
+    callbacks - delivered only when this thread calls into Kodi, which every
+    `monitor.waitForAbort(tick)` here does) - see
+    `_PLAYER_CLOSE_TIMEOUT_SECONDS` for why `isPlaying()` going False is not
+    enough. Returns False only on a monitor abort. A player without the
+    attribute (the injectable test fakes) is treated as already closed, and
+    a callback that never arrives within the timeout logs a warning and
+    proceeds."""
+    import xbmc
+
+    from lib.ui.compat import log
+
+    if getattr(player, 'playback_finished', True):
+        return True
+    for _attempt in range(max(1, int(_PLAYER_CLOSE_TIMEOUT_SECONDS / tick))):
+        if monitor.waitForAbort(tick):
+            return False
+        if getattr(player, 'playback_finished', True):
+            return True
+    log('streamswindow: no player-closed callback after %.0fs - reopening anyway' % _PLAYER_CLOSE_TIMEOUT_SECONDS,
+        xbmc.LOGWARNING)
+    return True
 
 
 #: Cap on how many failing addons the aggregate WARNING below names by
@@ -1091,18 +1162,35 @@ def _start_stream_fetch_workers(stype, sid, addons):
     return results
 
 
-def _await_stream_result(results):
+def _await_stream_result(results, should_stop=None):
     """Block for the next worker's own `(addon_name, pairs, failed,
     reason)` tuple - in short `_STREAM_RESULT_POLL_SECONDS` slices via a retried
-    `Queue.get(timeout=...)` rather than one indefinite `get()`, so a
-    caller looping on this (`_fetch_stream_pairs()`/`open_streams()`
-    below) keeps re-checking its own `dialog.iscanceled()` between polls
-    instead of only once a full addon answer lands."""
+    `Queue.get(timeout=...)` rather than one indefinite `get()`.
+
+    With `should_stop` (a zero-arg callable - the caller's
+    `dialog.iscanceled`) each empty slice first lets Kodi deliver the
+    window callbacks it has queued (`deliver_queued_input()`; a thread
+    parked in `Queue.get()` never reaches Kodi, so a Back press stayed
+    undelivered), then returns `None` as soon as `should_stop()` is true
+    or Kodi is shutting down. Before this the loop only `continue`d
+    inside this function, so the docstring's "keeps re-checking its own
+    `dialog.iscanceled()`" never happened: one slow addon held the
+    spinner - and Back - hostage for its whole 15 s request timeout.
+    Without `should_stop` (the background drain, which has no dialog) it
+    blocks until an answer exists, as before."""
+    monitor = None
     while True:
         try:
             return results.get(timeout=_STREAM_RESULT_POLL_SECONDS)
         except queue.Empty:
-            continue
+            if should_stop is None:
+                continue
+            if monitor is None:
+                import xbmc
+
+                monitor = xbmc.Monitor()
+            if deliver_queued_input(monitor) or should_stop():
+                return None
 
 
 class _StreamAnswerConsumer:
@@ -1131,10 +1219,13 @@ class _StreamAnswerConsumer:
         self._lock = lock
         self.consumed = 0
 
-    def __call__(self):
+    def __call__(self, should_stop=None):
         if self.consumed >= self._total:
             return None
-        addon_name, addon_pairs, failed, reason = _await_stream_result(self._results)
+        answer = _await_stream_result(self._results, should_stop)
+        if answer is None:
+            return None  # `should_stop` fired: nothing was consumed
+        addon_name, addon_pairs, failed, reason = answer
         self.consumed += 1
         if failed:
             self._failures.append((addon_name, reason))
@@ -1183,7 +1274,7 @@ def _fetch_stream_pairs(stype, sid):
         while True:
             if dialog.iscanceled():
                 break
-            result = consume_next()
+            result = consume_next(dialog.iscanceled)
             if result is None:
                 break
             addon_name, _addon_pairs = result
@@ -1335,18 +1426,25 @@ def _try_binge_watch(stype, meta, poster, art, video_id, played_info):
 
             proceed, ended_naturally = _wait_for_playback_end()
             if not proceed:
+                end_player_phase()
                 return False
             if not ended_naturally:
                 # The user stopped this auto-played episode instead of
                 # letting it end - stop the chain here, exactly like any
                 # other "nothing left to binge into" case above.
+                end_player_phase()
                 return None
             if xbmc.Monitor().waitForAbort(_REOPEN_SETTLE_SECONDS):
+                end_player_phase()
                 return False
+            # Player gone and queue drained: the next episode's countdown is
+            # a Rivulet screen again (see uicommon's "UI phases" notes).
+            end_player_phase()
 
             current_video_id = candidate.get('id')
             binge_group = picked_info.get('binge_group')
     except Exception as exc:  # noqa: BLE001 - a binge-chain hiccup must fall back to the picker, never crash open_streams()
+        end_player_phase()
         log('streamswindow: binge-watching failed: %r (falling back to the picker)' % (exc,), xbmc.LOGWARNING)
         return None
 
@@ -1460,21 +1558,29 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
     late_pairs = []
     consume_next = _StreamAnswerConsumer(results, total, late_pairs, failures, lock=pairs_lock)
 
+    canceled = False
     with busy_dialog(L(30033)) as dialog:
         while not pairs:
             if dialog.iscanceled():
                 break
-            result = consume_next()
+            result = consume_next(dialog.iscanceled)
             if result is None:
                 break
             addon_name, _addon_pairs = result
             with pairs_lock:
                 pairs = list(late_pairs)
             dialog.update(int(consume_next.consumed * 100 / total), L(30187) % addon_name)
+        canceled = dialog.iscanceled()
 
     if not pairs:
         if failures:
             log('streamswindow: %s' % _summarize_addon_failures(failures), xbmc.LOGWARNING)
+        if canceled:
+            # The user pressed Back on the spinner: that is "go back", not
+            # "nothing was found" - no notification, just return to the
+            # screen they came from.
+            log('streamswindow: stream lookup cancelled by the user', xbmc.LOGINFO)
+            return False
         notify(L(30030))
         return False
 
@@ -1564,6 +1670,9 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
                 pairs = streaminfo.sort_streams(list(late_pairs), key=sort_key)
 
         if not played:
+            # A pick whose play() raised after the handoff began never
+            # reaches the wait below; never leave the phase on `player`.
+            end_player_phase()
             return False
 
         # Playback started: wait it out, then reopen the SAME picker
@@ -1571,11 +1680,21 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
         # whole custom-window stack (see the module docstring). A monitor
         # abort (Kodi shutting down) at any point below returns False
         # immediately, reopening nothing.
+        #
+        # The wait returns only once Kodi announced the player closed
+        # (after CloseFile() returned), and the settle pause that follows
+        # is spent calling into Kodi, which is what delivers - to screens
+        # that still ignore input, phase `player` - anything queued while
+        # the player owned the screen. Only then does the phase end and a
+        # window open, so nothing opens behind a frozen GUI thread.
         proceed, ended_naturally = _wait_for_playback_end()
         if not proceed:
+            end_player_phase()
             return False
         if xbmc.Monitor().waitForAbort(_REOPEN_SETTLE_SECONDS):  # brief settle pause before reopening
+            end_player_phase()
             return False
+        end_player_phase()
 
         # Binge-watching: try to auto-play straight through as many
         # consecutive "next episodes" as apply (see _try_binge_watch()'s

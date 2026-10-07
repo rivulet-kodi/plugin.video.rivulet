@@ -993,3 +993,7 @@ msgstr "Suche unvollständig, keine Antwort von: %s"
 msgctxt "#30390"
 msgid "Loading subtitles…"
 msgstr "Untertitel werden geladen…"
+
+msgctxt "#30410"
+msgid "Syncing addons…"
+msgstr "Addons werden synchronisiert…"

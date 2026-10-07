@@ -31,6 +31,7 @@ and cannot be, exercised by this suite.
 """
 import contextlib
 import os
+import threading
 
 import pytest
 
@@ -697,6 +698,47 @@ def test_open_home_still_opens_the_window_when_the_store_raises(load_homewindow,
 
     assert captured['instance'].modal_calls == 1
     assert ctx.env.notifications == []
+
+
+def test_open_home_holds_a_ui_heartbeat_for_the_whole_session_and_clears_it_after(
+    load_homewindow, monkeypatch,
+):
+    ctx = load_homewindow(addon_info={'path': '/addon/path'})
+    seen = {}
+
+    class RecordingWindow(ctx.homewindow.HomeWindow):
+        def doModal(self):
+            # While Home is up a second interpreter must see a live owner.
+            seen['alive'] = ctx.uicommon.ui_owner_alive()
+            seen['threads'] = [t.name for t in threading.enumerate()]
+            super().doModal()
+
+    monkeypatch.setattr(ctx.homewindow, 'HomeWindow', RecordingWindow)
+
+    ctx.homewindow.open_home()
+
+    assert seen['alive'] is True
+    assert 'rivulet-ui-heartbeat' in seen['threads']
+    # Cleared on exit, thread joined: a later launch is a genuine one.
+    assert ctx.uicommon.ui_owner_alive() is False
+    assert 'rivulet-ui-heartbeat' not in [t.name for t in threading.enumerate()]
+    assert ctx.env.window_properties[10000].get('rivulet.ui.heartbeat') is None
+
+
+def test_open_home_clears_the_heartbeat_when_the_window_raises(load_homewindow, monkeypatch):
+    ctx = load_homewindow(addon_info={'path': '/addon/path'})
+
+    class ExplodingWindow(ctx.homewindow.HomeWindow):
+        def doModal(self):
+            raise RuntimeError('onInit blew up')
+
+    monkeypatch.setattr(ctx.homewindow, 'HomeWindow', ExplodingWindow)
+
+    with pytest.raises(RuntimeError, match='onInit blew up'):
+        ctx.homewindow.open_home()
+
+    assert ctx.uicommon.ui_owner_alive() is False
+    assert 'rivulet-ui-heartbeat' not in [t.name for t in threading.enumerate()]
 
 
 def test_every_menu_row_has_an_icon_shipped_for_it(load_homewindow):

@@ -255,6 +255,23 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
         def close(self):
             env.dialog_closed_count += 1
 
+    class Window:
+        """Stand-in for `xbmcgui.Window(<existing id>)`: only the property
+        accessors `lib.ui.uicommon`'s phase marker uses. Instances of the
+        same id share `env.window_properties[id]`, like real Kodi."""
+
+        def __init__(self, window_id=0):
+            self._props = env.window_properties.setdefault(window_id, {})
+
+        def setProperty(self, key, value):
+            self._props[key] = value
+
+        def getProperty(self, key):
+            return self._props.get(key, '')
+
+        def clearProperty(self, key):
+            self._props.pop(key, None)
+
     class FakeWindowControl:
         """Stand-in for one WindowXML control (`getControl(id)`'s
         return value): records addItems()/setImage()/setVisible()/
@@ -410,6 +427,7 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
         def close(self):
             self.closed = True
 
+    module.Window = Window
     module.Dialog = Dialog
     module.DialogProgress = DialogProgress
     module.WindowXML = WindowXML

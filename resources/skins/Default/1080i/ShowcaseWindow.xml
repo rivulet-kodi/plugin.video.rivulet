@@ -10,10 +10,7 @@
                 <effect type="slide" start="0,100" end="0,0" delay="160" time="160" />
                 <effect type="fade" delay="160" end="100" time="100" />
             </animation>
-            <animation type="WindowClose" reversible="false">
-                <effect type="slide" start="0,0" end="0,100" delay="160" time="160" />
-                <effect type="fade" delay="160" start="100" end="0" time="100" />
-            </animation>
+            <!-- No WindowClose animation on purpose: Kodi drops every action while the topmost modal plays one (test_skin_xml.py rule 9). -->
             <!-- Fallback wash: covers the instant this window opens, before
                  the background image below has a texture to draw - keeps
                  the opening frame dark instead of flashing skin-default

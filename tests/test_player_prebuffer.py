@@ -274,6 +274,114 @@ def test_buffering_loop_polls_iscanceled_on_every_chunk_even_when_update_is_skip
     assert env.dialog_iscanceled_calls >= len(chunks)
 
 
+def test_buffering_loop_lets_kodi_deliver_a_back_press_while_chunks_keep_arriving(kodi_stubs, monkeypatch):
+    """A pre-buffer that receives bytes continuously never reaches the
+    `waitForAbort()` between attempts, and Kodi only runs a script's queued
+    window callbacks from inside a Monitor call - so the per-chunk
+    `dialog.iscanceled()` was blind until the whole pre-buffer finished.
+    The loop now pumps the monitor on a time slice; here the slice is zero
+    and the Back press is delivered by that pump (it flips `env.cancel`,
+    which the fake dialog reads), so the loop must stop after the first
+    pumped chunk rather than draining all of them."""
+    env = kodi_stubs.env
+    player = kodi_stubs.player
+    chunks = [1_000] * 10
+    script = _ServerScript(
+        resolve_url='http://server/x/0', iter_front_attempts=[chunks],
+    ).install(monkeypatch, player)
+    monkeypatch.setattr(player, '_CANCEL_PUMP_SECONDS', 0)
+    pumped = []
+
+    class _PumpMonitor:
+        def waitForAbort(self, timeout=None):
+            pumped.append(timeout)
+            env.cancel = True  # Kodi delivered the queued Back press
+            return False
+
+    dialog = player.RivuletProgress()
+    proceed, _, _ = player._prebuffer_torrent(
+        script.build_class()('http://server'), _torrent_stream(fileIdx=0),
+        'http://server/x/0', dialog, _PumpMonitor(),
+    )
+
+    assert proceed is False
+    assert len(pumped) == 1
+    assert all(timeout and timeout > 0 for timeout in pumped)  # 0 would mean "forever" in Kodi
+
+
+def test_stats_poll_blocked_on_a_slow_server_is_cancelled_by_back_within_a_slice(kodi_stubs, monkeypatch):
+    """`_poll_stats_best_effort()` (the /create poll before every front-read
+    attempt, up to `_METADATA_TIMEOUT` ~8-10 s) used to be a plain blocking
+    call: this thread sat where Kodi cannot deliver the queued Back, so
+    cancelling the pre-buffer took the whole poll. It now runs under
+    `wait_cancellable()` against the Preparing dialog, pumping the monitor
+    every slice, so a Back delivered by that pump ends the pre-buffer fast
+    while the server call is still parked."""
+    import threading
+    import time
+
+    env = kodi_stubs.env
+    player = kodi_stubs.player
+    release = threading.Event()
+    started = threading.Event()
+    script = _ServerScript(resolve_url='http://server/x/0', iter_front_attempts=[[100]])
+    server_cls = script.install(monkeypatch, player).build_class()
+    server = server_cls('http://server')
+
+    def blocked_create_engine(info_hash, timeout=None, trackers=None):
+        script.create_engine_calls.append(info_hash)
+        if len(script.create_engine_calls) < 2:
+            return {}  # the engine warm; only the buffering stats poll hangs
+        started.set()
+        release.wait(10)
+        return {}
+
+    server.create_engine = blocked_create_engine
+    pumps = []
+
+    class _PumpMonitor:
+        def waitForAbort(self, timeout=None):
+            pumps.append(timeout)
+            env.cancel = True  # Kodi delivered the queued Back press
+            return False
+
+    dialog = player.RivuletProgress()
+    begun = time.monotonic()
+    try:
+        proceed, _, _ = player._prebuffer_torrent(
+            server, _torrent_stream(fileIdx=0), 'http://server/x/0', dialog, _PumpMonitor(),
+        )
+        elapsed = time.monotonic() - begun
+        assert started.is_set() and not release.is_set()  # still parked in the "network" call
+    finally:
+        release.set()
+
+    assert proceed is False
+    assert elapsed < 1.0  # ~0.1 s poll slice, nowhere near the 8 s timeout
+    assert script.iter_front_calls == []  # never reached the front read
+    assert pumps and all(timeout and timeout > 0 for timeout in pumps)
+
+
+def test_stats_poll_returns_the_snapshot_and_swallows_errors_under_a_dialog(kodi_stubs, monkeypatch):
+    player = kodi_stubs.player
+
+    class _Dialog:
+        def iscanceled(self):
+            return False
+
+    class _Server:
+        def __init__(self, result):
+            self.result = result
+
+        def create_engine(self, info_hash, timeout=None, trackers=None):
+            if isinstance(self.result, Exception):
+                raise self.result
+            return self.result
+
+    assert player._poll_stats_best_effort(_Server({'peers': 3}), INFO_HASH, None, _Dialog()) == {'peers': 3}
+    assert player._poll_stats_best_effort(_Server(RuntimeError('down')), INFO_HASH, None, _Dialog()) is None
+
+
 # --- cancellation: either trigger resolves False and closes the dialog ----
 
 

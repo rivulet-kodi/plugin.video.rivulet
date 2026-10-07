@@ -23,7 +23,7 @@ import xbmc
 import xbmcgui
 
 from lib.ui.dependencies import get_client, get_store
-from lib.ui.uicommon import BaseWindow, busy_dialog, escape_label, open_window
+from lib.ui.uicommon import BaseWindow, busy_dialog, deliver_queued_input, escape_label, open_window
 
 LIST = 30002
 
@@ -511,6 +511,7 @@ def _collect_answers(dialog, results, jobs, report):
     total = len(jobs)
     answered = {}
     dialog.update(0, L(30186) % (jobs[0][1].get('name') or '?'))
+    monitor = xbmc.Monitor()
     while len(answered) < total:
         if dialog.iscanceled():
             report.canceled = True
@@ -518,6 +519,14 @@ def _collect_answers(dialog, results, jobs, report):
         try:
             index, answer = results.get(timeout=_SEARCH_POLL_SECONDS)
         except queue.Empty:
+            # A blocked queue read never reaches Kodi, which only hands a
+            # script its queued Back press from inside a Monitor call -
+            # without this the dialog's iscanceled() above stayed False
+            # until the next answer happened to land (see
+            # uicommon.deliver_queued_input()).
+            if deliver_queued_input(monitor):
+                report.canceled = True  # Kodi is shutting down
+                break
             continue
         answered[index] = answer
         outstanding = next((i for i in range(total) if i not in answered), None)
@@ -571,11 +580,13 @@ class _FeedIndexLoader:
         """The feed index if it is ready within `timeout` (cancel-aware),
         else None - `_rank_by_title()`'s feedless path."""
         deadline = time.monotonic() + timeout
+        monitor = xbmc.Monitor()
         while not self._done.is_set():
             remaining = deadline - time.monotonic()
             if remaining <= 0 or dialog.iscanceled():
                 break
             self._done.wait(min(_SEARCH_POLL_SECONDS, remaining))
+            deliver_queued_input(monitor)
         return self.index if self._done.is_set() else None
 
 

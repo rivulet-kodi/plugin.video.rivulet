@@ -39,7 +39,14 @@ import xbmcgui
 
 from lib.ui.playbackmeta import episode_code as _pm_episode_code
 from lib.ui.playbackmeta import resolve_art
-from lib.ui.uicommon import BACK_ACTIONS, ModalStackWindow, busy_dialog, escape_label, open_window
+from lib.ui.uicommon import (
+    BACK_ACTIONS,
+    CANCELLED,
+    ModalStackWindow,
+    escape_label,
+    open_window,
+    run_cancellable,
+)
 
 BACKGROUND = 30000
 POSTER = 30004
@@ -575,7 +582,11 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         from lib.ui import dialogs
         from lib.ui.compat import L
 
-        auth, item, lookup_ok = self._current_library_state()
+        state = self._current_library_state()
+        if state is CANCELLED:
+            # Back on the lookup spinner: no menu, stay on the episode list.
+            return
+        auth, item, lookup_ok = state
         in_library = bool(item) and not item.get('removed')
         watched = bool(item) and bool((item.get('state') or {}).get('flaggedWatched'))
 
@@ -615,12 +626,11 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         Callers MUST check `lookup_ok` before trusting `item`, never
         just its truthiness.
 
-        The network round trip itself runs under `busy_dialog()` (see
-        the module-level import) so a slow lookup shows progress
-        instead of a frozen window -- the same mitigation
-        `lib.ui.views.py` and `streamswindow.py` already use for their
-        own UI-callback HTTP, per this addon's synchronous-HTTP-plus-
-        busy-dialog convention (never background threads)."""
+        The network round trip itself runs under `run_cancellable()`
+        (a worker thread behind a `busy_dialog()` spinner) so a slow
+        lookup shows progress instead of a frozen window AND Back on the
+        spinner stops the wait; in that case this returns `CANCELLED`
+        (not the tuple) and the caller must open nothing."""
         import xbmc
 
         from lib.stremio.api import ApiError
@@ -631,8 +641,12 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         if not auth:
             return None, None, True
         try:
-            with busy_dialog(L(30033)):
-                item = get_api().get_library_item(auth.get('authKey'), self.meta.get('id'))
+            lookup = run_cancellable(
+                lambda: get_api().get_library_item(auth.get('authKey'), self.meta.get('id')), L(30033),
+            )
+            if lookup is CANCELLED:
+                return CANCELLED
+            item = lookup
         except ApiError as exc:
             log('detailwindow: library lookup failed: %r' % (exc,), xbmc.LOGWARNING)
             return auth, None, False
@@ -704,11 +718,9 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         `False` on any `ApiError` (network failure or a server-side
         error envelope alike) so neither caller's own success
         notification runs after a write that never actually landed.
-        The write itself runs under `busy_dialog()`, same as the
-        lookup in `_current_library_state()` -- this account round
-        trip is another UI-callback HTTP call this addon deliberately
-        keeps synchronous, mitigated with progress feedback rather than
-        a threading rewrite."""
+        The write itself runs under `run_cancellable()`, same as the
+        lookup in `_current_library_state()`; Back stops the wait and
+        counts as "not confirmed" (returns `False`, no notification)."""
         import xbmc
 
         from lib.stremio.api import ApiError
@@ -716,8 +728,14 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         from lib.ui.dependencies import get_api
 
         try:
-            with busy_dialog(L(30033)):
-                get_api().put_library_item(auth.get('authKey'), payload)
+            if run_cancellable(
+                lambda: get_api().put_library_item(auth.get('authKey'), payload), L(30033),
+            ) is CANCELLED:
+                # Back = "stop waiting". The request itself cannot be
+                # recalled and may still land; what matters is that the
+                # user is neither blocked nor told it succeeded.
+                log('detailwindow: library write cancelled while pending', xbmc.LOGINFO)
+                return False
         except ApiError as exc:
             log('detailwindow: library write failed: %r' % (exc,), xbmc.LOGWARNING)
             notify(L(30301))
@@ -767,8 +785,10 @@ def open_detail(stype, sid):
     from lib.ui.compat import L, log, notify
     from lib.ui.views import _fetch_meta
 
-    with busy_dialog(L(30033)):
-        meta_obj = _fetch_meta(stype, sid)
+    meta_obj = run_cancellable(lambda: _fetch_meta(stype, sid), L(30033))
+    if meta_obj is CANCELLED:
+        log('detailwindow: meta fetch for %s/%s cancelled by the user' % (stype, sid), xbmc.LOGINFO)
+        return False
     if not meta_obj:
         notify(L(30030))
         return False

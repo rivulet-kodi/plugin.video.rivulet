@@ -362,8 +362,12 @@ def test_onplaybackstopped_flushes_local_cache_and_clears_context():
     store = _FakeProgressStore(now_playing=_CONTEXT)
     with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
         player.onAVStarted()  # accept the context so the stop below actually flushes
+        env.player_is_playing = True
         env.player_get_time = 50.0
         env.player_get_total_time = 100.0
+        player.sample_if_playing()  # the periodic tick whose sample the stop replays
+        store.progress_calls.clear()
+        env.player_is_playing = False
         player.onPlayBackStopped()
     assert store.progress_calls == [('movie', 'tt1', None, 50000, 100000, store.progress_calls[0][5])]
     assert store.get_now_playing() is None
@@ -373,11 +377,40 @@ def test_onplaybackended_flushes_local_cache_and_clears_context():
     store = _FakeProgressStore(now_playing=_CONTEXT)
     with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
         player.onAVStarted()  # accept the context so the end below actually flushes
+        env.player_is_playing = True
         env.player_get_time = 99.0
         env.player_get_total_time = 100.0
+        player.sample_if_playing()
+        store.progress_calls.clear()
+        env.player_is_playing = False
         player.onPlayBackEnded()
     assert store.progress_calls == [('movie', 'tt1', None, 99000, 100000, store.progress_calls[0][5])]
     assert store.get_now_playing() is None
+
+
+@pytest.mark.parametrize('callback', ['onPlayBackStopped', 'onPlayBackEnded', 'onPlayBackError'])
+def test_final_flush_never_calls_the_player_getters(callback):
+    """Kodi's Python layer logs `EXCEPTION: Kodi is not playing any media
+    file` for every getTime()/getTotalTime() raised once the player has
+    closed - even when the caller catches it (kodi.log 01:08:00.137, 0.15s
+    after CloseFile() returned). The stop/end/error callbacks fire only after
+    that point, so the final flush must not touch the getters at all - and
+    must still save the last position from the periodic sample."""
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        player.onAVStarted()
+        env.player_is_playing = True
+        env.player_get_time = 50.0
+        env.player_get_total_time = 100.0
+        player.sample_if_playing()
+        store.progress_calls.clear()
+        env.player_is_playing = False
+        time_calls, total_calls = env.player_get_time_calls, env.player_get_total_time_calls
+        getattr(player, callback)()
+        assert (env.player_get_time_calls, env.player_get_total_time_calls) == (time_calls, total_calls)
+    assert store.progress_calls == [('movie', 'tt1', None, 50000, 100000, store.progress_calls[0][5])]
+
+
 
 
 _NOT_PLAYING = 'Kodi is not playing any media file'
@@ -520,8 +553,9 @@ def test_onplaybackerror_flush_failure_still_clears_context_and_resume_offset():
     )
     with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
         player.onAVStarted()  # accept the context so the error path below actually attempts a flush
-        env.player_get_time = 50.0
-        env.player_get_total_time = 100.0
+        # Seed the periodic sample the final flush replays (a real tick would
+        # itself hit the failing progress write below).
+        player._last_sample = (service_runner._context_key(_CONTEXT), 50000, 100000)
         player.onPlayBackError()  # must not raise
     assert store.get_now_playing() is None
     assert store.get_resume_offset_ms() is None

@@ -767,7 +767,7 @@ def test_open_streams_busy_dialog_reports_progress_and_skips_unsupported_addons(
     assert busy.closed == 1
 
 
-def test_open_streams_cancelled_while_still_waiting_for_a_non_empty_result_falls_back_to_no_results(
+def test_open_streams_cancelled_while_still_waiting_for_a_non_empty_result_returns_silently(
     load_streamswindow, monkeypatch,
 ):
     """Every addon queried concurrently now fires its own HTTP call
@@ -776,7 +776,8 @@ def test_open_streams_cancelled_while_still_waiting_for_a_non_empty_result_falls
     longer stop an addon from being QUERIED, only stop open_streams()
     from continuing to WAIT for a non-empty result. Two addons that both
     answer empty force the wait loop to actually check
-    `dialog.iscanceled()` more than once before giving up."""
+    `dialog.iscanceled()` more than once before giving up. Back is "go
+    back", not "nothing found": no notification."""
     ctx = load_streamswindow()
     sw = ctx.streamswindow
     empty_a = {
@@ -806,11 +807,11 @@ def test_open_streams_cancelled_while_still_waiting_for_a_non_empty_result_falls
     result = sw.open_streams('movie', 'tt1')
 
     assert result is False
-    assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
+    assert ctx.env.notifications == []
     assert busy.closed == 1
 
 
-def test_open_streams_cancelled_before_first_addon_falls_back_to_no_results(
+def test_open_streams_cancelled_before_first_addon_returns_silently(
     load_streamswindow, monkeypatch,
 ):
     ctx = load_streamswindow()
@@ -838,9 +839,65 @@ def test_open_streams_cancelled_before_first_addon_falls_back_to_no_results(
     # loop, which gated each addon's own HTTP call behind that same
     # check, cancelling before the first addon can no longer prevent it
     # from being queried. What it DOES still guarantee is the same
-    # user-visible outcome: no window, and the "no results" notification.
+    # user-visible outcome: no window - and, because the user asked to
+    # leave rather than nothing being found, no notification either.
     assert result is False
-    assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
+    assert ctx.env.notifications == []
+    assert busy.closed == 1
+
+
+def test_open_streams_back_is_honoured_while_the_only_addon_is_still_blocked(
+    load_streamswindow, monkeypatch,
+):
+    """The 0.27.0 wait loop only re-checked `dialog.iscanceled()` between
+    ADDON ANSWERS (`_await_stream_result()` retried inside itself), and a
+    parked `Queue.get()` never calls into Kodi - which is the only thing
+    that delivers a queued Back press (`Monitor.waitForAbort()` ->
+    `MakePendingCalls()`). So one slow addon held the spinner hostage for
+    its whole request timeout. Here the single addon never answers; Back
+    is modelled as arriving ONLY when the loop calls into the monitor,
+    exactly as on a device, and the call must return promptly, silently,
+    with the spinner closed."""
+    import threading
+    import time
+
+    ctx = load_streamswindow()
+    import xbmc
+    sw = ctx.streamswindow
+    release = threading.Event()
+    descriptor = {
+        'transportUrl': 't-slow',
+        'manifest': {'name': 'Slow', 'resources': ['stream'], 'types': ['movie']},
+    }
+
+    class _BlockedClient:
+        def streams(self, transport, stype, sid):
+            release.wait(10)
+            return []
+
+    _wire_data_layer(sw, _FakeStore(addons=[descriptor]), _BlockedClient())
+    delivered = {'back': False, 'ticks': 0}
+
+    def _wait_for_abort(self, timeout=None):
+        delivered['ticks'] += 1
+        if delivered['ticks'] >= 2:
+            delivered['back'] = True  # Kodi hands over the queued Back press
+        return False
+
+    monkeypatch.setattr(xbmc.Monitor, 'waitForAbort', _wait_for_abort)
+    monkeypatch.setattr(ctx.dialogs.RivuletBusy, 'iscanceled', lambda self: delivered['back'])
+    busy = _record_busy_calls(monkeypatch, ctx.dialogs)
+    monkeypatch.setattr(sw, 'StreamsWindow', lambda *a, **k: pytest.fail('no window may open'))
+
+    started = time.monotonic()
+    try:
+        result = sw.open_streams('movie', 'tt1')
+    finally:
+        release.set()
+
+    assert result is False
+    assert time.monotonic() - started < 3
+    assert ctx.env.notifications == []
     assert busy.closed == 1
 
 
