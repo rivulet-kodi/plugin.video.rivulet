@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.rivulet" name="Rivulet" version="0.27.1" provider-name="M0RF30">
+<addon id="plugin.video.rivulet" name="Rivulet" version="0.28.0" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" version="2.22.0"/>
@@ -12,7 +12,16 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse and search catalogs by type, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote stremio-server-go streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.27.1:
+    <news>v0.28.0:
+- Fix: stopping a movie flashed the earlier screens one after another and ended on the main menu. When playback stops, Kodi reloads the Rivulet folder it was started from, which opened a second copy of Rivulet on top of the source list. Rivulet now notices it is already running and stays put, so stopping returns to the source list, and Back goes one screen per press.
+- Fix: Rivulet now waits until Kodi has fully closed the player before showing its screens again, and ignores clicks and Back presses made while the video was playing.
+- Fix: Back works on every loading spinner within a fraction of a second, including catalog, title, cast, library, My Stuff, addon catalog and addon install loads. Cancelling keeps you on the current screen and the late result is discarded.
+- Fix: Back presses were sometimes lost while a screen or spinner was closing. Rivulet's windows no longer play a closing animation, which made Kodi drop them.
+- Fix: a Back pressed just before a spinner appeared closed the screen underneath. It now cancels the spinner.
+- Fix: Back during "Preparing stream" now cancels within a second, also while the download statistics are being fetched.
+- Improved: syncing your addons to your Stremio account after an install shows a cancellable "Syncing addons…" spinner.
+- Fix: Kodi no longer logs "Kodi is not playing any media file" after a stop; your last position is still saved.
+v0.27.1:
 - Fix: after "Preparing stream" finished, the source list could sit on screen for up to half a minute before playback began, while subtitles were still being fetched. A source picked in that time was played as soon as the first one started, so "Preparing stream" reopened again and again and the first stream failed to open. Subtitles are now fetched while the stream is being prepared, the dialog stays up until playback starts (showing "Loading subtitles…" for at most 8 seconds if they are late), and extra picks made meanwhile are ignored.
 v0.27.0:
 - Fix: searches and catalogs could show a single result called "[X] AIOStreams", or nothing at all. That entry was an error message from a busy AIOStreams server, not a title. Rivulet now treats it as a failed request and shows the results from your other addons.
