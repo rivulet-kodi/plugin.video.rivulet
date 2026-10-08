@@ -40,14 +40,28 @@ line-length = 100
 src = ["lib", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP"]
+select = ["E", "F", "I", "B", "UP", "C901"]
 ignore = [
     # 97 pre-existing %-format call sites span lib/ and tests/; converting all of
     # them to str.format/f-strings is a sweeping rewrite outside this slice's scope.
     "UP031",
 ]
 
+[tool.ruff.lint.mccabe]
+# Complexity gate (C901). New code must stay at or below 15; the handful of
+# pre-existing offenders are exempted per file / per function below so the
+# gate ratchets instead of blocking on legacy code. service_runner.py has
+# no file-level exemption: Supervisor/ServiceMonitor must stay under it.
+max-complexity = 15
+
 [tool.ruff.lint.per-file-ignores]
+"lib/newepisodes.py" = ["C901"]
+"lib/s4me.py" = ["C901"]
+"lib/stremio/lzstring.py" = ["C901"]
+"lib/ui/player.py" = ["C901"]
+"lib/ui/streamswindow.py" = ["C901"]
+"resources/s4me_bridge/*" = ["C901"]
+"tests/kodistubs/*" = ["C901"]
 "lib/*" = [
     # 18 pre-existing lib/ui/* and lib/stremio/* lines run 101-111 cols; fixing
     # them means reformatting lib/, which is out of scope for this config slice.

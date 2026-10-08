@@ -32,6 +32,7 @@ This module is split in two halves:
     loop on top of the pure core.
 """
 
+import collections
 import datetime
 import os
 import shutil
@@ -726,7 +727,7 @@ def _context_key(context):
     return (context.get("type"), context.get("id"), context.get("video_id"), context.get("started_at"))
 
 
-def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn):
+def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn):  # noqa: C901 - legacy; ratchet
     """Return an `xbmc.Player` subclass instance reporting playback
     progress for Rivulet-originated playback only, and performing the
     one-shot resume seek `lib.ui.player` queues via
@@ -963,6 +964,578 @@ def _detect_italian_user(xbmc):
     return s4me.is_italian_user(ui_language, audio_language)
 
 
+LogLevels = collections.namedtuple("LogLevels", "info warning error")
+LogLevels.__doc__ = "The three `xbmc.LOG*` levels the supervisor logs at."
+
+
+class ServiceMonitor:
+    """Settings snapshot for the supervision loop.
+
+    Plain (no `xbmc` import at module scope); main() mixes it with
+    `xbmc.Monitor` so Kodi delivers `onSettingsChanged()` to it. `addon`
+    and `settings` are injected, so it can also be exercised directly.
+    """
+
+    def __init__(self, addon, settings=_settings):
+        super().__init__()
+        self._addon = addon
+        self._settings = settings
+        self.restart_requested = False
+        self.enabled = False
+        self.binary_setting = ""
+        self.server_url = DEFAULT_SERVER_URL
+        self.extra_settings = {}
+        self.extra_env = {}
+        self.force_library = False
+        self._refresh()
+
+    def _refresh(self):
+        addon = self._addon
+        cfg = self._settings
+        self.enabled = cfg.setting_bool(addon, "server_enable", EXTRA_ENV_TYPED_DEFAULTS["server_enable"])
+        self.binary_setting = addon.getSetting("server_binary")
+        self.server_url = addon.getSetting("server_url") or DEFAULT_SERVER_URL
+        self.force_library = cfg.setting_bool(addon, "server_force_library", False)
+        values = {}
+        for setting_id, _env_var, kind in EXTRA_ENV_SETTINGS:
+            default = EXTRA_ENV_TYPED_DEFAULTS.get(setting_id)
+            if kind == "bool":
+                values[setting_id] = cfg.setting_bool(addon, setting_id, default)
+            elif kind in ("int", "mb_to_bytes"):
+                values[setting_id] = cfg.setting_int(addon, setting_id, default)
+            else:
+                values[setting_id] = addon.getSetting(setting_id)
+        self.extra_settings = values
+        self.extra_env = extra_env_from_settings(values)
+
+    def _snapshot(self):
+        return (
+            self.enabled, self.binary_setting, self.server_url, self.force_library,
+            tuple(sorted(self.extra_settings.items())),
+        )
+
+    def onSettingsChanged(self):
+        prev = self._snapshot()
+        self._refresh()
+        if prev != self._snapshot():
+            self.restart_requested = True
+
+
+class LoopState:
+    """Mutable per-session state threaded explicitly through
+    `Supervisor.tick_progress_and_restart()`/`Supervisor.dispatch()`
+    instead of `nonlocal` closures."""
+
+    def __init__(self):
+        self.proc = None
+        self.backoff_idx = 0
+        self.notified_missing = False
+        # Coarse-cadence latch, NOT a "stop detecting" latch: once
+        # install_binary() raises UnsupportedPlatformError, this stays True
+        # and the nothing-of-ours-running branch polls at
+        # UNSUPPORTED_PLATFORM_POLL_INTERVAL (300s) instead of
+        # MISSING_BINARY_RECHECK_INTERVAL (5s) -- but it keeps calling BOTH
+        # probe_listening() and resolve_binary() every latched iteration
+        # (see UNSUPPORTED_PLATFORM_POLL_INTERVAL's comment for why the
+        # exception cannot tell a permanent cause from a transient one),
+        # only skipping the install/download attempt itself. It clears
+        # either when resolve_binary() finds a runnable binary while latched
+        # (self-heal) or via onSettingsChanged() -> restart_requested.
+        self.unsupported_platform = False
+        self.download_backoff_idx = 0
+        self.next_download_at = None
+        self.download_attempt_notified = False
+        self.download_failure_notified = False
+        # One-shot per session: see Supervisor._upgrade_bundled_if_stale().
+        # Deliberately NOT reset by onSettingsChanged() -- a settings change
+        # is not new information about the release tag, and re-arming it
+        # there would let a user toggling settings during a GitHub outage
+        # re-download on every toggle.
+        self.upgrade_attempted = False
+        # Which kind of server this session is using, so the "not our
+        # server" note is logged once per change, not once per tick:
+        # None (unknown yet), "embedded", "external" or "disabled".
+        self.server_mode = None
+
+    def reset_download(self):
+        self.download_backoff_idx = 0
+        self.next_download_at = None
+        self.download_attempt_notified = False
+        self.download_failure_notified = False
+
+
+class Supervisor:
+    """The xbmc.Monitor-driven supervision loop of the embedded server.
+
+    Every Kodi-facing dependency is injected, so the whole state machine
+    runs under plain python:
+
+    - `monitor`: `ServiceMonitor` mixed with `xbmc.Monitor` (settings
+      snapshot + abortRequested()/waitForAbort()).
+    - `log_fn(level, message)` / `levels`: a `LogLevels` of the xbmc levels.
+    - `notify_fn(string_id, error=False)`: toast with a localized string.
+    - `progress_player`: has `sample_if_playing()`.
+    - `sync_bridge_fn()`, `shutdown_bridge_fn()`: S4Me bridge hooks.
+    - `autoload`: an `AutoloadTrigger`.
+    - `clock`: monotonic time source.
+
+    Process/binary collaborators (ServerProcess, resolve_binary,
+    probe_listening, ...) are resolved from this module at call time.
+    """
+
+    def __init__(
+        self, monitor, profile_dir, log_fn, levels, notify_fn, progress_player,
+        sync_bridge_fn, shutdown_bridge_fn, autoload, clock=None,
+    ):
+        self.monitor = monitor
+        self.profile_dir = profile_dir
+        self.app_path = os.path.join(profile_dir, "server")
+        self.log_path = os.path.join(profile_dir, LOG_FILENAME)
+        self._log_fn = log_fn
+        self._levels = levels
+        self._notify = notify_fn
+        self.progress_player = progress_player
+        self._sync_bridge = sync_bridge_fn
+        self._shutdown_bridge = shutdown_bridge_fn
+        self.autoload = autoload
+        self._clock = clock or (lambda: time.monotonic())
+        self.state = LoopState()
+
+    # -- small helpers ----------------------------------------------------
+
+    def _info(self, message):
+        self._log_fn(self._levels.info, message)
+
+    def _warn(self, message):
+        self._log_fn(self._levels.warning, message)
+
+    def _error(self, message):
+        self._log_fn(self._levels.error, message)
+
+    def _stop_process(self, target):
+        """Best-effort `target.stop()`. Returns True once stop()
+        completed (state is safe to discard), False if it raised (an
+        unkillable/wedged child) -- callers must then keep polling the
+        same instance next iteration instead of spawning a duplicate
+        next to a possibly-still-alive process."""
+        try:
+            target.stop()
+        except Exception as exc:  # noqa: BLE001 - a failed stop must never crash the supervision loop
+            self._error(f"failed to stop embedded server: {exc}")
+            return False
+        return True
+
+    @staticmethod
+    def _backoff_interval(state):
+        """Current restart interval, advancing `state.backoff_idx`."""
+        interval = RESTART_BACKOFF[min(state.backoff_idx, len(RESTART_BACKOFF) - 1)]
+        state.backoff_idx = min(state.backoff_idx + 1, len(RESTART_BACKOFF) - 1)
+        return interval
+
+    def _start_embedded_server(self, binary, state):
+        """Spawn `binary` as the embedded server. Returns `(new_proc,
+        new_interval)`: `(candidate, HEALTHY_POLL_INTERVAL)` on a
+        successful start, or `(None, <backoff interval>)` on a failed
+        spawn (advancing `state.backoff_idx`)."""
+        self._info(f"starting embedded server: {binary}")
+        candidate = ServerProcess(
+            binary, self.monitor.server_url, self.app_path, self.log_path,
+            extra_env=self.monitor.extra_env,
+        )
+        try:
+            candidate.start()
+        except Exception as exc:  # noqa: BLE001 - a failed spawn must never crash the supervision loop
+            self._error(f"failed to start embedded server: {exc}")
+            return None, self._backoff_interval(state)
+        return candidate, HEALTHY_POLL_INTERVAL
+
+    def _resolve_library_candidate(self):
+        """Path of the libstremio-server.so for c-shared library mode (see
+        lib.libserver.LibraryServer), or None when unavailable: ctypes
+        import failed in this Python build, or serverbin.install_binary()
+        has not extracted a companion library yet. Cheap enough (an
+        isfile() check) to call fresh wherever needed."""
+        from lib import libserver
+        if not libserver.LIBRARY_SUPPORTED:
+            return None
+        from lib import serverbin
+        bin_dir = serverbin.install_dir(self.profile_dir, ADDON_ID)
+        return serverbin.resolve_library(bin_dir)
+
+    def _start_library_server(self, library_path, state):
+        """Spawn the c-shared library server. Mirrors
+        `_start_embedded_server()`'s `(candidate, interval)` contract and
+        failed-spawn backoff, using lib.libserver.LibraryServer."""
+        self._info(f"starting library-mode server: {library_path}")
+        from lib import libserver
+
+        candidate = libserver.LibraryServer(
+            library_path, self.monitor.server_url, self.app_path, self.log_path,
+            extra_env=self.monitor.extra_env,
+            log_fn=lambda message: self._warn(message),
+        )
+        try:
+            candidate.start()
+        except Exception as exc:  # noqa: BLE001 - a failed spawn must never crash the supervision loop
+            self._error(f"failed to start library-mode server: {exc}")
+            return None, self._backoff_interval(state)
+        return candidate, HEALTHY_POLL_INTERVAL
+
+    def _start_library_with_exec_fallback(self, state, library_path):
+        """Start library mode; if that fails, try an already-usable
+        executable before giving up on this tick. A failed dlopen() must
+        not unlatch `unsupported_platform` (it would re-enter the
+        download path next tick), so the latch is re-armed iff nothing
+        started. Returns the next interval."""
+        state.proc, interval = self._start_library_server(library_path, state)
+        if state.proc is None:
+            binary = resolve_binary(self.monitor.binary_setting, self.profile_dir)
+            if binary is not None:
+                state.notified_missing = False
+                state.proc, interval = self._start_embedded_server(binary, state)
+        state.unsupported_platform = state.proc is None
+        return interval
+
+    def _abort_progress(self, done, total):
+        """Download progress callback for serverbin.install_binary(): called
+        once per chunk, so a multi-minute download notices a Kodi shutdown
+        request within one chunk. Shared by the missing-binary install and
+        `_upgrade_bundled_if_stale()`."""
+        if self.monitor.abortRequested():
+            raise _AbortRequested()
+
+    def _upgrade_bundled_if_stale(self, binary, state):
+        """Reinstall `binary` when SERVER_TAG has moved past the tag it was
+        installed from. Returns the path to use (the fresh one on success,
+        `binary` unchanged otherwise).
+
+        install_binary() only runs when resolve_binary() finds nothing, so
+        without this a SERVER_TAG bump in a new addon release would never
+        reach anyone who already has a binary installed.
+
+        Three deliberate restrictions:
+          - Bundled path only, and only when the user has not named it
+            themselves (a PATH hit or a `server_binary` setting is the
+            user's own build; `server_binary` can legitimately point AT
+            the bundled path, so the setting is checked too).
+          - Once per session (`state.upgrade_attempted`), so a failing
+            download cannot re-fetch on every 5s spawn retry.
+          - Failures are non-fatal: an offline user with a stale binary
+            must still get their server started.
+
+        _AbortRequested propagates -- Kodi is shutting down, and the
+        caller unwinds the supervision loop instead of spawning.
+        """
+        if (state.upgrade_attempted
+                or not is_bundled_binary(binary, self.profile_dir)
+                or binary == self.monitor.binary_setting):
+            return binary
+        state.upgrade_attempted = True
+
+        from lib import serverbin
+
+        bin_dir = serverbin.install_dir(self.profile_dir, ADDON_ID)
+        installed = serverbin.installed_tag(bin_dir)
+        if installed == serverbin.SERVER_TAG:
+            return binary
+
+        self._info(
+            f"upgrading stremio-server binary from {installed or 'an unstamped install'} "
+            f"to {serverbin.SERVER_TAG}")
+        self._notify(30069)
+        try:
+            return serverbin.install_binary(bin_dir, progress_cb=self._abort_progress)
+        except _AbortRequested:
+            raise
+        except Exception as exc:  # noqa: BLE001 - a stale binary still works; never block the spawn
+            self._warn(
+                f"stremio-server binary upgrade to {serverbin.SERVER_TAG} failed: {exc}, "
+                f"keeping the installed one")
+            return binary
+
+    def _note_server_mode(self, state, mode):
+        """Log, once per change, that streaming goes through a server this
+        addon does not own: the torrent-engine/proxy settings
+        (`EXTRA_ENV_SETTINGS`) are handed to the server as environment
+        variables at spawn time and never reach an external one."""
+        if state.server_mode == mode:
+            return
+        state.server_mode = mode
+        target = server_url_for_log(self.monitor.server_url)
+        if mode == "disabled":
+            self._info(
+                f"embedded server disabled (server_enable is off): streaming through the server at {target}; "
+                f"the torrent-engine/proxy settings are not applied to it")
+        else:
+            self._info(
+                f"using the stremio-server already listening at {target} instead of spawning one; "
+                f"the torrent-engine/proxy settings are not applied to it")
+
+    # -- Phase B ----------------------------------------------------------
+
+    def tick_progress_and_restart(self, state):
+        """Sample playback progress, then apply a pending settings-changed
+        restart. Runs once per loop tick, before `dispatch()`."""
+        try:
+            self.progress_player.sample_if_playing()
+        except Exception as exc:  # noqa: BLE001 - playback-progress sampling must never crash the service loop
+            self._warn("progress sampling failed: %r" % (exc,))
+
+        if self.monitor.restart_requested:
+            self.monitor.restart_requested = False
+            if state.proc is not None:
+                self._info("settings changed, restarting embedded server")
+                if self._stop_process(state.proc):
+                    state.proc = None
+            state.backoff_idx = 0
+            state.server_mode = None
+            state.notified_missing = False
+            state.unsupported_platform = False
+            state.reset_download()
+
+    # -- Phase C ----------------------------------------------------------
+
+    def dispatch(self, state):
+        """Enabled/healthy/nothing-running dispatch, including binary
+        resolve/auto-download/upgrade. Returns `(interval, should_break)`;
+        `should_break` is True when an in-flight `_AbortRequested` must
+        unwind the loop straight past the autoload tick and
+        `waitForAbort()`, since Kodi is already shutting down."""
+        if not self.monitor.enabled:
+            self._dispatch_disabled(state)
+            return IDLE_POLL_INTERVAL, False
+        if state.proc is not None:
+            return self._dispatch_supervised(state), False
+        return self._dispatch_unsupervised(state)
+
+    def _dispatch_disabled(self, state):
+        self._note_server_mode(state, "disabled")
+        if state.proc is not None:
+            self._info("embedded server disabled, stopping")
+            if self._stop_process(state.proc):
+                state.proc = None
+
+    def _dispatch_supervised(self, state):
+        code = state.proc.poll()
+        if code is None:
+            state.server_mode = "embedded"
+            state.proc.maybe_rotate_log()
+            return HEALTHY_POLL_INTERVAL
+        if (state.proc.uptime() or 0) >= MIN_STABLE_UPTIME:
+            state.backoff_idx = 0
+        self._warn(f"embedded server exited (code {code}), restarting")
+        interval = self._backoff_interval(state)
+        if self._stop_process(state.proc):
+            state.proc = None
+        return interval
+
+    def _dispatch_unsupervised(self, state):
+        """Nothing of ours running: prefer an already-reachable instance
+        (external or manually started) over spawning a duplicate. The probe
+        runs every iteration regardless of the unsupported_platform latch,
+        because "point Server URL at a server running elsewhere" is the
+        documented remedy for that latch."""
+        monitor = self.monitor
+        if probe_listening(monitor.server_url):
+            state.notified_missing = False
+            self._note_server_mode(state, "external")
+            return EXTERNAL_RECHECK_INTERVAL, False
+        if monitor.force_library:
+            # Explicit opt-out of the exec()-based path (see
+            # `server_force_library` in settings.xml): skip
+            # resolve_binary()/install_binary() and go straight to
+            # c-shared library mode whenever a companion .so is on disk.
+            library_path = self._resolve_library_candidate()
+            if library_path is not None:
+                state.notified_missing = False
+                state.unsupported_platform = False
+                state.proc, interval = self._start_library_server(library_path, state)
+                return interval, False
+        if state.unsupported_platform:
+            return self._dispatch_unsupported(state), False
+        return self._dispatch_binary(state)
+
+    def _dispatch_unsupported(self, state):
+        """Latched branch: the same detection work as `_dispatch_binary()`
+        -- just resolve_binary(), no fresh install attempt -- at the
+        coarser UNSUPPORTED_PLATFORM_POLL_INTERVAL cadence."""
+        interval = UNSUPPORTED_PLATFORM_POLL_INTERVAL
+        library_path = self._resolve_library_candidate()
+        if library_path is not None:
+            # Self-heal into library mode: a companion .so is now on disk
+            # and ctypes works here; prefer it over the exec() path, which
+            # keeps failing for the same reason on an enforcing-SELinux
+            # device.
+            state.notified_missing = False
+            return self._start_library_with_exec_fallback(state, library_path)
+        binary = resolve_binary(self.monitor.binary_setting, self.profile_dir)
+        if binary is None:
+            if not state.notified_missing:
+                self._notify(30031, error=True)
+                self._error("stremio-server binary not found")
+                state.notified_missing = True
+            return interval
+        # Self-heal: a runnable binary appeared (or a noexec/EACCES mount
+        # condition cleared) without any Kodi setting changing.
+        state.notified_missing = False
+        state.unsupported_platform = False
+        state.proc, interval = self._start_embedded_server(binary, state)
+        return interval
+
+    def _dispatch_binary(self, state):
+        binary = resolve_binary(self.monitor.binary_setting, self.profile_dir)
+        if binary is None:
+            return self._dispatch_missing_binary(state)
+        state.notified_missing = False
+        state.unsupported_platform = False
+        state.reset_download()
+        # Before spawning: a binary installed under an older SERVER_TAG is
+        # upgraded in place, since install_binary() is otherwise only
+        # reached via the binary-is-None branch. Checked here rather than
+        # at startup so it can never race a server we already have running.
+        try:
+            binary = self._upgrade_bundled_if_stale(binary, state)
+        except _AbortRequested:
+            self._info("stremio-server binary upgrade aborted, shutting down")
+            return IDLE_POLL_INTERVAL, True
+        state.proc, interval = self._start_embedded_server(binary, state)
+        if state.proc is None and is_bundled_binary(binary, self.profile_dir):
+            # install_binary() promotes an unverified executable even when
+            # verify_executable() failed, so a leftover binary that still
+            # cannot exec() (SELinux W^X, noexec mount, ...) would
+            # spawn-fail forever with library mode never tried. Fall back
+            # when a companion .so is already on disk.
+            library_path = self._resolve_library_candidate()
+            if library_path is not None:
+                self._info(
+                    "stremio-server executable failed to spawn, "
+                    "falling back to library mode")
+                state.proc, interval = self._start_library_server(library_path, state)
+        return interval, False
+
+    def _dispatch_missing_binary(self, state):
+        interval = MISSING_BINARY_RECHECK_INTERVAL
+        if state.next_download_at is not None and self._clock() < state.next_download_at:
+            # Still cooling down from the last failed attempt -- gated on a
+            # monotonic deadline (not just this iteration's sleep) so no
+            # combination of other branches can retry early.
+            return interval, False
+        return self._auto_download(state, interval)
+
+    def _auto_download(self, state, interval):
+        if not state.download_attempt_notified:
+            self._notify(30069)
+            state.download_attempt_notified = True
+        self._info("auto-downloading stremio-server binary")
+        from lib import serverbin
+
+        try:
+            serverbin.install_binary(
+                serverbin.install_dir(self.profile_dir, ADDON_ID),
+                progress_cb=self._abort_progress,
+            )
+        except _AbortRequested:
+            # Not a failure -- Kodi is shutting down. No error
+            # notification, and unwind the loop right away instead of
+            # waiting on abort again.
+            self._info("stremio-server binary download aborted, shutting down")
+            return interval, True
+        except serverbin.UnsupportedPlatformError as exc:
+            return self._on_download_unsupported(state, exc, interval), False
+        except Exception as exc:
+            self._on_download_failed(state, exc)
+            return interval, False
+        self._info("stremio-server binary download complete")
+        state.reset_download()
+        return POST_DOWNLOAD_RECHECK_INTERVAL, False
+
+    def _on_download_unsupported(self, state, exc, interval):
+        library_path = self._resolve_library_candidate()
+        if library_path is None:
+            state.unsupported_platform = True
+            state.next_download_at = None
+            self._warn(f"stremio-server binary cannot run on this device: {exc}")
+            self._notify(30091, error=True)
+            return interval
+        # install_binary() extracts the optional libstremio-server.so
+        # companion regardless of whether the executable itself passed
+        # verify_executable(), so a fresh SELinux-enforcing failure can fall
+        # back to c-shared library mode immediately instead of latching.
+        self._info(
+            f"stremio-server executable unsupported ({exc}), "
+            f"falling back to library mode")
+        state.notified_missing = False
+        interval = self._start_library_with_exec_fallback(state, library_path)
+        state.next_download_at = None
+        return interval
+
+    def _on_download_failed(self, state, exc):
+        # Transient failure (network hiccup, GitHub outage, no release
+        # asset yet, ...): retry after a bounded backoff, but only surface
+        # the failure notification once per cycle so a prolonged outage
+        # does not spam the user.
+        wait_s = DOWNLOAD_RETRY_BACKOFF[
+            min(state.download_backoff_idx, len(DOWNLOAD_RETRY_BACKOFF) - 1)
+        ]
+        state.download_backoff_idx = min(
+            state.download_backoff_idx + 1, len(DOWNLOAD_RETRY_BACKOFF) - 1
+        )
+        state.next_download_at = self._clock() + wait_s
+        self._error(f"stremio-server binary download failed: {exc}, retrying in {wait_s}s")
+        if not state.download_failure_notified:
+            self._notify(30063, error=True)
+            state.download_failure_notified = True
+
+    # -- loop -------------------------------------------------------------
+
+    def _autoload_interval(self, interval):
+        """Autoload runs last, so it sees this iteration's `interval` and
+        can shorten it: the supervision branches may have picked a sleep
+        far longer than the launch is meant to wait."""
+        autoload = self.autoload
+        if autoload.fired:
+            return interval
+        try:
+            autoload_interval = autoload.poll(self._clock())
+        except Exception as exc:  # noqa: BLE001 - autoload must never crash the supervision loop
+            self._error("startup autoload failed: %r" % (exc,))
+            autoload.fired = True  # latch off; never retry for the rest of the session
+            return interval
+        if autoload_interval is not None:
+            return min(interval, autoload_interval)
+        return interval
+
+    def run(self):
+        state = self.state
+        monitor = self.monitor
+        while not monitor.abortRequested():
+            self.tick_progress_and_restart(state)
+            self._sync_bridge()
+
+            interval, should_break = self.dispatch(state)
+            if should_break:
+                break
+
+            interval = self._autoload_interval(interval)
+            if monitor.waitForAbort(interval):
+                break
+        self.shutdown()
+
+    def shutdown(self):
+        # Kodi never delivers the abort to the RunScript-launched bridge in
+        # time (it was observed still polling waitForAbort() well after
+        # "Stopping the application", then hung Kodi's quit). This service
+        # does see the abort, so it tells the bridge to stop itself.
+        try:
+            self._shutdown_bridge()
+        except Exception as exc:  # noqa: BLE001 - shutdown must continue regardless
+            self._warn("s4me bridge shutdown failed: %r" % (exc,))
+
+        if self.state.proc is not None:
+            self._info("shutting down embedded server")
+            self._stop_process(self.state.proc)
+
+
 def main():
     """Entry point for service.py: xbmc.Monitor-driven supervision loop."""
     import xbmc
@@ -974,11 +1547,20 @@ def main():
     profile_dir = xbmcvfs.translatePath(addon.getAddonInfo("profile"))
     os.makedirs(profile_dir, exist_ok=True)
 
-    app_path = os.path.join(profile_dir, "server")
-    log_path = os.path.join(profile_dir, LOG_FILENAME)
-
     def log(level, message):
         xbmc.log(f"[{ADDON_ID}] {message}", level)
+
+    def notify(string_id, error=False):
+        if error:
+            xbmcgui.Dialog().notification(
+                addon.getAddonInfo("name"),
+                addon.getLocalizedString(string_id),
+                xbmcgui.NOTIFICATION_ERROR,
+            )
+        else:
+            xbmcgui.Dialog().notification(
+                addon.getAddonInfo("name"), addon.getLocalizedString(string_id),
+            )
 
     def _launch_addon_ui():
         log(xbmc.LOGINFO, "startup autoload: opening Rivulet")
@@ -999,18 +1581,12 @@ def main():
         xbmc, store, StremioAPI(), log, lambda: _settings.setting_bool(addon, "sync_progress", True),
     )
 
-    # --- S4Me bridge -----------------------------------------------------
-    #
-    # Deliberately independent of ServiceMonitor: reads its own settings
-    # fresh every call instead of caching them, so this stays a single,
-    # self-contained hook with no coupling to the embedded-server restart
-    # machinery above/below. BridgeSupervisor.apply() is cheap and
-    # idempotent (see its own docstring), so calling this every
-    # supervision-loop tick (see the `while` loop's `_sync_s4me_bridge()`
-    # call near the bottom of `main()`) is fine.
+    # S4Me bridge: deliberately independent of ServiceMonitor -- reads its
+    # own settings fresh every call, and BridgeSupervisor.apply() is cheap
+    # and idempotent, so calling this every supervision tick is fine.
     s4me_bridge = s4me.BridgeSupervisor(addon.getAddonInfo("path"))
 
-    def _sync_s4me_bridge():
+    def sync_s4me_bridge():
         try:
             # Stream4Me's channels are Italian-language sites: the bridge
             # only runs for Italian users who also have Stream4Me
@@ -1032,569 +1608,21 @@ def main():
         except Exception as exc:  # noqa: BLE001 - a bridge sync failure must never crash the service loop
             log(xbmc.LOGWARNING, f"s4me bridge sync failed: {exc}")
 
-    class ServiceMonitor(xbmc.Monitor):
-        def __init__(self):
-            super().__init__()
-            self.restart_requested = False
-            self.enabled = False
-            self.binary_setting = ""
-            self.server_url = DEFAULT_SERVER_URL
-            self.extra_settings = {}
-            self.extra_env = {}
-            self.force_library = False
-            self._refresh()
-
-        def _refresh(self):
-            self.enabled = _settings.setting_bool(addon, "server_enable", EXTRA_ENV_TYPED_DEFAULTS["server_enable"])
-            self.binary_setting = addon.getSetting("server_binary")
-            self.server_url = addon.getSetting("server_url") or DEFAULT_SERVER_URL
-            self.force_library = _settings.setting_bool(addon, "server_force_library", False)
-            values = {}
-            for setting_id, _env_var, kind in EXTRA_ENV_SETTINGS:
-                default = EXTRA_ENV_TYPED_DEFAULTS.get(setting_id)
-                if kind == "bool":
-                    values[setting_id] = _settings.setting_bool(addon, setting_id, default)
-                elif kind in ("int", "mb_to_bytes"):
-                    values[setting_id] = _settings.setting_int(addon, setting_id, default)
-                else:
-                    values[setting_id] = addon.getSetting(setting_id)
-            self.extra_settings = values
-            self.extra_env = extra_env_from_settings(values)
-
-        def _snapshot(self):
-            return (
-                self.enabled, self.binary_setting, self.server_url, self.force_library,
-                tuple(sorted(self.extra_settings.items())),
-            )
-
-        def onSettingsChanged(self):
-            prev = self._snapshot()
-            self._refresh()
-            if prev != self._snapshot():
-                self.restart_requested = True
-
-    def _stop_process(target):
-        """Best-effort `target.stop()`. Returns True once stop()
-        completed (state is safe to discard), False if it raised (an
-        unkillable/wedged child) -- callers must then keep polling the
-        same instance next iteration instead of spawning a duplicate
-        next to a possibly-still-alive process."""
-        try:
-            target.stop()
-        except Exception as exc:  # noqa: BLE001 - a failed stop must never crash the supervision loop
-            log(xbmc.LOGERROR, f"failed to stop embedded server: {exc}")
-            return False
-        return True
-
-    def _start_embedded_server(binary, state):
-        """Spawn `binary` as the embedded server. Returns `(new_proc,
-        new_interval)`: `(candidate, HEALTHY_POLL_INTERVAL)` on a
-        successful start, or `(None, <backoff interval>)` on a failed
-        spawn (advancing `state.backoff_idx`).
-
-        Shared by both places that can discover a runnable binary --
-        the normal missing-binary flow and the unsupported_platform
-        latch's own resolve_binary() self-heal check just below -- so a
-        successful spawn behaves identically regardless of which one
-        found it.
-        """
-        log(xbmc.LOGINFO, f"starting embedded server: {binary}")
-        candidate = ServerProcess(
-            binary, monitor.server_url, app_path, log_path, extra_env=monitor.extra_env,
-        )
-        try:
-            candidate.start()
-        except Exception as exc:  # noqa: BLE001 - a failed spawn must never crash the supervision loop
-            log(xbmc.LOGERROR, f"failed to start embedded server: {exc}")
-            next_interval = RESTART_BACKOFF[min(state.backoff_idx, len(RESTART_BACKOFF) - 1)]
-            state.backoff_idx = min(state.backoff_idx + 1, len(RESTART_BACKOFF) - 1)
-            return None, next_interval
-        return candidate, HEALTHY_POLL_INTERVAL
-
-    def _resolve_library_candidate(profile_dir):
-        """Return the libstremio-server.so path to use for c-shared
-        library mode (see lib.libserver.LibraryServer), or None when
-        unavailable: ctypes import failed in this Python build (see
-        lib.libserver.LIBRARY_SUPPORTED), or serverbin.install_binary()
-        has not extracted a companion library into
-        serverbin.install_dir()'s location yet -- true of every
-        non-Android platform, and of an Android install predating
-        library-mode support. Cheap enough (an isfile() check, at most)
-        to call fresh at every site that needs it rather than caching
-        across a tick.
-        """
-        from lib import libserver
-        if not libserver.LIBRARY_SUPPORTED:
-            return None
-        from lib import serverbin
-        bin_dir = serverbin.install_dir(profile_dir, ADDON_ID)
-        return serverbin.resolve_library(bin_dir)
-
-    def _start_library_server(library_path, state):
-        """Spawn the c-shared library server. Mirrors
-        _start_embedded_server()'s `(candidate, interval)` contract and
-        failed-spawn backoff, using lib.libserver.LibraryServer instead
-        of a subprocess.Popen-backed ServerProcess -- see that class's
-        docstring for why its public surface matches ServerProcess
-        closely enough that `state.proc` doesn't need to know which one
-        it holds.
-        """
-        log(xbmc.LOGINFO, f"starting library-mode server: {library_path}")
-        from lib import libserver
-
-        candidate = libserver.LibraryServer(
-            library_path, monitor.server_url, app_path, log_path,
-            extra_env=monitor.extra_env,
-            log_fn=lambda message: log(xbmc.LOGWARNING, message),
-        )
-        try:
-            candidate.start()
-        except Exception as exc:  # noqa: BLE001 - a failed spawn must never crash the supervision loop
-            log(xbmc.LOGERROR, f"failed to start library-mode server: {exc}")
-            next_interval = RESTART_BACKOFF[min(state.backoff_idx, len(RESTART_BACKOFF) - 1)]
-            state.backoff_idx = min(state.backoff_idx + 1, len(RESTART_BACKOFF) - 1)
-            return None, next_interval
-        return candidate, HEALTHY_POLL_INTERVAL
-
-    def _abort_progress(done, total):
-        """Download progress callback for serverbin.install_binary(), which
-        forwards it to serverbin._download_to_file() -- called once per
-        chunk, so a multi-minute download notices a Kodi shutdown request
-        within one chunk instead of blocking abortRequested() from ever
-        being polled again until the transfer finishes on its own.
-
-        Shared by both callers that can start a download: the
-        missing-binary install below and _upgrade_bundled_if_stale().
-        """
-        if monitor.abortRequested():
-            raise _AbortRequested()
-
-    def _upgrade_bundled_if_stale(binary, state):
-        """Reinstall `binary` when SERVER_TAG has moved past the tag it was
-        installed from. Returns the path to use (the fresh one on success,
-        `binary` unchanged otherwise).
-
-        install_binary() only ever runs when resolve_binary() finds
-        nothing, so without this a SERVER_TAG bump in a new addon release
-        would never reach anyone who already has a binary installed --
-        they would keep running the old server forever, with a manual
-        Settings -> Download server (or deleting the file) as the only way
-        off it.
-
-        Three deliberate restrictions:
-          - Bundled path only, and only when the user has not named it
-            themselves. A PATH hit or a `server_binary` setting is the
-            user's own build; we neither stamped it nor get to replace it,
-            and `server_binary` can legitimately point AT the bundled
-            path (someone who dropped a hand-built binary exactly there),
-            which resolve_binary() returns from its explicit branch --
-            indistinguishable by path alone, so the setting is checked too.
-          - Once per session (`state.upgrade_attempted`), so a failing
-            download cannot re-fetch on every 5s spawn retry.
-          - Failures are non-fatal: an offline user with a stale binary
-            must still get their server started, so anything short of a
-            shutdown request falls back to the existing path rather than
-            entering the download backoff state machine.
-
-        _AbortRequested propagates -- Kodi is shutting down, and the
-        caller unwinds the supervision loop instead of spawning.
-        """
-        if (state.upgrade_attempted
-                or not is_bundled_binary(binary, profile_dir)
-                or binary == monitor.binary_setting):
-            return binary
-        state.upgrade_attempted = True
-
-        from lib import serverbin
-
-        bin_dir = serverbin.install_dir(profile_dir, ADDON_ID)
-        installed = serverbin.installed_tag(bin_dir)
-        if installed == serverbin.SERVER_TAG:
-            return binary
-
-        log(xbmc.LOGINFO,
-            f"upgrading stremio-server binary from {installed or 'an unstamped install'} "
-            f"to {serverbin.SERVER_TAG}")
-        xbmcgui.Dialog().notification(
-            addon.getAddonInfo("name"), addon.getLocalizedString(30069),
-        )
-        try:
-            return serverbin.install_binary(bin_dir, progress_cb=_abort_progress)
-        except _AbortRequested:
-            raise
-        except Exception as exc:  # noqa: BLE001 - a stale binary still works; never block the spawn
-            log(xbmc.LOGWARNING,
-                f"stremio-server binary upgrade to {serverbin.SERVER_TAG} failed: {exc}, "
-                f"keeping the installed one")
-            return binary
-
-    class _LoopState:
-        """Mutable per-session state threaded explicitly through
-        `_tick_progress_and_restart()`/`_dispatch_supervision()` below,
-        instead of `nonlocal` closures -- keeps both functions callable
-        (and testable) with a plain argument rather than depending on
-        `main()`'s frame.
-        """
-
-        def __init__(self):
-            self.proc = None
-            self.backoff_idx = 0
-            self.notified_missing = False
-            # Coarse-cadence latch, NOT a "stop detecting" latch: once
-            # install_binary() raises UnsupportedPlatformError below, this
-            # stays True and the nothing-of-ours-running branch further
-            # down polls at UNSUPPORTED_PLATFORM_POLL_INTERVAL (300s)
-            # instead of MISSING_BINARY_RECHECK_INTERVAL (5s) -- but it
-            # keeps calling BOTH probe_listening() and resolve_binary()
-            # every latched iteration (see UNSUPPORTED_PLATFORM_POLL_INTERVAL's
-            # comment for why the exception cannot tell a permanent cause
-            # from a transient one), only skipping the install/download
-            # attempt itself. It clears either when resolve_binary() finds
-            # a runnable binary while latched (self-heal, handled right
-            # where that call happens) or via onSettingsChanged() ->
-            # restart_requested just below.
-            self.unsupported_platform = False
-            self.download_backoff_idx = 0
-            self.next_download_at = None
-            self.download_attempt_notified = False
-            self.download_failure_notified = False
-            # One-shot per session: see _upgrade_bundled_if_stale().
-            # Deliberately NOT reset by onSettingsChanged() below -- a
-            # settings change is not new information about the release
-            # tag, and re-arming it there would let a user toggling
-            # settings during a GitHub outage re-download on every toggle.
-            self.upgrade_attempted = False
-            # Which kind of server this session is using, so the "not our
-            # server" note below is logged once per change, not once per tick:
-            # None (unknown yet), "embedded", "external" or "disabled".
-            self.server_mode = None
-
-    def _tick_progress_and_restart(state):
-        """Phase B: sample playback progress, then apply a pending
-        settings-changed restart. Runs once per loop tick, before the
-        supervision dispatch below decides what to do with `state.proc`.
-        """
-        try:
-            progress_player.sample_if_playing()
-        except Exception as exc:  # noqa: BLE001 - playback-progress sampling must never crash the service loop
-            log(xbmc.LOGWARNING, "progress sampling failed: %r" % (exc,))
-
-        if monitor.restart_requested:
-            monitor.restart_requested = False
-            if state.proc is not None:
-                log(xbmc.LOGINFO, "settings changed, restarting embedded server")
-                if _stop_process(state.proc):
-                    state.proc = None
-            state.backoff_idx = 0
-            state.server_mode = None
-            state.notified_missing = False
-            state.unsupported_platform = False
-            state.download_backoff_idx = 0
-            state.next_download_at = None
-            state.download_attempt_notified = False
-            state.download_failure_notified = False
-
-    def _note_server_mode(state, mode):
-        """Log, once per change, that streaming goes through a server this
-        addon does not own. Everything under Settings -> Torrent engine /
-        Streaming proxy / Integrations (`EXTRA_ENV_SETTINGS`) is handed to the
-        server as environment variables at spawn time, and the addon never
-        POSTs /settings, so none of it can reach an external or manually
-        started server - which used to be completely invisible in kodi.log."""
-        if state.server_mode == mode:
-            return
-        state.server_mode = mode
-        target = server_url_for_log(monitor.server_url)
-        if mode == "disabled":
-            log(xbmc.LOGINFO,
-                f"embedded server disabled (server_enable is off): streaming through the server at {target}; "
-                f"the torrent-engine/proxy settings are not applied to it")
-        else:
-            log(xbmc.LOGINFO,
-                f"using the stremio-server already listening at {target} instead of spawning one; "
-                f"the torrent-engine/proxy settings are not applied to it")
-
-    def _dispatch_supervision(state):
-        """Phase C: enabled/healthy/nothing-running dispatch, including
-        binary resolve/auto-download/upgrade. Returns `(interval,
-        should_break)`; `should_break` mirrors the two places the
-        original inline loop body used `break` to unwind an in-flight
-        `_AbortRequested` straight past the autoload tick and
-        `waitForAbort()` below, since Kodi is already shutting down.
-        """
-        interval = IDLE_POLL_INTERVAL
-
-        if not monitor.enabled:
-            _note_server_mode(state, "disabled")
-            if state.proc is not None:
-                log(xbmc.LOGINFO, "embedded server disabled, stopping")
-                if _stop_process(state.proc):
-                    state.proc = None
-        elif state.proc is not None:
-            code = state.proc.poll()
-            if code is None:
-                state.server_mode = "embedded"
-                interval = HEALTHY_POLL_INTERVAL
-                state.proc.maybe_rotate_log()
-            else:
-                if (state.proc.uptime() or 0) >= MIN_STABLE_UPTIME:
-                    state.backoff_idx = 0
-                log(xbmc.LOGWARNING, f"embedded server exited (code {code}), restarting")
-                interval = RESTART_BACKOFF[min(state.backoff_idx, len(RESTART_BACKOFF) - 1)]
-                state.backoff_idx = min(state.backoff_idx + 1, len(RESTART_BACKOFF) - 1)
-                if _stop_process(state.proc):
-                    state.proc = None
-        else:
-            # Nothing of ours running: prefer an already-reachable instance
-            # (external or manually-started) over spawning a duplicate --
-            # this probe runs every iteration regardless of the
-            # unsupported_platform latch below, because "point Server URL
-            # at a server running elsewhere" is the documented remedy for
-            # that latch (see UnsupportedPlatformError's docstring), and
-            # detecting that is exactly what probe_listening() is for.
-            if probe_listening(monitor.server_url):
-                state.notified_missing = False
-                _note_server_mode(state, "external")
-                interval = EXTERNAL_RECHECK_INTERVAL
-            elif monitor.force_library and (library_path := _resolve_library_candidate(profile_dir)) is not None:
-                # Explicit opt-out of the exec()-based path entirely (see
-                # `server_force_library`'s docstring in settings.xml) --
-                # skip resolve_binary()/install_binary() altogether and go
-                # straight to c-shared library mode whenever a companion
-                # libstremio-server.so is already on disk.
-                state.notified_missing = False
-                state.unsupported_platform = False
-                state.proc, interval = _start_library_server(library_path, state)
-            elif state.unsupported_platform:
-                # The exception that latched this flag cannot tell a
-                # permanent platform ban from a transient environment
-                # condition (see UNSUPPORTED_PLATFORM_POLL_INTERVAL's
-                # comment), so this branch still does the SAME detection
-                # work as the branch below -- just resolve_binary(), not
-                # a fresh install attempt -- only at this coarser cadence.
-                interval = UNSUPPORTED_PLATFORM_POLL_INTERVAL
-                library_path = _resolve_library_candidate(profile_dir)
-                if library_path is not None:
-                    # Self-heal into library mode: a companion .so is now
-                    # on disk -- install_binary() extracts it regardless of
-                    # whether the executable itself passed
-                    # verify_executable() -- and ctypes works here, so
-                    # prefer it over the exec()-based self-heal below,
-                    # which keeps failing for the exact same permanent
-                    # reason on an enforcing-SELinux device.
-                    state.notified_missing = False
-                    state.proc, interval = _start_library_server(library_path, state)
-                    # A failed dlopen() must not unlatch: keep polling at the
-                    # coarse cadence instead of re-entering install_binary()'s
-                    # download path on the next tick. But an executable may
-                    # already be usable (this latch cannot tell a permanent
-                    # library-load failure from a transient one either) --
-                    # try it before giving up on this tick.
-                    if state.proc is None:
-                        binary = resolve_binary(monitor.binary_setting, profile_dir)
-                        if binary is not None:
-                            state.notified_missing = False
-                            state.proc, interval = _start_embedded_server(binary, state)
-                    state.unsupported_platform = state.proc is None
-                else:
-                    binary = resolve_binary(monitor.binary_setting, profile_dir)
-                    if binary is None:
-                        if not state.notified_missing:
-                            xbmcgui.Dialog().notification(
-                                addon.getAddonInfo("name"),
-                                addon.getLocalizedString(30031),
-                                xbmcgui.NOTIFICATION_ERROR,
-                            )
-                            log(xbmc.LOGERROR, "stremio-server binary not found")
-                            state.notified_missing = True
-                    else:
-                        # Self-heal: a runnable binary appeared (or a
-                        # noexec/EACCES mount condition cleared) without any
-                        # Kodi setting changing -- unlatch immediately instead
-                        # of waiting on onSettingsChanged() -> restart_requested.
-                        state.notified_missing = False
-                        state.unsupported_platform = False
-                        state.proc, interval = _start_embedded_server(binary, state)
-            else:
-                binary = resolve_binary(monitor.binary_setting, profile_dir)
-                if binary is None:
-                    interval = MISSING_BINARY_RECHECK_INTERVAL
-                    if state.next_download_at is not None and time.monotonic() < state.next_download_at:
-                        # Still cooling down from the last failed attempt --
-                        # gated on a monotonic deadline (not just this
-                        # iteration's sleep) so no combination of other
-                        # branches running in between can retry early.
-                        pass
-                    else:
-                        if not state.download_attempt_notified:
-                            xbmcgui.Dialog().notification(
-                                addon.getAddonInfo("name"),
-                                addon.getLocalizedString(30069),
-                            )
-                            state.download_attempt_notified = True
-                        log(xbmc.LOGINFO, "auto-downloading stremio-server binary")
-                        from lib import serverbin
-
-                        try:
-                            serverbin.install_binary(
-                                serverbin.install_dir(profile_dir, ADDON_ID),
-                                progress_cb=_abort_progress,
-                            )
-                        except _AbortRequested:
-                            # Not a failure -- Kodi is shutting down. No
-                            # error notification, and unwind the loop right
-                            # away instead of falling through to the
-                            # waitForAbort() at the bottom (abort is already
-                            # known, waiting on it again just adds latency).
-                            log(xbmc.LOGINFO, "stremio-server binary download aborted, shutting down")
-                            return interval, True
-                        except serverbin.UnsupportedPlatformError as exc:
-                            library_path = _resolve_library_candidate(profile_dir)
-                            if library_path is not None:
-                                # install_binary() extracts the optional
-                                # libstremio-server.so companion regardless
-                                # of whether the executable itself passed
-                                # verify_executable() (see its docstring) --
-                                # so a fresh SELinux-enforcing failure right
-                                # here can fall back to c-shared library
-                                # mode immediately instead of latching
-                                # unsupported.
-                                log(xbmc.LOGINFO,
-                                    f"stremio-server executable unsupported ({exc}), "
-                                    f"falling back to library mode")
-                                state.notified_missing = False
-                                state.proc, interval = _start_library_server(library_path, state)
-                                # A failed dlopen() must not re-enter the
-                                # download branch on the next tick, but an
-                                # executable may already be usable -- try it
-                                # before giving up on this tick.
-                                if state.proc is None:
-                                    binary = resolve_binary(monitor.binary_setting, profile_dir)
-                                    if binary is not None:
-                                        state.notified_missing = False
-                                        state.proc, interval = _start_embedded_server(binary, state)
-                                state.unsupported_platform = state.proc is None
-                                state.next_download_at = None
-                            else:
-                                state.unsupported_platform = True
-                                state.next_download_at = None
-                                log(xbmc.LOGWARNING,
-                                    f"stremio-server binary cannot run on this device: {exc}")
-                                xbmcgui.Dialog().notification(
-                                    addon.getAddonInfo("name"),
-                                    addon.getLocalizedString(30091),
-                                    xbmcgui.NOTIFICATION_ERROR,
-                                )
-                        except Exception as exc:
-                            # Transient failure (network hiccup, GitHub
-                            # outage, no release asset published yet, ...)
-                            # -- retry automatically after a bounded
-                            # backoff instead of giving up for the
-                            # session, but only surface the failure
-                            # notification once per cycle so a prolonged
-                            # outage does not spam the user.
-                            wait_s = DOWNLOAD_RETRY_BACKOFF[
-                                min(state.download_backoff_idx, len(DOWNLOAD_RETRY_BACKOFF) - 1)
-                            ]
-                            state.download_backoff_idx = min(
-                                state.download_backoff_idx + 1, len(DOWNLOAD_RETRY_BACKOFF) - 1
-                            )
-                            state.next_download_at = time.monotonic() + wait_s
-                            log(
-                                xbmc.LOGERROR,
-                                f"stremio-server binary download failed: {exc}, retrying in {wait_s}s",
-                            )
-                            if not state.download_failure_notified:
-                                xbmcgui.Dialog().notification(
-                                    addon.getAddonInfo("name"),
-                                    addon.getLocalizedString(30063),
-                                    xbmcgui.NOTIFICATION_ERROR,
-                                )
-                                state.download_failure_notified = True
-                        else:
-                            log(xbmc.LOGINFO, "stremio-server binary download complete")
-                            state.download_backoff_idx = 0
-                            state.next_download_at = None
-                            state.download_attempt_notified = False
-                            state.download_failure_notified = False
-                            interval = POST_DOWNLOAD_RECHECK_INTERVAL
-                else:
-                    state.notified_missing = False
-                    state.unsupported_platform = False
-                    state.download_backoff_idx = 0
-                    state.next_download_at = None
-                    state.download_attempt_notified = False
-                    state.download_failure_notified = False
-                    # Before spawning: a binary installed under an older
-                    # SERVER_TAG is upgraded in place, since install_binary()
-                    # is otherwise only ever reached via the binary-is-None
-                    # branch above. Checked here rather than at startup so it
-                    # can never race a server we already have running.
-                    try:
-                        binary = _upgrade_bundled_if_stale(binary, state)
-                    except _AbortRequested:
-                        log(xbmc.LOGINFO,
-                            "stremio-server binary upgrade aborted, shutting down")
-                        return interval, True
-                    state.proc, interval = _start_embedded_server(binary, state)
-                    if state.proc is None and is_bundled_binary(binary, profile_dir):
-                        # install_binary() promotes an unverified executable
-                        # to final_path even when verify_executable() failed
-                        # (see its own docstring), so a leftover binary that
-                        # still cannot exec() (SELinux W^X, noexec mount, ...)
-                        # would otherwise spawn-fail forever at
-                        # RESTART_BACKOFF cadence with library mode never
-                        # tried in this session. Fall back when a companion
-                        # .so is already on disk.
-                        library_path = _resolve_library_candidate(profile_dir)
-                        if library_path is not None:
-                            log(xbmc.LOGINFO,
-                                "stremio-server executable failed to spawn, "
-                                "falling back to library mode")
-                            state.proc, interval = _start_library_server(library_path, state)
-
-        return interval, False
-
-    monitor = ServiceMonitor()
-    state = _LoopState()
-
-    while not monitor.abortRequested():
-        _tick_progress_and_restart(state)
-        _sync_s4me_bridge()
-
-        interval, should_break = _dispatch_supervision(state)
-        if should_break:
-            break
-
-        # Autoload last, so it sees this iteration's computed `interval`
-        # and can shorten it: the supervision branches above may have
-        # picked a sleep far longer than the launch is meant to wait.
-        if not autoload.fired:
-            try:
-                autoload_interval = autoload.poll(time.monotonic())
-            except Exception as exc:  # noqa: BLE001 - autoload must never crash the supervision loop
-                log(xbmc.LOGERROR, "startup autoload failed: %r" % (exc,))
-                autoload.fired = True  # latch off; never retry for the rest of the session
-            else:
-                if autoload_interval is not None:
-                    interval = min(interval, autoload_interval)
-
-        if monitor.waitForAbort(interval):
-            break
-
-    # Kodi never delivers the abort to the RunScript-launched bridge in
-    # time: observed live, its xbmc.Monitor was still polling
-    # waitForAbort() well after "Stopping the application", Kodi killed
-    # it after 5s and then hung on quit waiting for its threads. This
-    # service does see the abort, so it tells the bridge to stop itself
-    # over POST /shutdown, which runs the bridge's own cleanup.
-    try:
+    def shutdown_s4me_bridge():
         bridge_port = s4me_bridge.launched_port()
         if bridge_port is not None:
             s4me.shutdown_bridge(bridge_port)
-    except Exception as exc:  # noqa: BLE001 - shutdown must continue regardless
-        log(xbmc.LOGWARNING, "s4me bridge shutdown failed: %r" % (exc,))
 
-    if state.proc is not None:
-        log(xbmc.LOGINFO, "shutting down embedded server")
-        _stop_process(state.proc)
+    # Mix the Kodi Monitor in here: xbmc cannot be imported at module scope.
+    monitor_cls = type("KodiServiceMonitor", (ServiceMonitor, xbmc.Monitor), {})
+    Supervisor(
+        monitor_cls(addon),
+        profile_dir,
+        log,
+        LogLevels(xbmc.LOGINFO, xbmc.LOGWARNING, xbmc.LOGERROR),
+        notify,
+        progress_player,
+        sync_s4me_bridge,
+        shutdown_s4me_bridge,
+        autoload,
+    ).run()
