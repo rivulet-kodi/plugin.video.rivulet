@@ -72,6 +72,7 @@ on a torrent/YouTube/magnet/archive/nzb/ftp URL it returns.
 import base64
 import binascii
 import json
+import re
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
 from lib.stremio.addons import _request_error_category, safe_url_for_log
@@ -173,15 +174,58 @@ _DIRECT_URL_SCHEMES = frozenset({
 _MAX_ARCHIVE_URL_ENTRIES = 32
 
 
+#: Query parameters whose values are masked by `redact_url()`.
+_SENSITIVE_QUERY_KEYS = frozenset({
+    'lz', 'token', 'access_token', 'api_key', 'apikey', 'key', 'password', 'pass', 'passwd',
+    'secret', 'auth', 'authorization', 'signature', 'sig',
+})
+
+#: Stream ids `/yt/{id}` is built for (YouTube ids are 11 chars; some slack).
+_YT_ID_RE = re.compile(r'^[A-Za-z0-9_-]{1,20}$')
+
+
+def redact_url(url):
+    """`url` with userinfo (`user:pass@`) and sensitive query values
+    (`lz` payloads, tokens, passwords...) masked, safe for logging.
+    Never raises; unparseable input yields `<invalid-url>`."""
+    try:
+        text = str(url)
+        parsed = urlparse(text)
+        netloc = parsed.netloc
+        if '@' in netloc:
+            netloc = '***@' + netloc.rsplit('@', 1)[1]
+        query = parsed.query
+        if query:
+            parts = []
+            for piece in query.split('&'):
+                name, sep, _value = piece.partition('=')
+                if sep and unquote(name).lower() in _SENSITIVE_QUERY_KEYS:
+                    piece = name + '=***'
+                parts.append(piece)
+            query = '&'.join(parts)
+        return parsed._replace(netloc=netloc, query=query, params='' if not parsed.params else '***').geturl()
+    except Exception:  # noqa: BLE001 - logging helper must never raise
+        return '<invalid-url>'
+
+
+def _is_heartbeat_body(body):
+    return isinstance(body, dict) and body.get('success') is True
+
+
+def _is_settings_body(body):
+    return isinstance(body, dict) and isinstance(body.get('values'), dict)
+
+
 def _redact_error_url(base_url, url):
     """`url` with its `base_url` prefix (the free-text server_url setting,
     which may carry `user:pass@` userinfo) replaced by
-    `safe_url_for_log(base_url)` - so a `ServerError` message never echoes
-    credentials a user pasted into the streaming-server URL setting. The
-    path/query suffix is kept (it never carries userinfo)."""
+    `safe_url_for_log(base_url)`, and sensitive query values masked - so a
+    `ServerError` message never echoes credentials."""
     safe_base = safe_url_for_log(base_url)
     suffix = url[len(base_url):] if url.startswith(base_url) else url
-    return safe_base + suffix
+    if suffix.startswith('/') or suffix.startswith('?') or not suffix:
+        return redact_url(safe_base + suffix)
+    return redact_url(suffix)
 
 
 def normalize_info_hash(value):
@@ -327,6 +371,11 @@ class ServerError(Exception):
     """
 
 
+class RangeNotSatisfiableError(ServerError):
+    """HTTP 416 from a ranged read: the requested range starts at/after
+    EOF. Terminal for a range loop (the file is already fully read)."""
+
+
 class UnsupportedStreamError(ServerError):
     """Raised by `resolve_stream()` for a Stream source kind stremio-core
     itself recognizes but that can never be handed to Kodi's player:
@@ -364,24 +413,38 @@ class ServerClient:
         self.session = requests.Session() if _ensure_requests() is not None else None
 
     def is_available(self):
-        """Probe the server: GET /settings, falling back to /stats.json.
+        """Probe the server: GET /heartbeat, falling back to /settings.
 
-        Both endpoints exist per docs/swagger.yaml. Uses a short timeout
-        since this may run on every playback attempt; returns False on
-        ANY error (connection refused, timeout, non-2xx, missing
-        `requests`) rather than raising - unavailability is a normal,
-        expected state (server disabled or still starting up).
+        A responder only counts if its body looks like stremio-server-go
+        (`{"success": true}` for /heartbeat, an object with `values` for
+        /settings), so an unrelated service squatting the port is not
+        adopted. Short timeout; returns False on ANY error rather than
+        raising.
         """
         if requests is None:
             return False
-        for path in ('/settings', '/stats.json'):
+        for path, check in (('/heartbeat', _is_heartbeat_body), ('/settings', _is_settings_body)):
             try:
                 resp = self.session.get(self.base_url + path, timeout=2)
-                if resp.ok:
+                if not resp.ok:
+                    continue
+                if check(resp.json()):
                     return True
-            except requests.RequestException:
+            except (requests.RequestException, ValueError):
                 continue
         return False
+
+    def remove_engine(self, info_hash, timeout=2):
+        """Best-effort `GET /{ih}/remove` (drop the torrent engine at
+        playback end). Short timeout; returns True on success, never raises."""
+        if requests is None or self.session is None:
+            return False
+        normalized = normalize_info_hash(info_hash) or str(info_hash).lower()
+        try:
+            resp = self.session.get('%s/%s/remove' % (self.base_url, normalized), timeout=timeout)
+            return bool(resp.ok)
+        except Exception:  # noqa: BLE001 - best-effort cleanup
+            return False
 
     @staticmethod
     def _tr_query(trackers):
@@ -558,7 +621,11 @@ class ServerClient:
             resp = self.session.get(url, headers=headers, stream=True, timeout=timeout)
             resp.raise_for_status()
         except requests.RequestException as exc:
-            raise ServerError('GET %s failed: %s' % (_redact_error_url(self.base_url, url), _request_error_category(exc)))
+            status = getattr(getattr(exc, 'response', None), 'status_code', None)
+            message = 'GET %s failed: %s' % (_redact_error_url(self.base_url, url), _request_error_category(exc))
+            if status == 416:
+                raise RangeNotSatisfiableError(message)
+            raise ServerError(message)
         got = 0
         try:
             for chunk in resp.iter_content(chunk_size=chunk_size):
@@ -741,7 +808,7 @@ class ServerClient:
 
         url = stream.get('url')
         if url:
-            if isinstance(url, str) and url.startswith('magnet:'):
+            if is_magnet_url(url):
                 return self._magnet_to_torrent_url(url)
             if _is_ftp_url(url):
                 return self._ftp_create_url(url)
@@ -757,7 +824,10 @@ class ServerClient:
 
         yt_id = stream.get('ytId')
         if yt_id:
-            return '%s/yt/%s' % (self.base_url, quote(str(yt_id), safe=_YT_SAFE_CHARS))
+            yt_id = str(yt_id)
+            if not _YT_ID_RE.match(yt_id):
+                return None
+            return '%s/yt/%s' % (self.base_url, yt_id)
 
         for key, kind in _ARCHIVE_KIND_BY_KEY.items():
             if stream.get(key):
@@ -775,6 +845,27 @@ class ServerClient:
             )
 
         return None
+
+
+def is_magnet_url(value):
+    """True if `value` is a string with a `magnet:` scheme."""
+    return isinstance(value, str) and value.lower().startswith('magnet:')
+
+
+def magnet_stream(url):
+    """`{'infoHash': ..., 'announce': [...]}` for a `magnet:` url with a
+    usable btih hash (the shape the torrent pre-buffer consumes), else None."""
+    try:
+        query = parse_qs(urlparse(url).query)
+    except ValueError:
+        return None
+    info_hash = next(
+        (xt.split(':', 2)[2] for xt in query.get('xt', []) if xt.lower().startswith('urn:btih:') and xt.count(':') >= 2),
+        None,
+    )
+    if not info_hash or not normalize_info_hash(info_hash):
+        return None
+    return {'infoHash': info_hash, 'announce': query.get('tr', [])}
 
 
 def buffered_bytes(stats):

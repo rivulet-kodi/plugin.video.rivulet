@@ -275,19 +275,75 @@ def test_resolve_stream_malformed_url_error_omits_embedded_secrets():
 # --- is_available ----------------------------------------------------------
 
 
-def test_is_available_true_when_settings_ok():
+def _json_response(body, ok=True):
+    class _Resp:
+        status_code = 200 if ok else 500
+
+        def json(self):
+            return body
+
+    _Resp.ok = ok
+    return _Resp()
+
+
+def test_is_available_true_when_heartbeat_ok():
     client = make_client()
-    client.session = FakeSession(responses=[_ok_response()])
+    client.session = FakeSession(responses=[_json_response({"success": True})])
     assert client.is_available() is True
-    assert client.session.calls[0]["url"] == BASE + "/settings"
+    assert client.session.calls[0]["url"] == BASE + "/heartbeat"
 
 
-def test_is_available_falls_back_to_stats_json():
+def test_is_available_falls_back_to_settings():
     client = make_client()
-    client.session = FakeSession(responses=[_not_ok_response(), _ok_response()])
+    client.session = FakeSession(responses=[_not_ok_response(), _json_response({"values": {}})])
     assert client.is_available() is True
     urls = [c["url"] for c in client.session.calls]
-    assert urls == [BASE + "/settings", BASE + "/stats.json"]
+    assert urls == [BASE + "/heartbeat", BASE + "/settings"]
+
+
+def test_is_available_rejects_foreign_service_on_port():
+    client = make_client()
+    client.session = FakeSession(responses=[_json_response({"hello": 1}), _json_response({"nope": 1})])
+    assert client.is_available() is False
+
+
+def test_remove_engine_best_effort():
+    client = make_client()
+    client.session = FakeSession(responses=[_ok_response()])
+    assert client.remove_engine("AA" * 20, timeout=1) is True
+    call = client.session.calls[0]
+    assert call["url"] == BASE + "/" + "aa" * 20 + "/remove"
+    assert call["kwargs"]["timeout"] == 1
+
+
+def test_remove_engine_swallows_errors():
+    client = make_client()
+    client.session = FakeSession(exc=ConnectionError("down"))
+    assert client.remove_engine("aa" * 20) is False
+
+
+def test_yt_id_rejects_unsafe_ids():
+    client = make_client()
+    assert client.resolve_stream({"ytId": "a/../b"}) is None
+    assert client.resolve_stream({"ytId": "x" * 21}) is None
+    assert client.resolve_stream({"ytId": "dQw4w9WgXcQ"}) == BASE + "/yt/dQw4w9WgXcQ"
+
+
+def test_redact_url_masks_userinfo_and_secrets():
+    from lib.stremio.server import redact_url
+
+    out = redact_url("ftp://user:pw@host/f.mkv?token=abc&x=1&lz=PAYLOAD")
+    assert "pw" not in out and "abc" not in out and "PAYLOAD" not in out
+    assert "x=1" in out and "host" in out
+
+
+def test_magnet_stream_extracts_hash_and_trackers():
+    from lib.stremio.server import magnet_stream
+
+    ms = magnet_stream("magnet:?xt=urn:btih:" + "ab" * 20 + "&tr=udp%3A%2F%2Ft%2Fannounce")
+    assert ms["infoHash"] == "ab" * 20
+    assert ms["announce"] == ["udp://t/announce"]
+    assert magnet_stream("magnet:?dn=x") is None
 
 
 def test_is_available_false_on_connection_error():

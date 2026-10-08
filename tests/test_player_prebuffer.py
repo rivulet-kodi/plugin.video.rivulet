@@ -1443,3 +1443,112 @@ def test_keepalive_pin_start_spawns_a_real_background_thread(kodi_stubs):
     assert not pin._thread.is_alive()
 
 
+
+
+# --- resilience: 416, failures/backoff, ftp/magnet, session end ---------------
+
+
+def test_backoff_delay_sequence_caps_at_eight(kodi_stubs):
+    delays = [kodi_stubs.player._backoff_delay(n) for n in range(1, 7)]
+    assert delays == [1.0, 2.0, 4.0, 8.0, 8.0, 8.0]
+
+
+def test_416_on_resume_is_terminal_and_starts_with_what_was_buffered(kodi_stubs, monkeypatch):
+    from lib.stremio.server import RangeNotSatisfiableError
+
+    env = kodi_stubs.env
+    script = _ServerScript(
+        resolve_url='http://server/x/0',
+        iter_front_attempts=[[100_000], RangeNotSatisfiableError('416')],
+    ).install(monkeypatch, kodi_stubs.player)
+    monkeypatch.setattr(kodi_stubs.player, '_start_keepalive_pin', lambda *a, **k: None)
+
+    kodi_stubs.player.play(30, _torrent_stream(fileIdx=0), 'movie', 'tt30')
+
+    assert len(script.iter_front_calls) == 2  # no further retries after the 416
+    handle, succeeded, _ = _resolved_one(env)
+    assert (handle, succeeded) == (30, True)
+
+
+def test_consecutive_failures_with_server_gone_abort_with_notification(kodi_stubs, monkeypatch):
+    from lib.stremio.server import ServerError
+
+    env = kodi_stubs.env
+    script = _ServerScript(
+        available_results=[True, False],  # up for the connect stage, then gone
+        resolve_url='http://server/x/0',
+        iter_front_attempts=[ServerError('GET failed: ConnectionError')],
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(31, _torrent_stream(fileIdx=0), 'movie', 'tt31')
+
+    assert len(script.iter_front_calls) == 3
+    assert 'STR30031' in [msg for _, msg, _, _ in env.notifications]
+    handle, succeeded, _ = _resolved_one(env)
+    assert (handle, succeeded) == (31, False)
+
+
+def test_ftp_url_stream_waits_for_server(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    script = _ServerScript(
+        available_results=[False, True],
+        resolve_url='http://server/ftp/a.mkv?lz=x',
+    ).install(monkeypatch, kodi_stubs.player)
+
+    kodi_stubs.player.play(32, {'url': 'ftp://u:p@host/a.mkv'}, 'movie', 'tt32')
+
+    assert script.is_available_calls == 2
+    handle, succeeded, _ = _resolved_one(env)
+    assert (handle, succeeded) == (32, True)
+
+
+def test_magnet_url_stream_is_prebuffered(kodi_stubs, monkeypatch):
+    env = kodi_stubs.env
+    script = _ServerScript(
+        resolve_url='http://server/x/-1',
+        create_engine_result={'guessedFileIdx': 0},
+        iter_front_attempts=[[DEFAULT_TARGET_BYTES]],
+    ).install(monkeypatch, kodi_stubs.player)
+    monkeypatch.setattr(kodi_stubs.player, '_start_keepalive_pin', lambda *a, **k: None)
+
+    kodi_stubs.player.play(33, {'url': 'magnet:?xt=urn:btih:' + INFO_HASH}, 'movie', 'tt33')
+
+    assert script.create_engine_calls and script.iter_front_calls
+    handle, succeeded, _ = _resolved_one(env)
+    assert (handle, succeeded) == (33, True)
+
+
+def test_end_session_stops_pin_and_removes_engine(kodi_stubs):
+    player = kodi_stubs.player
+    removed = []
+    stopped = []
+
+    class _Server:
+        def remove_engine(self, info_hash, timeout=None):
+            removed.append((info_hash, timeout))
+
+    class _Pin:
+        def stop(self):
+            stopped.append(True)
+
+    player._register_session(_Server(), INFO_HASH, _Pin())
+    player._end_session()
+    player._end_session()  # idempotent
+
+    assert removed == [(INFO_HASH, 2)]
+    assert stopped == [True]
+
+
+def test_keepalive_pin_stops_on_416(kodi_stubs):
+    from lib.stremio.server import RangeNotSatisfiableError
+
+    calls = []
+
+    class _FakeServer:
+        def iter_front(self, *a, **k):
+            calls.append(1)
+            raise RangeNotSatisfiableError('416')
+            yield  # pragma: no cover
+
+    kodi_stubs.player._KeepAlivePin(_FakeServer(), INFO_HASH, 0, 0, lambda: False)._run()
+    assert calls == [1]

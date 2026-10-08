@@ -219,7 +219,10 @@ def probe_manifest_version(port, timeout=PROBE_TIMEOUT_SECONDS):
         manifest = json.loads(body)
     except ValueError:
         return ""
-    version = manifest.get("version") if isinstance(manifest, dict) else None
+    if not isinstance(manifest, dict) or manifest.get("id") != MANIFEST["id"]:
+        # Something else (not this bridge) holds the port: never adopt it.
+        return ""
+    version = manifest.get("version")
     return version if isinstance(version, str) else ""
 
 

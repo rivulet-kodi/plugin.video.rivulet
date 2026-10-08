@@ -19,10 +19,16 @@ import xbmcplugin
 from lib.library import iso8601_utc
 from lib.stremio.server import (
     UNKNOWN_FILE_IDX,
+    RangeNotSatisfiableError,
     ServerClient,
+    ServerError,
     UnsupportedStreamError,
+    _is_ftp_url,
     guess_file_idx,
+    is_magnet_url,
+    magnet_stream,
     normalize_info_hash,
+    redact_url,
     stream_trackers,
 )
 from lib.stremio.subtitles import collect_subtitles, filter_subtitles
@@ -84,6 +90,27 @@ _ATTEMPT_PAUSE_SECONDS = 2.0
 #: these caps are just the give-up backstop for a genuinely dead swarm.
 _MAX_METADATA_ATTEMPTS = 60
 _MAX_FRONT_ATTEMPTS = 60
+
+#: A pre-buffer/metadata loop that made no progress at all (no new bytes /
+#: no usable server answer) for this long gives up; progress resets it.
+_NO_PROGRESS_DEADLINE_SECONDS = 120.0
+
+#: Exponential retry backoff after a failed attempt: 1, 2, 4, 8s (cap).
+_BACKOFF_CAP_SECONDS = 8.0
+
+#: After this many consecutive connection failures the server is re-checked
+#: and, if gone, the loop aborts with a notification.
+_MAX_CONSECUTIVE_FAILURES = 3
+
+
+def _backoff_delay(failures):
+    """Seconds to wait after `failures` consecutive failures: 1, 2, 4, 8 (cap)."""
+    return min(_BACKOFF_CAP_SECONDS, float(2 ** max(0, failures - 1)))
+
+
+#: Seconds a handed-off torrent session is watched for playback to start
+#: before it is considered abandoned.
+_PLAYBACK_START_WAIT_SECONDS = 90.0
 
 #: Seconds to wait for a not-yet-reachable streaming server to come up
 #: (e.g. one the background service is still launching) before giving up.
@@ -643,12 +670,82 @@ class _KeepAlivePin:
                             return
                         if self._stop_event.wait(_KEEPALIVE_SLEEP_SECONDS):
                             return
+                except RangeNotSatisfiableError:
+                    return  # 416: past EOF, nothing left to keep warm
                 except Exception as exc:  # noqa: BLE001 - a pin read hiccup must never crash playback
                     log('player: keep-alive pin read failed for %s: %r' % (self._info_hash, exc), xbmc.LOGDEBUG)
                 if not advanced and self._stop_event.wait(_KEEPALIVE_POLL_SECONDS):
                     return
         except Exception as exc:  # noqa: BLE001 - the pin is a bonus, never fatal to playback
             log('player: keep-alive pin failed for %s: %r' % (self._info_hash, exc), xbmc.LOGWARNING)
+
+
+#: The torrent session currently handed off to Kodi: `(server, info_hash,
+#: pin)`, set when pre-buffer succeeds, consumed by `_end_session()`.
+_session_lock = threading.Lock()
+_session = None
+
+
+def _register_session(server, info_hash, pin):
+    global _session
+    with _session_lock:
+        previous, _session = _session, (server, info_hash, pin)
+    if previous is not None and previous[2] is not pin:
+        previous[2].stop()
+
+
+def _end_session():
+    """Playback ended (or never started): stop the keep-alive pin and
+    best-effort `/{ih}/remove` the engine (short timeout, never raises)."""
+    global _session
+    with _session_lock:
+        current, _session = _session, None
+    if current is None:
+        return
+    server, info_hash, pin = current
+    with contextlib.suppress(Exception):
+        pin.stop()
+    with contextlib.suppress(Exception):
+        server.remove_engine(info_hash, timeout=2)
+
+
+def _end_session_if(pin):
+    with _session_lock:
+        if _session is None or _session[2] is not pin:
+            return
+    _end_session()
+
+
+def _watch_playback_end():
+    """Spawn a daemon that waits for the just-started playback to begin and
+    end, then runs `_end_session()`. No-op when no torrent session exists."""
+    with _session_lock:
+        if _session is None:
+            return
+        watched = _session[2]
+
+    def _run():
+        try:
+            monitor = xbmc.Monitor()
+            player = xbmc.Player()
+            started = False
+            waited_s = 0.0
+            while not monitor.abortRequested():
+                with _session_lock:
+                    if _session is None or _session[2] is not watched:
+                        return  # superseded by a newer session
+                if player.isPlayingVideo():
+                    started = True
+                elif started or waited_s >= _PLAYBACK_START_WAIT_SECONDS:
+                    break
+                if monitor.waitForAbort(1.0):
+                    break
+                waited_s += 1.0
+        except Exception as exc:  # noqa: BLE001 - cleanup watcher must never be fatal
+            log('player: playback watcher failed: %r' % (exc,), xbmc.LOGDEBUG)
+        _end_session_if(watched)
+
+    threading.Thread(target=_run, name='RivuletPlaybackEnd', daemon=True).start()
 
 
 def _start_keepalive_pin(server, info_hash, file_idx, start_byte):
@@ -660,11 +757,12 @@ def _start_keepalive_pin(server, info_hash, file_idx, start_byte):
     """
     try:
         monitor = xbmc.Monitor()
-        _KeepAlivePin(
+        pin = _KeepAlivePin(
             server, info_hash, file_idx, start_byte,
             lambda: xbmc.Player().isPlayingVideo(),
             is_aborted=monitor.abortRequested,
         ).start()
+        _register_session(server, info_hash, pin)
     except Exception as exc:  # noqa: BLE001 - the pin is a bonus, never fatal to playback
         log('player: keep-alive pin failed to start for %s: %r' % (info_hash, exc), xbmc.LOGWARNING)
 
@@ -701,15 +799,24 @@ def _await_file_idx(server, stream, info_hash, url, dialog, monitor):
     # discovery for the metadata wait itself, not only once Kodi opens the
     # final URL (see `ServerClient.create_engine`).
     trackers = stream_trackers(stream)
+    failures = 0
+    last_progress = time.monotonic()
     for attempt in range(_MAX_METADATA_ATTEMPTS):
         if dialog.iscanceled():
             return UNKNOWN_FILE_IDX, url, False, None
 
         try:
             stats = server.create_engine(info_hash, timeout=_METADATA_TIMEOUT, trackers=trackers)
+            failures = 0
+            last_progress = time.monotonic()
         except Exception as exc:  # noqa: BLE001 - a slow/failed poll just means "try again"
             log('player: metadata poll failed for %s: %r' % (info_hash, exc), xbmc.LOGWARNING)
             stats = None
+            failures += 1
+            if failures >= _MAX_CONSECUTIVE_FAILURES and not server.is_available():
+                log('player: server unreachable during metadata wait for %s' % info_hash, xbmc.LOGWARNING)
+                notify(L(30031))
+                return UNKNOWN_FILE_IDX, url, False, None
 
         idx = guess_file_idx(stats)
         if idx is not None:
@@ -723,7 +830,10 @@ def _await_file_idx(server, stream, info_hash, url, dialog, monitor):
             stats=_stats_line(stats),
         )
 
-        if monitor.waitForAbort(1.0):
+        if time.monotonic() - last_progress >= _NO_PROGRESS_DEADLINE_SECONDS:
+            break
+
+        if monitor.waitForAbort(_backoff_delay(failures) if failures else 1.0):
             return UNKNOWN_FILE_IDX, url, False, None
 
     return UNKNOWN_FILE_IDX, url, True, None
@@ -862,6 +972,9 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=None):
         #: re-waits on) data already received. Monotonically
         #: non-decreasing: a chunk received in any attempt is never lost.
         total_got = 0
+        failures = 0
+        last_progress = time.monotonic()
+        range_eof = False
         #: Aggregate downloaded-bytes counter from the previous attempt's
         #: stats poll, best-effort - used only by the stalled-attempt
         #: guard in `_may_start_early` to tell "swarm truly dead" apart
@@ -928,8 +1041,22 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=None):
                         return False, url, None
                     if total_got >= target:
                         break
+            except RangeNotSatisfiableError:
+                # 416 is terminal: the range starts at/after EOF, so the file
+                # is fully read (or empty) - retrying can never change that.
+                range_eof = True
             except Exception as exc:  # noqa: BLE001 - a front-read hiccup must not brick playback
                 log('player: front read failed for %s: %r' % (info_hash, exc), xbmc.LOGWARNING)
+                if total_got == got_before_attempt and isinstance(exc, ServerError):
+                    failures += 1
+                    if failures >= _MAX_CONSECUTIVE_FAILURES and not server.is_available():
+                        log('player: server unreachable during pre-buffer for %s' % info_hash, xbmc.LOGWARNING)
+                        notify(L(30031))
+                        return False, url, None
+
+            if total_got > got_before_attempt:
+                failures = 0
+                last_progress = time.monotonic()
 
             # This attempt's own stall boundary: no new bytes at all,
             # whether from a timeout, an exception, or a zero-chunk
@@ -944,7 +1071,7 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=None):
             if downloaded_now is not None:
                 prev_downloaded = downloaded_now
 
-            if total_got >= target:
+            if total_got >= target or (range_eof and total_got > 0):
                 log(
                     'player: pre-buffer complete for %s: buffered=%d target=%d'
                     % (info_hash, total_got, target),
@@ -973,7 +1100,11 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=None):
                 stats=stats_line,
             )
 
-            if monitor.waitForAbort(_ATTEMPT_PAUSE_SECONDS):
+            if range_eof or time.monotonic() - last_progress >= _NO_PROGRESS_DEADLINE_SECONDS:
+                break
+
+            pause = _backoff_delay(failures) if failures else _ATTEMPT_PAUSE_SECONDS
+            if monitor.waitForAbort(pause):
                 return False, url, None
 
         if total_got >= _HEADER_MIN_BYTES:
@@ -1255,7 +1386,10 @@ def _resolve_playable_item(stream, stype, sid, item_meta=None, video_id=None):
     try:
         monitor = xbmc.Monitor()
 
-        if any(key in stream for key in _SERVER_DEPENDENT_KEYS) and not _wait_for_server(server, dialog, monitor):
+        raw_url = stream.get('url')
+        server_url_stream = is_magnet_url(raw_url) or _is_ftp_url(raw_url)
+        if (server_url_stream or any(key in stream for key in _SERVER_DEPENDENT_KEYS)) \
+                and not _wait_for_server(server, dialog, monitor):
             notify(L(30031))
             return None, None
 
@@ -1271,11 +1405,11 @@ def _resolve_playable_item(stream, stype, sid, item_meta=None, video_id=None):
             # telling the user WHY instead of the generic "no playable
             # stream" one below - raised, and this early return happens,
             # strictly before any metadata/ListItem construction below.
-            log('player: unsupported stream for %s/%s: %r' % (stype, sid, exc), xbmc.LOGINFO)
+            log('player: unsupported stream for %s/%s: %s' % (stype, sid, redact_url(str(exc))), xbmc.LOGINFO)
             notify(L(30160))
             return None, None
         except Exception as exc:  # noqa: BLE001 - a broken server response must not crash Kodi
-            log('player: resolve_stream failed for %s/%s: %r' % (stype, sid, exc), xbmc.LOGERROR)
+            log('player: resolve_stream failed for %s/%s: %s' % (stype, sid, redact_url(repr(exc))), xbmc.LOGERROR)
             url = None
 
         if not url:
@@ -1285,8 +1419,13 @@ def _resolve_playable_item(stream, stype, sid, item_meta=None, video_id=None):
         if dialog.iscanceled():
             return None, None
 
-        if stream.get('infoHash'):
-            proceed, url, resolved_filename = _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=item_meta)
+        prebuffer_stream = stream if stream.get('infoHash') else (
+            magnet_stream(raw_url) if is_magnet_url(raw_url) else None
+        )
+        if prebuffer_stream:
+            proceed, url, resolved_filename = _prebuffer_torrent(
+                server, prebuffer_stream, url, dialog, monitor, item_meta=item_meta,
+            )
             if not proceed:
                 return None, None
 
@@ -1379,6 +1518,7 @@ def play(handle, stream, stype, sid, item_meta=None, video_id=None):
         xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())
         return
     xbmcplugin.setResolvedUrl(handle, True, list_item)
+    _watch_playback_end()
 
 
 def play_direct(stream, stype, sid, item_meta=None, on_ready=None, video_id=None):
@@ -1409,4 +1549,5 @@ def play_direct(stream, stype, sid, item_meta=None, on_ready=None, video_id=None
         except Exception as exc:  # noqa: BLE001 - a hook failure must never block playback
             log('player: on_ready hook failed: %r' % (exc,), xbmc.LOGWARNING)
     xbmc.Player().play(url, list_item)
+    _watch_playback_end()
     return True

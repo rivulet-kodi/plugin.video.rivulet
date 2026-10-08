@@ -564,10 +564,25 @@ def test_probe_manifest_version_returns_the_served_version(monkeypatch):
     import json
     import urllib.request
 
-    body = json.dumps({"version": "1.1.0"}).encode("utf-8")
+    body = json.dumps({"id": "org.rivulet.s4me", "version": "1.1.0"}).encode("utf-8")
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _JsonResp(body))
 
     assert s4me.probe_manifest_version(11480) == "1.1.0"
+
+
+def test_probe_manifest_version_empty_string_for_foreign_manifest_id(monkeypatch):
+    """A different service on the port (wrong/missing manifest id) is never
+    adopted, even if it serves a matching version."""
+    import json
+    import urllib.request
+
+    body = json.dumps({"id": "com.other.addon", "version": s4me.MANIFEST["version"]}).encode("utf-8")
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _JsonResp(body))
+    assert s4me.probe_manifest_version(11480) == ""
+
+    body = json.dumps({"version": s4me.MANIFEST["version"]}).encode("utf-8")
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _JsonResp(body))
+    assert s4me.probe_manifest_version(11480) == ""
 
 
 def test_probe_manifest_version_empty_string_on_invalid_json(monkeypatch):
@@ -602,7 +617,7 @@ def test_probe_manifest_version_reads_body_off_http_error_responses(monkeypatch)
     import urllib.error
     import urllib.request
 
-    body = json.dumps({"version": "1.0.0"}).encode("utf-8")
+    body = json.dumps({"id": "org.rivulet.s4me", "version": "1.0.0"}).encode("utf-8")
 
     def _raise(*a, **k):
         raise urllib.error.HTTPError("url", 404, "not found", {}, io.BytesIO(body))
@@ -621,7 +636,7 @@ def test_probe_manifest_version_closes_http_error_response(monkeypatch):
     import urllib.error
     import urllib.request
 
-    body = json.dumps({"version": "1.0.0"}).encode("utf-8")
+    body = json.dumps({"id": "org.rivulet.s4me", "version": "1.0.0"}).encode("utf-8")
     closed = []
 
     class _ClosingBytesIO(io.BytesIO):
