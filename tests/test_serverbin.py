@@ -454,6 +454,69 @@ def test_install_binary_progress_cb_exception_aborts_and_cleans_up_partial_file(
     assert not (tmp_path / ".stremio-server.part").exists()
 
 
+class _BreakingResponse(_StreamResponse):
+    """Serves `data[:cut]` then drops the connection."""
+
+    def __init__(self, data, cut, **kwargs):
+        super().__init__(data, **kwargs)
+        self._cut = cut
+
+    def iter_content(self, chunk_size=1):
+        yield self._data[:self._cut]
+        raise serverbin.requests.ConnectionError("reset")
+
+
+class _RangeResponse(_StreamResponse):
+    def __init__(self, data, status_code):
+        super().__init__(data)
+        self.status_code = status_code
+
+
+def test_download_to_file_resumes_part_file_with_range_after_a_dropped_connection(
+        tmp_path, monkeypatch, fake_requests):
+    monkeypatch.setattr(serverbin, "_sleep", lambda seconds: None)
+    payload = bytes(range(256)) * 8
+    fake_requests.queue_get(_BreakingResponse(payload, 700))
+    fake_requests.queue_get(_RangeResponse(payload[700:], 206))
+    dest = tmp_path / "a.part"
+
+    digest = serverbin._download_to_file("http://x/a", str(dest), None)
+
+    assert digest == hashlib.sha256(payload).hexdigest()
+    assert dest.read_bytes() == payload
+    assert "Range" not in fake_requests.calls[0]["kwargs"]["headers"]
+    assert fake_requests.calls[1]["kwargs"]["headers"]["Range"] == "bytes=700-"
+
+
+def test_download_to_file_restarts_when_server_ignores_range(tmp_path, monkeypatch, fake_requests):
+    monkeypatch.setattr(serverbin, "_sleep", lambda seconds: None)
+    payload = b"abcdefghij" * 100
+    fake_requests.queue_get(_BreakingResponse(payload, 300))
+    fake_requests.queue_get(_RangeResponse(payload, 200))
+    dest = tmp_path / "a.part"
+
+    digest = serverbin._download_to_file("http://x/a", str(dest), None)
+
+    assert digest == hashlib.sha256(payload).hexdigest()
+    assert dest.read_bytes() == payload
+
+
+def test_download_to_file_gives_up_after_three_attempts_with_backoff(
+        tmp_path, monkeypatch, fake_requests):
+    sleeps = []
+    monkeypatch.setattr(serverbin, "_sleep", sleeps.append)
+    for _ in range(3):
+        fake_requests.queue_get(serverbin.requests.ConnectionError("down"))
+    dest = tmp_path / "a.part"
+
+    with pytest.raises(DownloadError, match="download failed"):
+        serverbin._download_to_file("http://x/a", str(dest), None)
+
+    assert len(fake_requests.calls) == 3
+    assert sleeps == [serverbin.DOWNLOAD_BACKOFF, serverbin.DOWNLOAD_BACKOFF * 2]
+    assert not dest.exists()
+
+
 # --- UnsupportedPlatformError / Android gating ------------------------------
 
 

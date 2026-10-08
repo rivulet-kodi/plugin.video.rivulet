@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 import zipfile
 
 try:
@@ -54,6 +55,8 @@ LIBRARY_NAME = "libstremio-server.so"
 PART_SUFFIX = ".part"
 DOWNLOAD_CHUNK_SIZE = 64 * 1024
 REQUEST_TIMEOUT = 30
+DOWNLOAD_ATTEMPTS = 3
+DOWNLOAD_BACKOFF = 2.0
 VERIFY_TIMEOUT = 15
 
 #: `sys.platform` values CPython reports on Apple's mobile systems, and the
@@ -403,26 +406,50 @@ def _safe_remove(path):
         pass
 
 
-def _download_to_file(url, dest_path, progress_cb):
-    """Stream `url` into `dest_path`, returning the sha256 hex digest."""
-    if requests is None:
-        raise DownloadError('the "requests" package is required to download the server binary')
+def _sleep(seconds):
+    time.sleep(seconds)
+
+
+def _hash_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(DOWNLOAD_CHUNK_SIZE), b""):
+            digest.update(block)
+    return digest
+
+
+def _download_attempt(url, dest_path, progress_cb, resume):
+    """One download attempt; with `resume` it continues the existing
+    `dest_path` via an HTTP Range request (falling back to a full restart if
+    the server ignores Range). Raises requests.RequestException on a
+    transport failure, leaving the partial file in place for the retry."""
     headers = {"User-Agent": USER_AGENT}
+    offset = 0
+    if resume:
+        try:
+            offset = os.path.getsize(dest_path)
+        except OSError:
+            offset = 0
+    if offset:
+        headers["Range"] = "bytes=%d-" % offset
+    resp = requests.get(url, headers=headers, stream=True, timeout=REQUEST_TIMEOUT)
     try:
-        resp = requests.get(url, headers=headers, stream=True, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
-    except requests.RequestException as exc:
-        raise DownloadError("download failed: %s" % exc)
-
-    try:
-        total_size = int(resp.headers.get("Content-Length"))
-    except (AttributeError, TypeError, ValueError):
-        total_size = None
-
-    sha256 = hashlib.sha256()
-    done = 0
-    try:
-        with open(dest_path, "wb") as fh:
+        if offset and getattr(resp, "status_code", 200) != 206:
+            offset = 0  # server ignored Range: restart from scratch
+        try:
+            content_length = int(resp.headers.get("Content-Length"))
+        except (AttributeError, TypeError, ValueError):
+            content_length = None
+        total_size = content_length + offset if content_length is not None else None
+        if offset:
+            sha256 = _hash_file(dest_path)
+            mode = "ab"
+        else:
+            sha256 = hashlib.sha256()
+            mode = "wb"
+        done = offset
+        with open(dest_path, mode) as fh:
             for chunk in resp.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
                 if not chunk:
                     continue
@@ -431,17 +458,33 @@ def _download_to_file(url, dest_path, progress_cb):
                 done += len(chunk)
                 if progress_cb is not None:
                     progress_cb(done, total_size)
-    except requests.RequestException as exc:
-        _safe_remove(dest_path)
-        raise DownloadError("download failed: %s" % exc)
-    except Exception:
-        # Includes a cancel signalled by progress_cb raising DownloadError.
-        _safe_remove(dest_path)
-        raise
+        return sha256.hexdigest()
     finally:
         resp.close()
 
-    return sha256.hexdigest()
+
+def _download_to_file(url, dest_path, progress_cb):
+    """Stream `url` into `dest_path`, returning the sha256 hex digest.
+
+    Retries up to DOWNLOAD_ATTEMPTS times with exponential backoff on
+    transport errors, resuming the `.part` file with an HTTP Range request.
+    The returned digest always covers the full file."""
+    if requests is None:
+        raise DownloadError('the "requests" package is required to download the server binary')
+    last_exc = None
+    for attempt in range(DOWNLOAD_ATTEMPTS):
+        if attempt:
+            _sleep(DOWNLOAD_BACKOFF * (2 ** (attempt - 1)))
+        try:
+            return _download_attempt(url, dest_path, progress_cb, resume=attempt > 0)
+        except requests.RequestException as exc:
+            last_exc = exc
+        except Exception:
+            # Includes a cancel signalled by progress_cb raising DownloadError.
+            _safe_remove(dest_path)
+            raise
+    _safe_remove(dest_path)
+    raise DownloadError("download failed: %s" % last_exc)
 
 
 def _target_member_name(os_name):
