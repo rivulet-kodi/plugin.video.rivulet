@@ -178,28 +178,28 @@ def test_platform_key_macos_arm64_is_not_mistaken_for_apple_mobile(monkeypatch):
 
 # --- PINNED_SHA256 / select_asset -------------------------------------------
 
-# Exact digests reviewed against the v0.20.1 GitHub release: computed
+# Exact digests reviewed against the v0.21.0 GitHub release: computed
 # locally from the downloaded assets and cross-checked against that
 # release's checksums.txt. Any drift here (wrong tag, tampered digest,
 # added/removed platform) must be a deliberate, reviewed edit to
 # lib/serverbin.py.
 EXPECTED_PINNED_SHA256 = {
-    ("Android", "arm64"): "f7333191e84d4a562fc0d25620b8bb6ffa163de7fa15c10e5110db99a5b5b432",
-    ("Android", "armv7"): "99c30a53399c7896afbda23b843e2cc4450492dbed99949f8eea3bb9acc74719",
-    ("Android", "i386"): "8d6fb3948b64c891c7397b4ed99e0dc662fa367d7f782ad6df722fc3c8997b76",
-    ("Android", "x86_64"): "155dacb694642e4c2709333380cbd7fce3081f524b96c00f8fb6e231d61c840b",
-    ("Darwin", "arm64"): "101debda5b10da4682c74662aec6bfd451561486b9ed76591d90b19bd50d548d",
-    ("Darwin", "x86_64"): "dfca26e865fd9c579c0eb1380d5e0f5af640946b9342fe2edfabf95ae9c6904b",
-    ("Linux", "arm64"): "329d0be5470a689bb0481b5be2c8c65cd202668cd713efcd9518482580cc0c94",
-    ("Linux", "armv7"): "f7a46f0f2a765ddc7aca0cfec8801780619d51a3da2455dc33b6117e284c9a23",
-    ("Linux", "x86_64"): "917be2db5a1115c4c4e083bba1918a202c70ed5e3e26556af59f89db99dc9dad",
-    ("Windows", "arm64"): "978a3ea4cb990d9fd4280d70bbbf2d7e7eb59133717cbbd5fdd564e8ca11a6c7",
-    ("Windows", "x86_64"): "ffb9e76b71f1f9ca76e8305c47b2fa91f976901c3bbb549e6c355a90a5271922",
+    ("Android", "arm64"): "568f222ca82caa5a1c477cfb63bc8d3c5bc23a113314f51d06975f1dc5e4efe0",
+    ("Android", "armv7"): "355930cd8d2d6a5fea8c570a70e3265a3d8fe61120b585cbd8b30443d4f42b38",
+    ("Android", "i386"): "67a9f2440a78922ee6bfa706c988c1378f750677cd10ae3a83ab142a3e52f530",
+    ("Android", "x86_64"): "b80ba42204d1fe56f79c0755e41993ad3fc2a409e4909b14a402cce624d790f7",
+    ("Darwin", "arm64"): "6984d53478dcdc370b3b61af492c0cc4c98f5e9026c7488ec9aa3ba3b9be45f7",
+    ("Darwin", "x86_64"): "83efe487548c81636315dc3ad09d70a4b23c6f08faa3c7c19fc30353f89cd9cf",
+    ("Linux", "arm64"): "12b250794a13e11f90cc2f9b6f6d414d53b35e77453ffc065693e0331378ac95",
+    ("Linux", "armv7"): "3bd21e854563595b91ae69eac2d5cb0535b8213f10f89f4942c8894fdc6294e6",
+    ("Linux", "x86_64"): "3c824dd75178308743c66582bc8fe526626837da0cd5c1a27240b424deffba2f",
+    ("Windows", "arm64"): "befc1771dbe437f232e8e72445adae40d23972ade84dfc2b2fce154dbe295394",
+    ("Windows", "x86_64"): "ae5e8be347f2e4150448c836761d0c7395608b9e8e777a0f5ff119838334fd4c",
 }
 
 
 def test_server_tag_is_pinned_to_v0_20_1():
-    assert SERVER_TAG == "v0.20.1"
+    assert SERVER_TAG == "v0.21.0"
 
 
 def test_pinned_sha256_table_matches_reviewed_v0_20_1_digests_exactly():
@@ -223,7 +223,7 @@ def test_select_asset_returns_deterministic_name_url_and_pinned_digest(
     assert asset is not None
     assert asset["name"] == expected_name
     assert asset["url"] == (
-        "https://github.com/%s/releases/download/v0.20.1/%s" % (GITHUB_REPO, expected_name))
+        "https://github.com/%s/releases/download/v0.21.0/%s" % (GITHUB_REPO, expected_name))
     assert asset["sha256"] == EXPECTED_PINNED_SHA256[(os_name, arch)]
 
 
@@ -322,7 +322,7 @@ def test_install_binary_downloads_verifies_pinned_checksum_and_installs(
     assert progress_calls[-1][1] == len(archive_bytes)
     assert len(fake_requests.calls) == 1
     assert fake_requests.calls[0]["url"] == (
-        "https://github.com/%s/releases/download/v0.20.1/stremio-server_Linux_x86_64.tar.gz"
+        "https://github.com/%s/releases/download/v0.21.0/stremio-server_Linux_x86_64.tar.gz"
         % GITHUB_REPO)
     assert not (tmp_path / ".stremio-server.part").exists()
     assert not os.path.exists(result_path + ".part")
