@@ -997,3 +997,7 @@ msgstr "Ondertitels laden…"
 msgctxt "#30410"
 msgid "Syncing addons…"
 msgstr "Addons synchroniseren…"
+
+msgctxt "#30411"
+msgid "Catalog shows only the first %d pages; more items are not loaded"
+msgstr "De catalogus toont alleen de eerste %d pagina's; meer items worden niet geladen"

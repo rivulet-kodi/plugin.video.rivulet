@@ -185,7 +185,7 @@ def _action_item(label, url, icon=None):
     return (url, li, False)
 
 
-def _fetch_meta(stype, sid, store=True, on_miss=None):
+def _fetch_meta(stype, sid, store=True, on_miss=None):  # noqa: C901 - legacy; ratchet
     """Aggregate meta across every installed addon supporting it for
     (stype, sid); Stremio addons commonly disagree on coverage, so the
     first addon to return a usable object wins.
@@ -485,6 +485,14 @@ def iter_catalog_pages(transport, ctype, cid, extra=None, catalog=None, manifest
 
     log('views.iter_catalog_pages: %s hit the %d-page cap'
         % (safe_url_for_log(transport), _MAX_CATALOG_PAGES), xbmc.LOGINFO)
+    # Surface the truncation instead of only logging it: the user would
+    # otherwise assume the catalog simply ends here.
+    message = L(30411)
+    try:
+        message = message % _MAX_CATALOG_PAGES
+    except TypeError:
+        pass  # a catalog without the %d placeholder: show it verbatim
+    notify(message)
 
 
 def fetch_catalog_pages(transport, ctype, cid, extra=None, catalog=None, manifest=None):

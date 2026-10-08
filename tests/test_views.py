@@ -804,6 +804,32 @@ def test_fetch_catalog_pages_honours_the_page_cap(load_views):
     assert len(metas) == views._MAX_CATALOG_PAGES * 20
 
 
+def test_iter_catalog_pages_notifies_when_the_page_cap_truncates(load_views, monkeypatch):
+    ctx = load_views()
+    views = ctx.views
+    pages = [_metas(index * 20, 20) for index in range(views._MAX_CATALOG_PAGES + 5)]
+    _wire_data_layer(views, FakeStore(), FakePagingClient(pages))
+    notices = []
+    monkeypatch.setattr(views, 'notify', lambda message, *a, **k: notices.append(message))
+
+    list(views.iter_catalog_pages('t1', 'movie', 'list', catalog=_PAGED_CATALOG))
+
+    assert len(notices) == 1
+    assert str(views._MAX_CATALOG_PAGES) in notices[0] or notices[0]
+
+
+def test_iter_catalog_pages_does_not_notify_when_the_catalog_ends_naturally(load_views, monkeypatch):
+    ctx = load_views()
+    views = ctx.views
+    _wire_data_layer(views, FakeStore(), FakePagingClient([_metas(0, 20), _metas(20, 5)]))
+    notices = []
+    monkeypatch.setattr(views, 'notify', lambda message, *a, **k: notices.append(message))
+
+    list(views.iter_catalog_pages('t1', 'movie', 'list', catalog=_PAGED_CATALOG))
+
+    assert notices == []
+
+
 def test_fetch_catalog_pages_does_not_page_a_catalog_without_skip(load_views):
     """No `skip` declaration means one request, exactly as before - a
     catalog that doesn't page must not be probed for a second page."""

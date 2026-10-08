@@ -438,10 +438,12 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
                 # a "continue watching" row - independent of this
                 # addon's own `state.watched` bitfield (lib.library
                 # never touches that; see its module docstring).
-                item.setInfo('video', {
-                    'resumetime': progress['position_ms'] / 1000.0,
-                    'totaltime': progress['duration_ms'] / 1000.0,
-                })
+                from lib.ui.compat import set_resume_point
+                set_resume_point(
+                    item,
+                    progress['position_ms'] / 1000.0,
+                    progress['duration_ms'] / 1000.0,
+                )
             items.append(item)
         return items
 

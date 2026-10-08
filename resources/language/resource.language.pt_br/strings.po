@@ -997,3 +997,7 @@ msgstr "Carregando legendas…"
 msgctxt "#30410"
 msgid "Syncing addons…"
 msgstr "Sincronizando addons…"
+
+msgctxt "#30411"
+msgid "Catalog shows only the first %d pages; more items are not loaded"
+msgstr "O catálogo mostra apenas as primeiras %d páginas; mais itens não são carregados"

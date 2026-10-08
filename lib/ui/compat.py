@@ -180,6 +180,26 @@ def set_video_info(list_item, info):
             list_item.setInfo('video', legacy)
 
 
+def set_resume_point(list_item, position, total):
+    """Badge `list_item` with a resume point (seconds) on any Kodi version.
+
+    Kodi >= 20 uses InfoTagVideo.setResumePoint; older Kodi (or a missing
+    setter) falls back to the legacy setInfo resumetime/totaltime keys.
+    """
+    position = float(position)
+    total = float(total)
+    if kodi_major_version() >= 20:
+        tag = getattr(list_item, 'getVideoInfoTag', lambda: None)()
+        setter = getattr(tag, 'setResumePoint', None)
+        if setter is not None:
+            try:
+                setter(position, total)
+                return
+            except (TypeError, ValueError):
+                pass
+    list_item.setInfo('video', {'resumetime': position, 'totaltime': total})
+
+
 def set_video_cast(list_item, cast):
     """Apply a Stremio meta's `cast` array to `list_item` on any Kodi
     version.

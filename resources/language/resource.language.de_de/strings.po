@@ -997,3 +997,7 @@ msgstr "Untertitel werden geladen…"
 msgctxt "#30410"
 msgid "Syncing addons…"
 msgstr "Addons werden synchronisiert…"
+
+msgctxt "#30411"
+msgid "Catalog shows only the first %d pages; more items are not loaded"
+msgstr "Der Katalog zeigt nur die ersten %d Seiten; weitere Einträge werden nicht geladen"

@@ -997,3 +997,7 @@ msgstr "正在加载字幕…"
 msgctxt "#30410"
 msgid "Syncing addons…"
 msgstr "正在同步插件…"
+
+msgctxt "#30411"
+msgid "Catalog shows only the first %d pages; more items are not loaded"
+msgstr "目录仅显示前 %d 页;更多项目不会加载"

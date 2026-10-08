@@ -44,6 +44,50 @@ def load_compat():
 
 
 # ---------------------------------------------------------------------------
+# set_resume_point()
+# ---------------------------------------------------------------------------
+
+
+class _ResumeTag:
+    def __init__(self):
+        self.calls = []
+
+    def setResumePoint(self, position, total=0.0):
+        self.calls.append((position, total))
+
+
+def test_set_resume_point_kodi21_uses_infotagvideo(load_compat):
+    ctx = load_compat(info_labels=_KODI21_LABELS)
+    li = FakeListItem()
+    li.info_tag = _ResumeTag()
+
+    ctx.compat.set_resume_point(li, 21, 50)
+
+    assert li.info_tag.calls == [(21.0, 50.0)]
+    assert li.legacy_info == {}
+
+
+def test_set_resume_point_kodi21_falls_back_when_setter_missing(load_compat):
+    ctx = load_compat(info_labels=_KODI21_LABELS)
+    li = FakeListItem()
+    li.info_tag = object()
+
+    ctx.compat.set_resume_point(li, 21, 50)
+
+    assert li.legacy_info == {'resumetime': 21.0, 'totaltime': 50.0}
+
+
+def test_set_resume_point_kodi19_uses_legacy_setinfo(load_compat):
+    ctx = load_compat()
+    li = FakeListItem()
+
+    ctx.compat.set_resume_point(li, 3, 9)
+
+    assert li.legacy_info == {'resumetime': 3.0, 'totaltime': 9.0}
+    assert li.info_tag.calls == {}
+
+
+# ---------------------------------------------------------------------------
 # set_video_cast()
 # ---------------------------------------------------------------------------
 

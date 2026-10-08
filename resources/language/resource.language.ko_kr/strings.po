@@ -997,3 +997,7 @@ msgstr "자막 불러오는 중…"
 msgctxt "#30410"
 msgid "Syncing addons…"
 msgstr "애드온 동기화 중…"
+
+msgctxt "#30411"
+msgid "Catalog shows only the first %d pages; more items are not loaded"
+msgstr "카탈로그에는 처음 %d페이지만 표시되며 나머지 항목은 불러오지 않습니다"

@@ -997,3 +997,7 @@ msgstr "Altyazılar yükleniyor…"
 msgctxt "#30410"
 msgid "Syncing addons…"
 msgstr "Eklentiler eşitleniyor…"
+
+msgctxt "#30411"
+msgid "Catalog shows only the first %d pages; more items are not loaded"
+msgstr "Katalog yalnızca ilk %d sayfayı gösteriyor; diğer öğeler yüklenmiyor"

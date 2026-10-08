@@ -997,3 +997,7 @@ msgstr "Wczytywanie napisów…"
 msgctxt "#30410"
 msgid "Syncing addons…"
 msgstr "Synchronizowanie dodatków…"
+
+msgctxt "#30411"
+msgid "Catalog shows only the first %d pages; more items are not loaded"
+msgstr "Katalog pokazuje tylko pierwsze %d stron; kolejne pozycje nie są ładowane"

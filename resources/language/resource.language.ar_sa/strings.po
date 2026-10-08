@@ -997,3 +997,7 @@ msgstr "جارٍ تحميل الترجمة…"
 msgctxt "#30410"
 msgid "Syncing addons…"
 msgstr "جارٍ مزامنة الإضافات…"
+
+msgctxt "#30411"
+msgid "Catalog shows only the first %d pages; more items are not loaded"
+msgstr "يعرض الكتالوج أول %d صفحات فقط؛ لن يتم تحميل المزيد من العناصر"
