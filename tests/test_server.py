@@ -877,7 +877,9 @@ def test_iter_front_start_byte_resume_after_partial_read_then_stall():
 # independently of the sections above; do not edit them when touching
 # this section.
 # ============================================================================
+import hashlib
 import json
+import re
 from urllib.parse import parse_qs, urlsplit
 
 from lib.stremio.lzstring import decompress_from_encoded_uri_component
@@ -898,6 +900,11 @@ def _lz_payload(url):
     decompressed = decompress_from_encoded_uri_component(compressed)
     assert decompressed is not None
     return json.loads(decompressed)
+
+
+def _create_key(url):
+    """The `{key}` path segment of `{base}/{kind}/create/{key}?lz=...`."""
+    return urlsplit(url).path.split("/")[3]
 
 
 # --- normalize_info_hash / normalize_trackers -----------------------------
@@ -989,7 +996,7 @@ def test_resolve_stream_archive_kinds_build_create_url_and_payload(stream_key, u
         "fileMustInclude": ["includeFile1"],
     }
     resolved = client.resolve_stream(stream)
-    assert resolved.startswith("%s/%s/create?" % (BASE, url_kind))
+    assert re.match(r"^%s/%s/create/[0-9a-f]{32}\?lz=" % (re.escape(BASE), url_kind), resolved)
     assert _lz_payload(resolved) == {
         "urls": [["https://example.com/file.rar", 10000], ["https://example.com/file2.rar"]],
         "fileIdx": 1,
@@ -1031,6 +1038,31 @@ def test_resolve_stream_archive_urls_capped_at_max_entries():
     assert payload["urls"][-1] == ["https://example.com/file31.rar"]
 
 
+def test_resolve_stream_archive_key_is_stable_and_body_sensitive():
+    """`/{kind}/create/{key}`: key = sha256(compact JSON body)[:32], so
+    an identical re-request hits the server's live-session reuse
+    (stremio-server-go v0.23.0) and any changed field gets a new key."""
+    client = make_client()
+    stream = {
+        "rarUrls": [["https://example.com/file.rar", 10000]],
+        "fileIdx": 1,
+        "fileMustInclude": ["a"],
+    }
+    resolved = client.resolve_stream(dict(stream))
+    key = _create_key(resolved)
+    assert re.fullmatch(r"[0-9a-f]{32}", key)
+    assert key == hashlib.sha256(
+        json.dumps(_lz_payload(resolved), separators=(",", ":")).encode()
+    ).hexdigest()[:32]
+    assert _create_key(client.resolve_stream(dict(stream))) == key
+    for change in (
+        {"fileIdx": 2},
+        {"fileMustInclude": ["b"]},
+        {"rarUrls": [["https://example.com/other.rar", 10000]]},
+    ):
+        assert _create_key(client.resolve_stream(dict(stream, **change))) != key
+
+
 # --- nzb ---------------------------------------------------------------
 
 
@@ -1041,7 +1073,7 @@ def test_resolve_stream_nzb_single_url():
         "servers": ["https://usenet1.example.com", "https://usenet2.example.com"],
     }
     resolved = client.resolve_stream(stream)
-    assert resolved.startswith(BASE + "/nzb/create?")
+    assert re.match(r"^%s/nzb/create/[0-9a-f]{32}\?lz=" % re.escape(BASE), resolved)
     assert _lz_payload(resolved) == {
         "nzbUrl": "https://example.com/release.nzb",
         "servers": ["https://usenet1.example.com", "https://usenet2.example.com"],
@@ -1071,6 +1103,20 @@ def test_resolve_stream_nzb_urls_capped_at_max_entries():
     payload = _lz_payload(resolved)
     assert len(payload["nzbUrls"]) == 32
     assert payload["nzbUrls"][-1] == "https://example.com/31.nzb"
+
+
+def test_resolve_stream_nzb_key_is_stable_and_body_sensitive():
+    """The nzb create url carries a deterministic session key so
+    stremio-server-go v0.23.0 can reuse the live session on re-open."""
+    client = make_client()
+    base = {"nzbUrl": "https://example.com/r.nzb", "servers": ["https://usenet1.example.com"]}
+    first = client.resolve_stream(dict(base))
+    assert _create_key(first) == _create_key(client.resolve_stream(dict(base)))
+    assert re.match(r"^%s/nzb/create/[0-9a-f]{32}\?lz=" % re.escape(BASE), first)
+    other_servers = dict(base, servers=["https://usenet2.example.com"])
+    other_url = dict(base, nzbUrl="https://example.com/other.nzb")
+    assert _create_key(client.resolve_stream(other_servers)) != _create_key(first)
+    assert _create_key(client.resolve_stream(other_url)) != _create_key(first)
 
 
 def test_resolve_stream_nzb_without_servers_returns_none():

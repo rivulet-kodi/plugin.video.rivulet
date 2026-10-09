@@ -36,7 +36,10 @@ local stremio-server-go instance, mirroring stremio-core's Stream::convert
   dict is untrusted addon data, so its `url` field must be validated
   before it ever reaches Kodi's player.
 - Archive sources (rar/zip/7zip/tgz/tar) and Nzb -> GET
-  {server}/{kind}/create?lz=<payload>, and a nested ftp(s) member url ->
+  {server}/{kind}/create/{key}?lz=<payload>, where `key` is the sha256
+  (hex, first 32 chars) of the compact JSON body so an identical
+  re-request reuses the server's live session (stremio-server-go
+  v0.23.0, ~1 h; local archives rechecked by size+mtime), and a nested ftp(s) member url ->
   GET {server}/ftp/{filename}?lz=<payload>, where <payload> is
   `lib.stremio.lzstring.compress_to_encoded_uri_component()` of the
   request JSON body - mirroring stream.rs's Rar/Zip/Zip7/Tgz/Tar/Nzb
@@ -71,6 +74,7 @@ on a torrent/YouTube/magnet/archive/nzb/ftp URL it returns.
 """
 import base64
 import binascii
+import hashlib
 import json
 import re
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
@@ -645,7 +649,7 @@ class ServerClient:
             except Exception:  # noqa: BLE001 - closing must never mask the real outcome
                 pass
 
-    def _lz_query_url(self, path, body):
+    def _lz_query_url(self, path, body, keyed=False):
         """GET `{base}/{path}?lz=<payload>` - the shape shared by every
         stremio-server-go endpoint that takes a JSON body via a query
         string instead of a POST body: archive/nzb `.../create` and the
@@ -654,9 +658,29 @@ class ServerClient:
         `body`, exactly how stream.rs builds every one of these
         (`serde_json::to_string(&payload)` then `lz_str::
         compress_to_encoded_uri_component(&stream_data)`).
+
+        With `keyed=True` (archive/nzb create only) a deterministic
+        session key is appended to `path` as `{path}/{key}`, where `key`
+        is the lowercase hex sha256 of that exact compact-JSON body
+        truncated to 32 chars (path-safe, no escaping needed). Since
+        stremio-server-go v0.21.0 the keyed GET form parses `?lz=` too
+        (key = path segment 2), and since v0.23.0 re-requesting the SAME
+        key with an equivalent payload reuses the live archive/NZB
+        session (download + extraction/assembly kept for ~1 h; local
+        archives are rechecked by size+mtime) instead of building a
+        fresh one - so Kodi's repeated stat/probe/open and resume after
+        stop no longer re-download/re-extract. Same body -> same key;
+        any differing field (urls, fileIdx, fileMustInclude, servers...)
+        -> a different key. This is an opt-in enhancement: upstream
+        stremio-core sends the unkeyed `/{kind}/create`, which the
+        server still accepts (and which always builds a fresh session).
         """
         from lib.stremio.lzstring import compress_to_encoded_uri_component
-        compressed = compress_to_encoded_uri_component(json.dumps(body, separators=(',', ':')))
+        body_json = json.dumps(body, separators=(',', ':'))
+        if keyed:
+            key = hashlib.sha256(body_json.encode('utf-8')).hexdigest()[:32]
+            path = '%s/%s' % (path, key)
+        compressed = compress_to_encoded_uri_component(body_json)
         return '%s/%s?%s' % (self.base_url, path, urlencode({'lz': compressed}))
 
     def _ftp_create_url(self, url):
@@ -675,7 +699,7 @@ class ServerClient:
         return self._lz_query_url('ftp/%s' % quote(filename, safe=''), {'ftpUrl': url})
 
     def _archive_create_url(self, kind, raw_urls, file_idx=None, file_must_include=None):
-        """Build `{base}/{kind}/create?lz=<payload>` for an archive
+        """Build `{base}/{kind}/create/{key}?lz=<payload>` for an archive
         stream source (`kind` one of 'rar'/'zip'/'7zip'/'tgz'/'tar' -
         stream.rs's Rar/Zip/Zip7/Tgz/Tar `StreamSource::convert()`
         branches, stream.rs:240-403, identical but for the path
@@ -719,10 +743,10 @@ class ServerClient:
             body['fileIdx'] = file_idx
         if file_must_include:
             body['fileMustInclude'] = list(file_must_include)
-        return self._lz_query_url('%s/create' % kind, body)
+        return self._lz_query_url('%s/create' % kind, body, keyed=True)
 
     def _resolve_nzb_stream(self, stream):
-        """Build `{base}/nzb/create?lz=<payload>` for an Nzb stream
+        """Build `{base}/nzb/create/{key}?lz=<payload>` for an Nzb stream
         source (`StreamSource::Nzb`, stream.rs:793-804 - `convert()`
         branch stream.rs:404-437). Supports both the single-url
         `nzbUrl` field and the newer multi-url `nzbUrls` array (upstream
@@ -767,7 +791,7 @@ class ServerClient:
         if multi_urls:
             body['nzbUrls'] = multi_urls
 
-        return self._lz_query_url('nzb/create', body)
+        return self._lz_query_url('nzb/create', body, keyed=True)
 
     def resolve_stream(self, stream):
         """Resolve a Stream protocol dict to a playable URL, None, or
