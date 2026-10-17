@@ -6,6 +6,11 @@
 <meta name="theme-color" content="#0A0C0E">
 <title>Rivulet — a Kodi client for the Stremio add-on protocol</title>
 <meta name="description" content="Rivulet is a Kodi video add-on that reimplements the Stremio client experience: catalogs, add-on management, stream resolution and playback, with one-click auto-updates.">
+<meta property="og:title" content="Rivulet: Stremio add-ons in Kodi">
+<meta property="og:description" content="Browse catalogs, resolve streams and play them through a built-in streaming server. Install in three steps.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://rivulet-kodi.github.io/plugin.video.rivulet/">
+<meta property="og:image" content="https://rivulet-kodi.github.io/plugin.video.rivulet/screenshots/discover-catalogs.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 240'%3E%3Ccircle cx='120' cy='120' r='118' fill='%230e1424'/%3E%3Ccircle cx='120' cy='120' r='74' fill='none' stroke='%235eead4' stroke-width='9' opacity='.4'/%3E%3Ccircle cx='120' cy='120' r='34' fill='%232dd4bf'/%3E%3Cpolygon points='110,104 110,136 138,120' fill='%230e1424'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -117,6 +122,40 @@ section.wrap{padding-block:clamp(48px,8vw,88px)}
 .install-card.featured .fine-print{margin:0 0 20px;color:var(--text-42)}
 .install-card.featured .fine-print strong{color:var(--text-70)}
 .install-card .btn-primary{margin-top:auto;align-self:flex-start;height:52px;padding:0 26px;font-size:16px}
+
+/* lightbox: full 1400px originals, uncropped (cards crop to 16:10) */
+.shot-card{cursor:zoom-in}
+.lb{border:0;padding:0;background:transparent;max-width:min(96vw,1400px);max-height:96vh;color:var(--text);overflow:visible}
+.lb::backdrop{background:rgba(5,7,9,.92)}
+.lb img{width:100%;height:auto;max-height:86vh;object-fit:contain;border-radius:var(--radius);border:1px solid var(--border-hi)}
+.lb-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;font-family:var(--mono);font-size:13px}
+.lb-bar span{color:var(--text-70)}
+.lb button{font:inherit;font-size:13px;height:36px;padding:0 14px;border-radius:5px;border:1px solid var(--border-strong);background:var(--panel);color:var(--text);cursor:pointer}
+.lb button:hover{border-color:var(--border-strong-hi)}
+
+/* install helpers */
+.prereq{margin:0 0 28px}
+.copyrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 20px}
+.copyrow code{font-size:13px;padding:8px 12px;flex:1 1 260px}
+.copybtn{font:inherit;font-size:13px;font-weight:600;height:36px;padding:0 14px;border-radius:5px;border:1px solid var(--accent-border-3);background:var(--accent-soft-2);color:var(--accent);cursor:pointer}
+.copybtn:hover{background:var(--accent-soft-3)}
+.alt{margin:20px 0 0;border:1px solid var(--border);border-radius:var(--radius);background:var(--panel)}
+.alt summary{cursor:pointer;padding:18px 24px;font-weight:600;color:var(--text)}
+.alt[open] summary{border-bottom:1px solid var(--border)}
+.alt .alt-body{padding:20px 24px 24px}
+.alt .steps{margin-bottom:0}
+.firstrun{margin-top:56px}
+.firstrun h3{font-size:22px;font-weight:700;margin:0 0 6px;text-align:center}
+.firstrun .sub{text-align:center;color:var(--text-50);font-size:15px;margin:0 0 28px}
+.fr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:20px}
+.fr-card{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:24px}
+.fr-card .tag{margin-bottom:12px}
+.fr-card h4{margin:0 0 8px;font-size:17px;font-weight:600;color:var(--white)}
+.fr-card p{font-size:14px;line-height:1.6;color:var(--text-60)}
+.fr-card strong{color:var(--text)}
+.faq-grid details{border-top:1px solid var(--border);padding-top:14px}
+.faq-grid summary{cursor:pointer;font-size:17px;font-weight:600;color:var(--white)}
+.faq-grid details p{margin-top:10px}
 
 /* streaming server */
 .server-intro{max-width:760px}
@@ -332,30 +371,69 @@ footer{border-top:1px solid var(--border)}
   <section id="install" class="wrap">
     <div class="section-head">
       <div class="eyebrow">Get started</div>
-      <h2>Install once, pick your update path</h2>
+      <h2>Installed in three steps</h2>
+    </div>
+    <div class="callout prereq">
+      <span class="badge">i</span>
+      <p><strong>First non-official add-on?</strong> Turn on <strong>Settings → System → Add-ons → Unknown sources</strong> once. Kodi asks you the same thing the first time you install a zip. Works on Kodi 19 and later; Android, Windows, Linux, macOS and CoreELEC.</p>
     </div>
     <div class="install-grid">
-      <div class="install-card">
-        <span class="tag">Manual</span>
-        <h3>Quick install</h3>
-        <ol class="steps">
-          <li>Download <a href="plugin.video.rivulet.zip">plugin.video.rivulet.zip</a> (always the current release).</li>
-          <li>In Kodi: <strong>Settings → Add-ons → Install from zip file</strong> and pick the zip.</li>
-          <li>Open <strong>Rivulet</strong> from the Videos section of the home screen.</li>
-        </ol>
-        <p class="fine-print">You'll need to repeat this for every future release.</p>
-      </div>
       <div class="install-card featured">
-        <span class="tag accent">Recommended — auto-updates</span>
-        <h3>Install the repository</h3>
+        <span class="tag accent">Recommended — updates itself</span>
+        <h3>Install via the repository</h3>
         <ol class="steps accent">
-          <li>Download <a href="repository.rivulet.zip">repository.rivulet.zip</a> — just once.</li>
-          <li><strong>Settings → Add-ons → Install from zip file</strong>, same as the plugin itself.</li>
-          <li><strong>Settings → Add-ons → Install from repository → Rivulet Repository → Rivulet.</strong></li>
-          <li>Kodi checks for and installs future Rivulet updates automatically, like any other repository.</li>
+          <li>Download <a href="repository.rivulet.zip">repository.rivulet.zip</a> (always current; you only need it once).</li>
+          <li><strong>Settings → Add-ons → Install from zip file</strong> → pick the zip.</li>
+          <li><strong>Install from repository → Rivulet Repository → Video add-ons → Rivulet → Install.</strong></li>
         </ol>
-        <p class="fine-print">Prefer Kodi's own file manager? <strong>Settings → File manager → Add source</strong> → <code>https://rivulet-kodi.github.io/plugin.video.rivulet/</code>, then <strong>Install from zip file</strong> and pick it from there.</p>
+        <p class="fine-print">Future releases are offered by Kodi like any other repository add-on.</p>
         <a class="btn btn-primary" href="repository.rivulet.zip">Get the repository zip</a>
+      </div>
+      <div class="install-card">
+        <span class="tag">Fewest clicks</span>
+        <h3>Install the add-on directly</h3>
+        <ol class="steps">
+          <li>Download <a href="plugin.video.rivulet.zip">plugin.video.rivulet.zip</a>.</li>
+          <li><strong>Settings → Add-ons → Install from zip file</strong> → pick the zip.</li>
+          <li>Open <strong>Rivulet</strong> from <strong>Add-ons → Video add-ons</strong>.</li>
+        </ol>
+        <p class="fine-print">No automatic updates: repeat for each release.</p>
+      </div>
+    </div>
+    <details class="alt">
+      <summary>Kodi can't browse to the zip? Install from a URL instead</summary>
+      <div class="alt-body">
+        <p class="fine-print" style="margin-bottom:14px">Typical on set-top boxes and TVs where you can't download files. Add this address as a source and Kodi fetches the zips itself, with no PC or browser needed.</p>
+        <div class="copyrow">
+          <code id="src-url">https://rivulet-kodi.github.io/plugin.video.rivulet/</code>
+          <button class="copybtn" type="button" data-copy="src-url">Copy URL</button>
+        </div>
+        <ol class="steps">
+          <li><strong>Settings → File manager → Add source</strong> → paste the address, name it <code>Rivulet</code>.</li>
+          <li><strong>Settings → Add-ons → Install from zip file → Rivulet</strong>, then pick <code>repository.rivulet.zip</code> (or <code>plugin.video.rivulet.zip</code>).</li>
+        </ol>
+      </div>
+    </details>
+
+    <div class="firstrun">
+      <h3>First launch</h3>
+      <p class="sub">Nothing to configure to start watching, but these take a minute and help.</p>
+      <div class="fr-grid">
+        <div class="fr-card">
+          <span class="tag accent">Automatic</span>
+          <h4>Streaming server</h4>
+          <p>The embedded server is on by default. The background service downloads and checks the right <code>rivulet-engine</code> build for your device the first time Kodi starts; watch for the notification.</p>
+        </div>
+        <div class="fr-card">
+          <span class="tag">Optional, recommended</span>
+          <h4>Bring your add-ons</h4>
+          <p><strong>Settings → Account → Log in</strong>, then <strong>Sync add-ons</strong> to pull your Stremio collection (Torrentio and others). No account? Add them from a manifest URL in the in-app add-on manager.</p>
+        </div>
+        <div class="fr-card">
+          <span class="tag">Optional</span>
+          <h4>Subtitle language</h4>
+          <p><strong>Settings → Subtitles</strong>: change <code>en</code> to your language code (<code>es</code>, <code>it</code>, <code>pt</code>…). OpenSubtitles v3 is preinstalled.</p>
+        </div>
       </div>
     </div>
   </section>
@@ -376,7 +454,8 @@ footer{border-top:1px solid var(--border)}
         </tbody>
       </table>
     </div>
-    <p class="server-outro">No manual binary install needed — use <strong>Download rivulet-engine binary</strong> under <strong>Settings → Streaming server</strong> to fetch and integrity-check the right build straight from the <a href="https://github.com/rivulet-kodi/rivulet-engine/releases">rivulet-engine releases</a>.</p>
+    <p class="server-outro">No manual binary install needed: the service fetches and integrity-checks the right build from the <a href="https://github.com/rivulet-kodi/rivulet-engine/releases">rivulet-engine releases</a> on its own. <strong>Download rivulet-engine binary</strong> under <strong>Settings → Streaming server</strong> re-runs it on demand.</p>
+    <p class="server-outro"><strong>Android:</strong> if Android refuses to run the downloaded executable, Rivulet falls back to loading the server as a library inside Kodi, with no root or second app. If a server error still appears, enable <strong>Force library mode (Android)</strong> (expert settings level). If neither works, point <strong>Server URL</strong> at a <code>rivulet-engine</code> on a PC, NAS or Termux and turn <strong>Run embedded server</strong> off.</p>
   </section>
 
   <section id="faq" class="wrap">
@@ -395,7 +474,7 @@ footer{border-top:1px solid var(--border)}
       </div>
       <div>
         <h3>Which Kodi versions are supported?</h3>
-        <p>Tested across Python 3.8 through 3.13 — Kodi 19 "Matrix" through current releases.</p>
+        <p>Kodi 19 "Matrix" through current releases (tested on Python 3.8 to 3.13).</p>
       </div>
       <div>
         <h3>How do updates work?</h3>
@@ -405,6 +484,22 @@ footer{border-top:1px solid var(--border)}
         <h3>Where do subtitles come from?</h3>
         <p>From your installed Stremio subtitle add-ons at playback time — OpenSubtitles v3 comes preinstalled.</p>
       </div>
+      <details>
+        <summary>"Server not available" or nothing plays</summary>
+        <p>Check the add-on's <strong>Streaming server</strong> settings: <strong>Run embedded server</strong> should be on, with the default URL. Wait for the first-run binary download to finish (needs internet). On Android try <strong>Force library mode</strong>.</p>
+      </details>
+      <details>
+        <summary>The catalogs are empty</summary>
+        <p>Rivulet ships no content: it shows what your Stremio add-ons provide. Log in and sync, or install an add-on from its manifest URL in the add-on manager.</p>
+      </details>
+      <details>
+        <summary>A source says the speed is too low</summary>
+        <p>Quality and speed depend on the source (torrent health, debrid, your link). Try another stream or a smaller file.</p>
+      </details>
+      <details>
+        <summary>Do I need Real-Debrid?</summary>
+        <p>Not by default. It depends on the Stremio add-on you use and how you configured it.</p>
+      </details>
     </div>
   </section>
 </main>
@@ -420,5 +515,33 @@ footer{border-top:1px solid var(--border)}
   </div>
 </footer>
 
+<script>
+document.querySelectorAll('.copybtn').forEach(function(b){
+  b.addEventListener('click',function(){
+    var t=document.getElementById(b.dataset.copy).textContent.trim(),done=function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy URL'},1800)};
+    if(navigator.clipboard){navigator.clipboard.writeText(t).then(done,function(){})}
+  });
+});
+
+(function(){
+  var cards=[].slice.call(document.querySelectorAll('.shot-card')),d=document.createElement('dialog'),i=0;
+  if(!cards.length||!d.showModal)return;
+  d.className='lb';d.setAttribute('aria-label','Screenshot viewer');
+  d.innerHTML='<img alt=""><div class="lb-bar"><button type="button" data-d="-1">&larr; Prev</button><span></span><button type="button" data-d="1">Next &rarr;</button><button type="button" data-d="0">Close</button></div>';
+  document.body.appendChild(d);
+  var im=d.querySelector('img'),cap=d.querySelector('span');
+  function show(n){i=(n+cards.length)%cards.length;var c=cards[i].querySelector('img');im.src=c.src;im.alt=c.alt;cap.textContent=(i+1)+' / '+cards.length+' \u00b7 '+cards[i].textContent.trim()}
+  cards.forEach(function(c,n){
+    c.tabIndex=0;c.setAttribute('role','button');c.setAttribute('aria-label','Enlarge screenshot: '+c.textContent.trim());
+    c.addEventListener('click',function(){show(n);d.showModal()});
+    c.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();show(n);d.showModal()}});
+  });
+  d.addEventListener('click',function(e){
+    var b=e.target.closest('button');
+    if(b){var k=+b.dataset.d;k?show(i+k):d.close()}else if(e.target===d||e.target===im)d.close();
+  });
+  d.addEventListener('keydown',function(e){if(e.key==='ArrowLeft')show(i-1);else if(e.key==='ArrowRight')show(i+1)});
+})();
+</script>
 </body>
 </html>
