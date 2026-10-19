@@ -1001,3 +1001,11 @@ msgstr "Синхронизация аддонов…"
 msgctxt "#30411"
 msgid "Catalog shows only the first %d pages; more items are not loaded"
 msgstr "Каталог показывает только первые %d страниц; остальные элементы не загружаются"
+
+msgctxt "#30413"
+msgid "Keep torrents after playback (seed)"
+msgstr "Сохранять торренты после воспроизведения (раздача)"
+
+msgctxt "#30414"
+msgid "Leave the torrent on the streaming server when playback ends instead of removing it, so it can keep seeding. Most useful with an external server."
+msgstr "Оставлять торрент на сервере потоковой передачи после окончания воспроизведения, чтобы он продолжал раздаваться. Полезно в основном с внешним сервером."

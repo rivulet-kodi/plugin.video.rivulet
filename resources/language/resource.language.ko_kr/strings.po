@@ -1001,3 +1001,11 @@ msgstr "애드온 동기화 중…"
 msgctxt "#30411"
 msgid "Catalog shows only the first %d pages; more items are not loaded"
 msgstr "카탈로그에는 처음 %d페이지만 표시되며 나머지 항목은 불러오지 않습니다"
+
+msgctxt "#30413"
+msgid "Keep torrents after playback (seed)"
+msgstr "재생 후 토렌트 유지 (시드)"
+
+msgctxt "#30414"
+msgid "Leave the torrent on the streaming server when playback ends instead of removing it, so it can keep seeding. Most useful with an external server."
+msgstr "재생이 끝나도 토렌트를 제거하지 않고 스트리밍 서버에 남겨 계속 시드할 수 있게 합니다. 주로 외부 서버에서 유용합니다."

@@ -206,6 +206,12 @@
         </category>
         <category id="server_bittorrent" label="30110">
             <group id="1">
+                <setting id="bt_keep_torrents" type="boolean" label="30413">
+                    <level>0</level>
+                    <default>false</default>
+                    <help>30414</help>
+                    <control type="toggle"/>
+                </setting>
                 <setting id="bt_listen_port" type="integer" label="30115">
                     <level>0</level>
                     <default>0</default>

@@ -696,7 +696,12 @@ def _register_session(server, info_hash, pin):
 
 def _end_session():
     """Playback ended (or never started): stop the keep-alive pin and
-    best-effort `/{ih}/remove` the engine (short timeout, never raises)."""
+    best-effort `/{ih}/remove` the engine (short timeout, never raises).
+
+    `bt_keep_torrents` skips the removal (issue #66): a user running a
+    long-lived external server wants the torrent left there to seed.
+    The pin still stops - it only exists to hold the stream open during
+    pre-buffer and playback, not to keep the torrent alive."""
     global _session
     with _session_lock:
         current, _session = _session, None
@@ -705,6 +710,9 @@ def _end_session():
     server, info_hash, pin = current
     with contextlib.suppress(Exception):
         pin.stop()
+    if setting_bool('bt_keep_torrents', False):
+        log('player: keeping torrent %s on the server (bt_keep_torrents)' % info_hash, xbmc.LOGINFO)
+        return
     with contextlib.suppress(Exception):
         server.remove_engine(info_hash, timeout=2)
 

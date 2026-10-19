@@ -1001,3 +1001,11 @@ msgstr "アドオンを同期中…"
 msgctxt "#30411"
 msgid "Catalog shows only the first %d pages; more items are not loaded"
 msgstr "カタログには最初の%dページのみ表示されます。それ以降の項目は読み込まれません"
+
+msgctxt "#30413"
+msgid "Keep torrents after playback (seed)"
+msgstr "再生後もトレントを保持 (シード)"
+
+msgctxt "#30414"
+msgid "Leave the torrent on the streaming server when playback ends instead of removing it, so it can keep seeding. Most useful with an external server."
+msgstr "再生終了時にトレントを削除せずストリーミングサーバーに残し、シードを続けられるようにします。主に外部サーバーで便利です。"

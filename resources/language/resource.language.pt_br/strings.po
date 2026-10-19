@@ -1001,3 +1001,11 @@ msgstr "Sincronizando addons…"
 msgctxt "#30411"
 msgid "Catalog shows only the first %d pages; more items are not loaded"
 msgstr "O catálogo mostra apenas as primeiras %d páginas; mais itens não são carregados"
+
+msgctxt "#30413"
+msgid "Keep torrents after playback (seed)"
+msgstr "Manter torrents após a reprodução (seed)"
+
+msgctxt "#30414"
+msgid "Leave the torrent on the streaming server when playback ends instead of removing it, so it can keep seeding. Most useful with an external server."
+msgstr "Deixa o torrent no servidor de streaming ao fim da reprodução em vez de removê-lo, para que continue semeando. Útil principalmente com um servidor externo."

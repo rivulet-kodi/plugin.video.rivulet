@@ -1539,6 +1539,27 @@ def test_end_session_stops_pin_and_removes_engine(kodi_stubs):
     assert stopped == [True]
 
 
+def test_end_session_keeps_engine_when_bt_keep_torrents_on(kodi_stubs):
+    kodi_stubs.env.addon.settings['bt_keep_torrents'] = 'true'
+    player = kodi_stubs.player
+    removed = []
+    stopped = []
+
+    class _Server:
+        def remove_engine(self, info_hash, timeout=None):
+            removed.append(info_hash)  # pragma: no cover - must not run
+
+    class _Pin:
+        def stop(self):
+            stopped.append(True)
+
+    player._register_session(_Server(), INFO_HASH, _Pin())
+    player._end_session()
+
+    assert removed == []
+    assert stopped == [True]
+
+
 def test_keepalive_pin_stops_on_416(kodi_stubs):
     from lib.stremio.server import RangeNotSatisfiableError
 
