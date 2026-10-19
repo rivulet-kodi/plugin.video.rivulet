@@ -1559,6 +1559,33 @@ class Store:
         _atomic_write(self._progress_path, progress, compact=True)
         self._invalidate_cache(self._progress_path)
 
+    def remove_progress_title(self, content_type, content_id):
+        """Drop every local progress entry for ``(content_type,
+        content_id)`` -- the movie's own entry, or every episode of a
+        series -- and return how many were removed.
+
+        Backs "Remove from Continue watching" in the My Stuff grid
+        (issue #65): a show abandoned part-way, or episodes stopped during
+        the credits short of `RESUME_MAX_PERCENT`, otherwise stay pinned
+        in the resume/next-up bands for the 180-day sweep. Progress is a
+        local-only cache (the Stremio account never re-fills it), so
+        deleting it here is the whole removal. Plain read-modify-write,
+        same reasoning as :meth:`set_progress`.
+        """
+        progress = _read_json(self._progress_path, None)
+        if not isinstance(progress, dict):
+            return 0
+        prefix = self._progress_key(content_type, content_id, "")
+        # `prefix` ends in the "\x1f" before the (empty) video id, so it
+        # never matches a different id that merely starts the same way.
+        kept = {key: value for key, value in progress.items()
+                if not (isinstance(key, str) and key.startswith(prefix))}
+        removed = len(progress) - len(kept)
+        if removed:
+            _atomic_write(self._progress_path, kept, compact=True)
+            self._invalidate_cache(self._progress_path)
+        return removed
+
     def get_progress_entries(self):
         """Return every cached local playback-progress entry, flattened
         to ``{'type', 'id', 'video_id', 'position_ms', 'duration_ms',

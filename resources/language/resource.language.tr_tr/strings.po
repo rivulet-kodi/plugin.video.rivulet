@@ -1009,3 +1009,7 @@ msgstr "Oynatmadan sonra torrentleri tut (seed)"
 msgctxt "#30414"
 msgid "Leave the torrent on the streaming server when playback ends instead of removing it, so it can keep seeding. Most useful with an external server."
 msgstr "Oynatma bittiğinde torrenti kaldırmak yerine akış sunucusunda bırakır, böylece seed etmeye devam edebilir. En çok harici bir sunucuyla kullanışlıdır."
+
+msgctxt "#30415"
+msgid "Remove from Continue watching?"
+msgstr "İzlemeye devam et listesinden kaldırılsın mı?"

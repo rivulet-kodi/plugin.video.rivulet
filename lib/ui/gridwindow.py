@@ -59,6 +59,15 @@ BAND_ROWS = {
     'library': (30032, 30137),
 }
 
+#: ACTION_CONTEXT_MENU ("C", a remote's menu button, long-press OK): offers
+#: "Remove from Continue watching" on a played title (issue #65).
+_CONTEXT_MENU_ACTION = 117
+
+#: Bands a title can be removed from: the ones built from local playback
+#: progress. A `library` card is the Stremio account's library, which this
+#: screen does not edit.
+_REMOVABLE_BANDS = frozenset(('resume', 'next_up', 'recent'))
+
 #: Reused by `lib.ui.catalogpicker`'s pinned "New Episodes" picker row
 #: for its own, standalone single-band GridWindow session - that
 #: session never runs alongside "My Stuff"'s four real bands, so
@@ -215,8 +224,9 @@ class GridWindow(BaseWindow):
         self.heading = ''
         self.labels = None
         self.selected = None
+        self.on_remove = None
 
-    def start(self, bands, heading='', labels=None):
+    def start(self, bands, heading='', labels=None, on_remove=None):
         """doModal() with `bands` (a `[(band, [item, ...]), ...]` list, as
         `mystuff.group_by_band()` returns) filling one row each. Returns
         the item picked, or None if the user backed out without picking
@@ -228,11 +238,17 @@ class GridWindow(BaseWindow):
         `NEW_EPISODES_BAND` and
         `lib.ui.catalogpicker.CatalogPickerWindow._open_new_episodes()`,
         which needs the borrowed 'library' row to say "New episodes"
-        rather than "Your library" for its own session."""
+        rather than "Your library" for its own session.
+
+        `on_remove(item)`, when given, enables the context-menu removal
+        of a played title (`_REMOVABLE_BANDS`); it does the actual delete
+        and returns True on success, and the card then leaves the grid
+        without a reload. None (the New episodes screen) disables it."""
         self.bands = [(band, list(items)) for band, items in bands or [] if items]
         self.heading = heading or ''
         self.labels = labels or None
         self.selected = None
+        self.on_remove = on_remove
         if not self.bands:
             return None
         self.doModal()
@@ -280,6 +296,43 @@ class GridWindow(BaseWindow):
         self.setFocusId(BAND_ROWS[self.bands[0][0]][0])
         self._update_background()
 
+    def _confirm_remove(self, item):
+        """Ask before dropping `item`'s progress: it cannot be undone."""
+        from lib.ui import dialogs
+        from lib.ui.compat import L
+
+        return dialogs.confirm(L(30415), escape_label(item.get('name') or ''),
+                               xbmc.getLocalizedString(107), xbmc.getLocalizedString(106))
+
+    def _remove_focused(self):
+        """Context-menu handler: remove the focused played title via
+        `on_remove`, then redraw without it. The focus stays on the same
+        band when it still has cards, else onInit() moves it to the first
+        band left; an emptied grid closes, like backing out."""
+        item = self._focused_item()
+        if self.on_remove is None or item is None or item.get('band') not in _REMOVABLE_BANDS:
+            return
+        if not self._confirm_remove(item):
+            return
+        try:
+            removed = self.on_remove(item)
+        except Exception as exc:  # noqa: BLE001 - a failed delete leaves the grid as it was
+            log('gridwindow: removing %s/%s failed: %r' % (item.get('type'), item.get('id'), exc),
+                xbmc.LOGWARNING)
+            return
+        if not removed:
+            return
+        band = item.get('band')
+        self.bands = [(name, [i for i in members if i is not item]) for name, members in self.bands]
+        self.bands = [(name, members) for name, members in self.bands if members]
+        if not self.bands:
+            self.close()
+            return
+        self.onInit()
+        if any(name == band for name, _members in self.bands):
+            self.setFocusId(BAND_ROWS[band][0])
+            self._update_background()
+
     def _focused_item(self):
         """The merged item under the focused row's selection, or None.
 
@@ -326,6 +379,9 @@ class GridWindow(BaseWindow):
         if action.getId() in BACK_ACTIONS:
             self.close()
             return
+        if action.getId() == _CONTEXT_MENU_ACTION:
+            self._remove_focused()
+            return
         # Any non-back action may have moved the focus - including up/down
         # between band rows, which the grouplist handles itself. Cheap (a
         # property read plus a setImage()), so it needs no settle timer.
@@ -344,12 +400,12 @@ class GridWindow(BaseWindow):
         self.close()
 
 
-def open_grid(bands, heading='', labels=None):
+def open_grid(bands, heading='', labels=None, on_remove=None):
     """Build and run a GridWindow over `bands` (as
     `mystuff.group_by_band()` returns); returns the selected item dict, or
     None if the user closed it without picking one (or `bands` was
-    empty). `labels` is forwarded to `GridWindow.start()` - see its
-    docstring.
+    empty). `labels` and `on_remove` are forwarded to
+    `GridWindow.start()` - see its docstring.
 
     The caller (`lib.ui.mystuff.open_my_stuff()`) wraps this in its own
     try/except and logs+notifies on failure, so an exception from
@@ -358,7 +414,7 @@ def open_grid(bands, heading='', labels=None):
     e.g. if onInit() or a mid-modal callback raised)."""
     win = open_window(GridWindow, 'GridWindow.xml')
     try:
-        return win.start(bands, heading=heading, labels=labels)
+        return win.start(bands, heading=heading, labels=labels, on_remove=on_remove)
     finally:
         try:
             win.close()

@@ -428,9 +428,18 @@ def open_my_stuff():
         return False
 
     log('mystuff: opening grid (%d items)' % len(items), xbmc.LOGINFO)
+
+    def _remove(item):
+        # Played bands come from local progress only (see `merge_entries`),
+        # so dropping it removes the card for good (issue #65).
+        removed = store.remove_progress_title(item.get('type'), item.get('id'))
+        log('mystuff: removed %s/%s from Continue watching (%d entries)'
+            % (item.get('type'), item.get('id'), removed), xbmc.LOGINFO)
+        return removed > 0
+
     try:
         from lib.ui.gridwindow import open_grid
-        selected = open_grid(group_by_band(items), heading=L(30241))
+        selected = open_grid(group_by_band(items), heading=L(30241), on_remove=_remove)
     except Exception as exc:  # a skin/UI failure must surface, not vanish
         log('mystuff: grid failed to open: %r' % (exc,), xbmc.LOGERROR)
         notify(L(30032))

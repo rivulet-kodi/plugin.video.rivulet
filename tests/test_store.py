@@ -1217,6 +1217,22 @@ def test_progress_persists_across_store_instances(tmp_path):
     }
 
 
+def test_remove_progress_title_drops_every_episode_of_that_title_only(tmp_path):
+    """issue #65: one removal clears the whole series, and must not touch
+    a different title whose id merely starts the same way."""
+    store = make_store(tmp_path)
+    store.set_progress("series", "tt9", "tt9:1:1", 1000, 2000, "t1")
+    store.set_progress("series", "tt9", "tt9:1:2", 1900, 2000, "t2")
+    store.set_progress("series", "tt90", "tt90:1:1", 500, 2000, "t3")
+    store.set_progress("movie", "tt9", None, 500, 2000, "t4")
+
+    assert store.remove_progress_title("series", "tt9") == 2
+
+    left = sorted((e["type"], e["id"], e["video_id"]) for e in store.get_progress_entries())
+    assert left == [("movie", "tt9", None), ("series", "tt90", "tt90:1:1")]
+    assert store.remove_progress_title("series", "tt9") == 0
+
+
 def test_corrupt_progress_json_returns_none_without_raising(tmp_path):
     data_dir = tmp_path / "addon_data"
     data_dir.mkdir()

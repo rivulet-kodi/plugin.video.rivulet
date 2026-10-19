@@ -1009,3 +1009,7 @@ msgstr "播放后保留种子（做种）"
 msgctxt "#30414"
 msgid "Leave the torrent on the streaming server when playback ends instead of removing it, so it can keep seeding. Most useful with an external server."
 msgstr "播放结束后不删除种子，而是保留在流媒体服务器上以便继续做种。主要适用于外部服务器。"
+
+msgctxt "#30415"
+msgid "Remove from Continue watching?"
+msgstr "从继续观看中移除？"

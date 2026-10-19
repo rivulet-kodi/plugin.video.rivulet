@@ -335,6 +335,67 @@ def test_onaction_updates_the_background_from_the_focused_row(ctx):
     assert win.getControl(ctx.gridwindow.BACKGROUND).image == 'two.jpg'
 
 
+def _removable_window(ctx, bands, removed, result=True):
+    win = _window(ctx, bands=bands)
+    win.on_remove = lambda item: removed.append(item['id']) or result
+    win._confirm_remove = lambda item: True
+    win.onInit()
+    return win
+
+
+def test_context_menu_removes_the_focused_played_title_and_keeps_the_band(ctx):
+    import xbmcgui
+    resume = ctx.mystuff.BAND_RESUME
+    removed = []
+    win = _removable_window(ctx, [
+        (resume, [_item(resume, id='a', name='A'), _item(resume, id='b', name='B')]),
+        (ctx.mystuff.BAND_LIBRARY, [_item(ctx.mystuff.BAND_LIBRARY, id='l', name='L')]),
+    ], removed)
+    resume_list = _row(ctx, resume)[0]
+    win.getControl(resume_list).selected_index = 1
+
+    win.onAction(xbmcgui.Action(117))
+
+    assert removed == ['b']
+    assert [i.getLabel() for i in win.getControl(resume_list).items] == ['A']
+    assert win.getFocusId() == resume_list
+    assert win.closed is False
+
+
+def test_context_menu_closes_the_grid_when_its_last_title_goes(ctx):
+    import xbmcgui
+    recent = ctx.mystuff.BAND_RECENT
+    removed = []
+    win = _removable_window(ctx, [(recent, [_item(recent, id='w', name='W')])], removed)
+
+    win.onAction(xbmcgui.Action(117))
+
+    assert removed == ['w']
+    assert win.closed is True
+    assert win.selected is None
+
+
+@pytest.mark.parametrize('case', ['library', 'declined', 'failed', 'disabled'])
+def test_context_menu_leaves_the_grid_alone(ctx, case):
+    """A library card is not local progress; a declined confirm, a failed
+    delete, or a screen without `on_remove` (New episodes) change nothing."""
+    import xbmcgui
+    band = ctx.mystuff.BAND_LIBRARY if case == 'library' else ctx.mystuff.BAND_RESUME
+    removed = []
+    win = _removable_window(ctx, [(band, [_item(band, id='x', name='X')])], removed,
+                            result=case != 'failed')
+    if case == 'declined':
+        win._confirm_remove = lambda item: False
+    if case == 'disabled':
+        win.on_remove = None
+
+    win.onAction(xbmcgui.Action(117))
+
+    assert removed == ([] if case != 'failed' else ['x'])
+    assert [i.getLabel() for i in win.getControl(_row(ctx, band)[0]).items] == ['X']
+    assert win.closed is False
+
+
 def test_update_background_swallows_a_broken_skin_control(ctx):
     """`BACKGROUND` missing/broken on a partial skin must never break
     navigation - `_update_background()` is called from `onAction()` on

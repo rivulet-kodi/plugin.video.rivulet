@@ -1009,3 +1009,7 @@ msgstr "Conservar torrents tras la reproducción (seed)"
 msgctxt "#30414"
 msgid "Leave the torrent on the streaming server when playback ends instead of removing it, so it can keep seeding. Most useful with an external server."
 msgstr "Deja el torrent en el servidor de streaming al terminar la reproducción en lugar de eliminarlo, para que siga compartiéndose. Útil sobre todo con un servidor externo."
+
+msgctxt "#30415"
+msgid "Remove from Continue watching?"
+msgstr "¿Quitar de Seguir viendo?"

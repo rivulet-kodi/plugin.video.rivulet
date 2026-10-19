@@ -1009,3 +1009,7 @@ msgstr "再生後もトレントを保持 (シード)"
 msgctxt "#30414"
 msgid "Leave the torrent on the streaming server when playback ends instead of removing it, so it can keep seeding. Most useful with an external server."
 msgstr "再生終了時にトレントを削除せずストリーミングサーバーに残し、シードを続けられるようにします。主に外部サーバーで便利です。"
+
+msgctxt "#30415"
+msgid "Remove from Continue watching?"
+msgstr "「続きを見る」から削除しますか？"
