@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.32.0" provider-name="M0RF30">
+<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.33.0" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0" />
     <import addon="script.module.requests" version="2.22.0" />
@@ -12,7 +12,14 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse and search catalogs by type, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote rivulet-engine streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.32.0:
+    <news>v0.33.0:
+- New: remove a title from Continue watching. Open the context menu on a played card in My Stuff and confirm.
+- New: optional "Keep torrents after playback (seed)" setting under BitTorrent, off by default. When on, the streaming server keeps seeding after you stop watching.
+- New: optional dark, rounded dialogs (Settings, "Dark dialogs"), off by default.
+- Fix: titles from provider lists (Netflix/Disney+-style catalogs) open and find streams again, including shows typed as "tv", and stream addons that only take IMDb ids are no longer left out.
+- Fix: an addon that answers with an empty meta no longer hides the title from Cinemeta, and a quick meta failure is retried.
+- Fix: search no longer waits for the slowest catalog once results are in; it tells you how many catalogs were too slow.
+v0.32.0:
 - Changed: the bundled Rivulet Engine streaming server is updated to v0.27.0, whose settings variables now start with RIVULET_ instead of STREMIO_. Rivulet sets them for you, so nothing changes in the addon settings; the server is downloaded again once after updating.
 v0.31.0:
 - Changed: the streaming server is now called Rivulet Engine and is updated to v0.26.0. Rivulet downloads it from its new home, rivulet-kodi/rivulet-engine; the downloaded program is now named rivulet-engine, so it is fetched again once after updating.
