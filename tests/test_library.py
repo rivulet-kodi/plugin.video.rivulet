@@ -462,3 +462,57 @@ def test_mark_watched_payload_does_not_mutate_input_item():
     library.mark_watched_payload(item, True, now=LATER)
     assert item == snapshot
     assert item["state"] == state_snapshot
+
+
+# --- progress_from_library_item (issue #74 pull) -----------------------
+
+
+def _remote(**overrides):
+    state = {
+        "lastWatched": "2026-10-20T21:14:03.512Z",
+        "timeOffset": 600000,
+        "duration": 3000000,
+        "flaggedWatched": 0,
+        "video_id": "tt9:1:2",
+    }
+    state.update(overrides.pop("state", {}))
+    item = {"_id": "tt9", "type": "series", "removed": False, "temp": True, "state": state}
+    item.update(overrides)
+    return item
+
+
+def test_progress_from_series_record_keys_episode_and_normalizes_time():
+    assert library.progress_from_library_item(_remote()) == {
+        "type": "series", "id": "tt9", "video_id": "tt9:1:2",
+        "position_ms": 600000, "duration_ms": 3000000,
+        "updated_at": "2026-10-20T21:14:03Z",
+    }
+
+
+def test_progress_from_movie_record_uses_none_video_id():
+    entry = library.progress_from_library_item(
+        _remote(_id="tt1", type="movie", state={"video_id": "tt1", "lastWatched": "2026-10-20T21:14:03Z"}),
+    )
+    assert entry["video_id"] is None
+    assert entry["updated_at"] == "2026-10-20T21:14:03Z"
+
+
+def test_progress_flagged_watched_reads_as_finished():
+    entry = library.progress_from_library_item(_remote(state={"flaggedWatched": 1, "timeOffset": 0}))
+    assert entry["position_ms"] == entry["duration_ms"] == 3000000
+
+
+def test_progress_flagged_watched_without_duration_is_still_finished():
+    entry = library.progress_from_library_item(
+        _remote(state={"flaggedWatched": 1, "timeOffset": 0, "duration": 0}),
+    )
+    assert entry["position_ms"] == entry["duration_ms"] == 1
+
+
+def test_progress_skips_unplayed_tombstoned_and_undatable_records():
+    assert library.progress_from_library_item(_remote(state={"timeOffset": 0})) is None
+    assert library.progress_from_library_item(_remote(removed=True, temp=False)) is None
+    assert library.progress_from_library_item(_remote(state={"lastWatched": None})) is None
+    assert library.progress_from_library_item(_remote(state={"lastWatched": "garbage"})) is None
+    assert library.progress_from_library_item(_remote(state={"video_id": "tt9"})) is None
+    assert library.progress_from_library_item({"_id": "tt9"}) is None

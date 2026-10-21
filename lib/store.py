@@ -32,11 +32,11 @@ JSON files live under ``data_dir``:
 * ``progress.json`` -- a local cache of playback position, keyed by
   ``(type, id, video_id)`` (see :func:`Store.get_progress`/
   :func:`Store.set_progress`), so resume and progress display work
-  fully offline and while logged out -- this file is never read from or
-  written to the Stremio account API (that is
-  ``lib.stremio.api.StremioAPI.datastore_get``/``datastore_put``'s job,
-  driven by ``lib.service_runner`` only when logged in AND the
-  "sync_progress" setting is on).
+  fully offline and while logged out. This module never talks to the
+  Stremio account API itself: ``lib.service_runner`` pushes samples with
+  ``datastore_put`` and pulls the account's watch state back in through
+  :func:`Store.merge_remote_progress`, both only when logged in AND the
+  "sync_progress" setting is on.
 * ``seen_episodes.json`` -- the capped ``lib.newepisodes.mark_seen`` set of
   ``(type, id, video_id)`` composite keys naming which "new episode" Home
   row candidates the user has already acted on, so a dismissed episode
@@ -1558,6 +1558,45 @@ class Store:
         # playback, machine-only, never hand-inspected.
         _atomic_write(self._progress_path, progress, compact=True)
         self._invalidate_cache(self._progress_path)
+
+    def merge_remote_progress(self, entries):
+        """Fold progress entries pulled from the Stremio account (see
+        ``lib.library.progress_from_library_item``) into ``progress.json``
+        in one read-modify-write, and return how many were written.
+
+        Last write wins on ``updated_at``: an entry replaces the local one
+        only when it is strictly newer, so a sample this device recorded
+        after the account's copy is never rolled back. Both sides use the
+        seconds-precision ``lib.library.iso8601_utc`` form, so a plain
+        string comparison orders them. Pruned exactly like
+        :meth:`set_progress` (full age sweep, then the
+        :data:`MAX_PROGRESS_ENTRIES` cap) -- an account with years of
+        history must not bloat the local cache past its bound.
+        """
+        progress = _read_json(self._progress_path, None)
+        if not isinstance(progress, dict):
+            progress = {}
+        written = 0
+        for entry in entries:
+            key = self._progress_key(entry["type"], entry["id"], entry.get("video_id"))
+            updated_at = entry["updated_at"]
+            local = progress.get(key)
+            if isinstance(local, dict) and str(local.get("updated_at") or "") >= updated_at:
+                continue
+            progress[key] = {
+                "position_ms": int(entry["position_ms"]),
+                "duration_ms": int(entry["duration_ms"]),
+                "updated_at": updated_at,
+            }
+            written += 1
+        if not written:
+            return 0
+        now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        progress = _prune_progress(progress, now, keep_key=None, sweep_age=True)
+        self._last_progress_sweep_monotonic = time.monotonic()
+        _atomic_write(self._progress_path, progress, compact=True)
+        self._invalidate_cache(self._progress_path)
+        return written
 
     def remove_progress_title(self, content_type, content_id):
         """Drop every local progress entry for ``(content_type,

@@ -72,6 +72,15 @@ LIBRARY_PUSH_INTERVAL_SECONDS = 90
 #: separately), but well above `HEALTHY_POLL_INTERVAL` so a long
 #: playback does not rewrite the whole cache file on every ~2s poll.
 LOCAL_PROGRESS_WRITE_INTERVAL_SECONDS = 15
+#: Interval between pulls of the account's watch state into
+#: `progress.json` (see `ProgressPuller`). Each pull after the first is a
+#: single `datastoreMeta` call (ids + mtimes only) plus a `datastoreGet`
+#: for just the records that changed, so this mostly bounds how long a
+#: title watched in another Stremio client takes to show up here.
+LIBRARY_PULL_INTERVAL_SECONDS = 15 * 60
+#: Ids per incremental `datastoreGet` -- keeps one request body bounded
+#: when many records changed between two pulls.
+LIBRARY_PULL_BATCH = 100
 # A run shorter than this does not count as "stable" -- backoff keeps climbing
 # instead of resetting, so a crash loop is actually throttled.
 MIN_STABLE_UPTIME = 60.0
@@ -937,6 +946,81 @@ def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn):  # 
     return _RivuletPlayer()
 
 
+class ProgressPuller:
+    """Pull the Stremio account's watch state into the local progress
+    cache (issue #74) -- the reverse of `_RivuletPlayer._push`, so titles
+    watched in an official Stremio client appear in Rivulet's Continue
+    Watching/Next Up/Recently Watched bands, including on a fresh install.
+
+    `poll()` runs once per supervision tick and does nothing unless a
+    pull is due: right after a login (a new `authKey`), then every
+    `LIBRARY_PULL_INTERVAL_SECONDS`. The first pull for an `authKey`
+    downloads the whole datastore; later ones diff `datastoreMeta`'s
+    mtimes against the previous pull and fetch only changed ids. Gated by
+    the same 'sync_progress' setting as the push, skipped while something
+    is playing (the push is what owns that title's state then), and
+    best-effort: a failure is logged and retried on the next interval,
+    never raised into the supervision loop. Merge precedence is
+    `Store.merge_remote_progress`'s: newer `updated_at` wins.
+    """
+
+    def __init__(self, store, api, log_fn, levels, sync_enabled_fn, is_playing_fn, clock=time.monotonic):
+        self._store = store
+        self._api = api
+        self._log = log_fn
+        self._levels = levels
+        self._sync_enabled = sync_enabled_fn
+        self._is_playing = is_playing_fn
+        self._clock = clock
+        self._auth_key = None
+        self._mtimes = None
+        self._next_at = 0.0
+
+    def poll(self):
+        try:
+            if not self._sync_enabled():
+                self._auth_key = None
+                return
+            auth = self._store.get_auth() or {}
+            auth_key = auth.get("authKey")
+            if not auth_key:
+                self._auth_key = None
+                return
+            now = self._clock()
+            if auth_key != self._auth_key:
+                self._auth_key = auth_key
+                self._mtimes = None
+                self._next_at = 0.0
+            if now < self._next_at:
+                return
+            if self._is_playing():
+                return
+            self._next_at = now + LIBRARY_PULL_INTERVAL_SECONDS
+            self._pull(auth_key)
+        except Exception as exc:  # noqa: BLE001 - a Stremio API hiccup must never crash the service loop
+            self._log(self._levels.warning, "library pull failed: %r" % (exc,))
+
+    def _pull(self, auth_key):
+        meta = self._api.datastore_meta(auth_key)
+        mtimes = {}
+        for entry in meta:
+            if isinstance(entry, (list, tuple)) and len(entry) == 2 and isinstance(entry[0], str):
+                mtimes[entry[0]] = entry[1]
+        if self._mtimes is None:
+            items = self._api.datastore_get(auth_key, all=True)
+        else:
+            changed = [item_id for item_id, mtime in mtimes.items() if self._mtimes.get(item_id) != mtime]
+            items = []
+            for start in range(0, len(changed), LIBRARY_PULL_BATCH):
+                items.extend(self._api.datastore_get(
+                    auth_key, ids=changed[start:start + LIBRARY_PULL_BATCH], all=False,
+                ))
+        entries = [e for e in (library.progress_from_library_item(i) for i in items) if e is not None]
+        written = self._store.merge_remote_progress(entries) if entries else 0
+        self._mtimes = mtimes
+        self._log(self._levels.info, "library pull: %d records, %d progress entries updated" % (len(items), written))
+
+
 def _detect_italian_user(xbmc):
     """Whether the Kodi user is Italian, per `s4me.is_italian_user()`:
     interface language, then the preferred audio language.
@@ -1577,8 +1661,13 @@ def main():
     )
 
     store = Store(profile_dir)
-    progress_player = build_progress_player(
-        xbmc, store, StremioAPI(), log, lambda: _settings.setting_bool(addon, "sync_progress", True),
+    sync_enabled = lambda: _settings.setting_bool(addon, "sync_progress", True)  # noqa: E731
+    progress_player = build_progress_player(xbmc, store, StremioAPI(), log, sync_enabled)
+    # Own client: the player pushes from Kodi's callback thread too, and a
+    # requests.Session is not safe to share across threads.
+    progress_puller = ProgressPuller(
+        store, StremioAPI(), log, LogLevels(xbmc.LOGINFO, xbmc.LOGWARNING, xbmc.LOGERROR),
+        sync_enabled, lambda: progress_player.isPlaying(),
     )
 
     # S4Me bridge: deliberately independent of ServiceMonitor -- reads its
@@ -1608,6 +1697,10 @@ def main():
         except Exception as exc:  # noqa: BLE001 - a bridge sync failure must never crash the service loop
             log(xbmc.LOGWARNING, f"s4me bridge sync failed: {exc}")
 
+    def periodic_sync():
+        sync_s4me_bridge()
+        progress_puller.poll()
+
     def shutdown_s4me_bridge():
         bridge_port = s4me_bridge.launched_port()
         if bridge_port is not None:
@@ -1622,7 +1715,7 @@ def main():
         LogLevels(xbmc.LOGINFO, xbmc.LOGWARNING, xbmc.LOGERROR),
         notify,
         progress_player,
-        sync_s4me_bridge,
+        periodic_sync,
         shutdown_s4me_bridge,
         autoload,
     ).run()

@@ -352,3 +352,97 @@ def mark_watched_payload(item, watched, now=None):
     result['state'] = state
     result['_mtime'] = now_iso
     return result
+
+
+def _normalize_iso(value):
+    """`value` -- a Stremio wire timestamp, which chrono emits WITH
+    fractional seconds whenever they are non-zero (e.g.
+    ``"2026-10-20T21:14:03.512Z"``, unlike the seconds-only form
+    :func:`iso8601_utc` writes) -- re-rendered in :func:`iso8601_utc`'s
+    exact seconds-precision form, or ``None`` when it is missing or not
+    parseable. The local progress cache compares ``updated_at`` values
+    as plain strings, which is only sound when every one of them shares
+    this single fixed-width format."""
+    if not isinstance(value, str) or not value:
+        return None
+    text = value.strip()
+    if text.endswith('Z'):
+        text = text[:-1] + '+00:00'
+    if '.' in text:
+        head, _, tail = text.partition('.')
+        offset = ''
+        for sign in ('+', '-'):
+            if sign in tail:
+                offset = sign + tail.split(sign, 1)[1]
+                break
+        text = head + offset
+    try:
+        parsed = datetime.datetime.strptime(text.replace('+00:00', '+0000'), '%Y-%m-%dT%H:%M:%S%z')
+    except ValueError:
+        return None
+    return iso8601_utc(parsed)
+
+
+def progress_from_library_item(item):
+    """Project one account `libraryItem` record onto the local progress
+    cache's shape -- ``{'type', 'id', 'video_id', 'position_ms',
+    'duration_ms', 'updated_at'}`` (the same keys
+    ``lib.store.Store.get_progress_entries`` returns) -- or ``None`` when
+    the record carries nothing worth resuming or listing as finished.
+
+    The inverse of what :func:`merge_playback` pushes, so a title watched
+    in an official Stremio client shows up in Rivulet's Continue
+    Watching/Next Up/Recently Watched bands (issue #74):
+
+    * ``video_id`` is the played episode for a series; a movie (or any
+      record whose ``state.video_id`` is just its own ``_id``) maps to
+      ``None``, the key ``lib.ui.player`` records movie progress under.
+    * ``flaggedWatched`` maps to ``position_ms == duration_ms`` -- the
+      local cache has no watched flag, it derives "finished" from the
+      percentage (``lib.ui.mystuff``), so a finished title must read as
+      100%. A flagged record with no known duration uses ``1/1`` for the
+      same reason.
+    * Skipped: a tombstoned record that is not also ``temp`` (stremio-
+      core's own continue-watching filter is ``!removed || temp``), one
+      never played (no ``timeOffset`` and not flagged watched), one with
+      no usable ``lastWatched`` (nothing to order it by), and a series
+      record without an episode id (nothing to resume into).
+    """
+    if not isinstance(item, dict):
+        return None
+    item_id = item.get('_id')
+    content_type = item.get('type')
+    state = item.get('state')
+    if not item_id or not content_type or not isinstance(state, dict):
+        return None
+    if item.get('removed') and not item.get('temp'):
+        return None
+    updated_at = _normalize_iso(state.get('lastWatched'))
+    if updated_at is None:
+        return None
+    try:
+        offset = max(0, int(state.get('timeOffset') or 0))
+        duration = max(0, int(state.get('duration') or 0))
+    except (TypeError, ValueError):
+        return None
+    if state.get('flaggedWatched'):
+        if duration <= 0:
+            duration = 1
+        offset = duration
+    elif offset <= 0 or duration <= 0:
+        return None
+    video_id = state.get('video_id')
+    if not isinstance(video_id, str) or not video_id or video_id == item_id:
+        video_id = None
+    if content_type == 'series' and video_id is None:
+        return None
+    if content_type != 'series':
+        video_id = None
+    return {
+        'type': content_type,
+        'id': item_id,
+        'video_id': video_id,
+        'position_ms': min(offset, duration),
+        'duration_ms': duration,
+        'updated_at': updated_at,
+    }

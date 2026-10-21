@@ -1509,3 +1509,31 @@ def test_cached_read_detects_same_size_rewrite_under_frozen_stat(tmp_path, monke
     other_store.set_seen_episodes(replacement)
 
     assert store.get_seen_episodes() == replacement
+
+
+# --- merge_remote_progress (issue #74 pull) ----------------------------
+
+
+def _remote_entry(updated_at, position_ms=1000, video_id="tt9:1:1"):
+    return {"type": "series", "id": "tt9", "video_id": video_id,
+            "position_ms": position_ms, "duration_ms": 5000, "updated_at": updated_at}
+
+
+def test_merge_remote_progress_newer_remote_wins_older_is_ignored(tmp_path):
+    store = make_store(tmp_path)
+    store.set_progress("series", "tt9", "tt9:1:1", 2000, 5000, "2099-01-01T00:00:10Z")
+    assert store.merge_remote_progress([_remote_entry("2099-01-01T00:00:09Z")]) == 0
+    assert store.get_progress("series", "tt9", "tt9:1:1")["position_ms"] == 2000
+    assert store.merge_remote_progress([_remote_entry("2099-01-01T00:00:11Z", position_ms=4000)]) == 1
+    assert store.get_progress("series", "tt9", "tt9:1:1") == {
+        "position_ms": 4000, "duration_ms": 5000, "updated_at": "2099-01-01T00:00:11Z",
+    }
+
+
+def test_merge_remote_progress_respects_entry_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr(store_module, "MAX_PROGRESS_ENTRIES", 2)
+    store = make_store(tmp_path)
+    entries = [_remote_entry("2099-01-01T00:00:0%dZ" % i, video_id="tt9:1:%d" % i) for i in range(4)]
+    assert store.merge_remote_progress(entries) == 4
+    kept = {e["video_id"] for e in store.get_progress_entries()}
+    assert kept == {"tt9:1:2", "tt9:1:3"}
