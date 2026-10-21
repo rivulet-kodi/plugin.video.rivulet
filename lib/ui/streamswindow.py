@@ -104,6 +104,7 @@ from lib.ui.uicommon import (
     escape_label,
     gated_input,
     open_window,
+    take_ui_show_request,
 )
 
 BACKGROUND = 30000
@@ -867,6 +868,12 @@ def _wait_for_playback_end(player=None, monitor=None, start_timeout=_PLAYBACK_ST
     That also guarantees `ended_naturally` is read AFTER the callback that
     sets it, never before it could have been delivered.
 
+    The user may also ask for Rivulet back while the video still plays
+    (`uicommon.launch_action()`'s `LAUNCH_SHOW`, issue #73): a show request
+    seen during the playing stage ends the wait at once with `(True,
+    False)`, so the caller reopens the picker over the still-running video
+    - and never auto-plays a next episode on it.
+
     Returns a `(proceed, ended_naturally)` tuple rather than a bare
     bool, since `isPlaying()` alone cannot tell a natural end apart from
     the user pressing stop. `proceed` keeps the meaning described above
@@ -951,6 +958,9 @@ def _wait_for_playback_end(player=None, monitor=None, start_timeout=_PLAYBACK_ST
         while player.isPlaying():
             if monitor.waitForAbort(tick):
                 return False, False
+            if take_ui_show_request():
+                log('streamswindow: show requested during playback - reopening over it', xbmc.LOGINFO)
+                return True, False
         if not _await_player_closed(player, monitor, tick):
             return False, False
         return True, getattr(player, 'ended_naturally', False)

@@ -43,9 +43,23 @@ if _action == 'home':
     )
     try:
         from lib.ui.homewindow import open_home
-        from lib.ui.uicommon import dismiss_busy_dialog, is_duplicate_launch
+        from lib.ui.uicommon import (
+            LAUNCH_IGNORE,
+            LAUNCH_SHOW,
+            dismiss_busy_dialog,
+            launch_action,
+            request_ui_show,
+        )
 
-        if is_duplicate_launch():
+        verdict = launch_action()
+        if verdict == LAUNCH_SHOW:
+            # The user left the fullscreen video and opened Rivulet while
+            # the running UI waits out the playback under its force-closed
+            # screens (issue #73): wake that UI rather than stack a second
+            # one. See lib.ui.uicommon's "UI phases" notes.
+            log('default: Rivulet UI is waiting on playback - asking it to come back', xbmc.LOGINFO)
+            request_ui_show()
+        elif verdict == LAUNCH_IGNORE:
             # Kodi re-ran the plugin root (it re-fetches the Videos container
             # the addon was started from whenever that window is activated
             # again - e.g. when playback stops: kodi.log 01:07:59.987 ->

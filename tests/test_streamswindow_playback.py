@@ -663,6 +663,41 @@ def test_wait_for_playback_end_returns_false_immediately_on_monitor_abort_while_
     assert monitor.calls == 1  # loop2's first abort check ends the wait immediately
 
 
+def test_wait_for_playback_end_returns_early_on_a_show_request_while_playing(load_streamswindow):
+    # Issue #73: the user opened Rivulet while the video plays on - the wait
+    # must end without the player closing, and must not report a natural end
+    # (no binge auto-play over a video that is still running).
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    player = _ScriptedPlayer(is_playing=True, ended_naturally=True)
+    props = ctx.env.window_properties.setdefault(10000, {})
+
+    def abort(n):
+        if n == 3:
+            props['rivulet.ui.show'] = '1.000'
+        return False
+
+    monitor = _ScriptedMonitor(abort=abort)
+
+    result = sw._wait_for_playback_end(player=player, monitor=monitor, start_timeout=20.0, tick=0.5)
+
+    assert result == (True, False)
+    assert monitor.calls == 3  # seen on the tick it arrived, not after playback
+    assert not props.get('rivulet.ui.show')  # consumed: a later wait is not cut short
+
+
+def test_a_show_request_from_an_earlier_playback_does_not_end_the_next_wait(load_streamswindow):
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    ctx.env.window_properties.setdefault(10000, {})['rivulet.ui.show'] = '1.000'
+    sw.close_windows_for_playback()  # the next handoff
+    player = _ScriptedPlayer(is_playing=lambda n: n in (1, 2, 3), ended_naturally=True)
+
+    result = sw._wait_for_playback_end(player=player, monitor=_ScriptedMonitor(), start_timeout=5.0, tick=0.1)
+
+    assert result == (True, True)
+
+
 def test_wait_for_playback_end_swallows_an_exception_and_returns_false(load_streamswindow):
     ctx = load_streamswindow()
     import xbmc
@@ -1558,7 +1593,7 @@ def test_full_play_stop_cycle_phase1_to_phase2_to_phase3(load_streamswindow, mon
             log.append(('tick', tick, uic.input_suppressed()))
             ancestor.onAction(xbmcgui.Action(92))
             ancestor.onClick(30002)
-            assert uic.is_duplicate_launch() is True
+            assert uic.launch_action() != uic.LAUNCH_OPEN  # never a second Home
 
     kodi = _SlowClosingKodi(ctx, monkeypatch, playing_polls=3, close_ticks=3, on_tick=on_tick)
 

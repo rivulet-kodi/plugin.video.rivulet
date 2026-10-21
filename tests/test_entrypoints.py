@@ -202,15 +202,28 @@ def _assert_launch_ignored(ctx):
     assert not any('Container.Update' in cmd for cmd in ctx.env.executed_builtins)
 
 
-def test_bare_launch_during_the_player_phase_is_a_noop(load_default):
-    # Phase 2: the player owns the screen. Even if Kodi reports something
-    # playing (a refresh mid-playback), no second UI.
+def test_bare_launch_after_playback_stopped_in_the_player_phase_is_a_noop(load_default):
+    # Phase 2, mid CloseFile: the post-stop refresh. The running UI reopens
+    # by itself; neither a second UI nor a show request.
+    _ns, ctx = load_default(
+        ['plugin://plugin.video.rivulet/', '5', '?action=home'],
+        before=lambda ctx: _owner(ctx, phase='player'),
+    )
+    _assert_launch_ignored(ctx)
+    assert not ctx.env.window_properties[10000].get('rivulet.ui.show')
+
+
+def test_bare_launch_while_the_video_plays_asks_the_running_ui_back(load_default):
+    # Issue #73: the user left the fullscreen video and opened Rivulet. The
+    # running UI is blocked in its playback wait - wake it, never open a
+    # second Home over it.
     def before(ctx):
         _owner(ctx, phase='player')
         ctx.env.player_is_playing = True
 
     _ns, ctx = load_default(['plugin://plugin.video.rivulet/', '5', '?action=home'], before=before)
     _assert_launch_ignored(ctx)
+    assert ctx.env.window_properties[10000].get('rivulet.ui.show')
 
 
 def test_bare_launch_while_a_ui_is_alive_and_nothing_plays_is_a_noop(load_default):

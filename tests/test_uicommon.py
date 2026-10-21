@@ -573,18 +573,18 @@ def test_window_property_failures_degrade_to_no_marker(load_uicommon, monkeypatc
     ctx.uicommon.begin_player_phase()  # must not raise
     ctx.uicommon.end_player_phase()
     assert ctx.uicommon.ui_owner_alive() is False
-    assert ctx.uicommon.is_duplicate_launch() is False
+    assert ctx.uicommon.launch_action() == ctx.uicommon.LAUNCH_OPEN
 
 
-@pytest.mark.parametrize('alive,phase,playing,duplicate', [
-    (False, 'player', True, False),   # no owner at all: a genuine launch
-    (False, 'addon', False, False),
-    (True, 'player', False, True),    # the post-stop refresh, mid CloseFile
-    (True, 'player', True, True),     # a refresh while the video still plays
-    (True, 'addon', False, True),     # the same refresh landing just after phase 3 began
-    (True, 'addon', True, False),     # background playback + deliberate launch
+@pytest.mark.parametrize('alive,phase,playing,verdict', [
+    (False, 'player', True, 'open'),    # no owner at all: a genuine launch
+    (False, 'addon', False, 'open'),
+    (True, 'player', False, 'ignore'),  # the post-stop refresh, mid CloseFile
+    (True, 'player', True, 'show'),     # user left the video and opened Rivulet (#73)
+    (True, 'addon', False, 'ignore'),   # the same refresh landing just after phase 3 began
+    (True, 'addon', True, 'open'),      # background playback + deliberate launch
 ])
-def test_is_duplicate_launch_matrix(load_uicommon, alive, phase, playing, duplicate):
+def test_launch_action_matrix(load_uicommon, alive, phase, playing, verdict):
     ctx = load_uicommon()
     props = ctx.env.window_properties.setdefault(10000, {})
     props['rivulet.ui.phase'] = phase
@@ -592,7 +592,8 @@ def test_is_duplicate_launch_matrix(load_uicommon, alive, phase, playing, duplic
         props['rivulet.ui.heartbeat'] = 'tok|%.3f' % time.time()
     ctx.env.player_is_playing = playing
 
-    assert ctx.uicommon.is_duplicate_launch() is duplicate
+    assert ctx.uicommon.launch_action() == verdict
+
 
 # ---------------------------------------------------------------------------
 # BaseWindow.onAction() - the shared back-navigation contract

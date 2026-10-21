@@ -49,10 +49,11 @@ bits every one of those screens needs so they stay consistent:
   then reopens each one - exactly where the user left it - once
   playback ends and control naturally unwinds back to it.
 - UI phases (`begin_player_phase()`/`end_player_phase()`/
-  `input_suppressed()`/`UiHeartbeat`/`is_duplicate_launch()`): while the
-  player owns the screen no Rivulet screen reacts to input and a Kodi
-  re-run of the plugin root opens nothing - see the "UI phases" notes
-  above `ModalStackWindow`.
+  `input_suppressed()`/`UiHeartbeat`/`launch_action()`): while the
+  player owns the screen no Rivulet screen reacts to input, a Kodi re-run
+  of the plugin root after playback opens nothing, and a launch while the
+  video still plays hands the screen back to the running UI - see the "UI
+  phases" notes above `ModalStackWindow`.
 
 Jumping into a plugin directory from one of these dialogs (e.g. a
 RunPlugin-only action) must use `ActivateWindow(Videos, url)`, NOT
@@ -357,7 +358,16 @@ def open_window(window_cls, xml_name, *args, **kwargs):
 #    HomeWindow over the restored StreamsWindow (kodi.log 01:07:59.987
 #    "Control 55 in window 10025 ..." then 01:08:00.189 "opening
 #    HomeWindow") and ran `Dialog.Close(all)`, closing the picker that had
-#    just come back. `default.py` asks `is_duplicate_launch()` first.
+#    just come back. `default.py` asks `launch_action()` first.
+#
+# Leaving the player phase early is the user's call, though (issue #73):
+# playback runs on when they leave the fullscreen video, and opening Rivulet
+# from Kodi's menus then must bring Rivulet back, not be ignored as a
+# refresh. A second Home cannot do it - the running interpreter is still
+# blocked in the playback wait under its force-closed screens - so the
+# launch posts a show request instead (`request_ui_show()`), and that wait
+# returns early on it (`take_ui_show_request()`), reopening the picker and,
+# behind it, the rest of the stack while the video plays on.
 #
 # The in-process flag (`_ui_phase`) is what screens consult - a plain
 # attribute read, no Kodi call, safe to hit on every mouse-move action. The
@@ -370,6 +380,12 @@ PHASE_PLAYER = 'player'
 #: Window(10000) property names owned by the interpreter running Home.
 PHASE_PROPERTY = 'rivulet.ui.phase'
 HEARTBEAT_PROPERTY = 'rivulet.ui.heartbeat'
+SHOW_REQUEST_PROPERTY = 'rivulet.ui.show'
+
+#: `launch_action()` verdicts for a bare plugin-root run.
+LAUNCH_OPEN = 'open'
+LAUNCH_IGNORE = 'ignore'
+LAUNCH_SHOW = 'show'
 
 #: How often the heartbeat thread refreshes its stamp, and how old a stamp may
 #: be before the owner counts as dead. A killed/crashed interpreter never
@@ -421,9 +437,11 @@ def begin_player_phase():
     """Phase 1 -> 2 handoff: from now on Rivulet is silent until
     `end_player_phase()`. Called by `close_windows_for_playback()`, i.e. right
     before `Player.play()`, so it also covers every callback still queued from
-    before the handoff."""
+    before the handoff. Drops any show request left from an earlier playback,
+    so only a launch made during THIS one can end it early."""
     global _ui_phase
     _ui_phase = PHASE_PLAYER
+    _home_property(SHOW_REQUEST_PROPERTY, '')
     _home_property(PHASE_PROPERTY, PHASE_PLAYER)
 
 
@@ -506,33 +524,54 @@ def ui_owner_alive(max_age=UI_HEARTBEAT_MAX_AGE_SECONDS, clock=None):
     return -max_age <= age <= max_age
 
 
-def is_duplicate_launch():
-    """True when a bare plugin-root run (`default.py` home action) must NOT open
-    another HomeWindow: another interpreter's UI is alive AND either its
-    phase is `player`, or Kodi is not playing anything.
+def launch_action():
+    """What a bare plugin-root run (`default.py` home action) must do:
+    `LAUNCH_OPEN` a HomeWindow, `LAUNCH_IGNORE` it, or `LAUNCH_SHOW` - ask
+    the running UI to come back (`request_ui_show()`) instead of opening a
+    second one.
 
-    - alive + `player`: the player owns the screen; this is Kodi refreshing
-      the Videos container the addon was started from. Whatever it plays or
-      closes now, a second UI is wrong.
-    - alive + not playing (+ phase `addon`): the same refresh landing just
-      after the old UI came back (it ends the phase before the refresh's
-      interpreter starts), or any stray re-run while a UI is on screen.
-    - alive + playing + `addon`: a video is running in the background and the
-      user opened Rivulet from Kodi's menus while an earlier session is still
-      up - a deliberate launch, honoured.
     - not alive (never started, exited, killed - stamp stale): a genuine
-      launch, always honoured, so a crashed interpreter can never lock the
+      launch, always opened, so a crashed interpreter can never lock the
       user out.
+    - alive + `player` + playing: the user left the fullscreen video and
+      opened Rivulet (from Kodi's menus, or by going Back to the Videos
+      window it was started from, which re-runs the root): show the running
+      UI, which is blocked in the playback wait (issue #73).
+    - alive + `player` + not playing: Kodi refreshing the Videos container
+      as playback stops (mid CloseFile); the running UI reopens by itself.
+    - alive + `addon` + not playing: the same refresh landing just after the
+      old UI came back (it ends the phase before the refresh's interpreter
+      starts), or any stray re-run while a UI is on screen.
+    - alive + `addon` + playing: a video is running in the background and
+      the user opened Rivulet from Kodi's menus while an earlier session is
+      still up - a deliberate launch, opened.
     """
     if not ui_owner_alive():
-        return False
-    if _home_property(PHASE_PROPERTY) == PHASE_PLAYER:
-        return True
+        return LAUNCH_OPEN
     try:
         playing = xbmc.Player().isPlaying()
     except Exception:  # noqa: BLE001 - cannot tell: treat as "not playing"
         playing = False
-    return not playing
+    if _home_property(PHASE_PROPERTY) == PHASE_PLAYER:
+        return LAUNCH_SHOW if playing else LAUNCH_IGNORE
+    return LAUNCH_OPEN if playing else LAUNCH_IGNORE
+
+
+def request_ui_show():
+    """Ask the interpreter running the UI to bring its screens back while
+    playback goes on - see `launch_action()`'s `LAUNCH_SHOW`."""
+    import time
+
+    _home_property(SHOW_REQUEST_PROPERTY, '%.3f' % time.time())
+
+
+def take_ui_show_request():
+    """True (once) if `request_ui_show()` was called since the last check or
+    the last `begin_player_phase()`; consumes the request."""
+    if not _home_property(SHOW_REQUEST_PROPERTY):
+        return False
+    _home_property(SHOW_REQUEST_PROPERTY, '')
+    return True
 
 
 #: `ModalStackWindow` callbacks gated by `input_suppressed()`: the ones that
@@ -716,7 +755,8 @@ def close_windows_for_playback(exclude=None):
 
     Marks the phase `player` first (`begin_player_phase()`): every callback
     still queued for a screen is ignored from here on, and a Videos-window
-    refresh of the plugin root is a no-op, until `streamswindow` ends it.
+    refresh of the plugin root is a no-op, until `streamswindow` ends it -
+    when the player closes, or early on a show request (`launch_action()`).
 
     Walks a snapshot of `_MODAL_WINDOW_STACK` innermost-first (the
     reversed live order), marking each survivor `_closed_for_playback =
