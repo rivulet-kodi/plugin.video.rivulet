@@ -787,7 +787,17 @@ def _pull_record(item_id, offset, last_watched):
                       "flaggedWatched": 0, "video_id": item_id}}
 
 
-def _puller(tmp_path, api, playing=False, sync=True):
+class _DoneWorker:
+    def is_alive(self):
+        return False
+
+
+def _run_inline(target):
+    target()
+    return _DoneWorker()
+
+
+def _puller(tmp_path, api, playing=False, sync=True, abort=lambda: False, spawn=_run_inline):
     from lib.store import Store
 
     store = Store(str(tmp_path / "data"))
@@ -797,7 +807,7 @@ def _puller(tmp_path, api, playing=False, sync=True):
     puller = service_runner.ProgressPuller(
         store, api, lambda level, msg: logs.append((level, msg)),
         service_runner.LogLevels("I", "W", "E"),
-        lambda: sync, lambda: playing, clock=lambda: clock[0],
+        lambda: sync, lambda: playing, abort, clock=lambda: clock[0], spawn_fn=spawn,
     )
     return puller, store, clock, logs
 
@@ -853,3 +863,40 @@ def test_progress_puller_failure_is_logged_not_raised(tmp_path):
     clock[0] += service_runner.LIBRARY_PULL_INTERVAL_SECONDS
     puller.poll()
     assert api.calls == [("k1", None, True)]
+
+
+def test_progress_puller_batches_incremental_fetch_and_ignores_junk_meta(tmp_path, monkeypatch):
+    monkeypatch.setattr(service_runner, "LIBRARY_PULL_BATCH", 1)
+    api = _PullApi([["tt1", 1], ["tt2", 1], "junk"], {
+        "tt1": _pull_record("tt1", 4000, "2099-01-01T00:00:00Z"),
+        "tt2": _pull_record("tt2", 5000, "2099-01-01T00:00:00Z"),
+    })
+    puller, _, clock, _ = _puller(tmp_path, api)
+    puller.poll()
+    api.meta = [["tt1", 2], ["tt2", 2], "junk"]
+    clock[0] += service_runner.LIBRARY_PULL_INTERVAL_SECONDS
+    puller.poll()
+    assert [c[1] for c in api.calls[1:]] == [["tt1"], ["tt2"]]
+
+
+def test_progress_puller_abort_stops_before_fetching_or_writing(tmp_path):
+    api = _PullApi([["tt1", 1]], {"tt1": _pull_record("tt1", 4000, "2099-01-01T00:00:00Z")})
+    puller, store, _, _ = _puller(tmp_path, api, abort=lambda: True)
+    puller.poll()
+    assert api.calls == []
+    assert store.get_progress("movie", "tt1") is None
+
+
+def test_progress_puller_runs_one_worker_at_a_time(tmp_path):
+    class _Busy:
+        def is_alive(self):
+            return True
+
+    spawned = []
+    api = _PullApi([], {})
+    puller, store, clock, _ = _puller(tmp_path, api, spawn=lambda target: spawned.append(target) or _Busy())
+    puller.poll()
+    store.set_auth({"authKey": "k2", "user": {}})
+    clock[0] += service_runner.LIBRARY_PULL_INTERVAL_SECONDS
+    puller.poll()
+    assert len(spawned) == 1

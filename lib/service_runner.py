@@ -37,6 +37,7 @@ import datetime
 import os
 import shutil
 import subprocess
+import threading
 import time
 from urllib.parse import urlparse
 
@@ -962,22 +963,35 @@ class ProgressPuller:
     best-effort: a failure is logged and retried on the next interval,
     never raised into the supervision loop. Merge precedence is
     `Store.merge_remote_progress`'s: newer `updated_at` wins.
+
+    The pull itself runs on a daemon worker thread (`spawn_fn`), one at
+    a time: it is several synchronous API calls with a 15s timeout each,
+    and running them inline would stall `Supervisor.run()`'s health
+    checks and its abort/shutdown handling for as long. `abort_fn` is
+    checked between requests so a Kodi quit stops the pull at the next
+    boundary, before anything is written.
     """
 
-    def __init__(self, store, api, log_fn, levels, sync_enabled_fn, is_playing_fn, clock=time.monotonic):
+    def __init__(self, store, api, log_fn, levels, sync_enabled_fn, is_playing_fn,
+                 abort_fn, clock=time.monotonic, spawn_fn=None):
         self._store = store
         self._api = api
         self._log = log_fn
         self._levels = levels
         self._sync_enabled = sync_enabled_fn
         self._is_playing = is_playing_fn
+        self._abort = abort_fn
         self._clock = clock
+        self._spawn = spawn_fn or _spawn_daemon
+        self._worker = None
         self._auth_key = None
         self._mtimes = None
         self._next_at = 0.0
 
     def poll(self):
         try:
+            if self._worker is not None and self._worker.is_alive():
+                return
             if not self._sync_enabled():
                 self._auth_key = None
                 return
@@ -996,29 +1010,51 @@ class ProgressPuller:
             if self._is_playing():
                 return
             self._next_at = now + LIBRARY_PULL_INTERVAL_SECONDS
-            self._pull(auth_key)
+            self._worker = self._spawn(lambda: self._run(auth_key, self._mtimes))
         except Exception as exc:  # noqa: BLE001 - a Stremio API hiccup must never crash the service loop
             self._log(self._levels.warning, "library pull failed: %r" % (exc,))
 
-    def _pull(self, auth_key):
+    def _run(self, auth_key, known_mtimes):
+        try:
+            self._pull(auth_key, known_mtimes)
+        except Exception as exc:  # noqa: BLE001 - worker thread: nothing above it to catch this
+            self._log(self._levels.warning, "library pull failed: %r" % (exc,))
+
+    def _pull(self, auth_key, known_mtimes):
         meta = self._api.datastore_meta(auth_key)
         mtimes = {}
         for entry in meta:
             if isinstance(entry, (list, tuple)) and len(entry) == 2 and isinstance(entry[0], str):
                 mtimes[entry[0]] = entry[1]
-        if self._mtimes is None:
+        if known_mtimes is None:
+            if self._abort():
+                return
             items = self._api.datastore_get(auth_key, all=True)
         else:
-            changed = [item_id for item_id, mtime in mtimes.items() if self._mtimes.get(item_id) != mtime]
+            changed = [item_id for item_id, mtime in mtimes.items() if known_mtimes.get(item_id) != mtime]
             items = []
             for start in range(0, len(changed), LIBRARY_PULL_BATCH):
+                if self._abort():
+                    return
                 items.extend(self._api.datastore_get(
                     auth_key, ids=changed[start:start + LIBRARY_PULL_BATCH], all=False,
                 ))
+        # A logout/re-login while this ran makes the result stale.
+        if self._abort() or self._auth_key != auth_key:
+            return
         entries = [e for e in (library.progress_from_library_item(i) for i in items) if e is not None]
         written = self._store.merge_remote_progress(entries) if entries else 0
         self._mtimes = mtimes
         self._log(self._levels.info, "library pull: %d records, %d progress entries updated" % (len(items), written))
+
+
+def _spawn_daemon(target):
+    """Start `target` on a daemon thread and return the thread -- daemon so
+    a request still in flight at Kodi quit never holds the interpreter."""
+    thread = threading.Thread(target=target, name="rivulet-library-pull")
+    thread.daemon = True
+    thread.start()
+    return thread
 
 
 def _detect_italian_user(xbmc):
@@ -1665,9 +1701,10 @@ def main():
     progress_player = build_progress_player(xbmc, store, StremioAPI(), log, sync_enabled)
     # Own client: the player pushes from Kodi's callback thread too, and a
     # requests.Session is not safe to share across threads.
+    abort_monitor = xbmc.Monitor()
     progress_puller = ProgressPuller(
         store, StremioAPI(), log, LogLevels(xbmc.LOGINFO, xbmc.LOGWARNING, xbmc.LOGERROR),
-        sync_enabled, lambda: progress_player.isPlaying(),
+        sync_enabled, lambda: progress_player.isPlaying(), lambda: abort_monitor.abortRequested(),
     )
 
     # S4Me bridge: deliberately independent of ServiceMonitor -- reads its
