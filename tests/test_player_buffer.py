@@ -926,6 +926,40 @@ def test_apply_item_metadata_skips_malformed_meta_fields_without_poisoning_other
     assert info.get('genre') == ['Sci-Fi']  # other fields unaffected
 
 
+def test_apply_item_metadata_escapes_addon_markup_on_every_text_field(kodi_stubs, monkeypatch):
+    """Addon-supplied text (label, filename-derived title, plot, tagline,
+    genres, series name) lands on the playing ListItem, which Kodi's OSD
+    and the skin render verbatim - so `[COLOR]`/`$INFO[...]` must be
+    neutralised on EVERY such field, not only the label streamswindow
+    already escapes (an unescaped plot evaluated `$INFO[...]` in the OSD).
+    """
+    env = kodi_stubs.env
+    env.addon.settings['buffer_enable'] = False
+    _ServerScript(resolve_url='http://server/x/0').install(monkeypatch, kodi_stubs.player)
+
+    item_meta = {
+        'label': '[COLOR red]Dune[/COLOR]',
+        'meta': {
+            'name': '$INFO[System.ProfileName]Show',
+            'description': 'Plot $INFO[Player.Title] [B]bold[/B]',
+            'tagline': '[CR]tag',
+            'genres': ['[COLOR x]Sci-Fi[/COLOR]', '$VAR[evil]Drama'],
+        },
+    }
+    stream = _torrent_stream(fileIdx=0, behaviorHints={'filename': '$INFO[Foo]Release.mkv'})
+    kodi_stubs.player.play(80, stream, 'series', 'tt80:1:1', item_meta=item_meta)
+
+    _handle, _succeeded, list_item = _resolved_one(env)
+    info = list_item.legacy_info
+    assert list_item.getLabel() == 'Dune'
+    assert info['title'] == 'Dune'
+    assert info['originaltitle'] == 'INFO[Foo]Release.mkv'
+    assert info['plot'] == 'Plot INFO[Player.Title] bold'
+    assert info['plotoutline'] == 'tag'
+    assert info['tvshowtitle'] == 'INFO[System.ProfileName]Show'
+    assert info['genre'] == ['Sci-Fi', 'VAR[evil]Drama']
+
+
 def test_apply_item_metadata_applies_cast_from_meta_with_one_based_order(kodi_stubs, monkeypatch):
     """`item_meta['meta']['cast']` (a Stremio meta's plain actor-name
     array) must reach the playback ListItem via `compat.set_video_cast`,

@@ -31,6 +31,7 @@ from lib.stremio.server import (
     redact_url,
     stream_trackers,
 )
+from lib.stremio.streaminfo import escape_label
 from lib.stremio.subtitles import collect_subtitles, filter_subtitles
 from lib.ui.compat import (
     ADDON,
@@ -1254,9 +1255,14 @@ def _apply_item_metadata(list_item, stream, stype, item_meta, filename):
     item_meta = item_meta or {}
     meta = item_meta.get('meta') or {}
 
-    title = sanitize_title(
+    # Everything below comes from third-party addon JSON and lands on a
+    # ListItem that Kodi's fullscreen OSD and the skin render verbatim, so
+    # a `[COLOR]`/`$INFO[...]` in a title, plot or genre would be
+    # EVALUATED there. `escape_label()` is idempotent, so a label the
+    # caller (streamswindow) already escaped passes through unchanged.
+    title = escape_label(sanitize_title(
         item_meta.get('label') or filename or stream.get('title') or stream.get('name') or ''
-    )
+    ))
     if title:
         list_item.setLabel(title)
 
@@ -1268,7 +1274,7 @@ def _apply_item_metadata(list_item, stream, stype, item_meta, filename):
     if title:
         info['title'] = title
 
-    originaltitle = sanitize_title(filename or '')
+    originaltitle = escape_label(sanitize_title(filename or ''))
     if originaltitle and originaltitle != title:
         info['originaltitle'] = originaltitle
 
@@ -1282,12 +1288,13 @@ def _apply_item_metadata(list_item, stream, stype, item_meta, filename):
     # back to the stream's own parsed description (release name, size,
     # seeders, provider) - genuinely the most useful thing to show about
     # the file actually playing.
-    plot = item_meta.get('plot') or meta.get('description') or _stream_plot(stream)
+    plot = escape_label(item_meta.get('plot') or meta.get('description') or _stream_plot(stream))
     if plot:
         info['plot'] = plot
 
-    if meta.get('tagline'):
-        info['plotoutline'] = meta['tagline']
+    tagline = escape_label(meta.get('tagline'))
+    if tagline:
+        info['plotoutline'] = tagline
 
     year = parse_year(meta.get('releaseInfo') or meta.get('year'))
     if year is not None:
@@ -1299,14 +1306,21 @@ def _apply_item_metadata(list_item, stream, stype, item_meta, filename):
 
     genres = meta.get('genres')
     if genres:
-        info['genre'] = genres
+        # A Stremio `genres` is a list, but an addon may send one bare
+        # value (set_video_info()'s `_as_list` accepts both); stringify
+        # first because escape_label() maps any non-str to ''.
+        if not isinstance(genres, (list, tuple)):
+            genres = [genres]
+        genres = [g for g in (escape_label(str(g)) for g in genres) if g]
+        if genres:
+            info['genre'] = genres
 
     duration = parse_duration_seconds(meta.get('runtime'))
     if duration is not None:
         info['duration'] = duration
 
     if stype == 'series' and meta.get('name'):
-        info['tvshowtitle'] = meta['name']
+        info['tvshowtitle'] = escape_label(str(meta['name']))
 
     set_video_info(list_item, info)
     set_video_cast(list_item, meta.get('cast'))
