@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.rivulet" name="Rivulet" version="0.34.0" provider-name="M0RF30">
+<addon id="plugin.video.rivulet" name="Rivulet" version="0.35.0" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" version="2.22.0"/>
@@ -17,6 +17,7 @@
 - New: a new series page with season tabs, episode rows with progress and watched ticks, and a new one-page search with an on-screen keyboard and a Discover row.
 - New: IMDb, Rotten Tomatoes (critics and audience) and Metacritic scores with optional OMDb and MDBList keys, which can be typed on your phone by scanning a QR code. Search, add-on links and Stremio sign-in can use the phone too.
 - Change: dialogs are now always dark and rounded (the "Dark dialogs" setting is gone), with a softer background dim, translucent panels, pill-shaped buttons and a 350 ms fade on the busy spinner.
+- Fix: Kodi no longer crashes when you leave Home and Rivulet exits. Home now releases its list items before its window closes.
 v0.34.0:
 - New: what you watch in other Stremio apps now shows up in Rivulet. Progress and watched titles from your Stremio account are pulled in after login and every 15 minutes, without overwriting anything newer on this device ("Sync playback progress to your Stremio account" setting).
 - Fix: while a video plays, opening Rivulet from Kodi's menus brings Rivulet back over the video instead of returning to it. Before, you had to stop playback first.
