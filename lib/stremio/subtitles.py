@@ -22,6 +22,7 @@ fetch remote fonts, so carrying it through would be dead weight.
 from urllib.parse import urlparse
 
 from lib.stremio.addons import addon_supports
+from lib.stremio.fanout import map_bounded
 
 # ISO 639-1 (2-letter) -> ISO 639-2/B (3-letter) codes for the languages
 # subtitle addons commonly report. Only used for the loose alias matching
@@ -148,9 +149,7 @@ def _query_addons(client, transport_urls, rtype, rid, extra):
         return []
     if len(transport_urls) == 1:
         return [_one(transport_urls[0])]
-    from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=min(len(transport_urls), _MAX_SUBTITLE_ADDON_WORKERS)) as pool:
-        return list(pool.map(_one, transport_urls))
+    return map_bounded(_one, transport_urls, _MAX_SUBTITLE_ADDON_WORKERS)
 
 
 def collect_subtitles(client, addons, rtype, rid, extra=None):

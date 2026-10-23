@@ -38,7 +38,7 @@ Browsing: `lib/ui/views.py` fans a request across installed addons -> `lib/strem
 
 | Path | Purpose |
 |---|---|
-| `lib/stremio/` | Protocol client: `addons.py` (manifests, catalogs, fan-out), `addoncatalogs.py` (the `addon_catalog` resource: collapsed per id, pooled, TTL-cached), `api.py` (account sync), `contentrating.py` (adult heuristic), `server.py` (streaming server), `streaminfo.py` (quality/seeder/cache decoration + source filtering), `subtitles.py`, `metalinks.py` |
+| `lib/stremio/` | Protocol client: `addons.py` (manifests, catalogs, fan-out), `addoncatalogs.py` (the `addon_catalog` resource: collapsed per id, pooled, TTL-cached), `api.py` (account sync), `contentrating.py` (adult heuristic), `fanout.py` (`map_bounded()`: ordered, bounded daemon-thread map for this layer; never `ThreadPoolExecutor`), `server.py` (streaming server), `streaminfo.py` (quality/seeder/cache decoration + source filtering), `subtitles.py`, `metalinks.py` |
 | `lib/ui/` | Windows, dialogs, routing, playback. All Kodi API contact lives here, except `lib/service_runner.py` |
 | `resources/skins/Default/1080i/` | 13 window XMLs, authored at 1920x1080 |
 | `resources/language/resource.language.*/` | 14 locales, `strings.po` |

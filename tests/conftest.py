@@ -132,9 +132,8 @@ class FakeSession:
         #: call to that same url (FIFO within that url only). Takes
         #: precedence over `_responses` for a url with an entry here.
         #: Exists so a test whose two calls race under a real thread pool
-        #: (`fetch_addon_catalogs()`'s `Executor.map()` gives no ordering
-        #: guarantee across sources - see
-        #: https://docs.python.org/3.8/library/concurrent.futures.html)
+        #: (`fetch_addon_catalogs()`'s `map_bounded()` workers give no
+        #: ordering guarantee across sources - see `lib.stremio.fanout`)
         #: can pick its response by url instead of by call order.
         self._url_responses = dict(url_responses or {})
         #: Guards `_responses`/`_url_responses` pop + `calls` append

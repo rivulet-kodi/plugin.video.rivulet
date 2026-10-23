@@ -65,6 +65,7 @@ from lib.stremio.addons import (
     safe_url_for_log,
     validate_transport_url,
 )
+from lib.stremio.fanout import map_bounded
 
 #: `descriptor_state()` outcomes - see its docstring for what each means.
 STATE_INSTALLED = 'installed'
@@ -369,9 +370,7 @@ def fetch_addon_catalogs(client_or_session, sources):
     if len(sources) == 1:
         results = [_fetch_one(sources[0])]
     else:
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=min(len(sources), _MAX_CATALOG_WORKERS)) as pool:
-            results = list(pool.map(_fetch_one, sources))
+        results = map_bounded(_fetch_one, sources, _MAX_CATALOG_WORKERS)
 
     entries = []
     failures = []
