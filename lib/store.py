@@ -37,6 +37,9 @@ JSON files live under ``data_dir``:
   ``datastore_put`` and pulls the account's watch state back in through
   :func:`Store.merge_remote_progress`, both only when logged in AND the
   "sync_progress" setting is on.
+* ``progress_dismissed.json`` -- titles removed from Continue, with the
+  time, so the library pull does not bring them back (see
+  :meth:`Store.remove_progress_title`). Read fresh, not cached.
 * ``last_version.json`` -- the addon version the user was last told
   about (see :meth:`Store.get_last_seen_version`).
 * ``home_layout.json`` -- the user's Home arrangement
@@ -94,6 +97,9 @@ RESUME_OFFSET_FILENAME = "resume_offset.json"
 PROGRESS_FILENAME = "progress.json"
 LAST_VERSION_FILENAME = "last_version.json"
 HOME_LAYOUT_FILENAME = "home_layout.json"
+#: ``{"<type>\x1f<id>": "<iso8601 dismissed at>"}`` -- titles removed from
+#: Continue. See :meth:`Store.remove_progress_title`.
+PROGRESS_DISMISSED_FILENAME = "progress_dismissed.json"
 
 #: Most-recent-first cap for the persisted search history list.
 MAX_SEARCH_HISTORY = 15
@@ -1051,6 +1057,7 @@ class Store:
         self._now_playing_path = os.path.join(self.data_dir, NOW_PLAYING_FILENAME)
         self._resume_offset_path = os.path.join(self.data_dir, RESUME_OFFSET_FILENAME)
         self._progress_path = os.path.join(self.data_dir, PROGRESS_FILENAME)
+        self._dismissed_path = os.path.join(self.data_dir, PROGRESS_DISMISSED_FILENAME)
         self._last_version_path = os.path.join(self.data_dir, LAST_VERSION_FILENAME)
         #: Per-instance memoisation for `_cached_read`: `path -> ((mtime_ns,
         #: size), parsed_value)`. A single process/screen-render often
@@ -1795,6 +1802,7 @@ class Store:
         now_parsed = _parse_progress_timestamp(now)
         max_age_seconds = MAX_PROGRESS_AGE_DAYS * 86400
         merged = []
+        dismissed = self._load_dismissed()
         for entry in entries:
             key = self._progress_key(entry["type"], entry["id"], entry.get("video_id"))
             updated_at = entry["updated_at"]
@@ -1802,6 +1810,11 @@ class Store:
             if updated is None or (now_parsed - updated).total_seconds() > max_age_seconds:
                 continue
             local = progress.get(key)
+            if dismissed.get(self._progress_key(entry["type"], entry["id"], ""), "") >= updated_at:
+                # Removed from Continue after the account last saw this
+                # title played: the pull must not bring it back. A newer
+                # play (on any device) is later than the dismissal and wins.
+                continue
             if isinstance(local, dict) and str(local.get("updated_at") or "") >= updated_at:
                 continue
             progress[key] = {
@@ -1826,18 +1839,38 @@ class Store:
         content_id)`` -- the movie's own entry, or every episode of a
         series -- and return how many were removed.
 
-        Backs "Remove from Continue watching" in the My Stuff grid
-        (issue #65): a show abandoned part-way, or episodes stopped during
-        the credits short of `RESUME_MAX_PERCENT`, otherwise stay pinned
-        in the resume/next-up bands for the 180-day sweep. Progress is a
-        local-only cache (the Stremio account never re-fills it), so
-        deleting it here is the whole removal. Plain read-modify-write,
-        same reasoning as :meth:`set_progress`.
+        Backs "Remove from Continue" on Home (issue #65): a show abandoned
+        part-way, or episodes stopped during the credits short of
+        `RESUME_MAX_PERCENT`, otherwise stay pinned in the resume/next-up
+        bands for the 180-day sweep.
+
+        Deleting the local entries is not enough on its own: the service's
+        library pull (:meth:`merge_remote_progress`) re-creates them from
+        the account's library state at the next Kodi start, and the title
+        came straight back. The removal is therefore also recorded in
+        ``progress_dismissed.json`` with its time, and the pull skips any
+        account entry not newer than that. Plain read-modify-write, same
+        reasoning as :meth:`set_progress`.
         """
+        prefix = self._progress_key(content_type, content_id, "")
+        now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        status, dismissed = _load_json(self._dismissed_path, dict)
+        if status == _UNREADABLE:
+            raise OSError("progress_dismissed.json is unreadable")
+        dismissed = dismissed if status == _OK else {}
+        dismissed[prefix] = now
+        now_parsed = _parse_progress_timestamp(now)
+        dismissed = {
+            key: value for key, value in dismissed.items()
+            if isinstance(key, str) and isinstance(value, str)
+            and _parse_progress_timestamp(value) is not None
+            and (now_parsed - _parse_progress_timestamp(value)).total_seconds()
+            <= MAX_PROGRESS_AGE_DAYS * 86400
+        }
+        _atomic_write(self._dismissed_path, dismissed, compact=True)
         status, progress = _load_json(self._progress_path, dict)
         if status != _OK:
             return 0
-        prefix = self._progress_key(content_type, content_id, "")
         # `prefix` ends in the "\x1f" before the (empty) video id, so it
         # never matches a different id that merely starts the same way.
         kept = {key: value for key, value in progress.items()
@@ -1847,6 +1880,11 @@ class Store:
             _atomic_write(self._progress_path, kept, compact=True)
             self._invalidate_cache(self._progress_path)
         return removed
+
+    def _load_dismissed(self):
+        """``{title_prefix: dismissed_at}``; empty when absent or bad."""
+        status, dismissed = _load_json(self._dismissed_path, dict)
+        return dismissed if status == _OK else {}
 
     def get_progress_entries(self):
         """Return every cached local playback-progress entry, flattened

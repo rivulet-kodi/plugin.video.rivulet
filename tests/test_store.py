@@ -1489,6 +1489,22 @@ def test_merge_remote_progress_newer_remote_wins_older_is_ignored(tmp_path):
     }
 
 
+def test_removed_title_is_not_restored_by_the_library_pull_until_played_again(tmp_path):
+    import datetime
+
+    store = make_store(tmp_path)
+    played = (datetime.datetime.now(datetime.timezone.utc)
+              - datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    store.merge_remote_progress([_remote_entry(played)])
+    store.remove_progress_title("series", "tt9")
+    assert store.get_progress("series", "tt9", "tt9:1:1") is None
+    # The next pull carries the same account state: it must stay removed.
+    assert store.merge_remote_progress([_remote_entry(played)]) == 0
+    assert store.get_progress("series", "tt9", "tt9:1:1") is None
+    # Watching it again (a newer account entry) brings it back.
+    assert store.merge_remote_progress([_remote_entry("2099-01-01T00:00:00Z")]) == 1
+
+
 def test_merge_remote_progress_respects_entry_cap(tmp_path, monkeypatch):
     monkeypatch.setattr(store_module, "MAX_PROGRESS_ENTRIES", 2)
     store = make_store(tmp_path)

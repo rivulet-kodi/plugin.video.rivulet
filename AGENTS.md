@@ -87,7 +87,7 @@ make parallel    # pytest -n auto
 
 **String formatting is printf-style.** `UP031` is globally ignored (`pyproject.toml:44-48`); ~198 sites use `"%s" %`. Consistent with the 3.8 floor. Do not modernize them.
 
-**State and persistence** (`lib/store.py`) — JSON files under the addon's `addon_data` dir: `addons`, `auth`, `search_history` (15 entries), `now_playing`, `resume_offset`, `progress` (500 entries, 180-day sweep, daily), `last_version`, `home_layout`.
+**State and persistence** (`lib/store.py`) — JSON files under the addon's `addon_data` dir: `addons`, `auth`, `search_history` (15 entries), `now_playing`, `resume_offset`, `progress` (500 entries, 180-day sweep, daily), `progress_dismissed` (titles removed from Continue, so the library pull cannot restore them), `last_version`, `home_layout`.
 - Reads distinguish *missing* (seed/empty), *unreadable* (an `OSError` other than not-found: never write over it) and *corrupt* (kept as `<name>.corrupt` before the default replaces it). `_atomic_write` fsyncs and retries `os.replace` on `PermissionError`.
 - `update_addons()` (`store.py:977`) is the **only** compare-and-swap path, because Kodi runs `default.py` as concurrent OS processes. It deliberately bypasses the read cache — it must see current on-disk bytes.
 - Everything else is plain read-modify-write, with the rationale at `store.py:43-53` (a lost search-history or progress entry is low-stakes).
