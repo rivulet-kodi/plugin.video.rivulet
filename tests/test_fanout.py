@@ -67,3 +67,13 @@ def test_map_bounded_reraises_first_failure_in_input_order():
 
     with pytest.raises(ValueError, match='boom 1'):
         map_bounded(fn, [0, 1, 2], 3)
+
+
+def test_map_bounded_returns_when_a_worker_raises_a_base_exception():
+    def fn(item):
+        if item == 1:
+            raise SystemExit('stop')
+        return item
+
+    with pytest.raises(SystemExit):
+        map_bounded(fn, [0, 1, 2], 2)

@@ -49,7 +49,10 @@ def map_bounded(fn, items, max_workers):
                 return
             try:
                 done.put((index, True, fn(item)))
-            except Exception as exc:  # noqa: BLE001 - handed to the caller below
+            # BaseException, not Exception: a SystemExit/GeneratorExit in
+            # one worker would otherwise post no outcome, and the collector
+            # below would wait for it forever.
+            except BaseException as exc:  # noqa: B036 - handed to the caller below
                 done.put((index, False, exc))
 
     for _ in range(min(len(items), max_workers)):
