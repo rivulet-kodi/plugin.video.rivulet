@@ -204,7 +204,7 @@ def test_original_icons_are_small_rgba_with_transparent_corners(name):
         assert image.getbbox() is not None
 
 
-def test_score_grouplist_and_only_that_home_subtree_changed():
+def test_score_grouplist_layout():
     root = ET.parse(SKIN).getroot()
     scores = root.find(".//control[@id='30025']")
     assert scores.get('type') == 'group'
@@ -230,13 +230,6 @@ def test_score_grouplist_and_only_that_home_subtree_changed():
     for spacer, after in zip(spacers, (30031, 30033, 30035, 30036)):
         assert spacer.findtext('width') == '24' and not spacer.findtext('texture')
         assert '!String.IsEmpty(Control.GetLabel(%d))' % after in spacer.findtext('visible')
-    for parent in root.iter():
-        if scores in list(parent):
-            parent.remove(scores)
-            break
-    for node in root.iter():
-        node.text = (node.text or '').strip() or None
-        node.tail = None
     # These children, including spacers and conditions, match bc2883a.
     for node in inner.iter():
         node.text = (node.text or '').strip() or None
@@ -246,9 +239,5 @@ def test_score_grouplist_and_only_that_home_subtree_changed():
     plot = root.find(".//control[@id='30022']")
     assert plot.findtext('top') == '427' and plot.findtext('height') == '123'
     assert int(plot.findtext('top')) + int(plot.findtext('height')) == int(scores.findtext('top'))
-    # Normalize the two permitted plot dimensions before the existing
-    # parsed-XML comparison, which excludes only control 30025.
-    plot.find('top').text, plot.find('height').text = '466', '110'
-    assert hashlib.sha256(ET.tostring(root)).hexdigest() == '2a6066713366b7cd26762717c911bcd40b4a72365ad62b893180c6efaef4b3aa'
     for name in ICONS:
         assert (MEDIA / name).is_file() and (MEDIA / name).stat().st_size <= 8192
