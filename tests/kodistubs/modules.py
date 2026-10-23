@@ -497,8 +497,8 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
             self.shown = False
             #: Window properties, as set by `setProperty()`. Real windows
             #: expose these to the skin as `Window.Property(key)`; Rivulet's
-            #: GridWindow drives each band row's visibility through them
-            #: (see its onInit()).
+            #: the skins read them back as
+            #: `Window.Property(key)`.
             self.properties = {}
             self._control_types = _declared_controls(args[0] if args else None)
 

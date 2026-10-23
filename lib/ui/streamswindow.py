@@ -19,8 +19,7 @@ whatever opened `open_streams()` in the first place. Consequently
 out of a window (the first one, or a reopened one) with no pick, and
 once more for a fetch/window failure - it never returns True. Every
 `if open_streams(...): self.close()` (or `return open_streams(...)`)
-branch up the call chain (`DetailWindow`, `CatalogPickerWindow`,
-`SearchWindow` via `open_detail`) is consequently dormant: those
+branch up the call chain (`DetailWindow`, and `NewSearchWindow` via `open_detail`) is consequently dormant: those
 callers stay open underneath for the round trip's "reopen" to sit on
 top of, and simply resume (natural Back navigation) once
 `open_streams()` finally returns.

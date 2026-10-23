@@ -286,10 +286,9 @@ class AddonsWindow(BaseWindow):
 
 def open_addons():
     """List every installed addon with install/enable-disable/remove
-    actions. Mirrors
-    `catalogpicker.open_catalog_picker`'s error-handling shape; unlike
-    that picker there is no should-close-caller outcome to report, so
-    this always returns None."""
+    actions. There
+    is no should-close-caller outcome to report, so this always returns
+    None."""
     import xbmc
 
     from lib.ui.compat import L, log, notify

@@ -658,7 +658,7 @@ class ModalStackWindow:
     to make room for the player rather than the user genuinely backing
     out of it.
 
-    Mixed into `BaseWindow` (so `HomeWindow`/`SearchWindow`/
+    Mixed into `BaseWindow` (so `HomeWindow`/`NewSearchWindow`/
     `StreamsWindow`/every other screen built on it gets this for free)
     and directly onto `DetailWindow`/`ShowcaseWindow`, which subclass
     `xbmcgui.WindowXMLDialog` themselves with no shared base to route it
@@ -781,8 +781,7 @@ class BaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
 def fetch_and_validate_addon(client, url):
     """Validate + fetch a Stremio addon manifest for `url`, the shared
     body of `AddonsWindow._install()`, `AddonCatalogWindow._configure()`
-    and `_install_from_catalog()`, and `CatalogPickerWindow` - all three
-    used to hand-roll the same `validate_transport_url()` ->
+    and `_install_from_catalog()` - all of them used to hand-roll the same `validate_transport_url()` ->
     `client.manifest()` -> `manifest.get('id')` sequence with their own
     copy-pasted `AddonError` handling and logging, drifting slightly
     between call sites.

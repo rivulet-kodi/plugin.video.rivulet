@@ -608,12 +608,6 @@ msgctxt "#30219"
 msgid "Home screen"
 msgstr "Ana ekran"
 
-
-
-
-
-
-
 msgctxt "#30222"
 msgid "Show Anime"
 msgstr "Anime göster"
@@ -630,12 +624,6 @@ msgctxt "#30225"
 msgid "plays now"
 msgstr "şimdi oynatır"
 
-
-
-
-
-
-
 msgctxt "#30230"
 msgid "Open Rivulet automatically on Kodi startup"
 msgstr "Kodi başlangıcında Rivulet'i otomatik olarak aç"
@@ -651,24 +639,6 @@ msgstr "devam"
 msgctxt "#30241"
 msgid "Continue"
 msgstr "Devam et"
-
-msgctxt "#30242"
-msgid "NEXT UP"
-msgstr "SIRADAKİ"
-
-
-
-msgctxt "#30245"
-msgid "Continue watching"
-msgstr "İzlemeye devam et"
-
-msgctxt "#30246"
-msgid "Recently watched"
-msgstr "Son izlenenler"
-
-msgctxt "#30247"
-msgid "Your library"
-msgstr "Kitaplığınız"
 
 msgctxt "#30248"
 msgid "Disable"
@@ -793,8 +763,6 @@ msgstr "Yeni Bölümler"
 msgctxt "#30280"
 msgid "Hide adult content"
 msgstr "Yetişkinlere yönelik içeriği gizle"
-
-
 
 msgctxt "#30335"
 msgid "Installed"
@@ -944,8 +912,6 @@ msgctxt "#30423"
 msgid "Titles saved in your Stremio library"
 msgstr "Stremio kitaplığınızdaki başlıklar"
 
-
-
 msgctxt "#30426"
 msgid "Your library is empty. Add a title from its page."
 msgstr "Kitaplığınız boş. Bir başlığı sayfasından ekleyin."
@@ -985,12 +951,6 @@ msgstr "OMDb API anahtarı"
 msgctxt "#30454"
 msgid "MDBList API key"
 msgstr "MDBList API anahtarı"
-
-
-
-
-
-
 
 msgctxt "#30458"
 msgid "Pair a key"
@@ -1140,196 +1100,157 @@ msgctxt "#30515"
 msgid "Want Rotten Tomatoes and Metacritic scores? Get a free key at omdbapi.com/apikey.aspx and enter it here."
 msgstr "Rotten Tomatoes ve Metacritic puanlarını mı istiyorsunuz? omdbapi.com/apikey.aspx adresinden ücretsiz bir anahtar alın ve buraya girin."
 
-
 msgctxt "#30516"
 msgid "My Stuff"
 msgstr "İçeriklerim"
-
 
 msgctxt "#30517"
 msgid "Remove from Continue"
 msgstr "Devam Et listesinden kaldır"
 
-
 msgctxt "#30518"
 msgid "Arrange Home lists"
 msgstr "Ana sayfa listelerini düzenle"
-
 
 msgctxt "#30519"
 msgid "Choose which lists each tab shows, and in what order."
 msgstr "Her sekmede hangi listelerin hangi sırayla gösterileceğini seçin."
 
-
 msgctxt "#30520"
 msgid "Lists: %d"
 msgstr "Listeler: %d"
-
 
 msgctxt "#30521"
 msgid "Reset to default"
 msgstr "Varsayılana sıfırla"
 
-
 msgctxt "#30522"
 msgid "Add a list"
 msgstr "Liste ekle"
-
 
 msgctxt "#30523"
 msgid "Move up"
 msgstr "Yukarı taşı"
 
-
 msgctxt "#30524"
 msgid "Move down"
 msgstr "Aşağı taşı"
-
 
 msgctxt "#30525"
 msgid "Remove from this tab"
 msgstr "Bu sekmeden kaldır"
 
-
 msgctxt "#30526"
 msgid "Also show in…"
 msgstr "Şurada da göster…"
-
 
 msgctxt "#30527"
 msgid "This tab is full"
 msgstr "Bu sekme dolu"
 
-
 msgctxt "#30528"
 msgid "Reset Home lists to default?"
 msgstr "Ana sayfa listeleri varsayılana sıfırlansın mı?"
-
 
 msgctxt "#30529"
 msgid "New Movies"
 msgstr "Yeni Filmler"
 
-
 msgctxt "#30530"
 msgid "New Series"
 msgstr "Yeni Diziler"
-
 
 msgctxt "#30531"
 msgid "New Anime Movies"
 msgstr "Yeni Anime Filmleri"
 
-
 msgctxt "#30532"
 msgid "New Anime Series"
 msgstr "Yeni Anime Dizileri"
-
 
 msgctxt "#30533"
 msgid "Library Movies"
 msgstr "Kitaplık Filmleri"
 
-
 msgctxt "#30534"
 msgid "Library Series"
 msgstr "Kitaplık Dizileri"
-
 
 msgctxt "#30535"
 msgid "Anime Movies"
 msgstr "Anime Filmleri"
 
-
 msgctxt "#30536"
 msgid "Anime Series"
 msgstr "Anime Dizileri"
-
 
 msgctxt "#30537"
 msgid "Browse full catalog"
 msgstr "Tüm kataloğa göz at"
 
-
 msgctxt "#30538"
 msgid "Replace this tab’s Continue list?"
 msgstr "Bu sekmenin Devam Et listesi değiştirilsin mi?"
-
 
 msgctxt "#30539"
 msgid "Enter OMDb key with your phone (QR)"
 msgstr "OMDb anahtarını telefonla gir (QR)"
 
-
 msgctxt "#30540"
 msgid "Enter MDBList key with your phone (QR)"
 msgstr "MDBList anahtarını telefonla gir (QR)"
-
 
 msgctxt "#30541"
 msgid "Get a free OMDb key: https://www.omdbapi.com/apikey.aspx"
 msgstr "Ücretsiz OMDb anahtarı al: https://www.omdbapi.com/apikey.aspx"
 
-
 msgctxt "#30542"
 msgid "Get a free MDBList key (sign in, then API key): https://mdblist.com/preferences/"
 msgstr "Ücretsiz MDBList anahtarı al (giriş yap, ardından API anahtarı): https://mdblist.com/preferences/"
-
 
 msgctxt "#30543"
 msgid "OMDb API key, get one at https://www.omdbapi.com/apikey.aspx"
 msgstr "OMDb API anahtarı alma adresi: https://www.omdbapi.com/apikey.aspx"
 
-
 msgctxt "#30544"
 msgid "MDBList API key, get one at https://mdblist.com/preferences/"
 msgstr "MDBList API anahtarı alma adresi: https://mdblist.com/preferences/"
-
 
 msgctxt "#30546"
 msgid "Shows a QR code. Scan it with your phone, paste the key there and it's saved here."
 msgstr "QR kodu gösterir. Telefonunuzla tarayıp anahtarı oraya yapıştırın; anahtar buraya kaydedilir."
 
-
 msgctxt "#30547"
 msgid "Want MDBList scores? Get a free key at https://mdblist.com/preferences/ (sign in, then generate an API key) and enter it here. MDBList also adds the Rotten Tomatoes audience score."
 msgstr "MDBList puanlarını mı istiyorsunuz? https://mdblist.com/preferences/ adresinden ücretsiz bir anahtar alın (giriş yapıp API anahtarı oluşturun) ve buraya girin. MDBList, Rotten Tomatoes izleyici puanını da ekler."
-
 
 msgctxt "#30492"
 msgid "Options"
 msgstr "Seçenekler"
 
-
 msgctxt "#30505"
 msgid "Use phone"
 msgstr "Telefonla"
-
 
 msgctxt "#30506"
 msgid "Discover"
 msgstr "Keşfet"
 
-
 msgctxt "#30507"
 msgid "Results"
 msgstr "Sonuçlar"
-
 
 msgctxt "#30508"
 msgid "Welcome"
 msgstr "Hoş geldiniz"
 
-
 msgctxt "#30509"
 msgid "Search for movies, shows and more. Pick letters, or use your phone."
 msgstr "Film, dizi ve daha fazlasını arayın. Harf seçin ya da telefonunuzu kullanın."
 
-
 msgctxt "#30511"
 msgid "Search"
 msgstr "Ara"
-
 
 msgctxt "#30513"
 msgid "No results for “%s”"

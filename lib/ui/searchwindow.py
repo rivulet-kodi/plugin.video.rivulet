@@ -484,12 +484,12 @@ def run_query(store, client, query, report=None):
     """Fan `query` across every search-capable catalog
     (`iter_catalogs(..., extra_required='search')`) and return the
     collected metas, each with `type` defaulted from its catalog.
-    Extracted verbatim from `SearchWindow._run_search()`'s own fan-out
-    (progress dialog via `busy_dialog`/L(30186), per-addon `AddonError`
-    isolation and logging included) so other windows can run a search
-    without going through `SearchWindow` -
-    `lib.ui.infowindow.open_credits_picker()`'s "person" dispatch is the
-    second caller. Writes no history, opens no coverflow - callers own
+    The fan-out (progress dialog via `busy_dialog`/L(30186), per-addon
+    `AddonError` isolation and logging included) lives here so every
+    window can run a search without opening one - callers are
+    `newsearch.NewSearchWindow` and
+    `lib.ui.infowindow.open_credits_picker()`'s "person" dispatch.
+    Writes no history, opens no coverflow - callers own
     both.
 
     The catalogs are queried CONCURRENTLY (`_MAX_SEARCH_WORKERS`), not one
@@ -501,8 +501,8 @@ def run_query(store, client, query, report=None):
 
     Pass a `SearchReport` as `report` to learn how the fan-out went
     (nothing enabled can search / every catalog failed / some failed /
-    cancelled) and to own the user-facing message - `SearchWindow.
-    _run_search()` does, so it can say "search failed" where it would
+    cancelled) and to own the user-facing message - `NewSearchWindow`
+    does, so it can say "search failed" where it would
     otherwise say "no results". Without one, `run_query()` shows that
     notification itself (`_search_notice()`), so a caller that never
     heard of reports (`open_credits_picker()`) still stops presenting an

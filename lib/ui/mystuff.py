@@ -11,9 +11,8 @@ dicts, hand it to a coverflow - and they overlap heavily in practice (a
 title you are part-way through is usually also in your library). Showing
 them as separate destinations made the viewer guess which one held the
 thing they wanted. This module merges both sources on their common
-`(type, id)` key and renders the result as one labelled poster row per
-band (`lib.ui.gridwindow`) - see `merge_entries()` for the merge and
-`group_by_band()` for the split into rows.
+`(type, id)` key and tags each entry with its band for the Home rows
+(`lib.ui.newhome`) - see `merge_entries()` for the merge.
 
 Band ordering (the flat list is grouped, not sorted by one key):
 
@@ -59,17 +58,6 @@ BAND_LIBRARY = 'library'
 #: Display order of the bands - `merge_entries()` emits its flat list in
 #: exactly this sequence.
 BAND_ORDER = (BAND_RESUME, BAND_NEXT_UP, BAND_RECENT, BAND_LIBRARY)
-
-#: band -> the localized-string id naming it. The grid names the band of
-#: whichever title is focused (`gridwindow._caption()`), which is what
-#: tells the viewer WHY that title is on the screen; the per-card badge
-#: is the same information compressed to a colour and a few characters.
-BAND_HEADINGS = {
-    BAND_RESUME: 30245,
-    BAND_NEXT_UP: 30242,
-    BAND_RECENT: 30246,
-    BAND_LIBRARY: 30247,
-}
 
 #: Cap on the number of titles fetched for the played bands (resume /
 #: next-up / recent). Each one costs a `views._fetch_meta` fan-out on a
@@ -217,24 +205,6 @@ def merge_entries(progress_entries, library_entries):
         merged.append(dict(meta, band=BAND_LIBRARY, percent=None, video_id=None, updated_at=None))
         remaining -= 1
     return merged
-
-
-def group_by_band(items):
-    """Split the merged list into `[(band, [item, ...]), ...]` in
-    `BAND_ORDER`, dropping bands with nothing in them.
-
-    The grid draws one labelled row per band (see `lib.ui.gridwindow`),
-    so this is the shape that screen consumes. Bands with no members are
-    dropped rather than passed through empty: the skin would hide the row
-    anyway, and an empty entry here would make the first-band focus in
-    `GridWindow.onInit()` land on a row that is not drawn.
-    """
-    grouped = []
-    for band in BAND_ORDER:
-        members = [item for item in items or [] if item.get('band') == band]
-        if members:
-            grouped.append((band, members))
-    return grouped
 
 
 def resolve_next_up(item, meta):
@@ -430,7 +400,7 @@ def _label_next_episodes(items):
     Also demotes a series that turns out to have NO next episode: if its
     meta arrived and nothing follows the episode just finished, the title
     is finished rather than next-up, so it moves to `BAND_RECENT` before
-    `group_by_band()` splits the list. An item whose meta never arrived is
+    the Home rows are built from the list. An item whose meta never arrived is
     left where it is - with no `videos` there is no way to tell "final
     season" from "not fetched yet". Mutates `items` in place, like the
     enrich pass above it.

@@ -608,12 +608,6 @@ msgctxt "#30219"
 msgid "Home screen"
 msgstr "Startscherm"
 
-
-
-
-
-
-
 msgctxt "#30222"
 msgid "Show Anime"
 msgstr "Anime tonen"
@@ -630,12 +624,6 @@ msgctxt "#30225"
 msgid "plays now"
 msgstr "speelt nu af"
 
-
-
-
-
-
-
 msgctxt "#30230"
 msgid "Open Rivulet automatically on Kodi startup"
 msgstr "Rivulet automatisch openen bij het opstarten van Kodi"
@@ -651,24 +639,6 @@ msgstr "heden"
 msgctxt "#30241"
 msgid "Continue"
 msgstr "Verder"
-
-msgctxt "#30242"
-msgid "NEXT UP"
-msgstr "VOLGENDE"
-
-
-
-msgctxt "#30245"
-msgid "Continue watching"
-msgstr "Verder kijken"
-
-msgctxt "#30246"
-msgid "Recently watched"
-msgstr "Onlangs bekeken"
-
-msgctxt "#30247"
-msgid "Your library"
-msgstr "Jouw bibliotheek"
 
 msgctxt "#30248"
 msgid "Disable"
@@ -793,8 +763,6 @@ msgstr "Nieuwe afleveringen"
 msgctxt "#30280"
 msgid "Hide adult content"
 msgstr "Volwassen inhoud verbergen"
-
-
 
 msgctxt "#30335"
 msgid "Installed"
@@ -944,8 +912,6 @@ msgctxt "#30423"
 msgid "Titles saved in your Stremio library"
 msgstr "Titels in je Stremio-bibliotheek"
 
-
-
 msgctxt "#30426"
 msgid "Your library is empty. Add a title from its page."
 msgstr "Je bibliotheek is leeg. Voeg een titel toe vanaf de pagina."
@@ -985,12 +951,6 @@ msgstr "OMDb API-sleutel"
 msgctxt "#30454"
 msgid "MDBList API key"
 msgstr "MDBList API-sleutel"
-
-
-
-
-
-
 
 msgctxt "#30458"
 msgid "Pair a key"
@@ -1140,196 +1100,157 @@ msgctxt "#30515"
 msgid "Want Rotten Tomatoes and Metacritic scores? Get a free key at omdbapi.com/apikey.aspx and enter it here."
 msgstr "Wil je scores van Rotten Tomatoes en Metacritic? Haal een gratis sleutel op via omdbapi.com/apikey.aspx en vul die hier in."
 
-
 msgctxt "#30516"
 msgid "My Stuff"
 msgstr "Mijn inhoud"
-
 
 msgctxt "#30517"
 msgid "Remove from Continue"
 msgstr "Verwijderen uit Verder kijken"
 
-
 msgctxt "#30518"
 msgid "Arrange Home lists"
 msgstr "Startlijsten indelen"
-
 
 msgctxt "#30519"
 msgid "Choose which lists each tab shows, and in what order."
 msgstr "Kies welke lijsten elk tabblad toont en in welke volgorde."
 
-
 msgctxt "#30520"
 msgid "Lists: %d"
 msgstr "Lijsten: %d"
-
 
 msgctxt "#30521"
 msgid "Reset to default"
 msgstr "Standaard herstellen"
 
-
 msgctxt "#30522"
 msgid "Add a list"
 msgstr "Lijst toevoegen"
-
 
 msgctxt "#30523"
 msgid "Move up"
 msgstr "Omhoog"
 
-
 msgctxt "#30524"
 msgid "Move down"
 msgstr "Omlaag"
-
 
 msgctxt "#30525"
 msgid "Remove from this tab"
 msgstr "Uit dit tabblad verwijderen"
 
-
 msgctxt "#30526"
 msgid "Also show in…"
 msgstr "Ook tonen in…"
-
 
 msgctxt "#30527"
 msgid "This tab is full"
 msgstr "Dit tabblad is vol"
 
-
 msgctxt "#30528"
 msgid "Reset Home lists to default?"
 msgstr "Startlijsten herstellen naar standaard?"
-
 
 msgctxt "#30529"
 msgid "New Movies"
 msgstr "Nieuwe films"
 
-
 msgctxt "#30530"
 msgid "New Series"
 msgstr "Nieuwe series"
-
 
 msgctxt "#30531"
 msgid "New Anime Movies"
 msgstr "Nieuwe animefilms"
 
-
 msgctxt "#30532"
 msgid "New Anime Series"
 msgstr "Nieuwe animeseries"
-
 
 msgctxt "#30533"
 msgid "Library Movies"
 msgstr "Films in bibliotheek"
 
-
 msgctxt "#30534"
 msgid "Library Series"
 msgstr "Series in bibliotheek"
-
 
 msgctxt "#30535"
 msgid "Anime Movies"
 msgstr "Animefilms"
 
-
 msgctxt "#30536"
 msgid "Anime Series"
 msgstr "Animeseries"
-
 
 msgctxt "#30537"
 msgid "Browse full catalog"
 msgstr "Volledige catalogus bekijken"
 
-
 msgctxt "#30538"
 msgid "Replace this tab’s Continue list?"
 msgstr "De lijst Verder kijken van dit tabblad vervangen?"
-
 
 msgctxt "#30539"
 msgid "Enter OMDb key with your phone (QR)"
 msgstr "OMDb-sleutel invoeren met je telefoon (QR)"
 
-
 msgctxt "#30540"
 msgid "Enter MDBList key with your phone (QR)"
 msgstr "MDBList-sleutel invoeren met je telefoon (QR)"
-
 
 msgctxt "#30541"
 msgid "Get a free OMDb key: https://www.omdbapi.com/apikey.aspx"
 msgstr "Een gratis OMDb-sleutel aanvragen: https://www.omdbapi.com/apikey.aspx"
 
-
 msgctxt "#30542"
 msgid "Get a free MDBList key (sign in, then API key): https://mdblist.com/preferences/"
 msgstr "Een gratis MDBList-sleutel aanvragen (inloggen, dan API-sleutel): https://mdblist.com/preferences/"
-
 
 msgctxt "#30543"
 msgid "OMDb API key, get one at https://www.omdbapi.com/apikey.aspx"
 msgstr "OMDb-API-sleutel, verkrijgbaar op https://www.omdbapi.com/apikey.aspx"
 
-
 msgctxt "#30544"
 msgid "MDBList API key, get one at https://mdblist.com/preferences/"
 msgstr "MDBList-API-sleutel, verkrijgbaar op https://mdblist.com/preferences/"
-
 
 msgctxt "#30546"
 msgid "Shows a QR code. Scan it with your phone, paste the key there and it's saved here."
 msgstr "Toont een QR-code. Scan deze met je telefoon en plak daar de sleutel om deze hier op te slaan."
 
-
 msgctxt "#30547"
 msgid "Want MDBList scores? Get a free key at https://mdblist.com/preferences/ (sign in, then generate an API key) and enter it here. MDBList also adds the Rotten Tomatoes audience score."
 msgstr "Wil je MDBList-scores? Vraag een gratis sleutel aan op https://mdblist.com/preferences/ (log in en genereer een API-sleutel) en voer deze hier in. MDBList voegt ook de publieksscore van Rotten Tomatoes toe."
-
 
 msgctxt "#30492"
 msgid "Options"
 msgstr "Opties"
 
-
 msgctxt "#30505"
 msgid "Use phone"
 msgstr "Via telefoon"
-
 
 msgctxt "#30506"
 msgid "Discover"
 msgstr "Ontdekken"
 
-
 msgctxt "#30507"
 msgid "Results"
 msgstr "Resultaten"
-
 
 msgctxt "#30508"
 msgid "Welcome"
 msgstr "Welkom"
 
-
 msgctxt "#30509"
 msgid "Search for movies, shows and more. Pick letters, or use your phone."
 msgstr "Zoek films, series en meer. Kies letters of gebruik je telefoon."
 
-
 msgctxt "#30511"
 msgid "Search"
 msgstr "Zoeken"
-
 
 msgctxt "#30513"
 msgid "No results for “%s”"

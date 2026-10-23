@@ -608,12 +608,6 @@ msgctxt "#30219"
 msgid "Home screen"
 msgstr "Schermata principale"
 
-
-
-
-
-
-
 msgctxt "#30222"
 msgid "Show Anime"
 msgstr "Mostra Anime"
@@ -630,12 +624,6 @@ msgctxt "#30225"
 msgid "plays now"
 msgstr "riproduce ora"
 
-
-
-
-
-
-
 msgctxt "#30230"
 msgid "Open Rivulet automatically on Kodi startup"
 msgstr "Apri Rivulet automaticamente all'avvio di Kodi"
@@ -651,24 +639,6 @@ msgstr "oggi"
 msgctxt "#30241"
 msgid "Continue"
 msgstr "Continua"
-
-msgctxt "#30242"
-msgid "NEXT UP"
-msgstr "PROSSIMO"
-
-
-
-msgctxt "#30245"
-msgid "Continue watching"
-msgstr "Continua a guardare"
-
-msgctxt "#30246"
-msgid "Recently watched"
-msgstr "Visti di recente"
-
-msgctxt "#30247"
-msgid "Your library"
-msgstr "La tua libreria"
 
 msgctxt "#30248"
 msgid "Disable"
@@ -793,8 +763,6 @@ msgstr "Nuovi episodi"
 msgctxt "#30280"
 msgid "Hide adult content"
 msgstr "Nascondi i contenuti per adulti"
-
-
 
 msgctxt "#30335"
 msgid "Installed"
@@ -944,8 +912,6 @@ msgctxt "#30423"
 msgid "Titles saved in your Stremio library"
 msgstr "Titoli salvati nella tua libreria Stremio"
 
-
-
 msgctxt "#30426"
 msgid "Your library is empty. Add a title from its page."
 msgstr "La tua libreria è vuota. Aggiungi un titolo dalla sua pagina."
@@ -985,12 +951,6 @@ msgstr "Chiave API OMDb"
 msgctxt "#30454"
 msgid "MDBList API key"
 msgstr "Chiave API MDBList"
-
-
-
-
-
-
 
 msgctxt "#30458"
 msgid "Pair a key"
@@ -1140,196 +1100,157 @@ msgctxt "#30515"
 msgid "Want Rotten Tomatoes and Metacritic scores? Get a free key at omdbapi.com/apikey.aspx and enter it here."
 msgstr "Vuoi i punteggi di Rotten Tomatoes e Metacritic? Ottieni una chiave gratuita su omdbapi.com/apikey.aspx e inseriscila qui."
 
-
 msgctxt "#30516"
 msgid "My Stuff"
 msgstr "I miei contenuti"
-
 
 msgctxt "#30517"
 msgid "Remove from Continue"
 msgstr "Rimuovi da Continua"
 
-
 msgctxt "#30518"
 msgid "Arrange Home lists"
 msgstr "Organizza le liste Home"
-
 
 msgctxt "#30519"
 msgid "Choose which lists each tab shows, and in what order."
 msgstr "Scegli quali liste mostrare in ogni scheda e in quale ordine."
 
-
 msgctxt "#30520"
 msgid "Lists: %d"
 msgstr "Liste: %d"
-
 
 msgctxt "#30521"
 msgid "Reset to default"
 msgstr "Ripristina predefiniti"
 
-
 msgctxt "#30522"
 msgid "Add a list"
 msgstr "Aggiungi una lista"
-
 
 msgctxt "#30523"
 msgid "Move up"
 msgstr "Sposta su"
 
-
 msgctxt "#30524"
 msgid "Move down"
 msgstr "Sposta giù"
-
 
 msgctxt "#30525"
 msgid "Remove from this tab"
 msgstr "Rimuovi da questa scheda"
 
-
 msgctxt "#30526"
 msgid "Also show in…"
 msgstr "Mostra anche in…"
-
 
 msgctxt "#30527"
 msgid "This tab is full"
 msgstr "Questa scheda è piena"
 
-
 msgctxt "#30528"
 msgid "Reset Home lists to default?"
 msgstr "Ripristinare le liste Home predefinite?"
-
 
 msgctxt "#30529"
 msgid "New Movies"
 msgstr "Nuovi film"
 
-
 msgctxt "#30530"
 msgid "New Series"
 msgstr "Nuove serie"
-
 
 msgctxt "#30531"
 msgid "New Anime Movies"
 msgstr "Nuovi film anime"
 
-
 msgctxt "#30532"
 msgid "New Anime Series"
 msgstr "Nuove serie anime"
-
 
 msgctxt "#30533"
 msgid "Library Movies"
 msgstr "Film della libreria"
 
-
 msgctxt "#30534"
 msgid "Library Series"
 msgstr "Serie della libreria"
-
 
 msgctxt "#30535"
 msgid "Anime Movies"
 msgstr "Film anime"
 
-
 msgctxt "#30536"
 msgid "Anime Series"
 msgstr "Serie anime"
-
 
 msgctxt "#30537"
 msgid "Browse full catalog"
 msgstr "Sfoglia il catalogo completo"
 
-
 msgctxt "#30538"
 msgid "Replace this tab’s Continue list?"
 msgstr "Sostituire la lista Continua di questa scheda?"
-
 
 msgctxt "#30539"
 msgid "Enter OMDb key with your phone (QR)"
 msgstr "Inserisci la chiave OMDb dal telefono (QR)"
 
-
 msgctxt "#30540"
 msgid "Enter MDBList key with your phone (QR)"
 msgstr "Inserisci la chiave MDBList dal telefono (QR)"
-
 
 msgctxt "#30541"
 msgid "Get a free OMDb key: https://www.omdbapi.com/apikey.aspx"
 msgstr "Ottieni una chiave OMDb gratuita: https://www.omdbapi.com/apikey.aspx"
 
-
 msgctxt "#30542"
 msgid "Get a free MDBList key (sign in, then API key): https://mdblist.com/preferences/"
 msgstr "Ottieni una chiave MDBList gratuita (accedi, poi chiave API): https://mdblist.com/preferences/"
-
 
 msgctxt "#30543"
 msgid "OMDb API key, get one at https://www.omdbapi.com/apikey.aspx"
 msgstr "Chiave API OMDb, disponibile su https://www.omdbapi.com/apikey.aspx"
 
-
 msgctxt "#30544"
 msgid "MDBList API key, get one at https://mdblist.com/preferences/"
 msgstr "Chiave API MDBList, disponibile su https://mdblist.com/preferences/"
-
 
 msgctxt "#30546"
 msgid "Shows a QR code. Scan it with your phone, paste the key there and it's saved here."
 msgstr "Mostra un codice QR. Scansionalo con il telefono e incolla lì la chiave per salvarla qui."
 
-
 msgctxt "#30547"
 msgid "Want MDBList scores? Get a free key at https://mdblist.com/preferences/ (sign in, then generate an API key) and enter it here. MDBList also adds the Rotten Tomatoes audience score."
 msgstr "Vuoi i voti di MDBList? Ottieni una chiave gratuita su https://mdblist.com/preferences/ (accedi, poi genera una chiave API) e inseriscila qui. MDBList aggiunge anche il voto del pubblico di Rotten Tomatoes."
-
 
 msgctxt "#30492"
 msgid "Options"
 msgstr "Opzioni"
 
-
 msgctxt "#30505"
 msgid "Use phone"
 msgstr "Usa telefono"
-
 
 msgctxt "#30506"
 msgid "Discover"
 msgstr "Scopri"
 
-
 msgctxt "#30507"
 msgid "Results"
 msgstr "Risultati"
-
 
 msgctxt "#30508"
 msgid "Welcome"
 msgstr "Benvenuto"
 
-
 msgctxt "#30509"
 msgid "Search for movies, shows and more. Pick letters, or use your phone."
 msgstr "Cerca film, serie e altro. Scegli le lettere o usa il telefono."
 
-
 msgctxt "#30511"
 msgid "Search"
 msgstr "Cerca"
-
 
 msgctxt "#30513"
 msgid "No results for “%s”"
