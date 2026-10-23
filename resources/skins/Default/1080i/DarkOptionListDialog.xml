@@ -48,13 +48,17 @@
                 </focusedlayout>
             </control>
 
+            <!-- Kodi's Python API cannot wrap a scrollbar (getControl raises "Unknown control type for python"), so lib/ui/dialogs.py moves this wrapper group instead; the scrollbar sits at its origin. It only shows when the list is a full page (showonepage=false), i.e. at its 504px maximum, so its height never needs to change. -->
+            <control type="group" id="30346">
+                <left>1300</left><top>250</top>
             <control type="scrollbar" id="30342">
-                <left>1300</left><top>250</top><width>6</width><height>504</height>
+                <left>0</left><top>0</top><width>6</width><height>504</height>
                 <texturesliderbar colordiffuse="1FFFFFFF">white.png</texturesliderbar>
                 <textureslidernib colordiffuse="FFD6D6D6">white.png</textureslidernib>
                 <textureslidernibfocus colordiffuse="FFD6D6D6">white.png</textureslidernibfocus>
                 <showonepage>false</showonepage>
                 <orientation>vertical</orientation>
+            </control>
             </control>
         </control>
     </controls>

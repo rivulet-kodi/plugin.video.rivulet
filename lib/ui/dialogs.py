@@ -84,7 +84,11 @@ CONFIRM_YES = 30333
 # DarkOptionListDialog.xml
 OPTIONLIST_HEADING = 30340
 OPTIONLIST_LIST = 30341
-OPTIONLIST_SCROLLBAR = 30342
+#: The scrollbar (30342) has no constant on purpose: Kodi's Python API
+#: cannot wrap a `scrollbar` (`getControl()` raises "Unknown control type
+#: for python"), so it is only driven by the list's `<pagecontrol>`; the
+#: group below wraps it so it can still be moved with the list.
+OPTIONLIST_SCROLL_GROUP = 30346
 #: Only in DarkOptionListDialog.xml: the plate, its hairline, the divider.
 OPTIONLIST_PANEL = 30343
 OPTIONLIST_STROKE = 30344
@@ -602,7 +606,7 @@ def _fit_option_list(window, count):
                 ctrl.setHeight(height)
     for cid, x, dy, h in ((OPTIONLIST_HEADING, 628, 38, None), (OPTIONLIST_DIVIDER, 628, 90, None),
                           (OPTIONLIST_LIST, 596, _OPTION_HEAD_H, list_h),
-                          (OPTIONLIST_SCROLLBAR, 1300, _OPTION_HEAD_H, list_h)):
+                          (OPTIONLIST_SCROLL_GROUP, 1300, _OPTION_HEAD_H, None)):
         ctrl = _get_control(window, cid)
         if ctrl is None:
             continue

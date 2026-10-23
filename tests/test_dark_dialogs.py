@@ -29,7 +29,7 @@ def _read(name):
     ('Progress', {30300, 30301, 30302, 30303, 30304, 30305, 30306}),
     ('Countdown', {30310, 30311, 30312, 30313}),
     ('Confirm', {30330, 30331, 30332, 30333}),
-    ('OptionList', {30340, 30341, 30342, 30343, 30344, 30345}),
+    ('OptionList', {30340, 30341, 30342, 30343, 30344, 30345, 30346}),
 ])
 def test_dark_dialog_controls_and_style(name, required):
     dark = _read('Dark' + name + 'Dialog.xml')
@@ -49,3 +49,20 @@ def test_the_menu_fits_its_rows(load):
     panel = win.getControl(dialogs.OPTIONLIST_PANEL)
     assert (panel.y, panel.height) == (top, height)
     assert win.getControl(dialogs.OPTIONLIST_LIST).height == list_h
+    # The scrollbar rides inside a wrapper group: Kodi's Python API cannot
+    # wrap a `scrollbar`, so the group is what gets moved with the list.
+    scroll = win.getControl(dialogs.OPTIONLIST_SCROLL_GROUP)
+    assert scroll.y == top + dialogs._OPTION_HEAD_H
+
+
+def test_the_option_list_never_asks_python_for_the_scrollbar(load):
+    """Asking for the `scrollbar` raised "Unknown control type for python"
+    and was logged as a warning on every open of the menu."""
+    ctx = load()
+    dialogs = ctx.dialogs
+    win = ctx.uicommon.open_window(dialogs._OptionListWindow, 'DarkOptionListDialog.xml')
+    win.heading = 'Title'
+    win.rows = ['One'] * 9
+    win.onInit()
+    failures = [msg for msg, _level in ctx.env.log_calls if 'getControl' in msg and 'failed' in msg]
+    assert failures == []
