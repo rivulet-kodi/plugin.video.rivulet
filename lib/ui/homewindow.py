@@ -108,6 +108,9 @@ class HomeOpenError(RuntimeError):
 def open_home():
     """Run the single Home under a heartbeat, closing it on every exit.
 
+    On every exit it also releases the `ListItem`s Home built
+    (`newhome.release_items`) before the window is dropped.
+
     Only construction/open failures reach the recovery directory. Home
     handles build/row failures itself, leaving failed rows empty.
     """
@@ -149,4 +152,14 @@ def open_home():
                 win.close()
             except Exception:
                 pass
+            # Still inside `open_home`, so the window and its controls
+            # exist: free the Home `ListItem`s now, not at interpreter
+            # teardown (the Kodi segfault `release_items` documents).
+            try:
+                from lib.ui.newhome import release_items
+
+                release_items(win)
+            except Exception as exc:
+                log('homewindow: releasing Home items failed: %s' % addon_error_detail(exc),
+                    xbmc.LOGWARNING)
     log('homewindow: HomeWindow closed', xbmc.LOGINFO)

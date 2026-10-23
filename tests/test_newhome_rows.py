@@ -189,9 +189,9 @@ def test_an_account_title_removed_from_continue_stays_off_until_watched_again(ho
     store = Store(str(tmp_path))
     store.remove_progress_title('movie', 'tt1')
     stale = _entry(_mtime='2000-01-01T00:00:00.000Z')
-    assert home.home._played_posters(store, [stale]) == []
+    assert home.home._played_metas(store, [stale]) == []
     watched_again = _entry(_mtime='2099-01-01T00:00:00.000Z')
-    assert len(home.home._played_posters(store, [watched_again])) == 1
+    assert len(home.home._played_metas(store, [watched_again])) == 1
 
 
 def test_library_is_read_newest_first(home):

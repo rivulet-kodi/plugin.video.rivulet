@@ -29,6 +29,7 @@ Shared helpers this module calls and does not modify:
 and `lib.ui.detailwindow.open_detail`.
 """
 import contextlib
+import gc
 import json
 import queue
 import threading
@@ -644,14 +645,19 @@ def _map_continue_meta(fetch, wanted, deadline, stop):
     return [fetched.get(index) for index in range(len(wanted))]
 
 
-def _home_personal_jobs(window, store, auth, plan, stopped, cancelled, timing):
-    """Account read and bounded Continue work share the row pool in parallel."""
-    cached = getattr(window, '_library_entries', None)
+def _home_personal_jobs(cached, library_failed, suppressed, store, auth, plan, stopped, cancelled,
+                        timing):
+    """Account read and bounded Continue work share the row pool in parallel.
+
+    The window's cached library, its failure flag and the suppressed
+    titles come in by value: the jobs run on worker threads and must not
+    hold the window (or anything that reaches its `ListItem`s).
+    """
     entries = {'value': cached}
     ready = threading.Event()
     jobs = []
     needs_library = any(kind in ('continue', 'library') for _, kind, _, _, _ in plan)
-    if needs_library and (cached is None or getattr(window, '_library_failed', False)):
+    if needs_library and (cached is None or library_failed):
         def library():
             try:
                 entries['value'] = _fetch_library(store, auth)
@@ -670,8 +676,8 @@ def _home_personal_jobs(window, store, auth, plan, stopped, cancelled, timing):
                 return {}
             started = time.monotonic()
             deadline = started + _CONTINUE_ENRICH_SECONDS
-            result = {list_id: _played_posters(store, entries['value'], variant,
-                       getattr(window, '_continue_suppressed', None), deadline, cancelled)
+            result = {list_id: _played_metas(store, entries['value'], variant, suppressed,
+                                             deadline, cancelled)
                       for list_id, variant in continued}
             timing['continue'] = time.monotonic() - started
             return result
@@ -679,8 +685,15 @@ def _home_personal_jobs(window, store, auth, plan, stopped, cancelled, timing):
     return jobs, needs_library, cached
 
 
-def _played_posters(store, library_entries, variant='', suppressed=None, deadline=None, stop=None):
-    """Resume, next-up and recently finished. Never the library band.
+def _played_metas(store, library_entries, variant='', suppressed=None, deadline=None, stop=None):
+    """Resume, next-up and recently finished, as plain dicts. Never the
+    library band.
+
+    This runs on worker threads, so it returns the records and never the
+    `ListItem`s: `_continue_item` builds those on the GUI thread
+    (`_attach_items`, `_refresh_snapshot_personal`). A worker that made
+    them would own native items whose last reference it could drop at any
+    moment, off the thread that owns the window (`release_items`).
 
     `merge_entries()` is what copies a saved title's name and poster onto
     a local progress row. `_enrich()` runs only for rows that still have
@@ -711,7 +724,7 @@ def _played_posters(store, library_entries, variant='', suppressed=None, deadlin
             continue
         key = (entry.get('type'), entry.get('id'))
         seen.add(key)
-        posters.append(_continue_item(entry))
+        posters.append(entry)
         if len(posters) >= SHELF_CAP:
             return posters
     dismissed = _continue_dismissals(store)
@@ -727,7 +740,7 @@ def _played_posters(store, library_entries, variant='', suppressed=None, deadlin
         if key in seen:
             continue
         seen.add(key)
-        posters.append(_continue_item(meta))
+        posters.append(meta)
         if len(posters) >= SHELF_CAP:
             break
     return posters
@@ -777,6 +790,13 @@ _MAX_HOME_WORKERS = 4
 
 
 def _make_row_states(store, auth, entries, plan, fetched, suppressed=None, continued=None):
+    """One plain state per planned row; `cells` says what each card shows.
+
+    Runs on a worker thread, so it builds no `ListItem`: a cell is a
+    `(kind, record)` pair and `_attach_items` turns the cells into items
+    on the GUI thread. See `release_items` for why a worker must never
+    own native items.
+    """
     from lib.homelayout import heading_text, matches_library
     from lib.ui.compat import L
     from lib.ui.mystuff import library_metas
@@ -790,21 +810,23 @@ def _make_row_states(store, auth, entries, plan, fetched, suppressed=None, conti
         # otherwise only rewrite the tags and leave the info label live.
         state = {'list_id': list_id, 'kind': kind, 'filter': variant,
                  'heading': escape_label(heading_text(heading, L)).upper(), 'descriptor': descriptor,
-                 'pending': [], 'exhausted': True, 'metas': [], 'items': []}
+                 'pending': [], 'exhausted': True, 'metas': [], 'items': [], 'cells': []}
         if kind == 'catalog':
             state.update(fetched.get(list_id, {}))
             state.pop('_stop', None)
             state['kind'] = 'catalog'
-            state['items'] = [_poster_item(meta) for meta in state['metas']]
+            state['cells'] = [('poster', meta) for meta in state['metas']]
         elif kind == 'continue':
-            state['items'] = continued.get(list_id, []) if continued is not None else _played_posters(store, entries, variant, suppressed)
-            if entries is None and auth and not state['items']:
-                state['items'] = [_poster_item({'name': L(30032)})]
+            played = continued.get(list_id, []) if continued is not None else _played_metas(
+                store, entries, variant, suppressed)
+            state['cells'] = [('continue', meta) for meta in played]
+            if entries is None and auth and not state['cells']:
+                state['cells'] = [('poster', {'name': L(30032)})]
         elif entries is None and auth:
-            state['items'] = [_poster_item({'name': L(30032)})]
+            state['cells'] = [('poster', {'name': L(30032)})]
         elif not auth:
             if not signed_out_card:
-                state['items'] = [_poster_item({'name': L(30427), 'description': L(30428)}, action='signin')]
+                state['cells'] = [('signin', {'name': L(30427), 'description': L(30428)})]
                 signed_out_card = True
         else:
             metas = [meta for meta in library_metas(_newest_first(entries))
@@ -812,11 +834,28 @@ def _make_row_states(store, auth, entries, plan, fetched, suppressed=None, conti
             state['metas'] = metas[:_ROW_INITIAL]
             state['pending'] = metas[_ROW_INITIAL:]
             state['exhausted'] = not state['pending']
-            state['items'] = [_poster_item(meta, sparse=True) for meta in state['metas']]
-            if not state['items']:
-                state['items'] = [_poster_item({'name': L(30426), 'description': L(30423)})]
+            state['cells'] = [('sparse', meta) for meta in state['metas']]
+            if not state['cells']:
+                state['cells'] = [('poster', {'name': L(30426), 'description': L(30423)})]
         rows.append(state)
     return rows
+
+
+def _cell_item(cell):
+    kind, record = cell
+    if kind == 'continue':
+        return _continue_item(record)
+    if kind == 'sparse':
+        return _poster_item(record, sparse=True)
+    return _poster_item(record, action='signin' if kind == 'signin' else '')
+
+
+def _attach_items(states):
+    """Turn each state's plain `cells` into `ListItem`s. GUI thread only."""
+    for state in states:
+        if 'cells' in state:
+            state['items'] = [_cell_item(cell) for cell in state.pop('cells')]
+    return states
 
 
 def _collect_home_rows(results, count, threads, stopped, deadline=None):
@@ -933,10 +972,15 @@ def _load_rows(window, store, auth):
     timing = {'tab': tab, 'start': time.monotonic(), 'jobs': {}, 'lock': threading.Lock(),
               'cancelled': False, 'continue': 0.0}
     window._tab_load_timing = timing
+    # Read here, on the GUI thread: `load` runs on a worker that must not
+    # reach the window (and through it every `ListItem` Home shows).
+    cached_entries = getattr(window, '_library_entries', None)
+    library_failed = getattr(window, '_library_failed', False)
+    suppressed = frozenset(getattr(window, '_continue_suppressed', None) or ())
 
     def load():
         jobs, needs_library, cached = _home_personal_jobs(
-            window, store, auth, plan, stopped, cancelled, timing)
+            cached_entries, library_failed, suppressed, store, auth, plan, stopped, cancelled, timing)
         for list_id, kind, descriptor, _variant, _heading in plan:
             if kind == 'catalog':
                 jobs.append((list_id, partial(_open_shelf, dict(descriptor, _stop=cancelled)),
@@ -952,7 +996,7 @@ def _load_rows(window, store, auth):
         entries = fetched.pop('library', cached)
         continued = fetched.pop('continue', {})
         rows = _make_row_states(store, auth, cached if entries is None and cached is not None else entries, plan, fetched,
-                                getattr(window, '_continue_suppressed', None), continued)
+                                suppressed, continued)
         return entries if needs_library or cached is not None else None, rows
 
     try:
@@ -966,6 +1010,7 @@ def _load_rows(window, store, auth):
         _tab_load_incomplete(window, reason)
         return []
     entries, rows = loaded
+    _attach_items(rows)
     needs_library = any(kind in ('continue', 'library') for _, kind, _, _, _ in plan)
     if entries is not None:
         window._library_entries = entries
@@ -1051,9 +1096,13 @@ def _refresh_saved_rows(window, store=None):
         return
     store = store or get_store()
     auth = store.get_auth()
-    suppressed = getattr(window, '_continue_suppressed', None)
+    suppressed = frozenset(getattr(window, '_continue_suppressed', None) or ())
     live = list(getattr(window, '_rows', {}).values())
     cached_tabs = _snapshot_only_states(window)
+    # What `reload` needs from the row states, as plain `(id, filter)`
+    # pairs: the worker never touches a state, so never its `ListItem`s.
+    continues = [(id(state), state['filter']) for state in live + cached_tabs
+                 if state['kind'] == 'continue']
 
     def reload():
         entries = _fetch_library(store, auth)
@@ -1061,7 +1110,7 @@ def _refresh_saved_rows(window, store=None):
             return None
         # Continue rows may fetch metadata, so they are rebuilt here under
         # the spinner rather than on the GUI thread afterwards.
-        return entries, _continue_rows(store, entries, live + cached_tabs, suppressed)
+        return entries, _continue_rows(store, entries, continues, suppressed)
 
     with _loading(window):
         loaded = run_cancellable(reload, L(30033))
@@ -1102,16 +1151,16 @@ def _snapshot_only_states(window):
             for state in states if id(state) not in live]
 
 
-def _continue_rows(store, entries, states, suppressed=None):
-    """New Continue posters for every Continue row in `states`, by state id."""
-    return {id(state): _played_posters(store, entries, state['filter'], suppressed)
-            for state in states if state['kind'] == 'continue'}
+def _continue_rows(store, entries, continues, suppressed=None):
+    """New Continue records for each `(state id, filter)` in `continues`."""
+    return {key: _played_metas(store, entries, variant, suppressed) for key, variant in continues}
 
 
 def _refresh_snapshot_personal(states, entries, auth, continued):
     """Personal writes invalidate personal data, never a tab's loaded catalogs.
 
-    `continued` is `_continue_rows` output, built off the GUI thread.
+    `continued` is `_continue_rows` output, fetched off the GUI thread as
+    plain records; the `ListItem`s are made here, on it.
     """
     from lib.homelayout import matches_library
     from lib.ui.mystuff import library_metas
@@ -1119,7 +1168,7 @@ def _refresh_snapshot_personal(states, entries, auth, continued):
     signed_out_card = False
     for state in states:
         if state['kind'] == 'continue':
-            state['items'][:] = continued[id(state)]
+            state['items'][:] = [_continue_item(meta) for meta in continued[id(state)]]
         elif state['kind'] == 'library':
             if not auth and signed_out_card:
                 state['items'][:] = []
@@ -1442,7 +1491,7 @@ def _remove_continue(window, item):
     control = window.getControl(CONTINUE_SHELF)
     position = control.getSelectedPosition()
     # Drop the one title from the rows already built. Rebuilding them with
-    # `_played_posters` would re-enrich every nameless progress entry over
+    # `_played_metas` would re-enrich every nameless progress entry over
     # the network on the GUI thread, with nothing pumping input.
     sid = item.getProperty('sid')
     state['items'][:] = [it for it in state['items'] if it.getProperty('sid') != sid]
@@ -1588,12 +1637,29 @@ def _current_shelf(window, generation, panel, state):
             and getattr(window, '_rows', {}).get(panel) is state)
 
 
+def _paging_snapshot(window, state):
+    """The plain paging fields of a row, copied for a worker to advance.
+
+    Never the row's `items`: a worker that held the `ListItem`s could be
+    the last owner of them when the window is gone (`release_items`).
+    """
+    private = {key: value for key, value in state.items() if key not in ('items', 'cells')}
+    private['_stop'] = _home_stop(window)
+    private['pending'] = list(state.get('pending', []))
+    private['seen_ids'] = set(state.get('seen_ids', set()))
+    return private
+
+
 def _schedule_shelf_extend(window, panel, room):
     """One job per row, two daemon workers, newest queued request first.
 
     Workers mutate private paging copies. Only a current result can commit
     its offsets/pending ids, so leaving a tab during HTTP loses no posters
     from that tab's saved snapshot. Running HTTP is never interrupted.
+
+    A worker is handed a weak reference to the window and a plain paging
+    snapshot, never the row state: it holds neither the window nor any
+    `ListItem`, so it cannot keep either alive past `release_items`.
     """
     state = getattr(window, '_rows', {}).get(panel)
     if not state or _stopping(_home_stop(window)):
@@ -1607,46 +1673,80 @@ def _schedule_shelf_extend(window, panel, room):
         inflight[panel] = (generation, state)
         jobs = getattr(window, '_shelf_queue', [])
         window._shelf_queue = jobs
-        jobs.append((generation, panel, state, room))
+        jobs.append((generation, panel, _paging_snapshot(window, state), room))
         running = getattr(window, '_shelf_running', 0)
         threads = getattr(window, '_shelf_threads', [])
         window._shelf_threads = [thread for thread in threads if thread.is_alive()]
         if running < 2:
             window._shelf_running = running + 1
-            thread = threading.Thread(target=_shelf_worker, args=(window,),
+            thread = threading.Thread(target=_shelf_worker, args=(weakref.ref(window),),
                                       name='rivulet-home-page', daemon=True)
             window._shelf_threads.append(thread)
             thread.start()
 
 
-def _shelf_worker(window):
+def _shelf_job_wanted(window, generation, panel):
+    """Whether this page job is still the row's current one.
+
+    The row-state identity check `_current_shelf` makes on the GUI side
+    is not available to a worker, which holds no row state. The
+    generation plus the row's in-flight record say the same thing:
+    `_cancel_shelf_extends` bumps one and empties the other.
+    """
+    return (window is not None and not _stopping(_home_stop(window))
+            and generation == getattr(window, '_tab_generation', 0)
+            and getattr(window, '_shelf_inflight', {}).get(panel, (None,))[0] == generation)
+
+
+def _publish_shelf_page(window_ref, generation, panel, private, metas):
+    """Hand a fetched page to the GUI thread, if its job is still wanted."""
+    window = window_ref()
+    if window is None:
+        return False
+    with _shelf_lock(window):
+        if not _shelf_job_wanted(window, generation, panel):
+            return False
+        ready = getattr(window, '_shelf_ready', [])
+        window._shelf_ready = ready
+        ready.append((generation, panel, private, metas))
+        return True
+
+
+def _retire_shelf_job(window_ref, generation, panel):
+    window = window_ref()
+    if window is None:
+        return
+    with _shelf_lock(window):
+        if window._shelf_inflight.get(panel, (None,))[0] == generation:
+            window._shelf_inflight.pop(panel, None)
+
+
+def _shelf_worker(window_ref):
     retired = False
     try:
         while True:
+            window = window_ref()
+            if window is None:
+                retired = True
+                return
             with _shelf_lock(window):
                 if _stopping(_home_stop(window)) or not window._shelf_queue:
                     window._shelf_running -= 1
                     retired = True
                     return
-                generation, panel, state, room = window._shelf_queue.pop()
+                generation, panel, private, room = window._shelf_queue.pop()
+            # Not held across the page fetch: only the stop event and the
+            # plain snapshot are.
+            del window
             queued = False
             try:
-                if not _current_shelf(window, generation, panel, state):
+                if not _shelf_job_wanted(window_ref(), generation, panel):
                     continue
-                private = dict(state)
-                private['_stop'] = _home_stop(window)
-                private['pending'] = list(state.get('pending', []))
-                private['seen_ids'] = set(state.get('seen_ids', set()))
                 metas = _pull_more(private, room)
-                with _shelf_lock(window):
-                    if not _current_shelf(window, generation, panel, state):
-                        continue
-                    ready = getattr(window, '_shelf_ready', [])
-                    window._shelf_ready = ready
-                    ready.append((generation, panel, state, private, metas))
-                    queued = True
-                import xbmc
-                xbmc.executebuiltin('Action(noop)')
+                queued = _publish_shelf_page(window_ref, generation, panel, private, metas)
+                if queued:
+                    import xbmc
+                    xbmc.executebuiltin('Action(noop)')
             except Exception as exc:
                 from lib.stremio.addons import addon_error_detail
                 from lib.ui.compat import log
@@ -1654,13 +1754,13 @@ def _shelf_worker(window):
                 log('home: shelf load failed: %s' % addon_error_detail(exc))
             finally:
                 if not queued:
-                    with _shelf_lock(window):
-                        if window._shelf_inflight.get(panel) == (generation, state):
-                            window._shelf_inflight.pop(panel, None)
+                    _retire_shelf_job(window_ref, generation, panel)
     finally:
         if not retired:
-            with _shelf_lock(window):
-                window._shelf_running -= 1
+            window = window_ref()
+            if window is not None:
+                with _shelf_lock(window):
+                    window._shelf_running -= 1
 
 
 def _join_shelf_extends(window):
@@ -1673,8 +1773,11 @@ def _apply_shelf_extends(window):
     with _shelf_lock(window):
         ready = list(getattr(window, '_shelf_ready', []))
         window._shelf_ready = []
-    for generation, panel, state, private, metas in ready:
-        if not _current_shelf(window, generation, panel, state) or not _focusable(window, panel):
+    for generation, panel, private, metas in ready:
+        scheduled = getattr(window, '_shelf_inflight', {}).get(panel)
+        state = scheduled[1] if scheduled is not None and scheduled[0] == generation else None
+        if (state is None or not _current_shelf(window, generation, panel, state)
+                or not _focusable(window, panel)):
             window._shelf_inflight.pop(panel, None)
             continue
         for key in ('pending', 'seen_ids', 'served', 'exhausted', 'failed', 'end_reason', 'page_number'):
@@ -1770,7 +1873,9 @@ def _schedule_library_meta(window, item):
             previous[0].setProperty('meta_state', '')
         item.setProperty('meta_state', 'loading')
         window._library_meta_latest = request
-        window._library_meta_pending = request
+        # What the worker is told is the plain `(stype, sid)`; the item
+        # stays here, on the GUI side, with the window.
+        window._library_meta_pending = (stype, sid)
         window._library_meta_ready = []
         if getattr(window, '_library_meta_running', False):
             window._library_meta_idle.clear()
@@ -1798,7 +1903,12 @@ def _start_library_meta(window):
 
 
 def _library_meta_worker(window_ref, wake, idle, stop):
-    """Serve one Home session; neither GC nor another key press ends it."""
+    """Serve one Home session; neither GC nor another key press ends it.
+
+    The window is resolved only inside each critical section and dropped
+    before anything slow (the idle wait, the HTTP fetch), so this thread
+    never keeps Home, or the `ListItem`s it holds, alive (`release_items`).
+    """
     while True:
         wake.wait(timeout=1.0)
         wake.clear()
@@ -1812,7 +1922,11 @@ def _library_meta_worker(window_ref, wake, idle, stop):
                 if window._library_meta_pending is not None and not _stopping(_home_stop(window)):
                     _start_library_meta(window)
                 return
-        _drain_library_meta(window, idle, stop)
+        del window
+        _drain_library_meta(window_ref, idle, stop)
+        window = window_ref()
+        if window is None:
+            return
         with _library_meta_lock(window):
             if not stop.is_set() and window._library_meta_pending is None:
                 window._library_meta_running = False
@@ -1821,8 +1935,12 @@ def _library_meta_worker(window_ref, wake, idle, stop):
         del window
 
 
-def _drain_library_meta(window, idle, stop):
+def _drain_library_meta(window_ref, idle, stop):
     while True:
+        window = window_ref()
+        if window is None:
+            idle.set()
+            return
         with _library_meta_lock(window):
             if _stopping(stop):
                 idle.set()
@@ -1832,15 +1950,22 @@ def _drain_library_meta(window, idle, stop):
             if wanted is None:
                 idle.set()
                 return
-        _item, wanted_type, wanted_id = wanted
+        del window
+        wanted_type, wanted_id = wanted
         try:
             meta = _fetch_library_meta(wanted_type, wanted_id, stop)
         except Exception:
             meta = None
+        window = window_ref()
+        if window is None:
+            idle.set()
+            return
         with _library_meta_lock(window):
-            if _stopping(stop) or window._library_meta_latest is not wanted:
+            latest = window._library_meta_latest
+            if _stopping(stop) or latest is None or latest[1:] != wanted:
                 continue
             window._library_meta_ready = [(wanted_type, wanted_id, meta)]
+        del window
         try:
             import xbmc
             xbmc.executebuiltin('Action(noop)')
@@ -2241,6 +2366,99 @@ def paint_hero(window, item=None):
             log('home: hero paint failed: %s' % addon_error_detail(exc), xbmc.LOGDEBUG)
 
 
+def _stop_workers(window):
+    """Tell every worker this Home started to stop; never blocks or frees.
+
+    Shared by `NewHomeWindow.close`, which also runs for the playback
+    force-close (Home then reopens and needs its rows), and by
+    `release_items`.
+    """
+    _home_stop(window).set()
+    for stop in getattr(window, '_home_load_stops', []):
+        stop.set()
+    _cancel_shelf_extends(window)
+    with _library_meta_lock(window):
+        previous = getattr(window, '_library_meta_latest', None)
+        if previous is not None:
+            previous[0].setProperty('meta_state', '')
+        window._library_meta_latest = None
+        window._library_meta_pending = None
+        window._library_meta_ready = []
+        wake = getattr(window, '_library_meta_wake', None)
+        if wake is not None:
+            wake.set()
+    from lib.ui import catalogpages, logocheck, posterwarm, ratingsched
+
+    catalogpages.stop()
+    posterwarm.stop(window)
+    logocheck.stop()
+    ratingsched.stop()
+
+
+#: Seconds `release_items` waits, in all, for the workers it stopped. They
+#: end within one poll of their stop event; this only bounds a stuck one.
+_WORKER_JOIN_SECONDS = 2.0
+
+
+def _join_workers(window):
+    """Wait, bounded, for the threads that hold the window to let go of it."""
+    from lib.ui import posterwarm
+
+    threads = list(getattr(window, '_shelf_threads', []))
+    meta = getattr(window, '_library_meta_thread', None)
+    if meta is not None:
+        threads.append(meta)
+    deadline = time.monotonic() + _WORKER_JOIN_SECONDS
+    for thread in threads:
+        if thread is threading.current_thread():
+            continue
+        try:
+            thread.join(max(0.0, deadline - time.monotonic()))
+        except RuntimeError:  # Never started: nothing to wait for.
+            pass
+    posterwarm.join(window, max(0.0, deadline - time.monotonic()))
+
+
+def release_items(window):
+    """Free every `ListItem` Home built, while its window still exists.
+
+    Call once, on the script thread, after the final `doModal()` return
+    and before the window object is dropped (`homewindow.open_home`).
+
+    Kodi crashed (SIGSEGV) on exit from Home: `CPythonInvoker::
+    onExecutionDone` tore the interpreter down, the Python `ListItem`s
+    that had been shown in Home's lists were freed last, and
+    `CGUIListItem::~CGUIListItem` -> `CGUIControlLookup::RemoveLookup()`
+    walked item layouts whose controls belonged to a window that was
+    already destroyed (a `dynamic_cast` on freed memory). Each Python
+    `ListItem` shares its native item with the list control; whichever
+    owner goes last runs the destructor, and that must be this function,
+    with the controls still alive, not the interpreter's final sweep.
+
+    So: stop and join the workers (they hold the window and, until they
+    end, what it holds), drop every Python reference to a `ListItem`
+    (rows, tab snapshots, the focused library item), reset the list
+    controls so Kodi lets go of its copies too, then collect cycles now.
+    Not `NewHomeWindow.close`: that also runs when playback force-closes
+    Home, which reopens and still needs these rows.
+    """
+    _stop_workers(window)
+    _join_workers(window)
+    window._rows = {}
+    window._tab_snapshots = {}
+    window._library_meta_thread = None
+    window._shelf_threads = []
+    window._home_on_shown = None
+    for list_id in _place_lists():
+        try:
+            window.getControl(list_id).reset()
+        except Exception:
+            # A window Kodi already unloaded has no controls to empty; its
+            # items are then freed with it, which is the order we want.
+            pass
+    gc.collect()
+
+
 class NewHomeWindow(BaseWindow):
     """See module docstring. Built/run by `homewindow.open_home()`."""
 
@@ -2264,26 +2482,7 @@ class NewHomeWindow(BaseWindow):
             shown()
 
     def close(self):
-        _home_stop(self).set()
-        for stop in getattr(self, '_home_load_stops', []):
-            stop.set()
-        _cancel_shelf_extends(self)
-        with _library_meta_lock(self):
-            previous = getattr(self, '_library_meta_latest', None)
-            if previous is not None:
-                previous[0].setProperty('meta_state', '')
-            self._library_meta_latest = None
-            self._library_meta_pending = None
-            self._library_meta_ready = []
-            wake = getattr(self, '_library_meta_wake', None)
-            if wake is not None:
-                wake.set()
-        from lib.ui import catalogpages, logocheck, posterwarm, ratingsched
-
-        catalogpages.stop()
-        posterwarm.stop(self)
-        logocheck.stop()
-        ratingsched.stop()
+        _stop_workers(self)
         super().close()
 
     def _build(self, place=None):

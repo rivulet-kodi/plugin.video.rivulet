@@ -156,3 +156,57 @@ def test_seen_posters_are_capped_oldest_first(load_warm, monkeypatch):
     assert len(warmer._seen) == warmer._MAX_SEEN
     assert urls[0] not in warmer._seen and urls[-1] in warmer._seen
     warmer.reset_warmer()
+
+
+def test_the_queued_target_does_not_keep_a_closed_window_alive(load_warm, monkeypatch):
+    """A module global owning the window would keep Home, and every
+    `ListItem` it holds, alive until interpreter teardown."""
+    import gc
+    import weakref
+
+    ctx = load_warm()
+    warmer = ctx.posterwarm
+    monkeypatch.setattr(warmer, '_running', True)  # a worker owns the slots: no thread here
+    screen = _Screen()
+    gone = weakref.ref(screen)
+    warmer.request_warm(screen, ['https://img.example/1.jpg'])
+    del screen
+    gc.collect()
+    assert gone() is None
+    warmer.reset_warmer()
+
+
+def test_join_waits_only_for_the_worker_serving_that_window(load_warm):
+    import gc
+    import threading
+    import time
+    import weakref
+
+    ctx = load_warm()
+    warmer = ctx.posterwarm
+    warmer.reset_warmer()
+    screen, other = _Screen(), _Screen()
+    screen._home_stop = threading.Event()
+    gone = weakref.ref(screen)
+    before = set(threading.enumerate())
+    warmer.request_warm(screen, ['https://img.example/1.jpg'])
+    deadline = time.monotonic() + 5
+    while not getattr(screen, '_poster_warm_ready', None) and time.monotonic() < deadline:
+        time.sleep(0.01)  # the worker is holding its first batch for the GUI thread
+    assert screen._poster_warm_ready
+    worker, = [t for t in threading.enumerate()
+               if t not in before and t.name == 'rivulet-poster-warm']
+
+    started = time.monotonic()
+    warmer.join(other, 5)  # holds nothing of `other`: must not wait for `screen`'s worker
+    assert time.monotonic() - started < 1 and worker.is_alive()
+
+    screen._home_stop.set()
+    warmer.stop(screen)
+    warmer.join(screen, 5)
+
+    assert not worker.is_alive()
+    del screen
+    gc.collect()
+    assert gone() is None
+    warmer.reset_warmer()

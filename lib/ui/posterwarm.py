@@ -28,6 +28,7 @@ time; further requests add to that queue and Home's slots carry the rest.
 """
 
 import threading
+import weakref
 
 #: Image controls in NewHomeWindow.xml. 1x1, visible,
 #: drawn under the opaque backdrop plate.
@@ -41,8 +42,16 @@ _lock = threading.Lock()
 _seen = {}  # type: dict
 _MAX_SEEN = 2000
 _queue = []
+# A weak reference: a module global that owned the window would keep Home,
+# and every `ListItem` it holds, alive past the end of `open_home`, so they
+# would be freed at interpreter shutdown, after Kodi has destroyed the
+# controls (see `newhome.release_items`).
 _target = {'window': None}
 _running = False
+_thread = None
+# The window the live worker is painting for, weak for the same reason, so
+# that `join` waits only for a worker that holds the window being released.
+_serving = None
 
 
 def collect_poster_urls(groups, limit_rows=_ROWS, limit_titles=_TITLES):
@@ -101,7 +110,7 @@ def request_warm(window, urls):
     this process is skipped. The worker is a daemon and stops with
     ``waitForAbort``.
     """
-    global _running
+    global _running, _thread
     fresh = []
     with _lock:
         for url in urls or []:
@@ -115,11 +124,13 @@ def request_warm(window, urls):
             return
         _queue.extend(fresh)
         if window is not None:
-            _target['window'] = window
+            _target['window'] = weakref.ref(window)
         if _running:
             return
         _running = True
-    threading.Thread(target=_drain, name='rivulet-poster-warm', daemon=True).start()
+        _thread = threading.Thread(target=_drain, name='rivulet-poster-warm', daemon=True)
+        thread = _thread
+    thread.start()
 
 
 def _post_batch(window, urls):
@@ -164,12 +175,33 @@ def stop(window):
     with _lock:
         ready = getattr(window, '_poster_warm_ready', [])
         window._poster_warm_ready = []
-        if _target['window'] is window:
+        target = _target['window']
+        current = target() if target is not None else None
+        if target is not None and (current is None or current is window):
             _queue.clear()
             _target['window'] = None
     for ticket in ready:
         ticket['done'].set()
     _clear(_slots(window))
+
+
+def join(window, timeout):
+    """Wait, bounded, for the warm worker to let go of ``window`` after `stop`.
+
+    The worker holds the window it is painting for as long as it runs.
+    `newhome.release_items` waits here so that reference is gone before
+    Home drops the window, and no thread frees it later. A worker serving
+    another window, or none, holds nothing of this one: no wait.
+    """
+    with _lock:
+        thread = _thread
+        serving = _serving() if _serving is not None else None
+    if thread is None or serving is not window or thread is threading.current_thread():
+        return
+    try:
+        thread.join(timeout)
+    except RuntimeError:  # Not started yet: nothing to wait for.
+        pass
 
 
 def _queued_warm(window, urls):
@@ -202,21 +234,25 @@ def _queued_warm(window, urls):
 
 
 def _drain():
-    global _running
+    global _running, _serving
     while True:
         with _lock:
             batch = list(_queue)
             del _queue[:]
-            window = _target['window']
+            target = _target['window']
+            window = target() if target is not None else None
             stop = getattr(window, '_home_stop', None)
             if stop is not None and stop.is_set():
                 del _queue[:]
                 _target['window'] = None
                 _running = False
+                _serving = None
                 return
             if not batch:
                 _running = False
+                _serving = None
                 return
+            _serving = target
         try:
             _queued_warm(window, batch)
         except Exception as exc:
@@ -229,9 +265,11 @@ def _drain():
 
 def reset_warmer():
     """Test hook. Drops the queued URL set."""
-    global _running
+    global _running, _thread, _serving
     with _lock:
         _seen.clear()
         del _queue[:]
         _target['window'] = None
         _running = False
+        _thread = None
+        _serving = None

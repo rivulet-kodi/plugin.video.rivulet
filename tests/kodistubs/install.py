@@ -18,6 +18,7 @@ stubbed module.
 import contextlib
 import importlib
 import sys
+import threading
 import types
 
 from .fakes import Env, FakeAddon
@@ -30,6 +31,29 @@ STUB_MODULE_NAMES = ('xbmc', 'xbmcgui', 'xbmcplugin', 'xbmcaddon', 'xbmcvfs')
 #: before" from "it had the attribute set to None" when snapshotting a
 #: `lib.ui.*` leaf attribute for restore.
 _MISSING = object()
+
+#: Daemon threads Home starts that end on their own once their work is
+#: drained or their window stops. Each imports lazily (`_stopping` does
+#: `from lib.ui.background import monitor`), so one still running when
+#: `sys.modules` is restored re-imports against the real interpreter
+#: state: `KeyError: 'lib.ui.background'` on Python 3.13, surfacing as a
+#: `PytestUnhandledThreadExceptionWarning` in whichever test runs next.
+#: Not `rivulet-poster-warm`: it only ends when its window is stopped, so
+#: waiting for one a test never stopped would just burn the timeout.
+_HOME_WORKER_NAMES = ('rivulet-library-meta', 'rivulet-home-page', 'rivulet-home-load')
+
+#: Seconds to wait for one such thread. They end within a poll; this only
+#: bounds a test that left one blocked, which must not hang the suite.
+_WORKER_JOIN_SECONDS = 5.0
+
+
+def _join_home_workers(existing):
+    """Wait for Home workers this stub session started, before restoring."""
+    for thread in threading.enumerate():
+        if (thread in existing or thread is threading.current_thread()
+                or thread.name not in _HOME_WORKER_NAMES):
+            continue
+        thread.join(_WORKER_JOIN_SECONDS)
 
 
 @contextlib.contextmanager
@@ -81,6 +105,7 @@ def install_kodi_stubs(reload=(), addon_info=None, settings=None, localized=None
         'xbmcvfs': make_xbmcvfs(),
     }
 
+    existing_threads = set(threading.enumerate())
     saved_modules = {name: sys.modules.get(name) for name in STUB_MODULE_NAMES + reload_names}
     # Resolved once, up front, before anything is mutated: every current
     # `reload` name shares the same 'lib.ui' parent package object, which
@@ -102,6 +127,7 @@ def install_kodi_stubs(reload=(), addon_info=None, settings=None, localized=None
         reloaded = {leaf: importlib.import_module(name) for name, leaf in zip(reload_names, leaves)}
         yield types.SimpleNamespace(env=env, **reloaded)
     finally:
+        _join_home_workers(existing_threads)
         for name, original in saved_modules.items():
             if original is None:
                 sys.modules.pop(name, None)

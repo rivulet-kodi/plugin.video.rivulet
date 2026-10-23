@@ -81,6 +81,11 @@ def test_continue_lookup_starts_while_catalog_first_page_is_still_running(load_h
         return metas(0, 30)
 
     def meta(stype, sid, should_stop, **kw):
+        if 'on_not_found' not in kw:
+            # The focused poster's lookup, not the Continue one under test.
+            # Left waiting on the barrier it outlives the test, and fails a
+            # later one once the stubs are restored.
+            return None
         together.wait(5)
         fetched.append(sid)
         return {'id': sid, 'name': 'resolved', 'poster': 'p'}
