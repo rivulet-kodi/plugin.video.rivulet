@@ -568,6 +568,7 @@ def _library_continue_metas(entries):
             'video_id': state.get('video_id') or None,
             'position_ms': state.get('timeOffset'),
             'duration_ms': state.get('duration'),
+            'watched_at': _iso_seconds(state.get('lastWatched') or entry.get('_mtime')),
         })
     return metas
 
@@ -713,8 +714,14 @@ def _played_posters(store, library_entries, variant='', suppressed=None, deadlin
         posters.append(_continue_item(entry))
         if len(posters) >= SHELF_CAP:
             return posters
+    dismissed = _continue_dismissals(store)
     for meta in _library_continue_metas(library_entries):
         if meta.get('id') in suppressed or not matches_continue(meta, variant):
+            continue
+        # Removed from Continue and not watched since: the account still
+        # holds the in-progress state, but the user asked for it gone.
+        when = dismissed.get((meta.get('type'), meta.get('id')))
+        if when is not None and when >= meta['watched_at']:
             continue
         key = (meta.get('type'), meta.get('id'))
         if key in seen:
@@ -724,6 +731,22 @@ def _played_posters(store, library_entries, variant='', suppressed=None, deadlin
         if len(posters) >= SHELF_CAP:
             break
     return posters
+
+
+def _iso_seconds(value):
+    """``YYYY-MM-DDTHH:MM:SSZ`` from a Stremio timestamp, '' if unusable.
+    Same seconds precision as the store's dismissal times, so the two
+    compare as strings."""
+    if not isinstance(value, str) or len(value) < 19:
+        return ''
+    return value[:19] + 'Z'
+
+
+def _continue_dismissals(store):
+    try:
+        return store.get_continue_dismissals()
+    except Exception:
+        return {}
 
 
 def _fetch_library(store, auth):

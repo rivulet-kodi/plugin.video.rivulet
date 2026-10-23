@@ -181,6 +181,19 @@ def test_a_continue_row_without_a_video_id_resumes_the_title(home):
     assert home.home._library_continue_metas([entry])[0]['video_id'] is None
 
 
+def test_an_account_title_removed_from_continue_stays_off_until_watched_again(home, tmp_path):
+    """The account still holds the in-progress state of a title removed
+    from Continue; the row must honour the removal, not just local progress."""
+    from lib.store import Store
+
+    store = Store(str(tmp_path))
+    store.remove_progress_title('movie', 'tt1')
+    stale = _entry(_mtime='2000-01-01T00:00:00.000Z')
+    assert home.home._played_posters(store, [stale]) == []
+    watched_again = _entry(_mtime='2099-01-01T00:00:00.000Z')
+    assert len(home.home._played_posters(store, [watched_again])) == 1
+
+
 def test_library_is_read_newest_first(home):
     rows = home.home._newest_first([
         {'_id': 'a', '_ctime': '2026-01-01'},

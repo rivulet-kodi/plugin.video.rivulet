@@ -1886,6 +1886,20 @@ class Store:
         status, dismissed = _load_json(self._dismissed_path, dict)
         return dismissed if status == _OK else {}
 
+    def get_continue_dismissals(self):
+        """``{(type, id): dismissed_at}`` for titles removed from Continue.
+
+        Home's Continue row also lists in-progress titles straight from
+        the account library (watched in the Stremio app, never on this
+        device), which no local progress entry backs. Those need the same
+        dismissal check the library pull applies."""
+        result = {}
+        for key, value in self._load_dismissed().items():
+            parts = key.split("\x1f") if isinstance(key, str) else []
+            if len(parts) == 3 and isinstance(value, str):
+                result[(parts[0], parts[1])] = value
+        return result
+
     def get_progress_entries(self):
         """Return every cached local playback-progress entry, flattened
         to ``{'type', 'id', 'video_id', 'position_ms', 'duration_ms',
