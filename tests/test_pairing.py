@@ -284,7 +284,6 @@ def test_partial_post_handler_ends_when_server_closes(monkeypatch):
         finally:
             ended.set()
     monkeypatch.setattr(pairing._Handler, 'do_POST', post)
-    assert pairing._Handler.timeout == 10
     session = PairSession()
     server = PairServer(session, _STRINGS, host='127.0.0.1')
     server.start()

@@ -1392,9 +1392,18 @@ def _offer_library(window, item, control_id=None):
 
 def _note_focus(window):
     """Remember where the remote is, so the next Up can tell a dead end
-    from a move (`HomeWindow.onAction`)."""
+    from a move (`HomeWindow.onAction`), and prefetch the focused row's
+    next page. Paging is best-effort: its failure must not cost the focus
+    bookkeeping the dead-end Up logic relies on."""
     try:
         _maybe_extend_focused_shelf(window)
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        import xbmc
+
+        from lib.ui.compat import log
+
+        log('home: paging check failed: %s' % type(exc).__name__, xbmc.LOGDEBUG)
+    try:
         window._last_focus = window.getFocusId()
         if window._last_focus in getattr(window, '_rows', {}):
             window._tab_last_row = window._last_focus
@@ -2264,7 +2273,6 @@ class NewHomeWindow(BaseWindow):
             _focus_first(self)
         elif focus != BROWSE_LIST and getattr(self, '_last_focus', None) == BROWSE_LIST:
             _select_active_chip(self)
-        _maybe_extend_focused_shelf(self)
         paint_hero(self)
         _note_focus(self)
 

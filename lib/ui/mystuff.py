@@ -257,8 +257,6 @@ def resolve_next_up(item, meta):
     return next_video(meta, video_id)
 
 
-
-
 # Writes that have been pushed and must show before the next
 # datastoreGet echoes them. Keyed by `_id`. A later fetch drops a
 # write once the account row is at least as new and agrees on `removed`.
@@ -332,7 +330,6 @@ def apply_library_writes(entries):
     return out
 
 
-
 def _read_library_entries(store):
     """Raw account read: Home must distinguish failure from an empty library."""
     from lib.stremio.api import StremioAPI
@@ -341,7 +338,6 @@ def _read_library_entries(store):
     if not auth:
         return []
     return StremioAPI().datastore_get(auth.get('authKey'), collection='libraryItem', all=True)
-
 
 
 def _enrich(items, fetch_meta=None, map_items=None):

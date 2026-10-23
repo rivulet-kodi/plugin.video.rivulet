@@ -66,56 +66,64 @@ class _Screen:
         return self.slots[control_id]
 
 
-def test_warm_fills_the_screens_own_slots_then_stops_on_abort(load_warm):
-    """The old warmer opened its own window. Kodi refuses that while a
-    modal dialog is up, so nothing ever loaded."""
-    ctx = load_warm()
-
-    from lib.ui.posterwarm import WARM_SLOTS, reset_warmer, warm_posters
-
-    reset_warmer()
-    urls = ['https://img.example/%d.jpg' % index for index in range(12)]
-    ctx.env.monitor_abort = lambda calls: calls >= 1
-    screen = _Screen()
-
-    warm_posters(screen, urls)
-
-    first = [screen.slots[control_id].images[0] for control_id in WARM_SLOTS]
-    assert first == urls[:8]
-    # Aborted during the first hold: the second batch never went out,
-    # and every slot let go of its URL on the way out.
-    assert all(urls[8] not in slot.images for slot in screen.slots.values())
-    assert all(slot.image == '' for slot in screen.slots.values())
-
-
-def test_each_batch_is_held_long_enough_for_kodi_to_start_it(load_warm):
-    ctx = load_warm()
+def test_the_gui_side_paints_a_batch_and_acknowledges_it(load_warm):
+    """The worker hands batches over; only the GUI thread touches slots."""
+    load_warm()
 
     from lib.ui import posterwarm
 
     posterwarm.reset_warmer()
-    ctx.env.monitor_abort = False
     screen = _Screen()
+    urls = ['https://img.example/%d.jpg' % index for index in range(5)]
 
-    posterwarm.warm_posters(screen, ['u%d' % index for index in range(16)])
+    ticket = posterwarm._post_batch(screen, urls)
+    assert not ticket['done'].is_set()
+    assert all(slot.image is None for slot in screen.slots.values())  # nothing painted off the GUI thread
 
-    assert ctx.env.wait_calls == [posterwarm._HOLD_SECONDS, posterwarm._HOLD_SECONDS]
-    assert posterwarm._HOLD_SECONDS >= 1.0
+    posterwarm.apply_pending(screen)
+
+    painted = [screen.slots[control_id].image for control_id in posterwarm.WARM_SLOTS]
+    assert painted == urls + [''] * (len(posterwarm.WARM_SLOTS) - len(urls))
+    assert ticket['done'].is_set() and ticket['ok'] is True
 
 
-def test_a_screen_without_slots_warms_nothing(load_warm):
-    """A skin with no warm slots, or a window that has closed. No error, no window."""
-    ctx = load_warm()
+def test_a_closing_screen_paints_nothing_and_releases_the_worker(load_warm):
+    import threading
 
-    from lib.ui.posterwarm import reset_warmer, warm_posters
+    load_warm()
 
-    reset_warmer()
-    ctx.env.monitor_abort = False
+    from lib.ui import posterwarm
 
-    warm_posters(_Screen(missing=True), ['u1', 'u2'])
-    warm_posters(None, ['u1'])
+    posterwarm.reset_warmer()
+    screen = _Screen()
+    screen._home_stop = threading.Event()
+    pending = posterwarm._post_batch(screen, ['u1'])
+    screen._home_stop.set()
 
-    assert ctx.env.wait_calls == []
+    posterwarm.apply_pending(screen)
+
+    assert pending['done'].is_set() and pending['ok'] is False
+    assert all(slot.image is None for slot in screen.slots.values())
+
+    # Closing with a batch still queued must not strand the worker either.
+    queued = posterwarm._post_batch(screen, ['u2'])
+    posterwarm.stop(screen)
+    assert queued['done'].is_set()
+    assert all(slot.image == '' for slot in screen.slots.values())
+
+
+def test_a_screen_without_slots_acknowledges_without_painting(load_warm):
+    """A skin with no warm slots, or a window that has closed: the worker
+    is released and told the batch did not land."""
+    load_warm()
+
+    from lib.ui import posterwarm
+
+    posterwarm.reset_warmer()
+    screen = _Screen(missing=True)
+    ticket = posterwarm._post_batch(screen, ['u1'])
+    posterwarm.apply_pending(screen)
+    assert ticket['done'].is_set() and ticket['ok'] is False
 
 
 def test_new_home_declares_the_warm_slots():

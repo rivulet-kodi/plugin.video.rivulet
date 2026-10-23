@@ -96,41 +96,6 @@ def _clear(slots):
             pass
 
 
-def warm_posters(window, urls, monitor=None):
-    """Feed ``urls`` to ``window``'s slots, a batch per hold. Returns
-    when the list is done, the window has no slots, or Kodi is aborting.
-    Posters only; the caller has already dropped everything else.
-    """
-    urls = [url for url in (urls or []) if isinstance(url, str) and url]
-    if not urls:
-        return
-    slots = _slots(window)
-    if not slots:
-        return
-    from lib.ui.background import monitor as shared_monitor
-
-    monitor = monitor or shared_monitor()
-    stop = getattr(window, '_home_stop', None)
-    try:
-        for start in range(0, len(urls), len(slots)):
-            if (stop is not None and stop.is_set()) or monitor.abortRequested():
-                return
-            batch = urls[start:start + len(slots)]
-            try:
-                for slot, url in zip(slots, batch):
-                    slot.setImage(url)
-            except Exception:
-                return
-            if stop is None:
-                if monitor.waitForAbort(_HOLD_SECONDS):
-                    return
-            else:
-                if stop.wait(_HOLD_SECONDS) or monitor.abortRequested():
-                    return
-    finally:
-        _clear(slots)
-
-
 def request_warm(window, urls):
     """Queue poster URLs for ``window``'s slots. A URL already queued
     this process is skipped. The worker is a daemon and stops with

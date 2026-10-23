@@ -70,12 +70,19 @@ def escape_label(text):
     below need it too, and this module cannot import anything under
     `lib.ui` - it is deliberately Kodi-independent (see module
     docstring), while `lib.ui.uicommon` imports `xbmc`/`xbmcgui`.
+
+    Strips until nothing changes: one pass rebuilds a tag from its own
+    pieces (`[[B]B]` -> `[B]`, `$$INFO[` -> `$INFO[`), and these names now
+    reach confirmation dialogs (an addon link typed on a phone).
     """
     if not isinstance(text, str):
         return ''
-    text = _LABEL_TAG_RE.sub('', text)
-    text = _LABEL_INFO_RE.sub(lambda m: m.group(0)[1:], text)
-    return text
+    while True:
+        cleaned = _LABEL_TAG_RE.sub('', text)
+        cleaned = _LABEL_INFO_RE.sub(lambda m: m.group(0)[1:], cleaned)
+        if cleaned == text:
+            return cleaned
+        text = cleaned
 
 # ---------------------------------------------------------------------------
 # clean_text

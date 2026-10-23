@@ -353,7 +353,7 @@ def link_sign_in(api=None, sleep=None, timeout=_LINK_TIMEOUT_SECONDS):
             if user is CANCELLED:
                 return None
         except ApiError as exc:
-            log('signin: user lookup failed: %s' % type(exc).__name__, xbmc.LOGWARNING)
+            log('signin: user lookup failed: ApiError (HTTP %s)' % exc.status_code, xbmc.LOGWARNING)
             user = {}
         if not isinstance(user, dict):
             user = {}

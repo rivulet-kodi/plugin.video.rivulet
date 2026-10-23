@@ -219,6 +219,17 @@ def test_escape_label_neutralizes_info_labels_by_dropping_the_leading_dollar():
     )
 
 
+@pytest.mark.parametrize('text,expected', [
+    ('[[B]B]Evil', 'Evil'),
+    ('[[COLOR red]COLOR red]Evil', 'Evil'),
+    ('[[[B]B]B]Evil', 'Evil'),
+    ('$$INFO[System.ProfileName]', 'INFO[System.ProfileName]'),
+    ('$$$LOCALIZE[1]', 'LOCALIZE[1]'),
+])
+def test_escape_label_markup_rebuilt_by_stripping_is_stripped_too(text, expected):
+    assert escape_label(text) == expected
+
+
 def test_escape_label_leaves_plain_text_untouched():
     assert escape_label('Cinemeta') == 'Cinemeta'
 
