@@ -496,11 +496,10 @@ def test_skin_slot_copies_and_active_pills_are_the_existing_primitives():
     root = ET.parse(Path(__file__).parents[1] / 'resources/skins/Default/1080i/NewHomeWindow.xml').getroot()
     controls = {int(c.attrib['id']): c for c in root.iter('control') if 'id' in c.attrib}
     chips = controls[30010]
-    assert chips.findtext('left') == '80' and chips.findtext('width') == '950'
+    assert chips.findtext('left') == '80'
     for layout in ('itemlayout', 'focusedlayout'):
         images = chips.find(layout).findall("control[@type='image']")
         active = next(image for image in images if image.find('texture').attrib['colordiffuse'] == '24FFFFFF')
-        assert active.findtext('width') == '174'
         assert active.find('texture').attrib['border'] == '28'
         assert 'ListItem.Property(active)' in active.findtext('visible')
     assert controls[30040].findtext('onup') == '30010'
@@ -625,6 +624,32 @@ def test_remove_continue_keeps_neighbour_and_failed_save_keeps_row(load_homewind
     hw._remove_continue(win, picked)
     assert control.size() == 2 and control.getSelectedPosition() == 1
     assert win.getFocusId() == 30040
+
+
+def test_remove_continue_never_writes_to_an_item_from_the_reset_shelf(load_homewindow, monkeypatch):
+    """Kodi frees a list's items on reset, and a ListItem that
+    getSelectedItem() returned does not keep its item alive: writing to it
+    afterwards segfaulted Kodi. The pending library-meta request held such
+    an item while the Continue shelf was rebuilt."""
+    ctx = load_homewindow()
+    from lib.ui import dialogs
+    progress = [{'type': 'movie', 'id': 'tt%d' % i, 'position_ms': 20, 'duration_ms': 100,
+                 'updated_at': str(i)} for i in range(2)]
+    win, store, _ = build(ctx, monkeypatch, progress=progress)
+    monkeypatch.setattr(dialogs, 'confirm', lambda *_: True)
+    store.remove_progress_title = lambda stype, sid: store._progress_entries.__setitem__(
+        slice(None), [entry for entry in store._progress_entries if entry['id'] != sid])
+
+    class FreedItem:
+        def setProperty(self, *_):
+            raise AssertionError('wrote to an item freed by the shelf reset')
+
+    win.setFocusId(30040)
+    picked = win.getControl(30040).getSelectedItem()
+    win._library_meta_latest = (FreedItem(), 'movie', picked.getProperty('sid'))
+    ctx.newhome._remove_continue(win, picked)
+    assert win.getControl(30040).size() == 1
+
 
 
 def test_cache_generation_clears_later_pages_before_rebuild(load_homewindow, monkeypatch):

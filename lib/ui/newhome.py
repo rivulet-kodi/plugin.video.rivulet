@@ -454,8 +454,26 @@ def _open_shelf(descriptor):
     return state
 
 
+def _forget_library_meta(window):
+    """Drop the in-flight library meta request without touching its item.
+
+    ``_library_meta_latest`` holds the ListItem that ``getSelectedItem()``
+    returned. That wrapper does not keep Kodi's item alive: once its
+    container is reset the item is freed, and the next
+    ``setProperty('meta_state', ...)`` on it segfaulted Kodi (removing a
+    title from Continue with the context menu rebuilt the shelf, then
+    ``paint_hero`` wrote to the old focused item). Call this before any
+    reset; the worker sees ``latest`` change and discards its answer.
+    """
+    with _library_meta_lock(window):
+        window._library_meta_latest = None
+        window._library_meta_pending = None
+        window._library_meta_ready = []
+
+
 def _set_shelf(window, list_id, label_id, prop, heading, items):
     control = window.getControl(list_id)
+    _forget_library_meta(window)
     control.reset()
     if items:
         control.addItems(items)
@@ -2206,6 +2224,7 @@ class NewHomeWindow(BaseWindow):
             _tab_load_incomplete(self, 'failed')
             _cancel_shelf_extends(self)
             self._rows = {}
+            _forget_library_meta(self)
             for list_id, prop, _counter in _ROW_COUNTERS:
                 self.setProperty(prop, '')
                 self.getControl(list_id).reset()
