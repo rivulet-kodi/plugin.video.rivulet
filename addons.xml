@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.38.0" provider-name="M0RF30">
+<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.38.1" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0" />
     <import addon="script.module.requests" version="2.22.0" />
@@ -12,7 +12,9 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse and search catalogs by type, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote rivulet-engine streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.38.0:
+    <news>v0.38.1:
+- Fix: you can type straight into Search from a keyboard. The search bar has the focus when Search opens, and letter keys no longer trigger Kodi shortcuts such as the shutdown menu. Enter opens Kodi's keyboard; confirm it to search.
+v0.38.0:
 - New: series get the watched check on their poster too, as in the Stremio apps: it appears once you have watched an episode, here or in another Stremio app.
 - Fix: marking a series as watched or unwatched, or adding or removing it from the library, on its page no longer has its check undone by Home a moment later.
 - Change: Home and the coverflow show watched checks from a saved copy of your Stremio library instead of asking your account each time, so they load faster. The copy is deleted when you sign out.
@@ -25,13 +27,13 @@ v0.36.0:
 - New: episodes you watched in other Stremio apps get a watched tick on the series page as soon as it opens, and "Mark as watched" on a series ticks every episode in a way the Stremio apps understand too.
 - Fix: changing your add-ons in Rivulet while logged in no longer deletes add-ons you installed from another Stremio app or the website. Rivulet now fetches your account's add-on list before saving it.
 - Fix: a source add-on that times out or fails is retried twice before its results are given up on, so slow add-ons are less often missing from the source list and search.
-Thanks to TheGildedGoo (RevRivulet) for the original work these are based on.
 v0.35.0:
 - New: a new Home replaces the old one. Tabs for Home, My Stuff, Movies, Series and Anime, a large hero with backdrop, logo, plot, scores and "Ends at", and one poster row at a time. Arrange Home (Settings &gt; Home screen) adds, hides, reorders and copies lists between tabs; your old row choices carry over once.
 - New: a new series page with season tabs, episode rows with progress and watched ticks, and a new one-page search with an on-screen keyboard and a Discover row.
 - New: IMDb, Rotten Tomatoes (critics and audience) and Metacritic scores with optional OMDb and MDBList keys, which can be typed on your phone by scanning a QR code. Search, add-on links and Stremio sign-in can use the phone too.
 - Change: dialogs are now always dark and rounded (the "Dark dialogs" setting is gone), with a softer background dim, translucent panels, pill-shaped buttons and a 350 ms fade on the busy spinner.
 - Fix: Kodi no longer crashes when you leave Home and Rivulet exits. Home now releases its list items before its window closes.
+Thanks to TheGildedGoo (RevRivulet) for the original work these are based on.
 v0.34.0:
 - New: what you watch in other Stremio apps now shows up in Rivulet. Progress and watched titles from your Stremio account are pulled in after login and every 15 minutes, without overwriting anything newer on this device ("Sync playback progress to your Stremio account" setting).
 - Fix: while a video plays, opening Rivulet from Kodi's menus brings Rivulet back over the video instead of returning to it. Before, you had to stop playback first.
