@@ -278,6 +278,7 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
     module = types.ModuleType('xbmcgui')
     module.NOTIFICATION_INFO = 'info'
     module.ALPHANUM_HIDE_INPUT = 1
+    module.INPUT_TYPE_TEXT = 0
     module.ListItem = FakeListItem
 
     inputs = list(dialog_inputs or [])
@@ -401,6 +402,14 @@ def make_xbmcgui(env, dialog_inputs=None, dialog_yesno=None):
 
         def setText(self, text):
             self.text = text
+
+        def setType(self, input_type, heading):
+            # `ControlEdit.setType()`: input type and keyboard heading.
+            self.input_type = (input_type, heading)
+
+        def getText(self):
+            # `ControlEdit.getText()`: what is in the edit field now.
+            return self.text or ''
 
         def setPercent(self, percent):
             self.percent = percent
