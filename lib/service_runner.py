@@ -530,9 +530,10 @@ class ServerProcess:
 
     def maybe_rotate_log(self):
         """Periodic size check for a LIVE process's log, called by main()'s
-        HEALTHY branch on every poll tick. Gated on LOG_ROTATE_CHECK_INTERVAL
-        (a coarse monotonic timestamp, not a per-tick stat()): start()'s own
-        `_rotate_log()` call only ever runs once, right before spawning, so
+        HEALTHY branch on every poll tick. Gated on
+        `lib.logrotate.LOG_ROTATE_CHECK_INTERVAL` (a coarse monotonic
+        timestamp, not a per-tick stat()): start()'s own
+        `rotate_if_oversized()` call only ever runs once, right before spawning, so
         without this a chatty binary's log grows unbounded across a crash-
         free multi-day session -- a real risk on a near-full SD/eMMC box.
 
@@ -540,7 +541,7 @@ class ServerProcess:
         `Popen(stdout=self._log_fh)`) was opened against log_path's INODE,
         not its path -- `os.rename()` only relabels a path, it never
         touches an already-open fd. So the FIRST time this fires against
-        an oversized live log, it rotates exactly like `_rotate_log()`
+        an oversized live log, it rotates exactly like `rotate_if_oversized()`
         (rename log_path -> `.1`): the child keeps appending to the same
         inode, now reachable only at `.1`, and log_path does not exist
         again until the next start() creates a fresh one.
@@ -557,7 +558,7 @@ class ServerProcess:
 
         Windows caveat: os.rename() of a file the child (and self._log_fh)
         holds open fails there with PermissionError (CPython never requests
-        FILE_SHARE_DELETE, bpo-15244), which _rename_to_backup() swallows.
+        FILE_SHARE_DELETE, bpo-15244), which `rename_to_backup()` swallows.
         So after attempting the rename, this re-checks whether log_path is
         actually gone and falls back to truncating the live fd -- the same
         bounded-but-history-losing tradeoff as the `.1` case, so the

@@ -33,7 +33,6 @@ from lib.stremio.addons import (
     AddonError,
     addon_error_detail,
     safe_url_for_log,
-    validate_transport_url,
 )
 from lib.stremio.api import ApiError, StremioAPI
 from lib.stremio.contentrating import filter_metas, is_adult_catalog
@@ -1036,30 +1035,10 @@ def sign_in():
             # Re-run against a freshly-read `local_addons` on every retry
             # (see Store.update_addons), so a concurrent install/remove
             # racing this login is merged rather than clobbered.
-            #
-            # Remote descriptors are untrusted (server-side account data,
-            # or another client's tampered sync push): a `transportUrl`
-            # that fails validate_transport_url() (credentials, plaintext
-            # public host, non-HTTP(S), ...) is discarded here rather than
-            # persisted/installed - only its safe identity/origin is
-            # logged, never the raw descriptor.
-            seen = {a.get('transportUrl') for a in local_addons}
-            merged = list(local_addons)
-            for descriptor in remote_addons:
-                transport_url = descriptor.get('transportUrl')
-                if not transport_url:
-                    continue
-                try:
-                    normalized_url = validate_transport_url(transport_url)
-                except AddonError:
-                    manifest_id = (descriptor.get('manifest') or {}).get('id') or '?'
-                    log('views.login: discarding unsafe synced addon %s (%s)' % (
-                        manifest_id, safe_url_for_log(transport_url)), xbmc.LOGWARNING)
-                    continue
-                if normalized_url not in seen:
-                    merged.append(dict(descriptor, transportUrl=normalized_url))
-                    seen.add(normalized_url)
-            return merged
+            # `union_remote` is the same union every pre-push pull uses,
+            # including its discarding of remote descriptors whose
+            # `transportUrl` fails validate_transport_url().
+            return addonsync.union_remote(local_addons, remote_addons)
 
         from lib.store import ConcurrentUpdateError
 

@@ -21,9 +21,10 @@ import json
 import math
 import os
 import re
-import tempfile
 import threading
 import time
+
+from lib.stremio import jsonfile
 
 TTL_SECONDS = 24 * 60 * 60
 
@@ -418,31 +419,12 @@ def fetch_scores(imdb_id, omdb_key='', mdblist_key='', get=None, timeout=_TIMEOU
 
 
 def _atomic_write(path, payload):
-    directory = os.path.dirname(path) or '.'
-    fd, tmp_path = tempfile.mkstemp(prefix='.tmp-ratings-', dir=directory)
-    try:
-        with os.fdopen(fd, 'w') as handle:
-            handle.write(json.dumps(payload, separators=(',', ':')))
-        os.replace(tmp_path, path)
-    except Exception:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
-        raise
+    jsonfile.write_json(path, payload, '.tmp-ratings-')
 
 
 def _valid_entry(entry):
     """Reject malformed disk entries before they reach age/eviction math."""
-    if not isinstance(entry, dict):
-        return False
-    stamp = entry.get('at')
-    if isinstance(stamp, bool) or not isinstance(stamp, (int, float)):
-        return False
-    try:
-        if not math.isfinite(stamp):
-            return False
-    except OverflowError:
+    if not isinstance(entry, dict) or not jsonfile.finite_number(entry.get('at')):
         return False
     ttl = entry.get('ttl', TTL_SECONDS)
     if isinstance(ttl, bool) or not isinstance(ttl, (int, float)):
@@ -486,11 +468,7 @@ class RatingsCache:
         return self._clock()
 
     def _load(self):
-        try:
-            with open(self.path) as handle:
-                payload = json.load(handle)
-        except (OSError, ValueError):
-            return
+        payload = jsonfile.read_json(self.path)
         if not isinstance(payload, dict):
             return
         self._entries = {key: entry for key, entry in payload.items() if _valid_entry(entry)}

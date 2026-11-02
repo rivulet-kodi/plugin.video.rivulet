@@ -387,20 +387,16 @@ def _not_ok_response():
 
 
 # ============================================================================
-# NEW SECTION (UxTests) - pre-buffer support: create_engine / file_stats /
-# buffered_bytes. Added independently of the tests above; do not edit the
-# tests above when touching this section.
+# NEW SECTION (UxTests) - pre-buffer support: create_engine. Added
+# independently of the tests above; do not edit the tests above when
+# touching this section.
 #
 # Confirmed shapes from ServerStatsLib (lib/stremio/server.py):
 #   create_engine(info_hash) -> GET {base}/{hash.lower()}/create, timeout=100
-#   file_stats(info_hash, file_idx) -> GET {base}/{hash.lower()}/{idx}/stats.json, timeout=10
-#   both call resp.raise_for_status() then resp.json(); any requests.RequestException,
+#   calls resp.raise_for_status() then resp.json(); any requests.RequestException,
 #   non-2xx, or invalid JSON (or requests is None) raises ServerError(Exception).
-#   buffered_bytes(stats) -> int(round(float(streamProgress)*float(streamLen))),
-#   clamped >=0; returns 0 for non-dict input, missing/None fields, or any
-#   TypeError/ValueError during conversion - never raises.
 # ============================================================================
-from lib.stremio.server import ServerError, buffered_bytes, guess_file_idx
+from lib.stremio.server import ServerError, guess_file_idx
 
 
 def _json_response(data, status_code=200):
@@ -495,89 +491,6 @@ def test_create_engine_raises_server_error_on_invalid_json():
         client.create_engine("aa" * 20)
 
 
-# --- file_stats ----------------------------------------------------------
-
-
-def test_file_stats_hits_per_file_endpoint():
-    client = make_client()
-    client.session = FakeSession(
-        responses=[_json_response({"streamProgress": 0.5, "streamLen": 1000})]
-    )
-    stats = client.file_stats("bb" * 20, 3)
-    assert client.session.calls[0]["method"] == "GET"
-    assert client.session.calls[0]["url"] == BASE + "/" + "bb" * 20 + "/3/stats.json"
-    assert stats["streamProgress"] == 0.5
-
-
-def test_file_stats_lowercases_info_hash():
-    client = make_client()
-    client.session = FakeSession(responses=[_json_response({})])
-    client.file_stats("BB" * 20, 0)
-    assert client.session.calls[0]["url"] == BASE + "/" + "bb" * 20 + "/0/stats.json"
-
-
-def test_file_stats_uses_10s_timeout():
-    client = make_client()
-    client.session = FakeSession(responses=[_json_response({})])
-    client.file_stats("cc" * 20, 0)
-    assert client.session.calls[0]["kwargs"].get("timeout") == 10
-
-
-def test_file_stats_raises_server_error_on_connection_error():
-    client = make_client()
-    client.session = FakeSession(exc=requests.exceptions.ConnectionError("refused"))
-    with pytest.raises(ServerError):
-        client.file_stats("cc" * 20, 0)
-
-
-def test_file_stats_raises_server_error_on_http_error():
-    client = make_client()
-    client.session = FakeSession(responses=[_json_response({}, status_code=404)])
-    with pytest.raises(ServerError):
-        client.file_stats("cc" * 20, 0)
-
-
-# --- buffered_bytes ------------------------------------------------------
-
-
-def test_buffered_bytes_normal_progress():
-    assert buffered_bytes({"streamProgress": 0.5, "streamLen": 1000}) == 500
-
-
-def test_buffered_bytes_rounds_to_nearest_int():
-    assert buffered_bytes({"streamProgress": 1.0 / 3.0, "streamLen": 10}) == 3
-
-
-def test_buffered_bytes_missing_fields_returns_zero():
-    assert buffered_bytes({}) == 0
-
-
-def test_buffered_bytes_none_progress_returns_zero():
-    assert buffered_bytes({"streamProgress": None, "streamLen": 1000}) == 0
-
-
-def test_buffered_bytes_none_len_returns_zero():
-    assert buffered_bytes({"streamProgress": 0.5, "streamLen": None}) == 0
-
-
-def test_buffered_bytes_negative_progress_clamped_to_zero():
-    assert buffered_bytes({"streamProgress": -0.1, "streamLen": 1000}) == 0
-
-
-def test_buffered_bytes_non_dict_input_returns_zero():
-    assert buffered_bytes(None) == 0
-    assert buffered_bytes("not a dict") == 0
-    assert buffered_bytes([]) == 0
-
-
-def test_buffered_bytes_non_numeric_fields_returns_zero():
-    assert buffered_bytes({"streamProgress": "half", "streamLen": 1000}) == 0
-
-
-def test_buffered_bytes_full_progress():
-    assert buffered_bytes({"streamProgress": 1.0, "streamLen": 123456}) == 123456
-
-
 # --- guess_file_idx --------------------------------------------------------
 #
 # Live-verified gap (rivulet-engine v0.8.5, Sintel torrent
@@ -667,7 +580,7 @@ def test_guess_file_idx_video_ties_pick_first_and_use_path_or_name():
 # iter_front: front-priming readiness probe (live-verified fix)
 #
 # Bug this defends against: pre-buffer used to poll aggregate
-# streamProgress/streamLen (buffered_bytes()), which can report megabytes
+# streamProgress/streamLen from per-file stats.json, which can report megabytes
 # "buffered" while the file's FRONT (offset 0 - where ffmpeg's container
 # probe reads from) was never downloaded, since torrent pieces arrive out
 # of order. Live-verified against a real rivulet-engine instance: a

@@ -22,7 +22,7 @@ lib/ui/        every xbmc* import lives here (except service_runner.py)
 default.py (plugin)   service.py (xbmc.service, start="startup")
 ```
 
-**The Kodi-independence rule is real and load-bearing.** `lib/stremio/*`, `lib/store.py`, `lib/library.py`, `lib/serverbin.py`, `lib/ui/urlutil.py`, `lib/ui/playbackmeta.py` and `lib/homelayout.py` contain **zero** `xbmc*` imports, which is what makes them unit-testable without stubs. `lib/stremio/subtitles.py:92-96` documents a constant duplicated rather than imported specifically to preserve this. Never add an `xbmc` import to those modules to save a few lines.
+**The Kodi-independence rule is real and load-bearing.** `lib/stremio/*`, `lib/store.py`, `lib/library.py`, `lib/serverbin.py`, `lib/logrotate.py`, `lib/ui/urlutil.py`, `lib/ui/playbackmeta.py` and `lib/homelayout.py` contain **zero** `xbmc*` imports, which is what makes them unit-testable without stubs. `lib/stremio/subtitles.py:92-96` documents a constant duplicated rather than imported specifically to preserve this. Never add an `xbmc` import to those modules to save a few lines.
 
 **Plugin flow.** Kodi invokes `default.py` -> `lib/ui/router.py:run()` reads `action` from the query string (`params.get('action', 'home')`) and dispatches. Handlers lazily import `views`/`player` **inside closures** so an unrelated action never pays their import cost — a measured startup optimization, not an accident.
 
@@ -38,7 +38,7 @@ Browsing: `lib/ui/views.py` fans a request across installed addons -> `lib/strem
 
 | Path | Purpose |
 |---|---|
-| `lib/stremio/` | Protocol client: `addons.py` (manifests, catalogs, fan-out), `addoncatalogs.py` (the `addon_catalog` resource: collapsed per id, pooled, TTL-cached), `api.py` (account sync), `contentrating.py` (adult heuristic), `fanout.py` (`map_bounded()`: ordered, bounded daemon-thread map for this layer; never `ThreadPoolExecutor`), `server.py` (streaming server), `streaminfo.py` (quality/seeder/cache decoration + source filtering), `subtitles.py`, `metalinks.py` |
+| `lib/stremio/` | Protocol client: `addons.py` (manifests, catalogs, fan-out), `addoncatalogs.py` (the `addon_catalog` resource: collapsed per id, pooled, TTL-cached), `api.py` (account sync), `contentrating.py` (adult heuristic), `fanout.py` (`map_bounded()`: ordered, bounded daemon-thread map for this layer; never `ThreadPoolExecutor`), `jsonfile.py` (atomic write and tolerant read for the disposable JSON caches; `lib/store.py` keeps its own fsyncing writer), `server.py` (streaming server), `streaminfo.py` (quality/seeder/cache decoration + source filtering), `subtitles.py`, `metalinks.py` |
 | `lib/ui/` | Windows, dialogs, routing, playback. All Kodi API contact lives here, except `lib/service_runner.py` |
 | `resources/skins/Default/1080i/` | 13 window XMLs, authored at 1920x1080 |
 | `resources/language/resource.language.*/` | 14 locales, `strings.po` |
@@ -55,8 +55,12 @@ Browsing: `lib/ui/views.py` fans a request across installed addons -> `lib/strem
 uvx --with-requirements requirements-dev.txt pytest tests/ -q          # all pass; well under a minute
 uvx --with-requirements requirements-dev.txt ruff check lib tests
 uvx --with-requirements requirements-dev.txt mypy
+uvx --with-requirements requirements-dev.txt vulture                    # dead code; exits 0
+uvx --with-requirements requirements-dev.txt pylint lib default.py service.py   # duplicate code; exits 0
 uvx --with-requirements requirements-dev.txt pytest tests/ --cov --cov-report=term-missing
 ```
+
+`vulture` and `pylint` read their settings from `pyproject.toml` (`[tool.vulture]`, `[tool.pylint.*]`), which is why the commands carry no flags; both run in CI's `lint-type` job. See "Dead code and duplication" under Code Conventions for what they check and how to make a legitimate exception.
 
 The `Makefile` wraps the same gates for a provisioned venv:
 
@@ -66,7 +70,9 @@ make test        # pytest tests/
 make cov         # pytest tests/ --cov --cov-report=term-missing
 make lint        # ruff check lib tests
 make typecheck   # mypy
-make check       # lint + typecheck + test
+make deadcode    # vulture
+make dupes       # pylint lib default.py service.py (duplicate-code only)
+make check       # lint + typecheck + deadcode + dupes + test
 make parallel    # pytest -n auto
 ```
 
@@ -77,6 +83,10 @@ make parallel    # pytest -n auto
 ## Code Conventions & Common Patterns
 
 **Docstrings carry the reasoning.** This codebase documents *why*, at length, including the measurement or bug that motivated the code. Match it. When you remove a workaround, you are deleting an explanation — read it first. Comments citing a past failure (`lib/store.py:40-52`, `.github/workflows/repo.yml:15-21`) are load-bearing.
+
+**Dead code and duplication are gated.** Both checks run in CI (`lint-type`) and must exit 0. Every exception needs a reason written next to it; an entry without one is not a legitimate exception.
+- *Dead code* (`vulture`, `[tool.vulture]` in `pyproject.toml`, confidence 60): scans `lib`, `default.py`, `service.py`. Code that only tests reach is dead: delete it with the tests that only exercise it, and move test-only helpers into `tests/`. The vendored ports (`lib/qrcodegen.py`, `lib/stremio/lzstring.py`) are excluded, never edited. Callbacks Kodi or the stdlib invoke by name (`onInit`, `onClick`, `onAction`, `onPlayBack*`, the `http.server` hooks in `lib/pairing.py`, ...) go in `ignore_names`, grouped and commented by caller. A specific use vulture cannot see (a name dispatched by string, as `lib/ui/router.py` does with `getattr(views, name)`; a ctypes struct field; a reset hook `tests/conftest.py`'s `_fresh_process_state` calls) goes in `vulture_whitelist.py`, one line each, with a comment saying who reaches it. That file sits at the repo root, so the shipped zip (which archives only `addon.xml`, `default.py`, `service.py`, `resources`, `lib`, `LICENSE`) never carries it.
+- *Duplication* (`pylint`, duplicate-code only, `[tool.pylint.*]`): six or more matching lines across `lib`, `default.py` and `service.py`, ignoring imports, docstrings and comments, fail. Extract a helper in the right layer (`lib.logrotate` for both engine supervisors, `lib.stremio.jsonfile` for the disposable JSON caches, `lib.stremio.addons.iter_manifests`, `lib.ui.uicommon.close_quietly` and the catalog-paging helpers are the models), never by adding an `xbmc` import to a Kodi-independent module. A copy kept on purpose (Kodi independence, the per-call-site fan-out bounds, two protocol shapes that only look alike) takes a file-level `# pylint: disable=duplicate-code` with the reason on the same or the preceding line. Keep these rare.
 
 **Kodi compatibility funnel.** `lib/ui/compat.py` is the single place that abstracts Kodi 19 vs 20+:
 - `L(string_id)` (`compat.py:26`) for every user-visible string — never a literal.
@@ -125,7 +135,8 @@ make parallel    # pytest -n auto
 | Path | Why |
 |---|---|
 | `addon.xml` | **Single source of version truth** (Kodi reads it). Bumped only by a release PR; see Release below |
-| `pyproject.toml` | ruff/mypy/pytest/coverage config only. It deliberately has no `[project]` table: the addon is not pip-installable and a second version there only went stale |
+| `vulture_whitelist.py` | Uses of code that vulture cannot see, one commented line each; never shipped |
+| `pyproject.toml` | ruff/mypy/pytest/coverage/vulture/pylint config only. It deliberately has no `[project]` table: the addon is not pip-installable and a second version there only went stale |
 | `requirements-dev.txt` | Every floor is deliberate; comments explain the 3.8 leg and the `mypy<2.0` cap |
 | `lib/ui/router.py` | Action dispatch; add new plugin actions here |
 | `lib/ui/compat.py` | The only sanctioned path to Kodi APIs that differ by version |

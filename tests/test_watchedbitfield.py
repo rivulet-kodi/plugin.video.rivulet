@@ -9,7 +9,7 @@ The pinned string was produced by the official JavaScript library
 """
 from lib.stremio.watchedbitfield import (
     WatchedBitfield,
-    set_video_watched,
+    set_all_watched,
     sorted_video_ids,
     video_sort_key,
     watched_video_ids,
@@ -22,8 +22,7 @@ IDS = ['tt1', 'tt1:1:1', 'tt1:1:2', 'tt1:1:3']
 
 def test_official_serial_round_trip():
     assert watched_video_ids(SERIAL, IDS) == {'tt1:1:1', 'tt1:1:3'}
-    again = set_video_watched(SERIAL, IDS, 'tt1:1:3', True)
-    assert again == SERIAL
+    assert WatchedBitfield.construct_and_resize(SERIAL, IDS).serialize() == SERIAL
 
 
 def test_construct_from_array_matches_the_official_serial():
@@ -45,23 +44,19 @@ def test_unknown_anchor_serializes_blank_and_writer_refuses_it():
     assert blank.serialize() == 'nope:1:eJxjAAAAAQAB'
     loaded = WatchedBitfield.construct_and_resize(SERIAL, ['nope'])
     assert loaded.anchor_not_found is True
-    assert set_video_watched(SERIAL, ['nope'], 'nope', True) is None
+    assert set_all_watched(SERIAL, ['nope'], True) is None
     assert watched_video_ids(SERIAL, ['nope']) is None
 
 
 def test_unparseable_string_is_not_replaced():
-    assert set_video_watched('no-colons', IDS, 'tt1:1:1', True) is None
-    assert set_video_watched('tt1:1:1:4:!!!not-base64!!!', IDS, 'tt1:1:1', True) is None
+    assert set_all_watched('no-colons', IDS, True) is None
+    assert set_all_watched('tt1:1:1:4:!!!not-base64!!!', IDS, True) is None
     assert watched_video_ids('no-colons', IDS) is None
 
 
-def test_unknown_video_id_is_a_noop():
-    assert set_video_watched(SERIAL, IDS, 'tt1:9:9', True) is None
-
-
-def test_fresh_field_marks_one_episode():
-    serial = set_video_watched(None, IDS, 'tt1:1:1', True)
-    assert watched_video_ids(serial, IDS) == {'tt1:1:1'}
+def test_fresh_field_marks_every_episode():
+    serial = set_all_watched(None, IDS, True)
+    assert watched_video_ids(serial, IDS) == set(IDS)
 
 
 def test_sort_puts_missing_series_info_before_season_zero():

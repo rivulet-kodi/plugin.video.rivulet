@@ -18,7 +18,7 @@ previews do.
 Cinemeta ships this seeded into `lib.store.DEFAULT_ADDONS` with its
 `addonCatalogs` array already committed, so `lib.ui.addoncatalogwindow` works
 offline-seeded on first run with no new dependency - but nothing here is
-Cinemeta-specific: `iter_addon_catalogs()` reads the field off WHATEVER
+Cinemeta-specific: `iter_unique_addon_catalogs()` reads the field off WHATEVER
 addons happen to be installed, so any addon publishing `addonCatalogs`
 contributes.
 
@@ -76,7 +76,7 @@ STATE_NEEDS_CONFIGURATION = 'needs-configuration'
 #: Built-in community addon-catalog source, always offered by
 #: `lib.ui.addoncatalogwindow` alongside whatever installed addons
 #: declare, regardless of which addons are installed - unlike every
-#: other source this module knows about (`iter_addon_catalogs()`),
+#: other source this module knows about (`iter_unique_addon_catalogs()`),
 #: nothing has to be installed first to browse it. Each tuple is
 #: `(transport_url, type_, id_, name)`: `transport_url` is fed straight
 #: into `build_resource_url()`/`fetch_addon_catalog()` exactly like an
@@ -106,42 +106,13 @@ BUILTIN_ADDON_CATALOG_SOURCES = (
 )
 
 
-def iter_addon_catalogs(addons):
-    """Yield `(transport_url, manifest, addon_catalog)` for every
-    addon-catalog descriptor declared by `addons` - a list of installed
-    addon descriptors shaped like `{"transportUrl": ..., "manifest": {...}}`
-    (`lib.store.Store.get_addons()`).
-
-    Reads `manifest['addonCatalogs']`, which is a DISTINCT manifest key
-    from `manifest['catalogs']` (`lib.stremio.addons.iter_catalogs()`
-    reads that one). Mirrors that function's shape exactly, deliberately
-    with no per-addon special-casing: ANY installed addon publishing
-    `addonCatalogs` contributes here, not only whichever ships as
-    Rivulet's seeded default (currently Cinemeta, in
-    `lib.store.DEFAULT_ADDONS`) - a catalog browser that only worked for one
-    hardcoded addon would stop working the moment that addon is removed
-    or replaced by the user.
-    """
-    for descriptor in addons or []:
-        if not isinstance(descriptor, dict):
-            continue
-        manifest = descriptor.get('manifest')
-        if not isinstance(manifest, dict):
-            continue
-        transport_url = descriptor.get('transportUrl')
-        declared = manifest.get('addonCatalogs')
-        for addon_catalog in declared if isinstance(declared, list) else ():
-            if isinstance(addon_catalog, dict):
-                yield transport_url, manifest, addon_catalog
-
-
 def fetch_addon_catalog(client_or_session, transport_url, type_, id_):
     """GET the `addon_catalog` resource -
     `{transport_url-base}/addon_catalog/{type_}/{id_}.json` - and return
     its `addons` list.
 
     `type_`/`id_` come from one entry of an installed addon's own
-    `manifest['addonCatalogs']` (see `iter_addon_catalogs`); `transport_url`
+    `manifest['addonCatalogs']` (see `iter_unique_addon_catalogs`); `transport_url`
     is that DECLARING addon's own transportUrl, never the transportUrl of
     an addon being listed.
 
@@ -193,11 +164,21 @@ def fetch_addon_catalog(client_or_session, transport_url, type_, id_):
 
 
 def iter_unique_addon_catalogs(addons):
-    """Like `iter_addon_catalogs()`, but yields at most one
-    `(transport_url, manifest, addon_catalog)` per unique catalog `id`
-    declared by each addon, instead of one per declared `(type, id)`
-    pair - see the module docstring for the measured 11-pairs/2-ids
-    Cinemeta numbers this collapsing is built from.
+    """Yield at most one `(transport_url, manifest, addon_catalog)` per
+    unique catalog `id` declared by each of `addons` - installed addon
+    descriptors shaped like `{"transportUrl": ..., "manifest": {...}}`
+    (`lib.store.Store.get_addons()`) - instead of one per declared
+    `(type, id)` pair; see the module docstring for the measured
+    11-pairs/2-ids Cinemeta numbers this collapsing is built from.
+
+    Reads `manifest['addonCatalogs']`, which is a DISTINCT manifest key
+    from `manifest['catalogs']` (`lib.stremio.addons.iter_catalogs()`
+    reads that one), deliberately with no per-addon special-casing: ANY
+    installed addon publishing `addonCatalogs` contributes here, not only
+    whichever ships as Rivulet's seeded default (currently Cinemeta, in
+    `lib.store.DEFAULT_ADDONS`) - a catalog browser that only worked for
+    one hardcoded addon would stop working the moment that addon is
+    removed or replaced by the user.
 
     Picks, per id: the descriptor declaring type `all` when one
     exists, regardless of where it falls in declaration order;
@@ -206,19 +187,8 @@ def iter_unique_addon_catalogs(addons):
     `all` variant) is still fetched exactly once, under whichever type
     it happened to declare first, rather than dropped or fetched once
     per type.
-
-    `iter_addon_catalogs()` itself is left untouched: `lib.ui.
-    addoncatalogwindow` still calls it directly today, so changing its
-    yield shape out from under that caller would silently break it.
-    This is the collapsing helper callers can opt into instead.
     """
-    for descriptor in addons or []:
-        if not isinstance(descriptor, dict):
-            continue
-        manifest = descriptor.get('manifest')
-        if not isinstance(manifest, dict):
-            continue
-        transport_url = descriptor.get('transportUrl')
+    for transport_url, manifest in _addons.iter_manifests(addons):
         chosen = {}
         order = []
         declared = manifest.get('addonCatalogs')

@@ -22,7 +22,6 @@ title the way the coverflow does; the query then goes into the search
 history.
 """
 
-import json
 import threading
 
 import xbmcgui
@@ -304,8 +303,7 @@ def _paint_hero(window, item):
     """
     if item is None:
         return
-    from lib.ui import logocheck, newhome, newlook
-    from lib.ui.ratingsched import overlay_text
+    from lib.ui import newhome, newlook
 
     title = item.getProperty('hero_title') or item.getLabel() or ''
     if not title and not item.getProperty('sid') and not item.getProperty('hero_logo'):
@@ -313,23 +311,10 @@ def _paint_hero(window, item):
     meta = item.getProperty('hero_meta') or ''
     facts_raw = item.getProperty('hero_facts') or ''
     if facts_raw and item.getProperty('facts_done') != '1':
-        try:
-            facts = json.loads(facts_raw)
-        except ValueError:
-            facts = None
-        if isinstance(facts, dict):
-            overlaid = overlay_text(facts, meta, newhome._upcoming_facts(window))
-            if overlaid != meta:
-                item.setProperty('hero_meta', overlaid)
-                item.setProperty('facts_done', '1')
-            meta = overlaid
+        meta = newhome._overlay_hero_facts(window, item, meta, facts_raw)
     plot = item.getProperty('hero_plot') or item.getProperty('subtitle') or ''
     fanart = item.getProperty('fanart') or ''
-    wanted_logo = item.getProperty('hero_logo') or ''
-    logo = wanted_logo if newhome._logo_known_good(wanted_logo) else ''
-    upcoming_logos = newhome._upcoming_logos(window)
-    newhome._warm_logos(window, ([wanted_logo] if wanted_logo and not logo else []) + upcoming_logos)
-    logocheck.ask(upcoming_logos)
+    logo = newhome._hero_logo(window, item)
     fill = item.getProperty('hero_fill') == '1' and bool(fanart)
     runtime = item.getProperty('hero_runtime') or ''
     painted = (title, meta, plot, fanart, fill, logo, runtime)

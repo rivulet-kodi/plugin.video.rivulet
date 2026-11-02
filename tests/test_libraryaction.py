@@ -154,24 +154,24 @@ def test_a_write_that_did_not_land_records_nothing(action, monkeypatch, cancel, 
     assert [text for _heading, text, *_rest in action.env.notifications] == ([toast] if toast else [])
 
 
-# --- the one-row menu -------------------------------------------------------------
+# --- the library row --------------------------------------------------------------
 
 
-def test_offer_signed_out_asks_to_sign_in(action, monkeypatch):
+def test_signed_out_menu_offers_only_the_trailer(action, monkeypatch):
     api = _Api()
-    spinners, shown = _wire(monkeypatch, api, auth=None)
-    assert action.libraryaction.offer(_META) is None
-    assert action.env.notifications[-1][1] == 'STR30190'
-    assert shown == [] and api.gets == []
+    _, shown = _wire(monkeypatch, api, auth=None, pick=None)
+    assert action.libraryaction.poster_menu(_META) is None
+    assert shown == [('Dune', ['STR30499'])]
+    assert api.gets == []
 
 
-def test_offer_adds_a_title_not_in_the_library(action, monkeypatch):
+def test_menu_adds_a_title_not_in_the_library(action, monkeypatch):
     import lib.ui.newhome as newhome
 
     api = _Api(record=None)
     _, shown = _wire(monkeypatch, api)
-    assert action.libraryaction.offer(_META) == 'added'
-    assert shown == [('Dune', ['STR30293'])]
+    assert action.libraryaction.poster_menu(_META) == 'added'
+    assert shown == [('Dune', ['STR30293', 'STR30295', 'STR30499'])]
     payload = api.puts[0][1]
     assert payload['_id'] == 'tt1' and payload['removed'] is False
     assert action.env.notifications[-1][1] == 'STR30297'
@@ -180,14 +180,14 @@ def test_offer_adds_a_title_not_in_the_library(action, monkeypatch):
     assert [row['_id'] for row in action.libraryaction.apply_library_writes([])] == ['tt1']
 
 
-def test_offer_removes_a_title_in_the_library(action, monkeypatch):
+def test_menu_removes_a_title_in_the_library(action, monkeypatch):
     from lib import library
 
     record = library.library_add_payload(_META)
     api = _Api(record=record)
     _, shown = _wire(monkeypatch, api)
-    assert action.libraryaction.offer(_META) == 'removed'
-    assert shown == [('Dune', ['STR30294'])]
+    assert action.libraryaction.poster_menu(_META) == 'removed'
+    assert shown == [('Dune', ['STR30294', 'STR30295', 'STR30499'])]
     payload = api.puts[0][1]
     assert payload['removed'] is True
     assert action.env.notifications[-1][1] == 'STR30298'
@@ -198,32 +198,15 @@ def test_a_removed_record_is_offered_as_an_add(action, monkeypatch):
 
     record = dict(library.library_add_payload(_META), removed=True)
     _, shown = _wire(monkeypatch, _Api(record=record), pick=-1)
-    assert action.libraryaction.offer(_META) is None
-    assert shown == [('Dune', ['STR30293'])]
+    assert action.libraryaction.poster_menu(_META) is None
+    assert shown == [('Dune', ['STR30293', 'STR30295', 'STR30499'])]
 
 
-def test_offer_with_a_failed_lookup_writes_nothing(action, monkeypatch):
-    api = _Api(get_error=_api_error())
-    _, shown = _wire(monkeypatch, api)
-    assert action.libraryaction.offer(_META) is None
-    assert action.env.notifications[-1][1] == 'STR30302'
-    assert shown == [] and api.puts == []
-
-
-def test_offer_back_on_the_lookup_spinner_writes_nothing(action, monkeypatch):
-    api = _Api()
-    _, shown = _wire(monkeypatch, api, cancel_on=0)
-    assert action.libraryaction.offer(_META) is None
-    assert shown == [] and api.puts == []
-    assert action.env.notifications == []
-
-
-def test_offer_backed_out_of_the_menu_writes_nothing(action, monkeypatch):
+def test_a_nameless_title_is_headed_by_its_id(action, monkeypatch):
     api = _Api()
     _, shown = _wire(monkeypatch, api, pick=None)
-    assert action.libraryaction.offer({'id': 'tt1'}) is None
-    # No name: the id heads the menu.
-    assert shown == [('tt1', ['STR30293'])]
+    assert action.libraryaction.poster_menu({'id': 'tt1'}) is None
+    assert shown == [('tt1', ['STR30293', 'STR30499'])]
     assert api.puts == []
 
 

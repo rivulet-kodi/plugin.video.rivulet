@@ -2,6 +2,7 @@
 import pytest
 
 from lib.stremio.addons import AddonError
+from tests.homehooks import join_shelf_extends
 from tests.test_newhome import load_homewindow as load_homewindow
 from tests.test_newhome_tabs import build, metas
 
@@ -19,7 +20,7 @@ def row(ctx, monkeypatch):
 
 def prefetch(hw, win):
     hw._maybe_extend_focused_shelf(win)
-    hw._join_shelf_extends(win)
+    join_shelf_extends(win)
     hw._apply_shelf_extends(win)
 
 

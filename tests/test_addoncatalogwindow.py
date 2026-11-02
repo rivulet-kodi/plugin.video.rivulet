@@ -74,7 +74,7 @@ def _disable_builtin_addon_catalog_source(monkeypatch):
 def _source_addon():
     """An installed addon (NOT Cinemeta) that publishes one
     addon_catalog - proves AddonCatalogWindow has no Cinemeta special-casing,
-    same as test_addoncatalogs.py does for iter_addon_catalogs()."""
+    same as test_addoncatalogs.py does for iter_unique_addon_catalogs()."""
     return {
         'transportUrl': 'https://source.example/manifest.json',
         'manifest': {

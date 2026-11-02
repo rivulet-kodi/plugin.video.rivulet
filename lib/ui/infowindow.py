@@ -37,7 +37,15 @@ import threading
 import xbmcgui
 
 from lib.ui.playbackmeta import resolve_art
-from lib.ui.uicommon import ModalStackWindow, escape_label, gated_input
+from lib.ui.uicommon import (
+    ModalStackWindow,
+    append_keeping_focus,
+    close_quietly,
+    escape_label,
+    gated_input,
+    log_paging_failure,
+    take_pending_pages,
+)
 
 BACKGROUND = 30000
 LOADING = 30001
@@ -352,57 +360,29 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
                 # enrich workers do - see `_enrich_fetch`'s tail.
                 xbmc.executebuiltin('Action(noop)')
         except Exception as exc:
-            # Daemon thread with nobody to catch for it; a failed walk
-            # must never take the window down. Same nested guard as
-            # `_enrich_worker`: reporting can itself fail during teardown.
-            # LOGWARNING, not DEBUG: a paging addon failing silently used
-            # to leave a truncated strip with no trace in the log at the
-            # default log level.
-            try:
-                from lib.stremio.addons import addon_error_detail
-                from lib.ui.compat import log
-
-                log('infowindow: catalog paging worker failed: %s' % addon_error_detail(exc), xbmc.LOGWARNING)
-            except Exception:
-                pass
+            # A failed walk must never take the window down; a paging
+            # addon failing silently used to leave a truncated strip with
+            # no trace in the log at the default log level.
+            log_paging_failure('infowindow', exc)
 
     def _apply_pending_pages(self):
         """Append whatever the paging worker has queued onto the live
         coverflow. Always call this from the UI thread.
 
-        Appending (rather than rebuilding) keeps every already-enriched
-        item untouched: indices only ever grow, so a page landing
-        mid-scroll cannot renumber the item under focus.
-
-        The cursor, however, is NOT preserved for free: `addItems()` on a
-        ControlList resets the selected position to 0, so a page landing
-        while the user scrolls would otherwise yank them back to the
-        first poster - the further they had scrolled, the more jarring.
-        Save the position and restore it after the append, the same
-        guard `streamswindow._merge_and_refresh()` applies for the same
-        reason. Restoring by INDEX is sound here where that one needs
-        object identity: this only ever appends, so every existing item
-        keeps the index it already had.
+        Appending keeps every already-enriched item untouched: indices
+        only ever grow, so a page landing mid-scroll cannot renumber the
+        item under focus. The cursor is not preserved for free, though -
+        see `append_keeping_focus()`; `streamswindow._merge_and_refresh()`
+        guards it for the same reason, by object identity there because
+        it re-sorts rather than appends.
         """
-        with self._paging_lock:
-            if not self._pending_pages:
-                return
-            pages, self._pending_pages = self._pending_pages, []
         items = []
-        for page in pages:
+        for page in take_pending_pages(self):
             for meta in page:
                 items.append(self._make_item(len(self.metas), meta))
                 self.metas.append(meta)
-        if not items:
-            return
-        control = self.getControl(SELECT)
-        focus_index = control.getSelectedPosition()
-        control.addItems(items)
-        # A negative position means nothing was focused (an empty list
-        # cannot happen here - the window never opens without a first
-        # page) - leave Kodi's own default alone in that case.
-        if focus_index > 0:
-            control.selectItem(focus_index)
+        if items:
+            append_keeping_focus(self.getControl(SELECT), items)
 
     def _make_item(self, index, meta, props=None):
         item = xbmcgui.ListItem(escape_label(meta.get('name') or meta.get('id') or '?'))
@@ -780,10 +760,7 @@ def open_showcase(metas, catalog_title=None, more_pages=None):
     try:
         return win.start(metas, catalog_title=catalog_title, more_pages=more_pages)
     finally:
-        try:
-            win.close()
-        except Exception:
-            pass
+        close_quietly(win)
 
 
 def open_credits_picker(store, client, meta):

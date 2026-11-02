@@ -4,6 +4,7 @@ import threading
 import pytest
 
 from lib import homelayout
+from tests.homehooks import join_library_meta
 from tests.kodistubs import install_kodi_stubs
 from tests.test_newhome import _RELOAD_MODULE_NAMES, _FakeStore
 from tests.test_newhome_tabs import build, metas
@@ -44,7 +45,7 @@ def test_all_idle_home_workers_stop_while_window_is_still_referenced(session, mo
     before = set(threading.enumerate())
     item = hw._poster_item({'id': 'tt1', 'type': 'movie'}, sparse=True)
     hw._schedule_library_meta(win, item)
-    hw._join_library_meta(win)
+    join_library_meta(win)
     # Exercise real shared workers as well as the window's metadata worker.
     warmed = threading.Event()
     original_post = ctx.posterwarm._post_batch
@@ -113,7 +114,7 @@ def test_close_drops_queued_and_late_meta_and_can_reopen_for_playback(session, m
     monkeypatch.setattr(win, '_build', lambda: None)
     win.onInit()
     hw._schedule_library_meta(win, second)
-    hw._join_library_meta(win)
+    join_library_meta(win)
     assert win._library_meta_thread is not worker
     assert fetched == ['tt1', 'tt2']
     win.close()
@@ -143,7 +144,7 @@ def test_playback_reopen_hands_pending_meta_to_a_new_session(session, monkeypatc
     hw._schedule_library_meta(win, item)
     release.set()
     join_promptly([old_worker])
-    hw._join_library_meta(win)
+    join_library_meta(win)
     assert fetched == ['tt1', 'tt1']
     assert win._library_meta_ready == [('movie', 'tt1', {'id': 'tt1'})]
     win.close()

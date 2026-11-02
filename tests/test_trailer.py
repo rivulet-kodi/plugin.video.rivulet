@@ -48,8 +48,6 @@ def test_a_server_stream_that_answers_goes_first_then_the_youtube_addon(trailer,
     assert list(trailer.trailer.trailer_urls('abcdefghijk', '')) == [
         'plugin://plugin.video.youtube/play/?video_id=abcdefghijk',
     ]
-    monkeypatch.setattr(trailer.trailer, '_youtube_addon_url', lambda yt: '')
-    assert trailer.trailer.trailer_url('abcdefghijk') == 'http://127.0.0.1:11470/yt/abcdefghijk'
 
 
 def test_a_server_url_that_does_not_play_is_not_used(trailer, monkeypatch):
@@ -363,7 +361,7 @@ def test_the_youtube_addon_is_a_route_only_when_installed(trailer, monkeypatch):
 def test_no_route_at_all_gives_an_empty_url(trailer, monkeypatch):
     monkeypatch.setattr(trailer.trailer, '_server_url', lambda yt: '')
     monkeypatch.setattr(trailer.trailer, '_youtube_addon_url', lambda yt: '')
-    assert trailer.trailer.trailer_url('abcdefghijk') == ''
+    assert list(trailer.trailer.trailer_urls('abcdefghijk')) == []
 
 
 # --- the full meta ------------------------------------------------------------

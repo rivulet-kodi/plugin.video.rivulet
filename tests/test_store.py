@@ -1031,18 +1031,6 @@ def test_add_search_query_caps_at_max_search_history(tmp_path):
     assert history[0] == "query-%d" % (MAX_SEARCH_HISTORY + 4)
 
 
-def test_clear_search_history_removes_all_entries(tmp_path):
-    store = make_store(tmp_path)
-    store.add_search_query("matrix")
-    store.clear_search_history()
-    assert store.get_search_history() == []
-
-
-def test_clear_search_history_on_empty_store_does_not_raise(tmp_path):
-    store = make_store(tmp_path)
-    store.clear_search_history()  # must not raise
-
-
 def test_search_history_persists_across_store_instances(tmp_path):
     data_dir = tmp_path / "addon_data"
     store = Store(str(data_dir))

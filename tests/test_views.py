@@ -33,7 +33,12 @@ from lib.ui import urlutil
 from tests.conftest import stub_confirm
 from tests.kodistubs import install_kodi_stubs
 
-_RELOAD_MODULE_NAMES = ('lib.ui.compat', 'lib.ui.router', 'lib.ui.views', 'lib.ui.infowindow', 'lib.ui.dialogs')
+#: `lib.ui.addonsync` binds `log` from compat at import; login's merge logs
+#: through it, so it is reloaded against the same fakes as views.
+_RELOAD_MODULE_NAMES = (
+    'lib.ui.compat', 'lib.ui.router', 'lib.ui.addonsync', 'lib.ui.views', 'lib.ui.infowindow',
+    'lib.ui.dialogs',
+)
 
 #: Generous safety-valve timeout (seconds) for the Barrier/Event-gated
 #: fanout tests below: bounds a genuine deadlock/regression as a test

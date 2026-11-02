@@ -72,7 +72,6 @@ def test_the_gui_side_paints_a_batch_and_acknowledges_it(load_warm):
 
     from lib.ui import posterwarm
 
-    posterwarm.reset_warmer()
     screen = _Screen()
     urls = ['https://img.example/%d.jpg' % index for index in range(5)]
 
@@ -94,7 +93,6 @@ def test_a_closing_screen_paints_nothing_and_releases_the_worker(load_warm):
 
     from lib.ui import posterwarm
 
-    posterwarm.reset_warmer()
     screen = _Screen()
     screen._home_stop = threading.Event()
     pending = posterwarm._post_batch(screen, ['u1'])
@@ -119,7 +117,6 @@ def test_a_screen_without_slots_acknowledges_without_painting(load_warm):
 
     from lib.ui import posterwarm
 
-    posterwarm.reset_warmer()
     screen = _Screen(missing=True)
     ticket = posterwarm._post_batch(screen, ['u1'])
     posterwarm.apply_pending(screen)
@@ -155,7 +152,6 @@ def test_seen_posters_are_capped_oldest_first(load_warm, monkeypatch):
     warmer.request_warm(None, urls)
     assert len(warmer._seen) == warmer._MAX_SEEN
     assert urls[0] not in warmer._seen and urls[-1] in warmer._seen
-    warmer.reset_warmer()
 
 
 def test_the_queued_target_does_not_keep_a_closed_window_alive(load_warm, monkeypatch):
@@ -173,7 +169,6 @@ def test_the_queued_target_does_not_keep_a_closed_window_alive(load_warm, monkey
     del screen
     gc.collect()
     assert gone() is None
-    warmer.reset_warmer()
 
 
 def test_join_waits_only_for_the_worker_serving_that_window(load_warm):
@@ -184,7 +179,6 @@ def test_join_waits_only_for_the_worker_serving_that_window(load_warm):
 
     ctx = load_warm()
     warmer = ctx.posterwarm
-    warmer.reset_warmer()
     screen, other = _Screen(), _Screen()
     screen._home_stop = threading.Event()
     gone = weakref.ref(screen)
@@ -209,4 +203,3 @@ def test_join_waits_only_for_the_worker_serving_that_window(load_warm):
     del screen
     gc.collect()
     assert gone() is None
-    warmer.reset_warmer()

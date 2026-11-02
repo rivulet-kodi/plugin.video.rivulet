@@ -3,7 +3,7 @@
 
 """Tests for lib.ui.mystuff's merge logic - the pure half of the merged
 "My Stuff" screen (`merge_entries()`, `latest_by_title()`,
-`percent_watched()`, `_band_for()`, `resolve_next_up()`), which takes
+`percent_watched()`, `_band_for()`), which takes
 plain dicts and needs no Kodi runtime, no store, and no network.
 
 The band boundaries here are the behaviour the merge exists to fix: the
@@ -271,130 +271,8 @@ def test_merge_entries_tolerates_none_sources(mystuff):
 
 
 # ---------------------------------------------------------------------------
-# resolve_next_up()
+# _enrich()
 # ---------------------------------------------------------------------------
-
-
-def test_resolve_next_up_returns_the_following_episode(mystuff):
-    item = {'band': mystuff.BAND_NEXT_UP, 'video_id': 'tt1:1:2'}
-    meta = {'videos': [
-        {'id': 'tt1:1:1', 'season': 1, 'episode': 1},
-        {'id': 'tt1:1:2', 'season': 1, 'episode': 2},
-        {'id': 'tt1:1:3', 'season': 1, 'episode': 3},
-    ]}
-
-    assert mystuff.resolve_next_up(item, meta)['id'] == 'tt1:1:3'
-
-
-def test_resolve_next_up_returns_none_after_the_final_episode(mystuff):
-    item = {'band': mystuff.BAND_NEXT_UP, 'video_id': 'tt1:1:2'}
-    meta = {'videos': [
-        {'id': 'tt1:1:1', 'season': 1, 'episode': 1},
-        {'id': 'tt1:1:2', 'season': 1, 'episode': 2},
-    ]}
-
-    assert mystuff.resolve_next_up(item, meta) is None
-
-
-@pytest.mark.parametrize('item', [
-    None,
-    {'band': 'resume', 'video_id': 'tt1:1:2'},
-    {'band': 'next_up', 'video_id': None},
-])
-def test_resolve_next_up_returns_none_outside_the_next_up_band(mystuff, item):
-    meta = {'videos': [{'id': 'tt1:1:2', 'season': 1, 'episode': 2},
-                       {'id': 'tt1:1:3', 'season': 1, 'episode': 3}]}
-
-    assert mystuff.resolve_next_up(item, meta) is None
-
-
-# ---------------------------------------------------------------------------
-# _label_next_episodes() - a finished series is not "next up"
-# ---------------------------------------------------------------------------
-
-
-def test_a_series_with_no_next_episode_moves_to_recently_watched(mystuff):
-    """A finished final season has nothing to play next, so it belongs with
-    the other watched titles rather than sitting under "NEXT UP" with no
-    episode to name."""
-    items = [{
-        'band': mystuff.BAND_NEXT_UP, 'video_id': 'tt1:2:6',
-        'videos': [
-            {'id': 'tt1:2:5', 'season': 2, 'episode': 5},
-            {'id': 'tt1:2:6', 'season': 2, 'episode': 6},
-        ],
-    }]
-
-    mystuff._label_next_episodes(items)
-
-    assert items[0]['band'] == mystuff.BAND_RECENT
-    assert 'next_label' not in items[0]
-
-
-def test_a_series_whose_meta_never_arrived_stays_in_next_up(mystuff):
-    """With no `videos` there is no way to tell "final season" from "not
-    fetched yet", so the band is left alone rather than guessing the title
-    is finished."""
-    items = [{'band': mystuff.BAND_NEXT_UP, 'video_id': 'tt1:1:2', 'videos': []}]
-
-    mystuff._label_next_episodes(items)
-
-    assert items[0]['band'] == mystuff.BAND_NEXT_UP
-
-
-def test_a_series_with_a_next_episode_stays_put_and_is_labelled(mystuff):
-    items = [{
-        'band': mystuff.BAND_NEXT_UP, 'video_id': 'tt1:1:2',
-        'videos': [
-            {'id': 'tt1:1:2', 'season': 1, 'episode': 2},
-            {'id': 'tt1:1:3', 'season': 1, 'episode': 3},
-        ],
-    }]
-
-    mystuff._label_next_episodes(items)
-
-    assert items[0]['band'] == mystuff.BAND_NEXT_UP
-    assert items[0]['next_label'] == 'S01E03'
-
-
-# ---------------------------------------------------------------------------
-# _enrich() - next-up items are fetched even when already enriched
-# ---------------------------------------------------------------------------
-
-
-def test_enrich_fetches_next_up_items_that_already_have_name_and_poster(mystuff):
-    """A series in BOTH the library and the progress cache arrives with a
-    name and poster from the library - but the library entry carries no
-    `videos`, so without a fetch the next episode can never be resolved.
-    That is the common case, not an edge one."""
-    fetched = []
-
-    class _Views:
-        _MAX_ADDON_WORKERS = 4
-
-        @staticmethod
-        def _map_addons(fn, items):
-            return [fn(item) for item in items]
-
-        @staticmethod
-        def _fetch_meta(stype, sid, store=True, on_miss=None):
-            fetched.append(sid)
-            return {'name': 'Sherlock', 'poster': 'p.jpg',
-                    'videos': [{'id': 'tt1:1:2', 'season': 1, 'episode': 2},
-                               {'id': 'tt1:1:3', 'season': 1, 'episode': 3}]}
-
-    import sys
-    sys.modules['lib.ui'].views = _Views
-    mystuff.get_store = lambda: type('S', (), {'data_dir': None})()
-
-    items = [{
-        'type': 'series', 'id': 'tt1', 'band': mystuff.BAND_NEXT_UP,
-        'video_id': 'tt1:1:2', 'name': 'Sherlock', 'poster': 'p.jpg',
-    }]
-    mystuff._enrich(items)
-
-    assert fetched == ['tt1'], 'an already-named next-up item must still be fetched for its videos'
-    assert items[0].get('videos'), 'the videos list must reach the item'
 
 
 def test_enrich_tolerates_a_none_slot_from_a_timed_out_addon_call(mystuff):
@@ -421,16 +299,16 @@ def test_enrich_tolerates_a_none_slot_from_a_timed_out_addon_call(mystuff):
     assert mystuff._enrich(items) == []
 
 
-def test_a_series_with_a_next_episode_gets_a_zero_padded_label(mystuff):
-    """`next_label` must be zero-padded ('S01E09'), not the bare 'S1E9' -
-    see lib.ui.playbackmeta.episode_code()."""
-    items = [{
-        'band': mystuff.BAND_NEXT_UP, 'video_id': 'tt1:1:8',
-        'videos': [{'id': 'tt1:1:8', 'season': 1, 'episode': 8},
-                   {'id': 'tt1:1:9', 'season': 1, 'episode': 9}],
-    }]
-    mystuff._label_next_episodes(items)
-    assert items[0]['next_label'] == 'S01E09'
+def test_enrich_fetches_nothing_for_items_already_named_and_postered(mystuff):
+    """A row the library already named and postered costs no addon call,
+    next-up included: Home never fetches a meta just to name the episode."""
+    def _map_items(fn, items):
+        raise AssertionError('nothing to fetch')
+
+    items = [{'type': 'series', 'id': 'tt1', 'band': mystuff.BAND_NEXT_UP,
+              'name': 'Sherlock', 'poster': 'p.jpg'}]
+
+    assert mystuff._enrich(items, fetch_meta=_map_items, map_items=_map_items) is items
 
 
 # ---------------------------------------------------------------------------

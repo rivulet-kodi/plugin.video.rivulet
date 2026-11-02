@@ -14,7 +14,7 @@ catalog/stream fan-out call site walks in order. Built/run via
 import xbmcgui
 
 from lib.ui.dependencies import get_client, get_store
-from lib.ui.uicommon import CANCELLED, BaseWindow, gated_input, open_window
+from lib.ui.uicommon import CANCELLED, BaseWindow, close_quietly, gated_input, open_window
 
 LIST = 30002
 
@@ -304,14 +304,4 @@ def open_addons():
         log('addonswindow: window failed to open: %r' % (exc,), xbmc.LOGERROR)
         notify(L(30032))
     finally:
-        # A normal return means AddonsWindow already closed itself (its
-        # own onAction calls self.close()) before doModal() returned -
-        # but an exception raised from WITHIN doModal() (onInit(), or a
-        # callback mid-modal) skips that self-close entirely. Close
-        # unconditionally here so no exit path leaves a zombie modal
-        # window behind; closing an already-closed window is a safe no-op.
-        if win is not None:
-            try:
-                win.close()
-            except Exception:
-                pass
+        close_quietly(win)

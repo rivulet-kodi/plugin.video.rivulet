@@ -15,3 +15,12 @@ ruff>=0.6
 # 3.10+), which would silently defeat this project's py38/py39-scoped mypy
 # config (see pyproject.toml [tool.mypy]). Stay on the 1.x line.
 mypy>=1.13.0,<2.0
+# Dead-code gate (`make deadcode`), configured in pyproject.toml [tool.vulture].
+# 2.14 is the last release installable on the Python 3.8 leg (2.15 needs
+# 3.9); CI's gate runs the current release, and both read the same config.
+vulture>=2.14
+# Duplication gate (`make dupes`), duplicate-code only; configured in
+# pyproject.toml [tool.pylint.*]. 3.2 is the last line installable on the
+# Python 3.8 leg (3.3 needs 3.9), so pip resolves 3.2.x there and the
+# current release everywhere else; both read the same config.
+pylint>=3.2

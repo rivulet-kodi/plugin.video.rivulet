@@ -57,7 +57,8 @@ local rivulet-engine instance, mirroring stremio-core's Stream::convert
 iter_front() is the client's readiness probe for torrents: it streams the
 FIRST bytes of the file (offset 0, Range GET) rather than trusting
 aggregate download progress. Verified live against rivulet-engine
-v0.8.5: a torrent's *aggregate* per-file stats (buffered_bytes()) can
+v0.8.5: a torrent's *aggregate* per-file stats (`streamProgress` x
+`streamLen` from `/{infoHash}/{fileIdx}/stats.json`) can
 report megabytes downloaded while the front of the file - where ffmpeg's
 container-header probe reads from - is still completely unavailable
 (pieces download out of order), causing Kodi's player to fail with
@@ -79,31 +80,30 @@ import json
 import re
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
+from lib.stremio import addons as _addons
 from lib.stremio.addons import _request_error_category, safe_url_for_log
 
 #: `requests` costs ~35ms and ~200 transitive modules to import - resolved
 #: lazily on first `ServerClient.__init__()` call via `_ensure_requests()`
 #: rather than at module import time, so importing this module's pure
-#: helpers (normalize_info_hash, normalize_trackers, buffered_bytes,
-#: guess_file_idx, ...) never pays that cost. `_UNSET` marks "not resolved
-#: yet" (distinct from a real `None`, the cached "package not installed"
-#: outcome) so a test directly assigning `requests = None` is honoured
-#: without triggering a redundant re-import.
-_UNSET = object()
+#: helpers (normalize_info_hash, normalize_trackers, guess_file_idx, ...)
+#: never pays that cost. `_UNSET` marks "not resolved yet" (distinct from a
+#: real `None`, the cached "package not installed" outcome) so a test
+#: directly assigning `requests = None` is honoured without triggering a
+#: redundant re-import.
+_UNSET = _addons._UNSET
 requests = _UNSET
 
 
 def _ensure_requests():
-    """Resolve and cache the `requests` module on first call, matching the
-    previous eager `try: import requests / except ImportError: requests =
-    None` at module scope. Safe to call repeatedly; only imports once."""
+    """Bind this module's `requests` global on first call, from the copy
+    `lib.stremio.addons._ensure_requests()` resolves (one import, one
+    "not installed" outcome, for the whole protocol layer). It stays a
+    module global rather than a call per use because every method below
+    tests `requests is None` and catches `requests.RequestException`."""
     global requests
     if requests is _UNSET:
-        try:
-            import requests as _requests
-        except ImportError:  # pragma: no cover - exercised only without the dependency
-            _requests = None
-        requests = _requests
+        requests = _addons._ensure_requests()
     return requests
 
 
@@ -582,31 +582,6 @@ class ServerClient:
         except ValueError as exc:
             raise ServerError('%s %s returned invalid JSON: %s' % (method, _redact_error_url(self.base_url, url), exc))
 
-    def file_stats(self, info_hash, file_idx):
-        """GET `{base}/{infoHash}/{fileIdx}/stats.json` - per-file buffer stats.
-
-        Per docs/swagger.yaml `/{infoHash}/{fileIdx}/stats.json` and
-        writeStats (internal/api/api.go:818-825), returns `types.Stats`
-        with the per-file extras (`streamProgress`, `streamLen`,
-        `streamName`) populated in addition to the torrent-level fields
-        (`downloadSpeed`, `peers`, ...). Requesting per-file stats also
-        triggers ensureDownloading(idx) server-side, prioritizing this
-        file's pieces. Uses a short 10s timeout since this is polled
-        repeatedly during pre-buffer.
-        """
-        if requests is None:
-            raise ServerError('the "requests" package is required for ServerClient')
-        url = '%s/%s/%s/stats.json' % (self.base_url, str(info_hash).lower(), _clean_file_idx(file_idx))
-        try:
-            resp = self.session.get(url, timeout=10)
-            resp.raise_for_status()
-        except requests.RequestException as exc:
-            raise ServerError('GET %s failed: %s' % (_redact_error_url(self.base_url, url), _request_error_category(exc)))
-        try:
-            return resp.json()
-        except ValueError as exc:
-            raise ServerError('GET %s returned invalid JSON: %s' % (_redact_error_url(self.base_url, url), exc))
-
     def iter_front(self, info_hash, file_idx, want_bytes, chunk_size=16384, timeout=60, start_byte=0,
                    trackers=None):
         """Stream the FRONT of a torrent file from `start_byte`, yielding
@@ -936,30 +911,6 @@ def magnet_stream(url):
     if not info_hash or not normalize_info_hash(info_hash):
         return None
     return {'infoHash': info_hash, 'announce': query.get('tr', [])}
-
-
-def buffered_bytes(stats):
-    """How many bytes of the current stream file are buffered so far.
-
-    `stats` is a `types.Stats` dict as returned by `file_stats()`:
-    `streamProgress` (float, 0-1, BytesCompleted/Length per
-    internal/engine/engine.go:1124-1278) times `streamLen` (int, file
-    size in bytes, swagger.yaml types.Stats.streamLen). Tolerates a
-    missing/None/non-numeric `stats`, or missing/None fields, returning
-    0 rather than raising - this feeds a UI progress poll that must
-    never crash playback over a transient/incomplete stats payload.
-    """
-    if not isinstance(stats, dict):
-        return 0
-    progress = stats.get('streamProgress')
-    length = stats.get('streamLen')
-    if progress is None or length is None:
-        return 0
-    try:
-        value = int(round(float(progress) * float(length)))
-    except (TypeError, ValueError):
-        return 0
-    return max(0, value)
 
 
 def guess_file_idx(stats):

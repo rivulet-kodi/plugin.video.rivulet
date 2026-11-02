@@ -127,17 +127,6 @@ def _set_label(window, control_id, text):
         log('dialogs: setLabel(%d) failed: %r' % (control_id, exc), xbmc.LOGWARNING)
 
 
-def _set_progress(window, control_id, percent):
-    """`getControl(control_id).setPercent(percent)`, tolerating a missing
-    `type="progress"` control."""
-    ctrl = _get_control(window, control_id)
-    if ctrl is None:
-        return
-    try:
-        ctrl.setPercent(percent)
-    except Exception as exc:  # noqa: BLE001 - a broken/partial skin must never crash playback
-        log('dialogs: setPercent(%d) failed: %r' % (control_id, exc), xbmc.LOGWARNING)
-
 class _Panel:
     """Resolved controls for one dialog window, plus the last value
     written to each.

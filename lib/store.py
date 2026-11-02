@@ -1627,14 +1627,6 @@ class Store:
         _atomic_write(self._search_history_path, history[:MAX_SEARCH_HISTORY])
         self._invalidate_cache(self._search_history_path)
 
-    def clear_search_history(self):
-        """Delete all persisted search history."""
-        try:
-            os.remove(self._search_history_path)
-        except OSError:
-            pass
-        self._invalidate_cache(self._search_history_path)
-
     # -- now playing / resume / progress (LibrarySync) ----------------------
 
     def get_now_playing(self):

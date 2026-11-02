@@ -95,6 +95,14 @@ jobs:
       - name: Type check (mypy)
         run: mypy
 
+      - name: Dead code (vulture)
+        # Config in pyproject.toml [tool.vulture]; whitelist in vulture_whitelist.py.
+        run: vulture
+
+      - name: Duplicate code (pylint duplicate-code)
+        # Config in pyproject.toml [tool.pylint.*].
+        run: pylint lib default.py service.py
+
   audit:
     runs-on: ubuntu-latest
     steps:

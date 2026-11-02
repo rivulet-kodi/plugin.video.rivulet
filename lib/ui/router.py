@@ -6,7 +6,7 @@
 Kodi invokes default.py with argv = [base_url, handle, "?querystring"].
 Everything here is UI glue only; the actual list-building/playback logic
 lives in views.py / player.py. Pure URL-building/stream-token logic
-(url_for/encode_stream/decode_stream) needs no dispatch state and lives in
+(url_for/decode_stream) needs no dispatch state and lives in
 lib.ui.urlutil instead; this module keeps only the mutable
 ADDON_HANDLE/BASE_URL dispatch state and the querystring parser.
 """

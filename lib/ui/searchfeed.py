@@ -46,11 +46,11 @@ worse, because the match tier always outranks the boost.
 import json
 import math
 import os
-import tempfile
 import time
 
 import xbmc
 
+from lib.stremio import jsonfile
 from lib.ui.compat import log
 
 #: Cinemeta's catalog host - a different host from the v3 API that
@@ -83,29 +83,16 @@ def _path(data_dir):
 
 def _atomic_write(path, data):
     """Write `data` as JSON via a temp file in the same directory, then
-    `os.replace()`. Mirrors `lib.ui.metacache._atomic_write()`: a torn
-    write here would poison every later search until the TTL expired."""
-    directory = os.path.dirname(path) or '.'
-    fd, tmp_path = tempfile.mkstemp(prefix='.tmp-', dir=directory)
-    try:
-        with os.fdopen(fd, 'w') as handle:
-            json.dump(data, handle, separators=(',', ':'))
-        os.replace(tmp_path, path)
-    except OSError:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
+    `os.replace()`: a torn write here would poison every later search
+    until the TTL expired. Raises OSError on failure; `load_records()`
+    logs it and keeps the fetched records."""
+    jsonfile.write_json(path, data, '.tmp-')
 
 
 def _read_cached(data_dir):
     """The cached `{'ts': ..., 'records': [...]}`, or None when missing,
     unreadable, malformed or expired."""
-    try:
-        with open(_path(data_dir)) as handle:
-            cached = json.load(handle)
-    except (OSError, ValueError):
-        return None
+    cached = jsonfile.read_json(_path(data_dir))
     if not isinstance(cached, dict):
         return None
     records = cached.get('records')

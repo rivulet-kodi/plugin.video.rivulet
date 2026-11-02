@@ -10,8 +10,8 @@ This module holds ONLY the small, pure, Kodi-independent pieces `lib.store`
 and `lib.service_runner` need to treat it as an opt-in, protected, built-in
 Stremio addon:
 
-  - the manifest/descriptor shape the store's `addons.json` should carry
-    while the bridge is enabled and Stream4Me is installed;
+  - the `MANIFEST` the store's `addons.json` entry should carry while the
+    bridge is enabled and Stream4Me is installed;
   - `RunScript()` command construction for launching the bridge script;
   - `BridgeSupervisor`, a tiny state machine deciding whether to (re)launch
     the bridge and whether the store descriptor should exist this tick.
@@ -257,28 +257,6 @@ def run_script_command(addon_path, port):
     entirely.
     """
     return "RunScript(%s,%s)" % (bridge_script_path(addon_path), port)
-
-
-def descriptor_for(port):
-    """The addon-store descriptor `Store.set_builtin_addon()` should hold
-    while the bridge is enabled and Stream4Me is installed."""
-    return {
-        "transportUrl": manifest_url(port),
-        "manifest": MANIFEST,
-        "flags": {"official": False, "protected": True, "builtin": BUILTIN_ID},
-    }
-
-
-def parse_channels_setting(raw):
-    """Parse the `s4me_channels` comma-list setting into a tuple of
-    stripped, non-empty channel ids, or `None` when blank.
-
-    `None` is the sentinel the bridge reads as "use every one of
-    Stream4Me's own active channels" rather than a fixed allow-list.
-    """
-    if not raw or not raw.strip():
-        return None
-    return tuple(c.strip() for c in raw.split(",") if c.strip())
 
 
 class BridgeSupervisor:
