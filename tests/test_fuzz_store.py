@@ -25,7 +25,11 @@ from tests.fuzz_strategies import (
 _RECOVERY_SUFFIXES = {store.HOME_LAYOUT_FILENAME: '.bak'}
 
 #: Nesting deep enough to exhaust the interpreter's recursion limit inside
-#: `json.loads`, which raises `RecursionError`, not `ValueError`.
+#: `json.loads`, which raises `RecursionError`, not `ValueError`. Never fed
+#: through Hypothesis, which raises the recursion limit around each example:
+#: on CPython 3.8 a `RecursionError` there could abort the interpreter
+#: (`test (3.8)` core-dumped in CI). `test_deep_nesting_is_corrupt` runs
+#: the properties on it directly.
 _DEEP = b'[' * 200_000 + b']' * 200_000
 
 
@@ -44,7 +48,6 @@ _progress_files = st.dictionaries(
 file_contents = st.one_of(
     st.binary(max_size=64),
     st.just(b''),
-    st.just(_DEEP),
     st.just(b'{"offset_ms": 1e400, "version": 1e999}'),
     json_values.map(_dumps),
     json_values.map(_dumps).flatmap(lambda blob: st.integers(0, len(blob)).map(lambda n: blob[:n])),
@@ -160,7 +163,6 @@ FILES = {
 
 @pytest.mark.parametrize('filename', sorted(FILES))
 @given(content=file_contents)
-@example(content=_DEEP)
 @example(content=b'\xff\xfe\x00garbage')
 @example(content=b'{"version": 1e999, "offset_ms": "7"}')
 @example(content=b'[{"_id": []}, {"_id": {}}, 5]')
@@ -180,7 +182,6 @@ def test_getters_serve_defaults_for_any_file_content_and_keep_the_bytes(filename
 
 
 @given(content=file_contents)
-@example(content=_DEEP)
 def test_writers_over_a_corrupt_progress_file_keep_it_as_dot_corrupt(content):
     with tempfile.TemporaryDirectory() as directory:
         path = _setup(directory, store.PROGRESS_FILENAME, content)
@@ -197,7 +198,6 @@ def test_writers_over_a_corrupt_progress_file_keep_it_as_dot_corrupt(content):
 
 
 @given(content=file_contents)
-@example(content=_DEEP)
 def test_writers_over_a_corrupt_addons_file_keep_it_as_dot_corrupt(content):
     with tempfile.TemporaryDirectory() as directory:
         path = _setup(directory, store.ADDONS_FILENAME, content)
@@ -210,7 +210,6 @@ def test_writers_over_a_corrupt_addons_file_keep_it_as_dot_corrupt(content):
 
 
 @given(content=file_contents)
-@example(content=_DEEP)
 def test_incremental_library_merge_never_overwrites_a_file_it_cannot_parse(content):
     with tempfile.TemporaryDirectory() as directory:
         path = _setup(directory, store.LIBRARY_FILENAME, content)
@@ -261,3 +260,15 @@ def test_an_unreadable_file_is_never_replaced(filename):
                 s.update_addons(lambda current: current + [{'transportUrl': 'x'}])
         assert os.path.isdir(path)
         assert sorted(os.listdir(directory)) == [filename]
+
+
+@pytest.mark.parametrize('check', [
+    lambda: [test_getters_serve_defaults_for_any_file_content_and_keep_the_bytes.hypothesis.inner_test(
+        filename, _DEEP) for filename in sorted(FILES)],
+    lambda: test_writers_over_a_corrupt_progress_file_keep_it_as_dot_corrupt.hypothesis.inner_test(_DEEP),
+    lambda: test_writers_over_a_corrupt_addons_file_keep_it_as_dot_corrupt.hypothesis.inner_test(_DEEP),
+    lambda: test_incremental_library_merge_never_overwrites_a_file_it_cannot_parse.hypothesis.inner_test(_DEEP),
+    lambda: test_jsonfile_read_json_is_none_or_json_for_any_content.hypothesis.inner_test(_DEEP),
+], ids=['getters', 'progress_writer', 'addons_writer', 'library_merge', 'jsonfile'])
+def test_deep_nesting_is_corrupt(check):
+    check()
