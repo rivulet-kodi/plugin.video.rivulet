@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.rivulet" name="Rivulet" version="0.36.0" provider-name="M0RF30">
+<addon id="plugin.video.rivulet" name="Rivulet" version="0.37.0" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" version="2.22.0"/>
@@ -12,7 +12,11 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse and search catalogs by type, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote rivulet-engine streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.36.0:
+    <news>v0.37.0:
+- New: movies you have watched, here or in another Stremio app, get a check mark on their poster in Home and the coverflow, and the poster menu can mark a movie as watched or unwatched.
+- New: movies still showing in cinemas, with no digital release yet, carry an IN CINEMA tag, as in the Stremio mobile app.
+- Change: a movie or episode now counts as watched at 70%, the same point the Stremio apps use, so stopping during the credits still marks it watched.
+v0.36.0:
 - New: episodes you watched in other Stremio apps get a watched tick on the series page as soon as it opens, and "Mark as watched" on a series ticks every episode in a way the Stremio apps understand too.
 - Fix: changing your add-ons in Rivulet while logged in no longer deletes add-ons you installed from another Stremio app or the website. Rivulet now fetches your account's add-on list before saving it.
 - Fix: a source add-on that times out or fails is retried twice before its results are given up on, so slow add-ons are less often missing from the source list and search.
