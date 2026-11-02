@@ -9,7 +9,10 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # ubuntu-latest moved to 26.04, for which actions/setup-python ships no
+    # 3.8 build ("version '3.8' ... was not found for Ubuntu 26.04"). The 3.8
+    # leg holds the Kodi 19 floor, so it stays on the last image that has it.
+    runs-on: ${{ matrix.python-version == '3.8' && 'ubuntu-24.04' || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -42,7 +45,8 @@ jobs:
           path: coverage.xml
 
   compat-py38-requests:
-    runs-on: ubuntu-latest
+    # Pinned for the same reason as the 3.8 `test` leg above.
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v7
