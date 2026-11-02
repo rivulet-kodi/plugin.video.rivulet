@@ -175,6 +175,29 @@ def test_titles_part_way_through_on_the_account_are_continued(home):
     assert home.home._library_continue_metas(None) == []
 
 
+def test_series_with_a_next_episode_pointer_on_the_account_are_next_up(home):
+    """#99: stremio-core keeps a series on Continue while `timeOffset` > 0.
+    Finishing an episode in a Stremio app leaves `timeOffset` 1 on the next
+    episode; one finished here keeps its offset at the end."""
+    def series(sid, **state):
+        return _entry(_id=sid, type='series', state=dict({'duration': 3600000}, **state))
+
+    metas = home.home._library_continue_metas([
+        series('tt1', timeOffset=1, video_id='tt1:1:3'),              # advanced by a Stremio app
+        series('tt2', timeOffset=3590000, video_id='tt2:1:2'),        # finished here
+        series('tt3', timeOffset=1, video_id='tt3:2:1', duration=0),  # pointer with no duration
+        series('tt4', timeOffset=0, video_id='tt4:1:8'),              # nothing left to play
+        series('tt5', timeOffset=1),                                  # no episode to point at
+        series('tt6', timeOffset=600000, video_id='tt6:1:1'),         # mid-episode
+    ])
+    assert [(meta['id'], meta['band'], meta['video_id']) for meta in metas] == [
+        ('tt1', 'next_up', 'tt1:1:3'),
+        ('tt2', 'next_up', 'tt2:1:2'),
+        ('tt3', 'next_up', 'tt3:2:1'),
+        ('tt6', 'resume', 'tt6:1:1'),
+    ]
+
+
 def test_a_continue_row_without_a_video_id_resumes_the_title(home):
     entry = _entry()
     del entry['state']['video_id']

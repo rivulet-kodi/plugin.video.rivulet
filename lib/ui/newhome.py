@@ -575,6 +575,12 @@ def _state_percent(entry):
     return (float(offset) / float(duration)) * 100.0
 
 
+def _positive_offset(state):
+    """Whether a libraryItem `state` holds a `timeOffset` above 0."""
+    offset = state.get('timeOffset')
+    return isinstance(offset, (int, float)) and not isinstance(offset, bool) and offset > 0
+
+
 def _library_continue_metas(entries):
     """In-progress titles recorded on the account.
 
@@ -584,8 +590,17 @@ def _library_continue_metas(entries):
     `temp` (`library_remove_payload`); those stay off Continue. An
     implicit watch record is both flags true, which is how Stremio
     stores "played, not added", and those do belong here.
+
+    A series outside the resume window is next-up whenever its
+    `timeOffset` is above 0, which is stremio-core's own rule
+    (`LibraryItem::is_in_continue_watching`). Finishing an episode in a
+    Stremio app points `video_id` at the next one with `timeOffset` 1
+    (`advance_to_video`), and a finish pushed from here keeps the
+    finished episode's offset; both read as 0% or 95%+, and were dropped,
+    so a series in progress elsewhere never reached Continue (#99). A
+    series with nothing left to play has `timeOffset` 0 and stays off.
     """
-    from lib.ui.mystuff import BAND_RESUME, RESUME_MAX_PERCENT, RESUME_MIN_PERCENT
+    from lib.ui.mystuff import BAND_NEXT_UP, BAND_RESUME, RESUME_MAX_PERCENT, RESUME_MIN_PERCENT
 
     metas = []
     for entry in entries or []:
@@ -593,21 +608,25 @@ def _library_continue_metas(entries):
             continue
         if entry.get('removed') and not entry.get('temp'):
             continue
-        percent = _state_percent(entry)
-        if percent is None or percent < RESUME_MIN_PERCENT or percent >= RESUME_MAX_PERCENT:
-            continue
         if not entry.get('_id'):
             continue
         if not (entry.get('name') or entry.get('poster')):
             continue
         state = entry.get('state') if isinstance(entry.get('state'), dict) else {}
+        percent = _state_percent(entry)
+        if percent is not None and RESUME_MIN_PERCENT <= percent < RESUME_MAX_PERCENT:
+            band = BAND_RESUME
+        elif entry.get('type') == 'series' and _positive_offset(state) and state.get('video_id'):
+            band = BAND_NEXT_UP
+        else:
+            continue
         metas.append({
             'id': entry.get('_id'),
             'name': entry.get('name'),
             'type': entry.get('type'),
             'poster': entry.get('poster'),
             'background': entry.get('background'),
-            'band': BAND_RESUME,
+            'band': band,
             'video_id': state.get('video_id') or None,
             'position_ms': state.get('timeOffset'),
             'duration_ms': state.get('duration'),
