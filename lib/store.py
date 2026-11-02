@@ -109,6 +109,8 @@ HOME_LAYOUT_FILENAME = "home_layout.json"
 PROGRESS_DISMISSED_FILENAME = "progress_dismissed.json"
 #: Slim account ``libraryItem`` records. See :meth:`Store.merge_library_cache`.
 LIBRARY_FILENAME = "library.json"
+#: New episodes of library series. See :meth:`Store.set_last_videos`.
+LAST_VIDEOS_FILENAME = "last_videos.json"
 
 #: Most-recent-first cap for the persisted search history list.
 MAX_SEARCH_HISTORY = 15
@@ -1078,6 +1080,7 @@ class Store:
         self._dismissed_path = os.path.join(self.data_dir, PROGRESS_DISMISSED_FILENAME)
         self._last_version_path = os.path.join(self.data_dir, LAST_VERSION_FILENAME)
         self._library_path = os.path.join(self.data_dir, LIBRARY_FILENAME)
+        self._last_videos_path = os.path.join(self.data_dir, LAST_VIDEOS_FILENAME)
         #: Per-instance memoisation for `_cached_read`: `path -> ((mtime_ns,
         #: size), parsed_value)`. A single process/screen-render often
         #: calls e.g. `get_addons()` many times; a fresh eMMC/SD `open()`
@@ -1085,8 +1088,9 @@ class Store:
         #: NEVER consulted by `update_addons`'s compare-and-swap, which
         #: must always observe the current on-disk bytes -- see
         #: `_cached_read`'s docstring. Its key set is closed on purpose --
-        #: exactly eight fixed paths (addons, auth, search_history,
-        #: now_playing, resume_offset, last_version, progress, library), which is
+        #: exactly nine fixed paths (addons, auth, search_history,
+        #: now_playing, resume_offset, last_version, progress, library,
+        #: last_videos), which is
         #: why it needs no size cap; `home_layout.json` is deliberately not
         #: one of them. Adding a path is a decision to revisit that bound.
         self._read_cache = {}
@@ -2017,3 +2021,27 @@ class Store:
         except OSError:
             pass
         self._invalidate_cache(self._library_path)
+
+    # -- new episodes of library series ------------------------------------
+
+    def get_last_videos(self):
+        """``{series id: [[video id, released], ...]}`` from
+        ``last_videos.json`` (`lib.stremio.lastvideos.fetch` output), or
+        ``{}`` when it is missing, unreadable or corrupt. Shared like
+        `get_library_cache`'s list: read it, never mutate it."""
+        videos = self._cached_read(self._last_videos_path, None)
+        return videos if isinstance(videos, dict) else {}
+
+    def set_last_videos(self, videos):
+        """Replace ``last_videos.json``. Only the service's pull writes it,
+        wholesale, so no read-modify-write is needed."""
+        _atomic_write(self._last_videos_path, videos, compact=True)
+        self._invalidate_cache(self._last_videos_path)
+
+    def clear_last_videos(self):
+        """Delete ``last_videos.json`` with the library cache it belongs to."""
+        try:
+            os.remove(self._last_videos_path)
+        except OSError:
+            pass
+        self._invalidate_cache(self._last_videos_path)

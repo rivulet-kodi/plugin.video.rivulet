@@ -79,6 +79,9 @@ LOCAL_PROGRESS_WRITE_INTERVAL_SECONDS = 15
 #: for just the records that changed, so this mostly bounds how long a
 #: title watched in another Stremio client takes to show up here.
 LIBRARY_PULL_INTERVAL_SECONDS = 15 * 60
+#: How often the library pull also asks for new episodes of library series
+#: (stremio-core ``REQUEST_LAST_VIDEOS_EVERY``).
+LAST_VIDEOS_INTERVAL_SECONDS = 6 * 60 * 60
 #: Ids per incremental `datastoreGet` -- keeps one request body bounded
 #: when many records changed between two pulls.
 LIBRARY_PULL_BATCH = 100
@@ -1058,6 +1061,13 @@ class ProgressPuller:
     replaces it, an incremental one updates the changed records in place;
     signed out, sync off or another account, it is deleted (`_stand_down`).
 
+    Every `LAST_VIDEOS_INTERVAL_SECONDS` it also asks the installed
+    addons' ``lastVideosIds`` catalogs for the latest episodes of the
+    library's series and keeps them in ``last_videos.json``
+    (`lib.stremio.lastvideos`). Home's Continue lists a caught-up series
+    from it once an episode newer than its last watch airs, as the
+    Stremio apps do (#99).
+
     The pull itself runs on a daemon worker thread (`spawn_fn`), one at
     a time: it is several synchronous API calls with a 15s timeout each,
     and running them inline would stall `Supervisor.run()`'s health
@@ -1067,7 +1077,7 @@ class ProgressPuller:
     """
 
     def __init__(self, store, api, log_fn, levels, sync_enabled_fn, is_playing_fn,
-                 abort_fn, clock=time.monotonic, spawn_fn=None):
+                 abort_fn, clock=time.monotonic, spawn_fn=None, client_factory=None):
         self._store = store
         self._api = api
         self._log = log_fn
@@ -1081,6 +1091,8 @@ class ProgressPuller:
         self._auth_key = None
         self._mtimes = None
         self._next_at = 0.0
+        self._client_factory = client_factory or _addon_client
+        self._videos_next_at = 0.0
         #: Whether `library.json` may hold records. True at start: the file
         #: can be left from an earlier session. See `_stand_down`.
         self._cache_may_exist = True
@@ -1105,6 +1117,7 @@ class ProgressPuller:
                 self._auth_key = auth_key
                 self._mtimes = None
                 self._next_at = 0.0
+                self._videos_next_at = 0.0
             if now < self._next_at:
                 return
             if self._is_playing():
@@ -1123,6 +1136,7 @@ class ProgressPuller:
         self._auth_key = None
         if self._cache_may_exist:
             self._store.clear_library_cache()
+            self._store.clear_last_videos()
             self._cache_may_exist = False
 
     def _run(self, auth_key, known_mtimes):
@@ -1163,6 +1177,41 @@ class ProgressPuller:
         # pull a full one, which rewrites the cache wholesale.
         self._mtimes = mtimes if cached else None
         self._log(self._levels.info, "library pull: %d records, %d progress entries updated" % (len(items), written))
+        if cached and self._clock() >= self._videos_next_at and not self._abort():
+            self._pull_last_videos()
+
+    def _pull_last_videos(self):
+        """Refresh ``last_videos.json`` for the library's series. A run
+        where every catalog failed keeps the previous file and retries on
+        the next library pull rather than in six hours."""
+        from lib.stremio import lastvideos
+
+        id_types = lastvideos.pull_ids(self._store.get_library_cache())
+        if not id_types:
+            self._store.clear_last_videos()
+            self._videos_next_at = self._clock() + LAST_VIDEOS_INTERVAL_SECONDS
+            return
+        failures = []
+
+        def note(message):
+            failures.append(message)
+            self._log(self._levels.warning, message)
+
+        plans = lastvideos.plan_requests(self._store.get_addons(), id_types)
+        videos = lastvideos.fetch(self._client_factory(), self._store.get_addons(), id_types, log=note)
+        if self._abort():
+            return
+        if plans and len(failures) == len(plans):
+            return
+        self._store.set_last_videos(videos)
+        self._videos_next_at = self._clock() + LAST_VIDEOS_INTERVAL_SECONDS
+        self._log(self._levels.info, "last videos: %d series checked, %d answered" % (len(id_types), len(videos)))
+
+
+def _addon_client():
+    from lib.stremio.addons import AddonClient
+
+    return AddonClient()
 
 
 def _spawn_daemon(target, name="rivulet-library-pull"):

@@ -657,8 +657,10 @@ def episode_ticked(percent):
 #: slim one is under a hundred bytes, which is what lets the service
 #: rewrite the file on every pull. A new reader of the cache that needs
 #: another field adds it here.
-_SLIM_ITEM_KEYS = ('_id', 'type', 'removed', '_mtime')
-_SLIM_STATE_KEYS = ('timesWatched',)
+#: `temp`, `behaviorHints` and `state.noNotif`/`lastWatched` are what
+#: `lib.stremio.lastvideos.should_pull`/`new_videos` read.
+_SLIM_ITEM_KEYS = ('_id', 'type', 'removed', 'temp', 'behaviorHints', '_mtime')
+_SLIM_STATE_KEYS = ('timesWatched', 'noNotif', 'lastWatched')
 
 
 def slim_library_item(item):

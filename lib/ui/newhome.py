@@ -31,6 +31,7 @@ and `lib.ui.detailwindow.open_detail`.
 import contextlib
 import gc
 import json
+import math
 import queue
 import threading
 import time
@@ -555,24 +556,12 @@ def _number_rows(window):
         label.setLabel('%d / %d' % (index, total) if index and total > 1 else '')
 
 
-def _state_percent(entry):
-    """Percent of a libraryItem's own `state`, or None when the record
-    has no usable duration. Same fields `lib.library.merge_playback()`
-    writes (`timeOffset`, `duration`); this only reads them."""
-    if not isinstance(entry, dict):
+def _finite_number(value):
+    """`value` as a number when it is a finite int/float, else None.
+    `json` accepts `Infinity`, and a Continue card `int()`s these."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    state = entry.get('state')
-    if not isinstance(state, dict):
-        return None
-    duration = state.get('duration') or 0
-    offset = state.get('timeOffset') or 0
-    if isinstance(duration, bool) or not isinstance(duration, (int, float)):
-        return None
-    if isinstance(offset, bool) or not isinstance(offset, (int, float)):
-        return None
-    if duration <= 0:
-        return None
-    return (float(offset) / float(duration)) * 100.0
+    return value if math.isfinite(value) else None
 
 
 def _library_continue_metas(entries):
@@ -584,8 +573,20 @@ def _library_continue_metas(entries):
     `temp` (`library_remove_payload`); those stay off Continue. An
     implicit watch record is both flags true, which is how Stremio
     stores "played, not added", and those do belong here.
+
+    A series whose `timeOffset` is above 0 but below the resume window is
+    next-up on its `video_id`: finishing an episode in a Stremio app
+    points `video_id` at the next one with `timeOffset` 1
+    (stremio-core `advance_to_video`), which read as 0% and was dropped,
+    so a series watched there never reached Continue (#99). A series
+    with nothing left to play has `timeOffset` 0. A record at 95%+ still
+    names the episode just finished, possibly a finale, so it stays off;
+    this device's own progress already lists it as next-up.
+
+    Resume records come first, then next-up, each most recently watched
+    first, so the shelf cap never drops a resume for a next-up.
     """
-    from lib.ui.mystuff import BAND_RESUME, RESUME_MAX_PERCENT, RESUME_MIN_PERCENT
+    from lib.ui.mystuff import BAND_NEXT_UP, BAND_RESUME, RESUME_MAX_PERCENT, RESUME_MIN_PERCENT
 
     metas = []
     for entry in entries or []:
@@ -593,26 +594,37 @@ def _library_continue_metas(entries):
             continue
         if entry.get('removed') and not entry.get('temp'):
             continue
-        percent = _state_percent(entry)
-        if percent is None or percent < RESUME_MIN_PERCENT or percent >= RESUME_MAX_PERCENT:
-            continue
         if not entry.get('_id'):
             continue
         if not (entry.get('name') or entry.get('poster')):
             continue
         state = entry.get('state') if isinstance(entry.get('state'), dict) else {}
+        offset = _finite_number(state.get('timeOffset'))
+        duration = _finite_number(state.get('duration') or 0)
+        if offset is None or duration is None or offset <= 0:
+            continue
+        percent = (float(offset) / float(duration)) * 100.0 if duration > 0 else None
+        if percent is not None and RESUME_MIN_PERCENT <= percent < RESUME_MAX_PERCENT:
+            band = BAND_RESUME
+        elif (entry.get('type') == 'series' and state.get('video_id')
+              and (percent is None or percent < RESUME_MIN_PERCENT)):
+            band = BAND_NEXT_UP
+        else:
+            continue
         metas.append({
             'id': entry.get('_id'),
             'name': entry.get('name'),
             'type': entry.get('type'),
             'poster': entry.get('poster'),
             'background': entry.get('background'),
-            'band': BAND_RESUME,
+            'band': band,
             'video_id': state.get('video_id') or None,
-            'position_ms': state.get('timeOffset'),
-            'duration_ms': state.get('duration'),
+            'position_ms': offset,
+            'duration_ms': duration,
             'watched_at': _iso_seconds(state.get('lastWatched') or entry.get('_mtime')),
         })
+    metas.sort(key=lambda meta: meta['watched_at'] or '', reverse=True)
+    metas.sort(key=lambda meta: meta['band'] != BAND_RESUME)
     return metas
 
 
@@ -773,7 +785,7 @@ def _played_metas(store, library_entries, variant='', suppressed=None, deadline=
         if len(posters) >= SHELF_CAP:
             return posters
     dismissed = _continue_dismissals(store)
-    for meta in _library_continue_metas(library_entries):
+    for meta in _library_continue_metas(library_entries) + _new_episode_metas(store, library_entries):
         if meta.get('id') in suppressed or not matches_continue(meta, variant):
             continue
         # Removed from Continue and not watched since: the account still
@@ -789,6 +801,48 @@ def _played_metas(store, library_entries, variant='', suppressed=None, deadline=
         if len(posters) >= SHELF_CAP:
             break
     return posters
+
+
+def _new_episode_metas(store, library_entries, now=None):
+    """Caught-up library series with an episode out since their last
+    watch, as next-up on the oldest such episode, newest release first.
+
+    The Stremio apps list these on Continue through their notifications
+    (#99); the service keeps the latest episodes in ``last_videos.json``
+    (`lib.service_runner.ProgressPuller`), so this reads a file and makes
+    no request. `lib.stremio.lastvideos.new_videos` is the rule.
+    """
+    from lib.stremio.lastvideos import new_videos
+    from lib.ui.mystuff import BAND_NEXT_UP
+
+    try:
+        latest = store.get_last_videos()
+    except Exception:
+        return []
+    if not latest:
+        return []
+    now = now or time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    metas = []
+    for entry in library_entries or []:
+        if not isinstance(entry, dict) or not (entry.get('name') or entry.get('poster')):
+            continue
+        fresh = new_videos(entry, latest.get(entry.get('_id')), now)
+        if not fresh:
+            continue
+        metas.append({
+            'id': entry['_id'],
+            'name': entry.get('name'),
+            'type': entry.get('type'),
+            'poster': entry.get('poster'),
+            'background': entry.get('background'),
+            'band': BAND_NEXT_UP,
+            'video_id': fresh[0][0],
+            'position_ms': None,
+            'duration_ms': None,
+            'watched_at': fresh[-1][1],
+        })
+    metas.sort(key=lambda meta: meta['watched_at'], reverse=True)
+    return metas
 
 
 def _iso_seconds(value):
