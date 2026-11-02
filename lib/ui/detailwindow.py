@@ -38,6 +38,7 @@ import time
 
 import xbmcgui
 
+from lib.library import WATCHED_THRESHOLD_RATIO
 from lib.stremio.addons import _base_type
 from lib.stremio.watchedbitfield import sorted_video_ids, watched_video_ids
 from lib.ui.playbackmeta import episode_code as _pm_episode_code
@@ -60,7 +61,10 @@ SEASON_BAR = 30007
 OPTIONS = 30009
 TRAILER = 30012
 LOGO = 30023
-_WATCHED_TICK_PERCENT = 90
+#: The tick on an episode row from local progress. Derived from the
+#: threshold that flags the title on the account (`library`), so a row
+#: ticks at the same point the account would count it as watched (#85).
+_WATCHED_TICK_PERCENT = round(WATCHED_THRESHOLD_RATIO * 100)
 
 #: Right-aligned "N EPISODES" readout for the season the episode list
 #: (LIST) is currently showing - a plain window label DetailWindow sets

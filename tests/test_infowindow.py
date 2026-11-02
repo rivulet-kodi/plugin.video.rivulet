@@ -121,6 +121,9 @@ def test_item_properties_full_meta_maps_every_field(load_infowindow):
         'plot': 'A plot.',
         'year': '2019',
         'runtime': '132 min',
+        'cinema': '',
+        'in_cinema': '',
+        'watched': '',
         'meta_line': '2019 · IMDb 8.4 · 132 min · Action, Sci-Fi',
     }
 
@@ -290,7 +293,7 @@ def test_item_properties_missing_fields_are_empty_strings(load_infowindow):
     ctx = load_infowindow()
     assert ctx.infowindow._item_properties({}) == {
         'thumbnail': '', 'fanart': '', 'genre': '', 'rating': '', 'plot': '', 'year': '',
-        'runtime': '', 'meta_line': '',
+        'runtime': '', 'cinema': '', 'in_cinema': '', 'watched': '', 'meta_line': '',
     }
 
 
@@ -962,6 +965,7 @@ def test_enrich_worker_merges_into_metas_and_queues_props(load_infowindow, monke
         0: {
             'genre': 'Drama, Thriller', 'rating': '7.9', 'plot': 'A full plot.',
             'year': '2026', 'meta_line': '2026 · IMDb 7.9 · Drama, Thriller',
+            'cinema': '', 'in_cinema': '',
         },
     }
 
@@ -1865,3 +1869,125 @@ def test_start_with_more_pages_spawns_the_paging_worker(load_infowindow, monkeyp
     win.start([_make_meta('tt1', 'One')], more_pages=pages)
 
     assert spawned == [pages]
+
+
+# ---------------------------------------------------------------------------
+# IN CINEMA tag and watched check on the coverflow (issues #84, #85)
+# ---------------------------------------------------------------------------
+
+
+def _recent_release(days=10):
+    import datetime
+
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    return (today - datetime.timedelta(days=days)).isoformat() + 'T00:00:00.000Z'
+
+
+def test_item_properties_tags_a_movie_still_in_cinema(load_infowindow):
+    ctx = load_infowindow()
+    props = ctx.infowindow._item_properties(
+        _make_meta('tt1', 'Dune', released=_recent_release(), releaseInfo='2026'),
+    )
+    assert props['in_cinema'] == '1'
+    assert props['cinema'] == 'STR30548'
+    assert props['meta_line'] == '2026 · STR30548'
+
+
+def test_item_properties_does_not_tag_once_a_home_release_exists(load_infowindow):
+    ctx = load_infowindow()
+    props = ctx.infowindow._item_properties(
+        _make_meta('tt1', 'Dune', released=_recent_release(), dvdRelease=_recent_release(2), releaseInfo='2026'),
+    )
+    assert props['in_cinema'] == '' and props['cinema'] == ''
+    assert props['meta_line'] == '2026'
+
+
+def test_item_properties_marks_a_watched_movie(load_infowindow):
+    from lib.ui import watchmarks
+
+    class _Store:
+        def get_auth(self):
+            return None
+
+        def get_progress_entries(self):
+            return [{'id': 'tt1', 'type': 'movie', 'video_id': None, 'position_ms': 90,
+                     'duration_ms': 100, 'updated_at': '2026-05-02T00:00:00Z'}]
+
+    ctx = load_infowindow()
+    watchmarks.refresh(_Store())
+    assert ctx.infowindow._item_properties(_make_meta('tt1', 'Dune'))['watched'] == '1'
+    assert ctx.infowindow._item_properties(_make_meta('tt2', 'Arrival'))['watched'] == ''
+    assert ctx.infowindow._item_properties(_make_meta('tt1', 'Dune', mtype='series'))['watched'] == ''
+
+
+def test_meta_line_puts_the_cinema_tag_after_the_year(load_infowindow):
+    ctx = load_infowindow()
+    line = ctx.infowindow._meta_line({'year': '2026', 'cinema': 'IN CINEMA', 'rating': '7.1', 'genre': 'Drama'})
+    assert line == '2026 · IN CINEMA · IMDb 7.1 · Drama'
+
+
+def test_enrich_merge_carries_dvd_release_so_the_tag_clears(load_infowindow, monkeypatch):
+    """The preview has no `dvdRelease`; the full meta does, and the tag the
+    sparse preview would have shown must be withdrawn."""
+    ctx = load_infowindow()
+    win = ctx.infowindow.ShowcaseWindow()
+    win.metas = [_sparse(released=_recent_release(), releaseInfo='2026')]
+    win._reset_enrich_state()
+    monkeypatch.setattr(
+        ctx.views, '_fetch_meta',
+        lambda stype, sid: {'id': 'tt1', 'description': 'Plot.', 'dvdRelease': _recent_release(2)},
+    )
+    win._enrich_worker(0, win.metas[0])
+    assert win.metas[0]['dvdRelease'] == _recent_release(2)
+    assert win._enrich_pending[0]['in_cinema'] == ''
+    assert win._enrich_pending[0]['cinema'] == ''
+
+
+def test_start_reads_the_account_once_for_the_watched_check(load_infowindow, monkeypatch):
+    """A coverflow opened in a fresh interpreter has no account answer;
+    `start()` reads it under the spinner, once, and a failure is silent."""
+    ctx = load_infowindow()
+    import lib.ui.dependencies as dependencies
+    import lib.ui.mystuff as mystuff
+    import lib.ui.uicommon as uicommon
+    from lib.ui import watchmarks
+
+    class _Store:
+        def get_auth(self):
+            return {'authKey': 'k'}
+
+        def get_progress_entries(self):
+            return []
+
+    reads = []
+    record = {'_id': 'tt1', 'type': 'movie', '_mtime': '2026-05-01T00:00:00Z', 'state': {'timesWatched': 1}}
+    monkeypatch.setattr(dependencies, 'get_store', lambda: _Store())
+    monkeypatch.setattr(mystuff, '_read_library_entries', lambda store: reads.append(True) or [record])
+    monkeypatch.setattr(uicommon, 'run_cancellable', lambda func, heading, message='': func())
+    win = ctx.infowindow.ShowcaseWindow()
+    win.start([_make_meta('tt1', 'Dune')])
+    assert reads == [True]
+    assert watchmarks.is_watched({'id': 'tt1', 'type': 'movie'}) is True
+    win.start([_make_meta('tt1', 'Dune')])
+    assert reads == [True]
+
+
+def test_start_survives_a_failed_account_read(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    import lib.ui.dependencies as dependencies
+    import lib.ui.mystuff as mystuff
+    import lib.ui.uicommon as uicommon
+    from lib.ui import watchmarks
+
+    class _Store:
+        def get_auth(self):
+            return {'authKey': 'k'}
+
+    def boom(store):
+        raise OSError('offline')
+
+    monkeypatch.setattr(dependencies, 'get_store', lambda: _Store())
+    monkeypatch.setattr(mystuff, '_read_library_entries', boom)
+    monkeypatch.setattr(uicommon, 'run_cancellable', lambda func, heading, message='': func())
+    ctx.infowindow.ShowcaseWindow().start([_make_meta('tt1', 'Dune')])
+    assert watchmarks.account_loaded() is False

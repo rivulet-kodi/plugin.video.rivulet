@@ -1428,3 +1428,95 @@ def test_signin_button_opens_sign_in_without_settings_or_a_plugin_handle(load_ho
     assert ctx.env.opened_settings is False
     assert ctx.env.end_of_directory == []
     assert not win.closed
+
+
+# --- the watched check and the IN CINEMA strip (issues #85, #84) ---------------
+
+
+def _recent_release(days=10):
+    import datetime
+
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    return (today - datetime.timedelta(days=days)).isoformat() + 'T00:00:00.000Z'
+
+
+def test_a_watched_movie_card_wears_the_check(load_homewindow):
+    from lib.ui import watchmarks
+
+    ctx = load_homewindow()
+    watchmarks.refresh(_FakeStore(progress_entries=[{
+        'id': 'tt1', 'type': 'movie', 'video_id': None, 'position_ms': 80000,
+        'duration_ms': 100000, 'updated_at': '2026-05-02T00:00:00Z',
+    }]))
+    item = ctx.homewindow._poster_item({'id': 'tt1', 'type': 'movie', 'name': 'Dune'})
+    assert item.getProperty('watched') == '1'
+    assert item.legacy_info == {'playcount': 1, 'overlay': 5}
+    other = ctx.homewindow._poster_item({'id': 'tt2', 'type': 'movie', 'name': 'Arrival'})
+    assert other.getProperty('watched') == ''
+    assert other.legacy_info == {}
+    # A series is never marked, even on the same id.
+    show = ctx.homewindow._poster_item({'id': 'tt1', 'type': 'series', 'name': 'Dune'})
+    assert show.getProperty('watched') == ''
+
+
+def test_a_card_built_with_no_watched_set_loaded_is_unmarked(load_homewindow):
+    ctx = load_homewindow()
+    item = ctx.homewindow._poster_item({'id': 'tt1', 'type': 'movie'}, sparse=True)
+    assert item.getProperty('watched') == ''
+    assert item.getProperty('in_cinema') == ''
+
+
+def test_a_recent_movie_without_a_home_release_gets_the_cinema_strip(load_homewindow):
+    ctx = load_homewindow()
+    meta = {'id': 'tt1', 'type': 'movie', 'name': 'Dune', 'released': _recent_release()}
+    assert ctx.homewindow._poster_item(meta).getProperty('in_cinema') == '1'
+    meta['dvdRelease'] = _recent_release(2)
+    assert ctx.homewindow._poster_item(meta).getProperty('in_cinema') == ''
+    meta.pop('dvdRelease')
+    meta['type'] = 'series'
+    assert ctx.homewindow._poster_item(meta).getProperty('in_cinema') == ''
+
+
+def test_the_hero_line_names_the_cinema_in_the_year_row(load_homewindow):
+    ctx = load_homewindow()
+    meta = {'id': 'tt1', 'type': 'movie', 'name': 'Dune', 'released': _recent_release(), 'releaseInfo': '2026'}
+    item = ctx.homewindow._poster_item(meta)
+    assert '2026 \u00b7 STR30548' in item.getProperty('hero_meta').splitlines()
+
+
+def test_the_fetched_meta_decides_the_tag_on_a_library_card(load_homewindow):
+    """A library record has no `released`; once the focus fetch lands the
+    card on the row picks the tag up."""
+    ctx = load_homewindow()
+    item = ctx.homewindow._poster_item({'id': 'tt1', 'type': 'movie', 'name': 'Dune'}, sparse=True)
+    assert item.getProperty('in_cinema') == ''
+    ctx.homewindow._write_meta_onto(item, {'id': 'tt1', 'type': 'movie', 'released': _recent_release()})
+    assert item.getProperty('in_cinema') == '1'
+
+
+def test_repaint_watched_flips_cards_in_place_and_leaves_the_rest(load_homewindow):
+    from lib.ui import watchmarks
+
+    ctx = load_homewindow()
+    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    watchmarks.refresh(_FakeStore())
+    cards = [ctx.homewindow._poster_item({'id': 'tt%d' % n, 'type': 'movie'}) for n in (1, 2)]
+    show = ctx.homewindow._poster_item({'id': 'tt1', 'type': 'series'})
+    win._rows = {ctx.homewindow.CONTINUE_SHELF: {'items': cards + [show]}}
+    assert [c.getProperty('watched') for c in cards] == ['', '']
+
+    watchmarks.refresh(_FakeStore(auth={'authKey': 'k'}), [
+        {'_id': 'tt1', 'type': 'movie', '_mtime': '2026-05-01T00:00:00Z', 'state': {'timesWatched': 1}},
+    ])
+    ctx.homewindow.repaint_watched(win)
+    assert [c.getProperty('watched') for c in cards] == ['1', '']
+    assert cards[0].legacy_info == {'playcount': 1, 'overlay': 5}
+    assert show.getProperty('watched') == ''
+
+    # Unmarked again: the check and the playcount both clear.
+    watchmarks.refresh(_FakeStore(auth={'authKey': 'k'}), [
+        {'_id': 'tt1', 'type': 'movie', '_mtime': '2026-05-03T00:00:00Z', 'state': {'timesWatched': 0}},
+    ])
+    ctx.homewindow.repaint_watched(win)
+    assert cards[0].getProperty('watched') == ''
+    assert cards[0].legacy_info == {'playcount': 0, 'overlay': 4}

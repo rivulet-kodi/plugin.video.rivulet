@@ -158,9 +158,46 @@ def _hero_meta_text(meta):
     not carry is left out, so a sparse title never shows a bare label.
     """
     from lib.ui.compat import L
-    from lib.ui.playbackmeta import hero_panel_text
+    from lib.ui.playbackmeta import hero_panel_text, in_cinema
 
-    return hero_panel_text(meta, runtime_text=_runtime_text(meta), now_word=L(30234))
+    return hero_panel_text(meta, runtime_text=_runtime_text(meta), now_word=L(30234),
+                           cinema_word=L(30548) if in_cinema(meta) else '')
+
+
+def _mark_watched_on(item, watched):
+    """Paint (or clear) the watched check on one card.
+
+    The skin shows the check from the `watched` property; the playcount
+    and overlay are what Kodi's own widgets and the Info dialog read, and
+    what `detailwindow` sets on an episode row (same values, 5 watched and
+    4 unwatched), so a movie card and an episode row agree. `_poster_item`
+    only calls this for a watched card; clearing one goes through here
+    too, because a card cannot un-set a playcount any other way.
+    """
+    item.setProperty('watched', '1' if watched else '')
+    item.setInfo('video', {'playcount': 1 if watched else 0, 'overlay': 5 if watched else 4})
+
+
+def repaint_watched(window):
+    """Re-derive the check on every movie card Home holds, in place.
+
+    A mark made from a poster's menu, or a refreshed library read, changes
+    the verdict for cards the personal-row rebuild never touches (catalog
+    rows, and rows of a cached tab). They share their native item with
+    the list control (see `_snapshot_tab`), so writing the property on the
+    state's `ListItem` is enough; nothing is rebuilt and the remote stays
+    put. Cards whose verdict did not change are left alone.
+    """
+    from lib.ui import watchmarks
+
+    states = list(getattr(window, '_rows', {}).values()) + _snapshot_only_states(window)
+    for state in states:
+        for item in state.get('items') or ():
+            if item.getProperty('stype') != 'movie':
+                continue
+            watched = watchmarks.is_watched({'type': 'movie', 'id': item.getProperty('sid')})
+            if bool(item.getProperty('watched')) != watched:
+                _mark_watched_on(item, watched)
 
 
 def _runtime_minutes(meta):
@@ -182,6 +219,8 @@ def _poster_item(meta, action='', sparse=False):
     of letterboxed on the black plate.
     """
     from lib.stremio.ratings import panel_facts
+    from lib.ui import watchmarks
+    from lib.ui.playbackmeta import in_cinema
     from lib.ui.uicommon import escape_label
     from lib.ui.urlutil import sized_image
 
@@ -211,7 +250,12 @@ def _poster_item(meta, action='', sparse=False):
         'action': action,
         'stype': str(meta.get('type') or ''),
         'sid': str(meta.get('id') or ''),
+        # Drawn by the skin as a strip over the poster. The word comes from
+        # the skin's own `$ADDON` label; only the verdict is set here.
+        'in_cinema': '1' if in_cinema(meta) else '',
     })
+    if watchmarks.is_watched(meta):
+        _mark_watched_on(item, True)
     return item
 
 
@@ -657,7 +701,13 @@ def _home_personal_jobs(cached, library_failed, suppressed, store, auth, plan, s
     ready = threading.Event()
     jobs = []
     needs_library = any(kind in ('continue', 'library') for _, kind, _, _, _ in plan)
-    if needs_library and (cached is None or library_failed):
+    # The movie cards' watched check reads the same account records, so a
+    # signed-in load reads them even when no Continue/Library row is
+    # planned. Still one read, still gated by the window's own cache and
+    # failure flag: a layout of catalogs only costs one `datastore_get` per
+    # build, not one per row.
+    reads_library = needs_library or bool(auth)
+    if reads_library and (cached is None or library_failed):
         def library():
             try:
                 entries['value'] = _fetch_library(store, auth)
@@ -952,6 +1002,7 @@ def _tab_load_incomplete(window, reason):
 def _load_rows(window, store, auth):
     """Fetch only this tab's plan. One account read feeds every personal row."""
     from lib.homelayout import resolve
+    from lib.ui import watchmarks
     from lib.ui.compat import L, setting_bool
     from lib.ui.uicommon import CANCELLED, run_cancellable
 
@@ -997,7 +1048,7 @@ def _load_rows(window, store, auth):
         continued = fetched.pop('continue', {})
         rows = _make_row_states(store, auth, cached if entries is None and cached is not None else entries, plan, fetched,
                                 suppressed, continued)
-        return entries if needs_library or cached is not None else None, rows
+        return entries if needs_library or auth or cached is not None else None, rows
 
     try:
         loaded = run_cancellable(load, L(30033))
@@ -1010,6 +1061,8 @@ def _load_rows(window, store, auth):
         _tab_load_incomplete(window, reason)
         return []
     entries, rows = loaded
+    # Before the cards exist: each `_poster_item` reads the watched set.
+    watchmarks.refresh(store, entries if entries is not None else cached_entries)
     _attach_items(rows)
     needs_library = any(kind in ('continue', 'library') for _, kind, _, _, _ in plan)
     if entries is not None:
@@ -1086,6 +1139,7 @@ def refresh_library_row(window):
 def _refresh_saved_rows(window, store=None):
     """Refresh personal rows only, retaining their loaded slice and cursor."""
     global _library_dirty
+    from lib.ui import watchmarks
     from lib.ui.compat import L
     from lib.ui.uicommon import CANCELLED, run_cancellable
 
@@ -1124,6 +1178,10 @@ def _refresh_saved_rows(window, store=None):
     _cancel_shelf_extends(window)
     window._library_entries = entries
     window._library_failed = False
+    # The rebuilt personal rows read the set; catalog rows are repainted
+    # below. A mark made from a poster menu lands here.
+    watchmarks.refresh(store, entries)
+    repaint_watched(window)
     # Cached tabs may contain personal rows too. Rebuild them when revisited.
     place = _remember_place(window)
     _refresh_snapshot_personal(live, entries, auth, continued)
@@ -1983,6 +2041,8 @@ def _join_library_meta(window):
 _HERO_PROPS = (
     'thumbnail', 'fanart', 'hero_logo', 'hero_title', 'hero_meta',
     'hero_plot', 'hero_facts', 'hero_fill', 'hero_runtime', 'needs_meta', 'stype', 'sid',
+    # A library record has no `released`; the fetched meta decides the tag.
+    'in_cinema',
 )
 
 

@@ -236,9 +236,9 @@ def test_poster_menu_signed_out_still_offers_the_trailer(menu, monkeypatch):
 
 
 def test_poster_menu_signed_in_puts_the_library_row_first(menu, monkeypatch):
-    shown, played = _wire(menu, monkeypatch, {'authKey': 'k'}, 1)
+    shown, played = _wire(menu, monkeypatch, {'authKey': 'k'}, 2)
     menu.libraryaction.poster_menu({'id': 'tt1', 'type': 'movie', 'name': 'Dune'})
-    assert shown == [['STR30293', 'STR30499']]
+    assert shown == [['STR30293', 'STR30295', 'STR30499']]
     assert played == [('movie', 'tt1')]
 
 

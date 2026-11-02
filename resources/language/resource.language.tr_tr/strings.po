@@ -1255,3 +1255,7 @@ msgstr "Ara"
 msgctxt "#30513"
 msgid "No results for “%s”"
 msgstr "“%s” için sonuç yok"
+
+msgctxt "#30548"
+msgid "IN CINEMA"
+msgstr "SİNEMADA"

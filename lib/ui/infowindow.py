@@ -154,11 +154,16 @@ def _meta_line(props):
     place it in, so the reflow matrix that placement needed is gone
     with it.
 
+    The IN CINEMA tag (`props['cinema']`, already localized and escaped)
+    sits right after the year, where the release is read; it is empty for
+    anything `playbackmeta.in_cinema()` does not tag.
+
     Pure helper - no xbmc - so it is trivially unit-testable on its own.
     """
     props = props or {}
     segments = (
         props.get('year') or '',
+        props.get('cinema') or '',
         _rating_segment(props.get('rating')),
         props.get('runtime') or '',
         props.get('genre') or '',
@@ -178,7 +183,9 @@ def _item_properties(meta):
     Pure helper - no xbmc - so it is trivially unit-testable on its own.
     """
     meta = meta or {}
-    from lib.ui import previews
+    from lib.ui import previews, watchmarks
+    from lib.ui.compat import L
+    from lib.ui.playbackmeta import in_cinema
 
     previews.remember(meta)
     poster = meta.get('poster')
@@ -204,6 +211,12 @@ def _item_properties(meta):
         'plot': escape_label(meta.get('description') or ''),
         'year': escape_label(_year_text(meta)),
         'runtime': escape_label(str(runtime)) if runtime not in (None, '') else '',
+        # The localized word for the hero line; the card's own strip is
+        # drawn by the skin from `in_cinema` (issue #84).
+        'cinema': escape_label(L(30548)) if in_cinema(meta) else '',
+        'in_cinema': '1' if in_cinema(meta) else '',
+        # Drives the check on the card (issue #85); see `watchmarks`.
+        'watched': '1' if watchmarks.is_watched(meta) else '',
     }
     # Precomposed for the skin: `meta_line` is what the hero actually
     # renders, but `year`/`rating`/`runtime`/`genre` stay individually
@@ -310,10 +323,39 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         self._reset_paging_state()
         if not self.metas:
             return None
+        self._load_account_marks()
         if more_pages is not None:
             self._spawn_paging(more_pages)
         self.doModal()
         return self.selected
+
+    def _load_account_marks(self):
+        """Give the watched check the account's answer when this process
+        has none yet.
+
+        Home feeds it on every signed-in load, so a coverflow opened from
+        Home never reads. One opened by a plugin route in a fresh
+        interpreter has nothing, and local progress alone would miss a
+        movie watched on another device. The read runs under the usual
+        spinner, before the window opens, never inside onInit (which also
+        runs again on every reopen after playback). A failure leaves the
+        check to local progress: it is cosmetic.
+        """
+        try:
+            from lib.ui import watchmarks
+            from lib.ui.compat import L
+            from lib.ui.dependencies import get_store
+            from lib.ui.mystuff import _read_library_entries, apply_library_writes
+            from lib.ui.uicommon import run_cancellable
+
+            store = get_store()
+            if not store.get_auth() or watchmarks.account_loaded():
+                return
+            raw = run_cancellable(lambda: _read_library_entries(store), L(30033))
+            if isinstance(raw, list):
+                watchmarks.refresh(store, apply_library_writes(raw))
+        except Exception:
+            pass
 
     def _spawn_paging(self, more_pages):
         """Walk `more_pages` on a daemon thread, queueing each page for
@@ -405,6 +447,17 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         if not self.metas:
             return
         self.getControl(HEADER).setLabel(_header_label(self.catalog_title))
+        # The check is a set lookup per card (`watchmarks`); recompute the
+        # set once here, which is also what a reopen after playback runs,
+        # so a movie just finished shows watched when the strip comes back.
+        # The library itself is not re-read: no network on the way in.
+        try:
+            from lib.ui import watchmarks
+            from lib.ui.dependencies import get_store
+
+            watchmarks.refresh(get_store())
+        except Exception:
+            pass
         # Computed once per meta and reused for the background fallback
         # below - _make_item() used to call _item_properties() again just
         # for metas[0], recomputing what this loop already has in hand.
@@ -649,7 +702,7 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         # playbackmeta.py float()s the other), so those are coerced rather
         # than rejected. `released` is merged as well as `releaseInfo`
         # because _item_properties() derives `year` from either.
-        for key in ('description', 'genres', 'imdbRating', 'releaseInfo', 'released'):
+        for key in ('description', 'genres', 'imdbRating', 'releaseInfo', 'released', 'dvdRelease'):
             value = full.get(key)
             if not value or meta.get(key):
                 continue
@@ -671,7 +724,7 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
             # the sparse one built before the fetch.
             self._enrich_pending[index] = {
                 key: props.get(key, '')
-                for key in ('genre', 'rating', 'plot', 'year', 'meta_line')
+                for key in ('genre', 'rating', 'plot', 'year', 'meta_line', 'cinema', 'in_cinema')
             }
         # ...and wake it, or nothing would apply the queue until the user's
         # next keypress - by which time focus has usually left the item

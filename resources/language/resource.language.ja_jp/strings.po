@@ -1255,3 +1255,7 @@ msgstr "検索"
 msgctxt "#30513"
 msgid "No results for “%s”"
 msgstr "「%s」の結果はありません"
+
+msgctxt "#30548"
+msgid "IN CINEMA"
+msgstr "劇場公開中"

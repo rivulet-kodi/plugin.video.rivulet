@@ -1255,3 +1255,7 @@ msgstr "Zoeken"
 msgctxt "#30513"
 msgid "No results for “%s”"
 msgstr "Geen resultaten voor ‘%s’"
+
+msgctxt "#30548"
+msgid "IN CINEMA"
+msgstr "IN DE BIOSCOOP"

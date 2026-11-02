@@ -28,8 +28,8 @@ def remember(meta):
     if not isinstance(sid, str) or not sid:
         return
     keep = {key: meta.get(key) for key in (
-        'id', 'type', 'name', 'year', 'releaseInfo', 'released', 'imdb_id', 'imdbId', 'behaviorHints',
-        'poster', 'background', 'logo', 'description',
+        'id', 'type', 'name', 'year', 'releaseInfo', 'released', 'dvdRelease',
+        'imdb_id', 'imdbId', 'behaviorHints', 'poster', 'background', 'logo', 'description',
     ) if meta.get(key) is not None}
     with _LOCK:
         _PREVIEWS[sid] = keep

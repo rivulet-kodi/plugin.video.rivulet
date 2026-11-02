@@ -47,6 +47,17 @@ def _fresh_previews():
 
 
 @pytest.fixture(autouse=True)
+def _fresh_watchmarks():
+    """lib.ui.watchmarks holds the watched set between paints, process-wide;
+    a card built in one test must not wear another test's check."""
+    from lib.ui import watchmarks
+
+    watchmarks.reset()
+    yield
+    watchmarks.reset()
+
+
+@pytest.fixture(autouse=True)
 def _block_real_network(monkeypatch):
     """Fail loudly if any code path tries to open a real socket."""
 

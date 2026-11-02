@@ -53,6 +53,10 @@ _SCORE_KEYS = ('rottenTomatoes', 'rtAudience', 'metascore', 'imdbRating')
 _FACT_KEYS = (
     'id', 'type', 'imdb_id', 'imdbId', 'imdbID',
     'imdbRating', 'year', 'releaseInfo', 'released', 'runtime',
+    # `playbackmeta.in_cinema()` reads `type`, `released` and this one;
+    # once a score arrives the panel text is rebuilt from these facts
+    # alone, and the IN CINEMA tag must survive that.
+    'dvdRelease',
     'rottenTomatoes', 'rtRating', 'tomatoMeter', 'tomatoes',
     'rtAudience', 'audienceScore', 'popcornmeter',
     'metascore', 'metacritic', 'metaScore',
