@@ -364,12 +364,11 @@ def mark_watched_payload(item, watched, now=None, video_ids=None):
     same two fields by hand instead of waiting for enough playback.
 
     `timesWatched` increments by exactly one ONLY on the 0->1
-    transition (`flaggedWatched` was falsy and `watched` is True) --
-    mirrors `merge_playback()`'s own "gated by flaggedWatched == 0"
-    increment, and is what makes this function idempotent: feeding its
-    own output back in with the same `watched` value is a no-op past the
-    first call, since the second call's `was_watched` reads back the
-    `True` the first call just wrote.
+    transition (`timesWatched` was 0 and `watched` is True), which is
+    what makes this function idempotent: feeding its own output back in
+    with the same `watched` value is a no-op past the first call, since
+    the second call's `was_watched` reads back the count the first call
+    just wrote.
 
     Marking unwatched resets `timesWatched` to 0, as stremio-core's own
     `LibraryItem::mark_as_watched(false)` does. That counter is not a
@@ -391,7 +390,10 @@ def mark_watched_payload(item, watched, now=None, video_ids=None):
     original_state = item.get('state')
     state = dict(original_state) if isinstance(original_state, dict) else _default_state(now_iso)
 
-    was_watched = bool(state.get('flaggedWatched'))
+    # `timesWatched`, not `flaggedWatched`: it is what "watched" means
+    # upstream, and a record left at flag 1 / times 0 by an official unmark
+    # must still count up when marked again.
+    was_watched = int(state.get('timesWatched') or 0) > 0
     state['flaggedWatched'] = 1 if watched else 0
     if watched and not was_watched:
         state['timesWatched'] = int(state.get('timesWatched') or 0) + 1
@@ -509,13 +511,14 @@ def item_watched(item):
     """Whether one account `libraryItem` record counts as watched.
 
     ``state.timesWatched > 0`` is stremio-core's own answer
-    (``LibraryItem::watched()``), and it is the ONLY signal an official
-    client's "Mark as watched" sets: that action bumps ``timesWatched``
-    and leaves ``flaggedWatched`` alone (``mark_as_watched(true)``).
-    ``flaggedWatched`` is what a playback that crossed
-    :data:`WATCHED_THRESHOLD_RATIO` sets, together with its own
-    ``timesWatched`` bump, and what this addon's explicit mark writes, so
-    accepting either covers every writer.
+    (``LibraryItem::watched()``) and the only one used here:
+    ``mark_as_watched(false)`` resets just ``timesWatched`` and leaves
+    ``flaggedWatched`` as it was, so a record can carry a stale
+    ``flaggedWatched = 1`` that every official client already reads as
+    unwatched. Every writer that marks a title watched bumps
+    ``timesWatched`` (an official mark, a playback past
+    :data:`WATCHED_THRESHOLD_RATIO`, and this addon's explicit mark), so
+    nothing is lost by ignoring the flag.
 
     Only meaningful for a movie. For a series ``timesWatched`` counts
     episodes ("incremented once for each video watched"), so it says
@@ -524,8 +527,6 @@ def item_watched(item):
     state = item.get('state') if isinstance(item, dict) else None
     if not isinstance(state, dict):
         return False
-    if state.get('flaggedWatched'):
-        return True
     try:
         return int(state.get('timesWatched') or 0) > 0
     except (TypeError, ValueError, OverflowError):

@@ -419,3 +419,23 @@ def test_a_failed_mark_write_says_so_and_returns_nothing(action, monkeypatch):
     _wire(monkeypatch, api, pick=1)
     assert action.libraryaction.poster_menu(_META) is None
     assert action.env.notifications[-1][1] == 'STR30301'
+
+
+def test_the_mark_row_offers_watched_for_a_stale_flag_with_no_count(action, monkeypatch):
+    """An official unmark leaves `flaggedWatched` up and `timesWatched` at
+    0: that is unwatched, so the row must not offer to unmark."""
+    from lib.ui import watchmarks
+
+    class _Marked:
+        def get_auth(self):
+            return _AUTH
+
+        def get_progress_entries(self):
+            return []
+
+    stale = _watched_record()
+    stale['state']['timesWatched'] = 0
+    _, shown = _wire(monkeypatch, _Api(record=stale), pick=None)
+    watchmarks.refresh(_Marked(), [stale])
+    action.libraryaction.poster_menu(_META)
+    assert shown == [('Dune', ['STR30294', 'STR30295', 'STR30499'])]

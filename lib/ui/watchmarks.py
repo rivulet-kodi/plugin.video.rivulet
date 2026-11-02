@@ -9,8 +9,9 @@ no store read, and above all no per-card network call. `refresh()` computes
 the set once per paint from the two sources that already exist in this
 process, and `is_watched()` is the lookup.
 
-* The account library, when this process has read it (`newhome._fetch_library`
-  feeds it in). Its records carry the flag every official client writes.
+* The account library (`newhome._fetch_library` feeds it in on every
+  authenticated Home load, and the coverflow reads it itself when this
+  process has not). `timesWatched > 0` is the verdict, as upstream.
 * Local `progress.json`, which `lib.service_runner.ProgressPuller` fills
   from the account every few minutes (a flagged movie arrives as a 100%
   entry) and which holds this device's own plays the moment they happen,
@@ -33,6 +34,10 @@ _LOCK = threading.Lock()
 #: answer.
 _verdicts = {}
 _marks: frozenset = frozenset()
+#: True once an account read has been applied for the signed-in account.
+#: A fresh interpreter (the plugin route that opens a coverflow without
+#: Home) starts False, and `account_loaded()` tells its caller to read.
+_account_known = False
 
 
 def refresh(store, library_entries=None):
@@ -43,7 +48,7 @@ def refresh(store, library_entries=None):
     one. Signed out, the account's answer is dropped whatever was cached:
     it belongs to the previous account.
     """
-    global _verdicts, _marks
+    global _verdicts, _marks, _account_known
     try:
         signed_in = bool(store.get_auth())
     except Exception:
@@ -55,9 +60,17 @@ def refresh(store, library_entries=None):
     with _LOCK:
         if not signed_in:
             _verdicts = {}
+            _account_known = False
         elif library_entries is not None:
             _verdicts = library.movie_verdicts(library_entries)
+            _account_known = True
         _marks = library.watched_movie_ids(_verdicts, progress)
+
+
+def account_loaded():
+    """Whether this process has applied an account library read since it
+    last saw the account signed in."""
+    return _account_known
 
 
 def is_watched(meta):
@@ -70,7 +83,8 @@ def is_watched(meta):
 
 def reset():
     """Test hook. Production never calls this."""
-    global _verdicts, _marks
+    global _verdicts, _marks, _account_known
     with _LOCK:
         _verdicts = {}
         _marks = frozenset()
+        _account_known = False

@@ -569,16 +569,50 @@ def test_catalog_worker_failure_and_cancelled_load_leave_home_available(load_hom
     assert hw._load_rows(win, store, None) == []
 
 
-def test_visiting_catalog_only_tab_does_not_cache_an_unfetched_library(load_homewindow, monkeypatch):
+def test_catalog_only_tab_reads_the_account_library_once_for_the_watched_check(load_homewindow, monkeypatch):
+    """Movie cards read the account's watched state, so a signed-in load
+    reads the library even with no Continue/Library row; the next tab
+    reuses it rather than reading again."""
+    ctx = load_homewindow()
+    layout = homelayout.default_layout()
+    layout['tabs']['home'] = ['new:movie']
+    reads = []
+    entries = [{'_id': 'tt0', 'type': 'movie', '_mtime': '2026-05-01T00:00:00Z', 'state': {'timesWatched': 1}}]
+
+    def read(*_args):
+        reads.append(True)
+        return list(entries)
+
+    win, _, _ = build(ctx, monkeypatch, layout=layout, auth={'authKey': 'k'}, library=entries)
+    monkeypatch.setattr(ctx.newhome, '_fetch_library', read)
+    ctx.newhome._switch_tab(win, 'mystuff')
+    assert reads == []
+    assert win._library_entries == entries
+
+
+def test_catalog_only_layout_shows_the_account_watched_badge(load_homewindow, monkeypatch):
+    """No Continue/Library row, no local progress: the badge comes from the
+    account record's `timesWatched` alone."""
+    ctx = load_homewindow()
+    layout = homelayout.default_layout()
+    layout['tabs']['home'] = ['new:movie']
+    # `metas(0, 30, 'movie')` are tt0..tt29.
+    entries = [{'_id': 'tt0', 'type': 'movie', '_mtime': '2026-05-01T00:00:00Z', 'state': {'timesWatched': 1}}]
+    win, _, _ = build(ctx, monkeypatch, layout=layout, auth={'authKey': 'k'}, library=entries)
+    items = win.getControl(30041).items
+    assert items[0].getProperty('sid') == 'tt0' and items[0].getProperty('watched') == '1'
+    assert items[1].getProperty('watched') == ''
+
+
+def test_a_failed_catalog_only_library_read_does_not_flag_the_tab_incomplete(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     layout = homelayout.default_layout()
     layout['tabs']['home'] = ['new:movie']
     win, _, _ = build(ctx, monkeypatch, layout=layout, auth={'authKey': 'k'})
-    assert getattr(win, '_library_entries', None) is None
-    fetched = []
-    monkeypatch.setattr(ctx.newhome, '_fetch_library', lambda *_: fetched.append(True) or [])
-    ctx.newhome._switch_tab(win, 'mystuff')
-    assert fetched == [True]
+    monkeypatch.setattr(ctx.newhome, '_fetch_library', lambda *_: None)
+    win._library_entries = None
+    ctx.newhome._load_rows(win, ctx.newhome.get_store(), {'authKey': 'k'})
+    assert getattr(win, '_library_failed', False) is False
 
 
 def test_personal_refresh_retains_catalog_snapshots_and_library_page_positions(load_homewindow, monkeypatch):

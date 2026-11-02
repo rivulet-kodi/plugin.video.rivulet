@@ -184,13 +184,14 @@ def test_a_local_finish_marks_it_signed_out():
 
 def test_a_refresh_without_entries_reuses_the_last_account_read():
     store = _Store(auth={'authKey': 'k'})
-    watchmarks.refresh(store, [_record(flaggedWatched=1)])
+    watchmarks.refresh(store, [_record(timesWatched=1)])
+    assert watchmarks.account_loaded() is True
     watchmarks.refresh(store)
     assert watchmarks.is_watched({'id': 'tt1', 'type': 'movie'}) is True
 
 
 def test_signing_out_drops_the_previous_accounts_answer():
-    watchmarks.refresh(_Store(auth={'authKey': 'k'}), [_record(flaggedWatched=1)])
+    watchmarks.refresh(_Store(auth={'authKey': 'k'}), [_record(timesWatched=1)])
     watchmarks.refresh(_Store(auth=None))
     assert watchmarks.is_watched({'id': 'tt1', 'type': 'movie'}) is False
 
@@ -205,5 +206,18 @@ def test_an_unmark_clears_the_check_despite_the_stale_local_finish():
 
 
 def test_a_failing_store_never_raises_and_leaves_no_marks():
-    watchmarks.refresh(_Store(fail=True), [_record(flaggedWatched=1)])
+    watchmarks.refresh(_Store(fail=True), [_record(timesWatched=1)])
     assert watchmarks.is_watched({'id': 'tt1', 'type': 'movie'}) is False
+
+
+def test_a_stale_flag_with_no_count_shows_no_check():
+    watchmarks.refresh(_Store(auth={'authKey': 'k'}), [_record(flaggedWatched=1, timesWatched=0)])
+    assert watchmarks.is_watched({'id': 'tt1', 'type': 'movie'}) is False
+
+
+def test_account_loaded_follows_the_account():
+    assert watchmarks.account_loaded() is False
+    watchmarks.refresh(_Store(auth={'authKey': 'k'}), [])
+    assert watchmarks.account_loaded() is True
+    watchmarks.refresh(_Store(auth=None))
+    assert watchmarks.account_loaded() is False

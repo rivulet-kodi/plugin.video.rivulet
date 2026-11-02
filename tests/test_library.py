@@ -566,15 +566,18 @@ def _progress(item_id="tt1", position=80000, duration=100000, updated_at=LATER_I
 
 
 @pytest.mark.parametrize("state, expected", [
-    ({"flaggedWatched": 1}, True),
     # What an official client's "Mark as watched" writes: the counter alone.
     ({"timesWatched": 1}, True),
+    # An official unmark resets the counter and leaves the flag standing.
+    ({"flaggedWatched": 1, "timesWatched": 0}, False),
+    ({"flaggedWatched": 1}, False),
+    ({"flaggedWatched": 1, "timesWatched": 2}, True),
     ({"flaggedWatched": 0, "timesWatched": 0}, False),
     ({}, False),
     ({"timesWatched": "x"}, False),
     ({"timesWatched": None}, False),
 ])
-def test_item_watched_reads_flag_or_counter(state, expected):
+def test_item_watched_reads_the_counter_only(state, expected):
     assert library.item_watched({"_id": "tt1", "state": state}) is expected
 
 
@@ -586,10 +589,10 @@ def test_item_watched_tolerates_junk():
 
 def test_movie_verdicts_keeps_movies_only_with_their_mtime():
     entries = [
-        _record("tt1", flaggedWatched=1),
-        _record("tt2", timesWatched=0),
+        _record("tt1", timesWatched=1),
+        _record("tt2", flaggedWatched=1, timesWatched=0),
         # A series' counter is episodes watched: says nothing about the show.
-        _record("tt3", kind="series", timesWatched=4, flaggedWatched=1),
+        _record("tt3", kind="series", timesWatched=4),
         {"_id": "", "type": "movie"},
         "junk",
     ]
@@ -599,7 +602,7 @@ def test_movie_verdicts_keeps_movies_only_with_their_mtime():
 
 def test_movie_verdicts_keeps_removed_records():
     """Removing from the library does not unwatch."""
-    removed = _record("tt1", flaggedWatched=1)
+    removed = _record("tt1", timesWatched=1)
     removed["removed"] = True
     assert library.movie_verdicts([removed]) == {"tt1": (True, NOW_ISO)}
 
@@ -615,8 +618,15 @@ def test_progress_finished_without_a_duration_is_false(entry):
 
 
 def test_watched_ids_account_flag_wins():
-    verdicts = library.movie_verdicts([_record("tt1", flaggedWatched=1)])
+    verdicts = library.movie_verdicts([_record("tt1", timesWatched=1)])
     assert library.watched_movie_ids(verdicts, []) == frozenset({"tt1"})
+
+
+def test_watched_ids_stale_flag_without_a_count_is_unwatched():
+    """`mark_as_watched(false)` leaves `flaggedWatched` up; upstream reads
+    that as unwatched."""
+    verdicts = library.movie_verdicts([_record("tt1", flaggedWatched=1, timesWatched=0)])
+    assert library.watched_movie_ids(verdicts, []) == frozenset()
 
 
 def test_watched_ids_local_finish_counts_before_the_push_lands():
@@ -645,3 +655,12 @@ def test_watched_ids_ignores_unfinished_series_and_episode_progress():
         "junk",
     ]
     assert library.watched_movie_ids({}, entries) == frozenset()
+
+
+def test_mark_watched_counts_up_from_a_stale_flag():
+    """Flag 1 / times 0 is what an official unmark leaves; marking watched
+    again has to make the title watched, not skip the increment."""
+    item = {"_id": "tt1", "state": {"flaggedWatched": 1, "timesWatched": 0}}
+    marked = library.mark_watched_payload(item, True, now=NOW)
+    assert marked["state"]["timesWatched"] == 1
+    assert library.item_watched(marked)
