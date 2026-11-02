@@ -90,6 +90,7 @@ import copy
 import datetime
 import heapq
 import json
+import math
 import os
 import shutil
 import tempfile
@@ -910,7 +911,10 @@ def _parse_json(raw, default):
         return default
     try:
         return json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):
+        # RecursionError: a document nested past the interpreter's limit
+        # (a few thousand `[`) is not a ValueError to `json`, but it is
+        # exactly as corrupt as a truncated one.
         return default
 
 
@@ -935,7 +939,7 @@ def _classify_json(text_result, expected_type):
         return status, None
     try:
         value = json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):  # see `_parse_json` for RecursionError
         return _CORRUPT, None
     if not isinstance(value, expected_type):
         return _CORRUPT, None
@@ -948,14 +952,29 @@ def _load_json(path, expected_type):
     return _classify_json(_read_text(path), expected_type)
 
 
+def _usable_flags(addon):
+    """Whether ``addon['flags']`` is something ``(flags or {}).get(...)``
+    can be called on: absent, ``None`` or a dict."""
+    flags = addon.get("flags")
+    return flags is None or isinstance(flags, dict)
+
+
 def _dict_entries(addons):
     """``addons`` without non-dict entries (a hand-edited or partly
     corrupt ``addons.json``), which every ``a.get(...)`` consumer would
-    otherwise crash on. Returns ``addons`` itself when it is already clean
-    so the read cache's list identity is kept."""
-    if all(isinstance(a, dict) for a in addons):
+    otherwise crash on, and with a ``flags`` that is not a dict (``true``,
+    a string, a list) reset to ``{}`` for the same reason: every reader
+    does ``(a.get("flags") or {}).get(...)``, which raised
+    ``AttributeError`` out of :meth:`Store.get_enabled_addons` and so out
+    of every catalog, stream and subtitle fan-out. Returns ``addons``
+    itself when it is already clean so the read cache's list identity is
+    kept."""
+    if all(isinstance(a, dict) and _usable_flags(a) for a in addons):
         return addons
-    return [a for a in addons if isinstance(a, dict)]
+    return [
+        a if _usable_flags(a) else dict(a, flags={})
+        for a in addons if isinstance(a, dict)
+    ]
 
 
 def _keep_corrupt_copy(path):
@@ -1660,7 +1679,15 @@ class Store:
         or ``None`` if there is nothing queued. Served from the
         per-instance read cache -- see `_cached_read`."""
         payload = self._cached_read(self._resume_offset_path, None)
-        return payload.get("offset_ms") if isinstance(payload, dict) else None
+        offset = payload.get("offset_ms") if isinstance(payload, dict) else None
+        # A finite number or nothing: a hand-edited file can hold a string
+        # or a list, and `onAVStarted` divides the answer by 1000.
+        # `Infinity`/`NaN` parse as floats and would seek to nowhere.
+        if isinstance(offset, bool) or not isinstance(offset, (int, float)):
+            return None
+        if isinstance(offset, float) and not math.isfinite(offset):
+            return None
+        return offset
 
     def set_resume_offset_ms(self, offset_ms):
         """Queue a pending resume-seek offset, or clear it when
@@ -1685,7 +1712,9 @@ class Store:
         been recorded yet (including a missing/corrupt file). Served from
         the per-instance read cache -- see `_cached_read`."""
         payload = self._cached_read(self._last_version_path, None)
-        return payload.get("version") if isinstance(payload, dict) else None
+        version = payload.get("version") if isinstance(payload, dict) else None
+        # A string or nothing, as `set_last_seen_version` writes it.
+        return version if isinstance(version, str) else None
 
     def set_last_seen_version(self, version):
         """Record `version` as the addon version the user has now been
@@ -1995,7 +2024,11 @@ class Store:
             live = set(live_ids)
             current = {
                 record["_id"]: record for record in existing
-                if isinstance(record, dict) and record.get("_id") in live
+                # `isinstance` first: `in live` hashes the id, and a list or
+                # dict `_id` in a damaged file raised `TypeError` instead of
+                # dropping that one record.
+                if isinstance(record, dict) and isinstance(record.get("_id"), str)
+                and record["_id"] in live
             }
         for record in records:
             if isinstance(record, dict) and isinstance(record.get("_id"), str):

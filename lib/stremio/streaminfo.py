@@ -298,7 +298,14 @@ def _parse_size(behavior_hints, text):
         # OverflowError: `videoSize: 1e999` is valid JSON and parses to inf.
         video_size = None
     if video_size and video_size > 0:
-        return video_size, _human_size(video_size)
+        try:
+            return video_size, _human_size(video_size)
+        except OverflowError:
+            # `videoSize` is an unbounded JSON integer: past ~1.8e308 it
+            # converts to `int` fine and then cannot become a float for the
+            # label. Same junk as the `1e999` case above, so the same answer:
+            # ignore the hint and read the free text instead.
+            pass
 
     match = _SIZE_RE.search(text)
     if not match:

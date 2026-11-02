@@ -80,8 +80,17 @@ _MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 
 def _encode_component(value):
-    """Percent-encode one path/extra component, matching URI_COMPONENT_ENCODE_SET."""
-    return quote(str(value), safe=EXTRA_SAFE_CHARS)
+    """Percent-encode one path/extra component, matching URI_COMPONENT_ENCODE_SET.
+
+    ``errors='replace'``: an id or extra value comes from an addon's JSON, and
+    a JSON string holding half of a surrogate pair decodes to a lone
+    surrogate without complaint (``json.loads`` accepts it). ``quote()``
+    then raised ``UnicodeEncodeError`` ("surrogates not allowed") from every
+    request built for that title, an exception type no ``except
+    AddonError`` site expects. The surrogate becomes ``%3F`` instead; no addon can serve
+    an id that is not valid UTF-8 anyway, so nothing that worked is lost.
+    """
+    return quote(str(value), safe=EXTRA_SAFE_CHARS, errors='replace')
 
 
 def encode_extra(props, *value):

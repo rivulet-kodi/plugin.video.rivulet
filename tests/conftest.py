@@ -14,6 +14,7 @@ which import style a given module uses.
 """
 import contextlib
 import json
+import os
 import socket
 import sys
 import threading
@@ -21,6 +22,7 @@ from pathlib import Path
 
 import pytest
 import requests
+from hypothesis import HealthCheck, settings
 
 # --- sys.path bootstrap ----------------------------------------------------
 # tests/ lives at the repo root alongside lib/, default.py, service.py.
@@ -32,6 +34,38 @@ if str(REPO_ROOT) not in sys.path:
 # import time), but needs REPO_ROOT on sys.path first to be importable
 # itself as `tests.kodistubs` - hence this import follows the bootstrap.
 from tests.kodistubs import install_kodi_stubs
+
+# --- Hypothesis profiles -------------------------------------------------------
+# The property tests (tests/test_fuzz_*.py) are regression tests, not a
+# search: a CI run must give the same verdict for the same commit, so the
+# default profile is derandomized (the example sequence is a pure function of
+# the test) and keeps no example database (nothing written next to the
+# checkout, nothing carried between runs). That also makes it independent of
+# pytest-randomly, which reseeds `random` before every test but cannot move a
+# derandomized Hypothesis run. `deadline=None`: the first example of a
+# recursive strategy pays import/compilation cost, and a wall-clock deadline
+# turns a loaded CI runner into a spurious failure. `too_slow` is suppressed
+# for the same reason - it measures data generation time, not the code under
+# test. 75 examples per property keeps the whole fuzz suite to a few seconds.
+#
+# `HYPOTHESIS_PROFILE=deep pytest tests/test_fuzz_*.py` is the hunting mode:
+# the same properties with thousands of fresh examples. A crash it finds is added to
+# the property as an `@example` before the fix, so the default profile keeps
+# replaying it.
+settings.register_profile(
+    "rivulet",
+    max_examples=75,
+    derandomize=True,
+    database=None,
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow],
+)
+# Hunting must explore: not derandomized, so every run looks at new examples
+# (Hypothesis prints the seed-free `@reproduce_failure` blob for a failure).
+settings.register_profile(
+    "deep", settings.get_profile("rivulet"), max_examples=5000, derandomize=False,
+)
+settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "rivulet"))
 
 
 @pytest.fixture(autouse=True)
