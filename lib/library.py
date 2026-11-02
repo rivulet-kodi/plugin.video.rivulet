@@ -375,7 +375,7 @@ def mark_watched_payload(item, watched, now=None, video_ids=None):
     private history here: the official clients decide "watched" from
     `timesWatched > 0` alone (`LibraryItem::watched()`), so an unmark that
     left it standing was undone on every other device (issue #85) and
-    Rivulet's own badge (`movie_verdicts`) could never clear.
+    Rivulet's own badge (`title_verdicts`) could never clear.
 
     An `item` with no `state` at all yet (never played, never added)
     gets a fresh default one first, same as `merge_playback()`.
@@ -520,9 +520,12 @@ def item_watched(item):
     :data:`WATCHED_THRESHOLD_RATIO`, and this addon's explicit mark), so
     nothing is lost by ignoring the flag.
 
-    Only meaningful for a movie. For a series ``timesWatched`` counts
-    episodes ("incremented once for each video watched"), so it says
-    nothing about the title as a whole -- see :func:`movie_verdicts`.
+    The same rule for every type, deliberately: Stremio draws the check
+    on a series poster once ``timesWatched`` is above zero, and for a
+    series that counter goes up once per episode played past
+    :data:`WATCHED_THRESHOLD_RATIO`, so "one episode seen" is what the
+    official apps show and what this reproduces (issue #85). It is not
+    "the whole show is finished".
     """
     state = item.get('state') if isinstance(item, dict) else None
     if not isinstance(state, dict):
@@ -533,23 +536,23 @@ def item_watched(item):
         return False
 
 
-def movie_verdicts(entries):
-    """``{movie id: (watched, mtime)}`` for every movie record in
-    `entries` (a ``libraryItem`` datastore read).
+def title_verdicts(entries):
+    """``{title id: (watched, mtime)}`` for every typed record in
+    `entries` (a ``libraryItem`` datastore read), movies and series alike.
 
     ``mtime`` is the record's ``_mtime`` in :func:`iso8601_utc`'s form
     (``''`` when absent/unparseable): it is what lets
-    :func:`watched_movie_ids` decide whether the account or a local
+    :func:`watched_title_ids` decide whether the account or a local
     playback sample is the more recent word. Tombstoned (``removed``)
     records are kept: removing a title from the library does not unwatch
     it, and a title watched without ever being added is a ``temp``,
     ``removed`` record by construction (:func:`build_library_item`).
-    Anything that is not a movie is skipped, for the reason given in
-    :func:`item_watched`.
+    A record with no type is skipped, as everything downstream is keyed by
+    a typed card.
     """
     verdicts = {}
     for entry in entries or []:
-        if not isinstance(entry, dict) or entry.get('type') != 'movie':
+        if not isinstance(entry, dict) or not entry.get('type'):
             continue
         item_id = entry.get('_id')
         if not isinstance(item_id, str) or not item_id:
@@ -566,7 +569,7 @@ def progress_finished(entry):
     This reads where playback stopped, while the account flag counts time
     actually watched, so a viewer who skipped ahead can read as finished
     here before the account agrees -- a provisional answer
-    :func:`watched_movie_ids` hands back to the account the moment the
+    :func:`watched_title_ids` hands back to the account the moment the
     account has a newer word.
     """
     try:
@@ -577,16 +580,19 @@ def progress_finished(entry):
     return duration > 0 and position > duration * WATCHED_THRESHOLD_RATIO
 
 
-def watched_movie_ids(verdicts, progress_entries):
-    """The frozenset of movie ids that should wear the watched badge.
+def watched_title_ids(verdicts, progress_entries):
+    """The frozenset of title ids (movies and series) that should wear the
+    watched badge.
 
-    `verdicts` is :func:`movie_verdicts` of the account's library (empty
+    `verdicts` is :func:`title_verdicts` of the account's library (empty
     when signed out or the library has not been read), `progress_entries`
     is `Store.get_progress_entries()`.
 
     * An account record that says watched wins outright.
-    * A movie finished in local progress (:func:`progress_finished`) is
-      watched even before the playback push has landed on the account,
+    * A title with finished local progress (:func:`progress_finished`) is
+      watched: a movie's own entry, or any one episode's entry for a
+      series (Stremio's rule is "at least one episode", see
+      :func:`item_watched`), even before the playback push has landed on the account,
       which lags by up to ``LIBRARY_PUSH_INTERVAL_SECONDS`` -- UNLESS the
       account has a record at least as new as that local sample. The
       record is then the later word, and for an explicit "Mark as
@@ -599,7 +605,7 @@ def watched_movie_ids(verdicts, progress_entries):
     """
     marks = {item_id for item_id, (watched, _mtime) in verdicts.items() if watched}
     for entry in progress_entries or []:
-        if not isinstance(entry, dict) or entry.get('type') != 'movie' or entry.get('video_id'):
+        if not isinstance(entry, dict) or not entry.get('type'):
             continue
         item_id = entry.get('id')
         if not isinstance(item_id, str) or item_id in marks or not progress_finished(entry):

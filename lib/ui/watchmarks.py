@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 M0Rf30
 # SPDX-License-Identifier: MIT
 
-"""Which movie cards wear the watched check (issue #85).
+"""Which movie and series cards wear the watched check (issue #85).
 
 A Home row is up to a few hundred `ListItem`s and the coverflow another
 page, all built in bulk, so the verdict for a card has to be a set lookup:
@@ -13,22 +13,24 @@ process, and `is_watched()` is the lookup.
   authenticated Home load, and the coverflow reads it itself when this
   process has not). `timesWatched > 0` is the verdict, as upstream.
 * Local `progress.json`, which `lib.service_runner.ProgressPuller` fills
-  from the account every few minutes (a flagged movie arrives as a 100%
+  from the account every few minutes (a flagged title arrives as a 100%
   entry) and which holds this device's own plays the moment they happen,
-  before the playback push reaches the account. Hence a movie watched in
+  before the playback push reaches the account. Hence a title watched in
   Rivulet is marked right away.
 
 How the two combine, including the explicit "Mark as unwatched" case, is
-`lib.library.watched_movie_ids`; this module only holds the result between
-paints. Series get no mark: `timesWatched` counts episodes there, so the
-account does not say whether the show as a whole is done.
+`lib.library.watched_title_ids`; this module only holds the result between
+paints. A series wears the check as soon as one episode counts as watched:
+that is Stremio's own rule for every type (`LibraryItem::watched()` is
+`times_watched > 0`, and a series' counter goes up per episode), so the
+poster agrees with the official apps rather than meaning "show finished".
 """
 import threading
 
 from lib import library
 
 _LOCK = threading.Lock()
-#: `lib.library.movie_verdicts` of the last library read. Kept (rather than
+#: `lib.library.title_verdicts` of the last library read. Kept (rather than
 #: the raw records, which run to a kilobyte each) so a paint that has not
 #: re-read the library, such as the coverflow, can still apply the account's
 #: answer.
@@ -62,9 +64,9 @@ def refresh(store, library_entries=None):
             _verdicts = {}
             _account_known = False
         elif library_entries is not None:
-            _verdicts = library.movie_verdicts(library_entries)
+            _verdicts = library.title_verdicts(library_entries)
             _account_known = True
-        _marks = library.watched_movie_ids(_verdicts, progress)
+        _marks = library.watched_title_ids(_verdicts, progress)
 
 
 def account_loaded():
@@ -74,11 +76,10 @@ def account_loaded():
 
 
 def is_watched(meta):
-    """Whether `meta` (a catalog/library/progress record) is a movie that
-    should wear the check. A set lookup; see the module docstring."""
-    if not isinstance(meta, dict) or meta.get('type') != 'movie':
-        return False
-    return meta.get('id') in _marks
+    """Whether `meta` (a catalog/library/progress record) should wear the
+    check. A set lookup; see the module docstring. Ids are IMDb ids, unique
+    across types, so the type is not part of the key."""
+    return isinstance(meta, dict) and meta.get('id') in _marks
 
 
 def reset():

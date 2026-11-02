@@ -587,24 +587,30 @@ def test_item_watched_tolerates_junk():
     assert library.item_watched(None) is False
 
 
-def test_movie_verdicts_keeps_movies_only_with_their_mtime():
+def test_title_verdicts_cover_movies_and_series_with_their_mtime():
     entries = [
         _record("tt1", timesWatched=1),
         _record("tt2", flaggedWatched=1, timesWatched=0),
-        # A series' counter is episodes watched: says nothing about the show.
+        # Stremio's rule is the same for every type: a series' counter goes
+        # up per episode and `timesWatched > 0` is its check.
         _record("tt3", kind="series", timesWatched=4),
+        _record("tt4", kind="series", flaggedWatched=1, timesWatched=0),
         {"_id": "", "type": "movie"},
+        {"_id": "tt5"},
         "junk",
     ]
-    assert library.movie_verdicts(entries) == {"tt1": (True, NOW_ISO), "tt2": (False, NOW_ISO)}
-    assert library.movie_verdicts(None) == {}
+    assert library.title_verdicts(entries) == {
+        "tt1": (True, NOW_ISO), "tt2": (False, NOW_ISO),
+        "tt3": (True, NOW_ISO), "tt4": (False, NOW_ISO),
+    }
+    assert library.title_verdicts(None) == {}
 
 
-def test_movie_verdicts_keeps_removed_records():
+def test_title_verdicts_keeps_removed_records():
     """Removing from the library does not unwatch."""
     removed = _record("tt1", timesWatched=1)
     removed["removed"] = True
-    assert library.movie_verdicts([removed]) == {"tt1": (True, NOW_ISO)}
+    assert library.title_verdicts([removed]) == {"tt1": (True, NOW_ISO)}
 
 
 @pytest.mark.parametrize("position, expected", [(70000, False), (70001, True), (100000, True), (0, False)])
@@ -618,43 +624,63 @@ def test_progress_finished_without_a_duration_is_false(entry):
 
 
 def test_watched_ids_account_flag_wins():
-    verdicts = library.movie_verdicts([_record("tt1", timesWatched=1)])
-    assert library.watched_movie_ids(verdicts, []) == frozenset({"tt1"})
+    verdicts = library.title_verdicts([_record("tt1", timesWatched=1)])
+    assert library.watched_title_ids(verdicts, []) == frozenset({"tt1"})
 
 
 def test_watched_ids_stale_flag_without_a_count_is_unwatched():
     """`mark_as_watched(false)` leaves `flaggedWatched` up; upstream reads
     that as unwatched."""
-    verdicts = library.movie_verdicts([_record("tt1", flaggedWatched=1, timesWatched=0)])
-    assert library.watched_movie_ids(verdicts, []) == frozenset()
+    verdicts = library.title_verdicts([_record("tt1", flaggedWatched=1, timesWatched=0)])
+    assert library.watched_title_ids(verdicts, []) == frozenset()
 
 
 def test_watched_ids_local_finish_counts_before_the_push_lands():
     """Watched in Rivulet, account not yet told (or signed out)."""
-    assert library.watched_movie_ids({}, [_progress(position=71000)]) == frozenset({"tt1"})
+    assert library.watched_title_ids({}, [_progress(position=71000)]) == frozenset({"tt1"})
     # Account has an older, unwatched record: the later local sample wins.
-    verdicts = library.movie_verdicts([_record("tt1", mtime=NOW_ISO, timesWatched=0)])
-    assert library.watched_movie_ids(verdicts, [_progress(position=71000, updated_at=LATER_ISO)]) == frozenset({"tt1"})
+    verdicts = library.title_verdicts([_record("tt1", mtime=NOW_ISO, timesWatched=0)])
+    assert library.watched_title_ids(verdicts, [_progress(position=71000, updated_at=LATER_ISO)]) == frozenset({"tt1"})
 
 
 def test_watched_ids_a_newer_unwatched_account_record_beats_a_stale_local_finish():
     """Mark as unwatched: its payload carries a newer `_mtime` than the
     100% sample local progress still holds, and must clear the badge."""
-    verdicts = library.movie_verdicts([_record("tt1", mtime=LATER_ISO, timesWatched=0)])
-    assert library.watched_movie_ids(verdicts, [_progress(position=100000, updated_at=NOW_ISO)]) == frozenset()
+    verdicts = library.title_verdicts([_record("tt1", mtime=LATER_ISO, timesWatched=0)])
+    assert library.watched_title_ids(verdicts, [_progress(position=100000, updated_at=NOW_ISO)]) == frozenset()
     # Equal stamps: the account is "at least as new".
-    assert library.watched_movie_ids(verdicts, [_progress(position=100000, updated_at=LATER_ISO)]) == frozenset()
+    assert library.watched_title_ids(verdicts, [_progress(position=100000, updated_at=LATER_ISO)]) == frozenset()
 
 
-def test_watched_ids_ignores_unfinished_series_and_episode_progress():
+def test_watched_ids_ignores_unfinished_and_malformed_progress():
     entries = [
         _progress("tt1", position=60000),
-        _progress("tt2", kind="series", position=100000),
-        _progress("tt3", video_id="tt3:1:1", position=100000),
+        _progress("tt2", kind="series", video_id="tt2:1:1", position=60000),
         {"id": 5, "type": "movie", "position_ms": 100000, "duration_ms": 100000},
+        {"id": "tt3", "type": "", "position_ms": 100000, "duration_ms": 100000},
         "junk",
     ]
-    assert library.watched_movie_ids({}, entries) == frozenset()
+    assert library.watched_title_ids({}, entries) == frozenset()
+
+
+def test_watched_ids_one_finished_episode_marks_the_series():
+    """Stremio's check on a series means at least one episode watched."""
+    entries = [
+        _progress("tt2", kind="series", video_id="tt2:1:1", position=10000),
+        _progress("tt2", kind="series", video_id="tt2:1:2", position=71000),
+    ]
+    assert library.watched_title_ids({}, entries) == frozenset({"tt2"})
+
+
+def test_watched_ids_a_newer_account_record_beats_a_stale_episode():
+    """Series unmarked in the detail window: the payload is newer than the
+    finished episode samples still in local progress."""
+    verdicts = library.title_verdicts([_record("tt2", kind="series", mtime=LATER_ISO, timesWatched=0)])
+    entries = [_progress("tt2", kind="series", video_id="tt2:1:1", position=100000, updated_at=NOW_ISO)]
+    assert library.watched_title_ids(verdicts, entries) == frozenset()
+    # An episode finished after the account's word counts again.
+    entries.append(_progress("tt2", kind="series", video_id="tt2:1:2", position=100000, updated_at="2020-01-02T00:00:00Z"))
+    assert library.watched_title_ids(verdicts, entries) == frozenset({"tt2"})
 
 
 def test_mark_watched_counts_up_from_a_stale_flag():
