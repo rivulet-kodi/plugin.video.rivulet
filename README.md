@@ -67,17 +67,22 @@ account.
 
 Rivulet's custom UI:
 
-| ![Home](artwork/screenshots/home.png) | ![Browsing a catalog](artwork/screenshots/discover-coverflow.png) |
+| ![Home with a backdrop hero and the Continue row](artwork/screenshots/home.png) | ![Series page with season tabs and episodes](artwork/screenshots/series-episodes.png) |
 | :---: | :---: |
-| **Home** | **Browse** |
+| **Home** | **Series** |
 
-| ![Detail + streams](artwork/screenshots/detail-streams.png) | ![Addon manager](artwork/screenshots/addons-manager.png) |
+| ![Search with on-screen keyboard and result posters](artwork/screenshots/search.png) | ![Browsing a catalog](artwork/screenshots/discover-coverflow.png) |
 | :---: | :---: |
-| **Detail + streams** | **Addon manager** |
+| **Search** | **Browse** |
 
-| ![Continue](artwork/screenshots/mystuff.png) | ![Search results](artwork/screenshots/search-results.png) |
+| ![Stream sources](artwork/screenshots/detail-streams.png) | ![Addon manager](artwork/screenshots/addons-manager.png) |
 | :---: | :---: |
-| **Continue** | **Search** |
+| **Sources** | **Addon manager** |
+
+The Home, series and search screens are based on
+[RevRivulet](https://github.com/TheGildedGoo/plugin.video.rivulet) by
+TheGildedGoo, who also took these screenshots
+([#67](https://github.com/rivulet-kodi/plugin.video.rivulet/issues/67)).
 
 ## Install
 
