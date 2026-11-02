@@ -1902,7 +1902,7 @@ def test_item_properties_does_not_tag_once_a_home_release_exists(load_infowindow
     assert props['meta_line'] == '2026'
 
 
-def test_item_properties_marks_a_watched_movie(load_infowindow):
+def test_item_properties_marks_a_watched_movie_and_series(load_infowindow):
     from lib.ui import watchmarks
 
     class _Store:
@@ -1917,7 +1917,9 @@ def test_item_properties_marks_a_watched_movie(load_infowindow):
     watchmarks.refresh(_Store())
     assert ctx.infowindow._item_properties(_make_meta('tt1', 'Dune'))['watched'] == '1'
     assert ctx.infowindow._item_properties(_make_meta('tt2', 'Arrival'))['watched'] == ''
-    assert ctx.infowindow._item_properties(_make_meta('tt1', 'Dune', mtype='series'))['watched'] == ''
+    # Ids are unique across types, so a series card is looked up the same way.
+    assert ctx.infowindow._item_properties(_make_meta('tt1', 'Dune', mtype='series'))['watched'] == '1'
+    assert ctx.infowindow._item_properties(_make_meta('tt2', 'Severance', mtype='series'))['watched'] == ''
 
 
 def test_meta_line_puts_the_cinema_tag_after_the_year(load_infowindow):

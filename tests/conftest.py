@@ -49,12 +49,26 @@ def _fresh_previews():
 @pytest.fixture(autouse=True)
 def _fresh_watchmarks():
     """lib.ui.watchmarks holds the watched set between paints, process-wide;
-    a card built in one test must not wear another test's check."""
+    a card built in one test must not wear another test's check.
+
+    `lib.ui.mystuff`'s pending library writes are process-wide too, and
+    every successful detail-window or poster-menu toggle notes one: a write
+    left behind for `tt1` overrides the account record a later test reads
+    through `apply_library_writes`, which failed CI only under the random
+    orders that ran a toggle test first. `mystuff` imports Kodi modules, so
+    it is never imported here: only a copy some test already loaded can
+    hold a stale write, and that is the copy cleared."""
     from lib.ui import watchmarks
 
-    watchmarks.reset()
+    def _clear():
+        watchmarks.reset()
+        mystuff = sys.modules.get('lib.ui.mystuff')
+        if mystuff is not None:
+            mystuff.clear_library_writes()
+
+    _clear()
     yield
-    watchmarks.reset()
+    _clear()
 
 
 @pytest.fixture(autouse=True)

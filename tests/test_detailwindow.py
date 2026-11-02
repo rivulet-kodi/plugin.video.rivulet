@@ -1880,3 +1880,77 @@ def test_open_time_fetch_older_than_the_context_menu_lookup_is_dropped(load_deta
     _drain(win)
 
     assert _watched_marks(win, ctx) == ['', '', '1']
+
+
+def _noted_writes_cleared(monkeypatch):
+    from lib.ui import mystuff, newhome
+
+    mystuff.clear_library_writes()
+    monkeypatch.setattr(newhome, '_library_dirty', False)
+    return mystuff, newhome
+
+
+def test_series_mark_watched_reaches_home_before_the_account_echoes_it(load_detailwindow, monkeypatch):
+    """The account's next read can still hold the old record. Home paints
+    from the write this window remembered, so the series check shows."""
+    ctx = load_detailwindow()
+    mystuff, newhome = _noted_writes_cleared(monkeypatch)
+    try:
+        win = _make_window(ctx.detailwindow)
+        win.meta = {'id': 'tt1', 'name': 'Breaking Bad', 'type': 'series'}
+        old = {'_id': 'tt1', 'type': 'series', 'removed': False, '_mtime': '2026-05-01T00:00:00Z',
+               'state': {'flaggedWatched': 0, 'timesWatched': 0}}
+        _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, item=old)
+        _stub_choose(monkeypatch, ctx, 2)  # "Mark as watched"
+
+        win._open_context_menu()
+
+        assert newhome._library_dirty is True
+        from lib.ui import watchmarks
+
+        class _Store:
+            def get_auth(self):
+                return {'authKey': 'tok-123'}
+
+            def get_progress_entries(self):
+                return []
+
+        # What `_fetch_library` does with a read that predates the write.
+        watchmarks.refresh(_Store(), mystuff.apply_library_writes([old]))
+        assert watchmarks.is_watched({'id': 'tt1', 'type': 'series'}) is True
+    finally:
+        mystuff.clear_library_writes()
+
+
+def test_series_library_add_is_remembered_for_home(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    mystuff, newhome = _noted_writes_cleared(monkeypatch)
+    try:
+        win = _make_window(ctx.detailwindow)
+        win.meta = {'id': 'tt1', 'name': 'Breaking Bad', 'type': 'series'}
+        _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, item=None)
+        _stub_choose(monkeypatch, ctx, 1)  # "Add to Library"
+
+        win._open_context_menu()
+
+        assert [e['_id'] for e in mystuff.apply_library_writes([])] == ['tt1']
+        assert newhome._library_dirty is True
+    finally:
+        mystuff.clear_library_writes()
+
+
+def test_a_failed_series_write_is_not_remembered_for_home(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    mystuff, newhome = _noted_writes_cleared(monkeypatch)
+    try:
+        win = _make_window(ctx.detailwindow)
+        win.meta = {'id': 'tt1', 'name': 'Breaking Bad', 'type': 'series'}
+        _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, item=None, put_error=ApiError('boom'))
+        _stub_choose(monkeypatch, ctx, 2)
+
+        win._open_context_menu()
+
+        assert mystuff.apply_library_writes([]) == []
+        assert newhome._library_dirty is False
+    finally:
+        mystuff.clear_library_writes()

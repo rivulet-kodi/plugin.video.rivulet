@@ -1454,9 +1454,11 @@ def test_a_watched_movie_card_wears_the_check(load_homewindow):
     other = ctx.homewindow._poster_item({'id': 'tt2', 'type': 'movie', 'name': 'Arrival'})
     assert other.getProperty('watched') == ''
     assert other.legacy_info == {}
-    # A series is never marked, even on the same id.
+    # A series wears it too: Stremio's `timesWatched > 0` rule is type-blind.
     show = ctx.homewindow._poster_item({'id': 'tt1', 'type': 'series', 'name': 'Dune'})
-    assert show.getProperty('watched') == ''
+    assert show.getProperty('watched') == '1'
+    other_show = ctx.homewindow._poster_item({'id': 'tt2', 'type': 'series', 'name': 'Severance'})
+    assert other_show.getProperty('watched') == ''
 
 
 def test_a_card_built_with_no_watched_set_loaded_is_unmarked(load_homewindow):
@@ -1501,17 +1503,20 @@ def test_repaint_watched_flips_cards_in_place_and_leaves_the_rest(load_homewindo
     win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
     watchmarks.refresh(_FakeStore())
     cards = [ctx.homewindow._poster_item({'id': 'tt%d' % n, 'type': 'movie'}) for n in (1, 2)]
-    show = ctx.homewindow._poster_item({'id': 'tt1', 'type': 'series'})
-    win._rows = {ctx.homewindow.CONTINUE_SHELF: {'items': cards + [show]}}
+    show = ctx.homewindow._poster_item({'id': 'tt3', 'type': 'series'})
+    watched_show = ctx.homewindow._poster_item({'id': 'tt4', 'type': 'series'})
+    win._rows = {ctx.homewindow.CONTINUE_SHELF: {'items': cards + [show, watched_show]}}
     assert [c.getProperty('watched') for c in cards] == ['', '']
 
     watchmarks.refresh(_FakeStore(auth={'authKey': 'k'}), [
         {'_id': 'tt1', 'type': 'movie', '_mtime': '2026-05-01T00:00:00Z', 'state': {'timesWatched': 1}},
+        {'_id': 'tt4', 'type': 'series', '_mtime': '2026-05-01T00:00:00Z', 'state': {'timesWatched': 2}},
     ])
     ctx.homewindow.repaint_watched(win)
     assert [c.getProperty('watched') for c in cards] == ['1', '']
     assert cards[0].legacy_info == {'playcount': 1, 'overlay': 5}
     assert show.getProperty('watched') == ''
+    assert watched_show.getProperty('watched') == '1'
 
     # Unmarked again: the check and the playcount both clear.
     watchmarks.refresh(_FakeStore(auth={'authKey': 'k'}), [

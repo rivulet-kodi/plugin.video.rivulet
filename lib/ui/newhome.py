@@ -179,7 +179,7 @@ def _mark_watched_on(item, watched):
 
 
 def repaint_watched(window):
-    """Re-derive the check on every movie card Home holds, in place.
+    """Re-derive the check on every movie and series card Home holds, in place.
 
     A mark made from a poster's menu, or a refreshed library read, changes
     the verdict for cards the personal-row rebuild never touches (catalog
@@ -193,9 +193,7 @@ def repaint_watched(window):
     states = list(getattr(window, '_rows', {}).values()) + _snapshot_only_states(window)
     for state in states:
         for item in state.get('items') or ():
-            if item.getProperty('stype') != 'movie':
-                continue
-            watched = watchmarks.is_watched({'type': 'movie', 'id': item.getProperty('sid')})
+            watched = watchmarks.is_watched({'id': item.getProperty('sid')})
             if bool(item.getProperty('watched')) != watched:
                 _mark_watched_on(item, watched)
 

@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2026 M0Rf30
 # SPDX-License-Identifier: MIT
 
-"""The IN CINEMA tag (issue #84) and the watched set behind the movie
-card's check (issue #85): the pure rules, and that `dvdRelease` survives
+"""The IN CINEMA tag (issue #84) and the watched set behind the movie and
+series card's check (issue #85): the pure rules, and that `dvdRelease` survives
 every place a meta is trimmed on its way to a card."""
 import datetime
 
@@ -170,10 +170,31 @@ def test_an_account_flag_marks_the_movie():
     assert watchmarks.is_watched({'id': 'tt2', 'type': 'movie'}) is False
 
 
-def test_only_movies_wear_the_check():
+def test_a_series_with_a_watched_episode_count_wears_the_check():
+    """Stremio's rule is `timesWatched > 0` for every type."""
+    series = dict(_record('tt9', timesWatched=1), type='series')
+    watchmarks.refresh(_Store(auth={'authKey': 'k'}), [series])
+    assert watchmarks.is_watched({'id': 'tt9', 'type': 'series'}) is True
+
+
+def test_a_series_with_a_stale_flag_and_no_count_shows_no_check():
+    series = dict(_record('tt9', flaggedWatched=1, timesWatched=0), type='series')
+    watchmarks.refresh(_Store(auth={'authKey': 'k'}), [series])
+    assert watchmarks.is_watched({'id': 'tt9', 'type': 'series'}) is False
+
+
+def test_a_locally_finished_episode_marks_the_series_without_an_account_record():
+    episode = {'id': 'tt9', 'type': 'series', 'video_id': 'tt9:1:2', 'position_ms': 90000,
+               'duration_ms': 100000, 'updated_at': '2026-05-02T00:00:00Z'}
+    watchmarks.refresh(_Store(progress=[episode]))
+    assert watchmarks.is_watched({'id': 'tt9', 'type': 'series'}) is True
+    assert watchmarks.is_watched({'id': 'tt8', 'type': 'series'}) is False
+
+
+def test_cards_without_an_id_never_wear_the_check():
     watchmarks.refresh(_Store(auth={'authKey': 'k'}), [_record(timesWatched=1)])
-    assert watchmarks.is_watched({'id': 'tt1', 'type': 'series'}) is False
-    assert watchmarks.is_watched({'id': 'tt1'}) is False
+    assert watchmarks.is_watched({'type': 'movie'}) is False
+    assert watchmarks.is_watched({}) is False
     assert watchmarks.is_watched(None) is False
 
 
