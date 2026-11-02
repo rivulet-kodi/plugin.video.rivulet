@@ -20,6 +20,7 @@ import threading
 
 import pytest
 
+import lib.logrotate as logrotate
 import lib.serverbin as serverbin
 import lib.service_runner as service_runner
 
@@ -609,7 +610,7 @@ def test_start_is_a_noop_while_already_running(fake_popen, tmp_path):
 
 
 def test_start_with_no_existing_log_does_not_raise(fake_popen, tmp_path):
-    """`_rotate_log()`'s getsize() raises FileNotFoundError (an OSError)
+    """`logrotate.rotate_if_oversized()`'s getsize() raises FileNotFoundError (an OSError)
     on a fresh install with no prior log -- start() must swallow it."""
     log_path = tmp_path / 'server.log'
     assert not log_path.exists()
@@ -621,14 +622,14 @@ def test_start_with_no_existing_log_does_not_raise(fake_popen, tmp_path):
 
 def test_start_rotates_log_exceeding_the_threshold(fake_popen, tmp_path):
     log_path = tmp_path / 'server.log'
-    log_path.write_bytes(b'x' * (service_runner.LOG_ROTATE_BYTES + 1))
+    log_path.write_bytes(b'x' * (logrotate.LOG_ROTATE_BYTES + 1))
 
     sp = _server_process(tmp_path)
     sp.start()
 
     backup = tmp_path / 'server.log.1'
     assert backup.exists()
-    assert backup.stat().st_size == service_runner.LOG_ROTATE_BYTES + 1
+    assert backup.stat().st_size == logrotate.LOG_ROTATE_BYTES + 1
     assert log_path.stat().st_size == 0  # reopened fresh in append mode after the rename
     sp.stop()
 
@@ -636,19 +637,19 @@ def test_start_rotates_log_exceeding_the_threshold(fake_popen, tmp_path):
 def test_start_overwrites_a_stale_existing_backup_on_rotation(fake_popen, tmp_path):
     log_path = tmp_path / 'server.log'
     backup = tmp_path / 'server.log.1'
-    log_path.write_bytes(b'y' * (service_runner.LOG_ROTATE_BYTES + 1))
+    log_path.write_bytes(b'y' * (logrotate.LOG_ROTATE_BYTES + 1))
     backup.write_bytes(b'stale-backup-from-last-rotation')
 
     sp = _server_process(tmp_path)
     sp.start()
 
-    assert backup.read_bytes() == b'y' * (service_runner.LOG_ROTATE_BYTES + 1)
+    assert backup.read_bytes() == b'y' * (logrotate.LOG_ROTATE_BYTES + 1)
     sp.stop()
 
 
 def test_start_does_not_rotate_log_at_or_under_the_threshold(fake_popen, tmp_path):
     log_path = tmp_path / 'server.log'
-    log_path.write_bytes(b'z' * service_runner.LOG_ROTATE_BYTES)  # exactly at the boundary
+    log_path.write_bytes(b'z' * logrotate.LOG_ROTATE_BYTES)  # exactly at the boundary
 
     sp = _server_process(tmp_path)
     sp.start()
@@ -666,18 +667,18 @@ def test_maybe_rotate_log_does_not_stat_before_the_check_interval_elapses(monkey
     filesystem at all -- this is what keeps main()'s HEALTHY-tick cost at
     zero disk touches between gates, even though it is called every tick."""
     log_path = tmp_path / 'server.log'
-    log_path.write_bytes(b'x' * (service_runner.LOG_ROTATE_BYTES + 1))  # already oversized
+    log_path.write_bytes(b'x' * (logrotate.LOG_ROTATE_BYTES + 1))  # already oversized
 
     times = iter([
         1000.0,
-        1000.0 + service_runner.LOG_ROTATE_CHECK_INTERVAL / 2,
-        1000.0 + service_runner.LOG_ROTATE_CHECK_INTERVAL - 1,
+        1000.0 + logrotate.LOG_ROTATE_CHECK_INTERVAL / 2,
+        1000.0 + logrotate.LOG_ROTATE_CHECK_INTERVAL - 1,
     ])
     monkeypatch.setattr(service_runner.time, 'monotonic', lambda: next(times))
 
     sp = _server_process(tmp_path)
     sp.start()  # consumes times[0] for _started_at/_last_rotate_check; rotates the pre-existing oversized file
-    log_path.write_bytes(b'y' * (service_runner.LOG_ROTATE_BYTES + 1))  # grows oversized again while "running"
+    log_path.write_bytes(b'y' * (logrotate.LOG_ROTATE_BYTES + 1))  # grows oversized again while "running"
 
     getsize_calls = []
     real_getsize = os.path.getsize
@@ -692,25 +693,25 @@ def test_maybe_rotate_log_does_not_stat_before_the_check_interval_elapses(monkey
     sp.maybe_rotate_log()
 
     assert getsize_calls == []
-    assert log_path.stat().st_size == service_runner.LOG_ROTATE_BYTES + 1  # untouched
+    assert log_path.stat().st_size == logrotate.LOG_ROTATE_BYTES + 1  # untouched
     sp.stop()
 
 
 def test_maybe_rotate_log_rotates_an_oversized_log_once_the_interval_elapses(monkeypatch, fake_popen, tmp_path):
     log_path = tmp_path / 'server.log'
 
-    times = iter([1000.0, 1000.0 + service_runner.LOG_ROTATE_CHECK_INTERVAL])
+    times = iter([1000.0, 1000.0 + logrotate.LOG_ROTATE_CHECK_INTERVAL])
     monkeypatch.setattr(service_runner.time, 'monotonic', lambda: next(times))
 
     sp = _server_process(tmp_path)
     sp.start()  # log_path does not exist yet -- start()'s own rotation is a no-op
-    log_path.write_bytes(b'x' * (service_runner.LOG_ROTATE_BYTES + 1))  # grew past threshold while "running"
+    log_path.write_bytes(b'x' * (logrotate.LOG_ROTATE_BYTES + 1))  # grew past threshold while "running"
 
     sp.maybe_rotate_log()  # exactly LOG_ROTATE_CHECK_INTERVAL elapsed -> gate fires
 
     backup = tmp_path / 'server.log.1'
     assert backup.exists()
-    assert backup.stat().st_size == service_runner.LOG_ROTATE_BYTES + 1
+    assert backup.stat().st_size == logrotate.LOG_ROTATE_BYTES + 1
     # Renamed away, not truncated: a live child's stdout fd follows the
     # inode to `.1` (see maybe_rotate_log()'s docstring) -- log_path itself
     # does not exist again until the next start() creates a fresh one.
@@ -727,12 +728,12 @@ def test_maybe_rotate_log_truncates_when_the_rename_itself_fails(monkeypatch, fa
     the whole session on exactly the platform class the bound exists for."""
     log_path = tmp_path / 'server.log'
 
-    times = iter([1000.0, 1000.0 + service_runner.LOG_ROTATE_CHECK_INTERVAL])
+    times = iter([1000.0, 1000.0 + logrotate.LOG_ROTATE_CHECK_INTERVAL])
     monkeypatch.setattr(service_runner.time, 'monotonic', lambda: next(times))
 
     sp = _server_process(tmp_path)
     sp.start()
-    log_path.write_bytes(b'x' * (service_runner.LOG_ROTATE_BYTES + 1))
+    log_path.write_bytes(b'x' * (logrotate.LOG_ROTATE_BYTES + 1))
 
     def failing_rename(src, dst):
         raise PermissionError(32, 'file in use')
@@ -754,8 +755,8 @@ def test_maybe_rotate_log_resets_its_own_clock_after_a_check_fires(monkeypatch, 
 
     times = iter([
         1000.0,                                                      # start()
-        1000.0 + service_runner.LOG_ROTATE_CHECK_INTERVAL,           # 1st check: fires (nothing oversized)
-        1000.0 + 2 * service_runner.LOG_ROTATE_CHECK_INTERVAL - 1,   # too soon for a 2nd check
+        1000.0 + logrotate.LOG_ROTATE_CHECK_INTERVAL,           # 1st check: fires (nothing oversized)
+        1000.0 + 2 * logrotate.LOG_ROTATE_CHECK_INTERVAL - 1,   # too soon for a 2nd check
     ])
     monkeypatch.setattr(service_runner.time, 'monotonic', lambda: next(times))
 
@@ -763,7 +764,7 @@ def test_maybe_rotate_log_resets_its_own_clock_after_a_check_fires(monkeypatch, 
     sp.start()
     sp.maybe_rotate_log()  # 1st check -- advances the internal clock
 
-    log_path.write_bytes(b'x' * (service_runner.LOG_ROTATE_BYTES + 1))
+    log_path.write_bytes(b'x' * (logrotate.LOG_ROTATE_BYTES + 1))
     getsize_calls = []
     real_getsize = os.path.getsize
 
@@ -791,23 +792,23 @@ def test_maybe_rotate_log_truncates_a_still_growing_backup_after_the_first_rotat
 
     times = iter([
         1000.0,                                                    # start()
-        1000.0 + service_runner.LOG_ROTATE_CHECK_INTERVAL,         # gate 1: rotates (rename)
-        1000.0 + 2 * service_runner.LOG_ROTATE_CHECK_INTERVAL,     # gate 2: must truncate the live `.1`
+        1000.0 + logrotate.LOG_ROTATE_CHECK_INTERVAL,         # gate 1: rotates (rename)
+        1000.0 + 2 * logrotate.LOG_ROTATE_CHECK_INTERVAL,     # gate 2: must truncate the live `.1`
     ])
     monkeypatch.setattr(service_runner.time, 'monotonic', lambda: next(times))
 
     sp = _server_process(tmp_path)
     sp.start()  # log_path does not exist yet -- start()'s own rotation is a no-op
 
-    log_path.write_bytes(b'x' * (service_runner.LOG_ROTATE_BYTES + 1))
+    log_path.write_bytes(b'x' * (logrotate.LOG_ROTATE_BYTES + 1))
     sp.maybe_rotate_log()  # gate 1
     assert not log_path.exists()
-    assert backup.stat().st_size == service_runner.LOG_ROTATE_BYTES + 1
+    assert backup.stat().st_size == logrotate.LOG_ROTATE_BYTES + 1
 
     # The child keeps appending to the same inode, now only reachable at
     # `.1` -- simulate it growing past the threshold again.
     with open(backup, 'ab') as fh:
-        fh.write(b'y' * (service_runner.LOG_ROTATE_BYTES + 1))
+        fh.write(b'y' * (logrotate.LOG_ROTATE_BYTES + 1))
 
     sp.maybe_rotate_log()  # gate 2 -- must find `.1` oversized, not skip it
 
@@ -827,7 +828,7 @@ def test_maybe_rotate_log_keeps_total_on_disk_bytes_bounded_across_many_gates(mo
     log_path = tmp_path / 'server.log'
     backup = tmp_path / 'server.log.1'
 
-    times = iter([1000.0 + i * service_runner.LOG_ROTATE_CHECK_INTERVAL for i in range(5)])
+    times = iter([1000.0 + i * logrotate.LOG_ROTATE_CHECK_INTERVAL for i in range(5)])
     monkeypatch.setattr(service_runner.time, 'monotonic', lambda: next(times))
 
     sp = _server_process(tmp_path)
@@ -842,12 +843,12 @@ def test_maybe_rotate_log_keeps_total_on_disk_bytes_bounded_across_many_gates(mo
     def grow_live_file():
         live = log_path if log_path.exists() else backup
         with open(live, 'ab') as fh:
-            fh.write(b'x' * (service_runner.LOG_ROTATE_BYTES + 1))
+            fh.write(b'x' * (logrotate.LOG_ROTATE_BYTES + 1))
 
     for _ in range(4):
         grow_live_file()
         sp.maybe_rotate_log()
-        assert total_bytes() <= 2 * service_runner.LOG_ROTATE_BYTES
+        assert total_bytes() <= 2 * logrotate.LOG_ROTATE_BYTES
 
     sp.stop()
 

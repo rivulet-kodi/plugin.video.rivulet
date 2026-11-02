@@ -294,17 +294,81 @@ def addon_skin_path():
     return ADDON.getAddonInfo('path')
 
 
+def close_quietly(window):
+    """Close `window` (None is allowed) and swallow whatever the close
+    raises. Every `open_*()` entry point calls it from a `finally:` after
+    the window's `start()`/`doModal()`.
+
+    A normal return means the window already closed itself (its own
+    onAction/onClick calls self.close()) - but an exception raised from
+    WITHIN `start()`/`doModal()` (onInit(), or a callback mid-modal) skips
+    that self-close entirely. Closing unconditionally means no exit path
+    leaves a zombie modal window behind; closing an already-closed window
+    is a safe no-op, and a close failing during cleanup must not mask the
+    error that got us here."""
+    if window is None:
+        return
+    try:
+        window.close()
+    except Exception:  # noqa: BLE001 - cleanup must never raise
+        pass
+
+
+# --- catalog paging ------------------------------------------------------------
+#
+# `infowindow.ShowcaseWindow` and `addoncatalogwindow.AddonCatalogWindow`
+# both show a catalog's first page at once and append later pages as a
+# daemon worker fetches them: the worker queues each page on
+# `window._pending_pages` under `window._paging_lock` and wakes the UI
+# thread with Action(noop), which drains the queue. What they fetch and how
+# they pace it differs; the hand-off below is the same and lives here once.
+
+
+def take_pending_pages(window):
+    """Swap `window._pending_pages` for an empty list under
+    `window._paging_lock` and return what was queued. UI thread only:
+    ListItems must be built where they are added."""
+    with window._paging_lock:
+        pages, window._pending_pages = window._pending_pages, []
+    return pages
+
+
+def append_keeping_focus(control, items):
+    """`control.addItems(items)`, keeping the selected row.
+
+    Appending (rather than rebuilding) leaves every already-rendered row
+    untouched, but `addItems()` on a ControlList resets the selection to
+    0, so a page landing while the user scrolls would yank them back to
+    the first row. Restoring by INDEX is sound because this only ever
+    appends: every existing item keeps its index. A negative position
+    means nothing was focused; Kodi's own default is left alone then."""
+    focus_index = control.getSelectedPosition()
+    control.addItems(items)
+    if focus_index > 0:
+        control.selectItem(focus_index)
+
+
+def log_paging_failure(tag, exc):
+    """Report a paging worker's failure at LOGWARNING: a page that
+    silently never arrives looks like a short catalog, not a bug, at the
+    default log level. The worker is a daemon thread with nobody to catch
+    for it, and reporting can itself fail during teardown, so this never
+    raises."""
+    try:
+        from lib.stremio.addons import addon_error_detail
+        from lib.ui.compat import log
+
+        log('%s: catalog paging worker failed: %s' % (tag, addon_error_detail(exc)), xbmc.LOGWARNING)
+    except Exception:  # noqa: BLE001 - reporting must never raise
+        pass
+
+
 def open_window(window_cls, xml_name, *args, **kwargs):
     """Build `window_cls(xml_name, addon_skin_path(), 'Default', '1080i')`
     and return it (unconstructed screens are useless - callers still call
     `.start(...)` themselves, since each screen's `start()` signature
-    differs). The file loaded is kept on the window as `_skin_xml`."""
-    window = window_cls(xml_name, addon_skin_path(), 'Default', '1080i', *args, **kwargs)
-    try:
-        window._skin_xml = xml_name
-    except Exception:  # noqa: BLE001 - a binding that refuses attributes still opens
-        pass
-    return window
+    differs)."""
+    return window_cls(xml_name, addon_skin_path(), 'Default', '1080i', *args, **kwargs)
 
 
 # --- UI phases ---------------------------------------------------------------
@@ -404,12 +468,6 @@ def input_suppressed():
     return _ui_phase == PHASE_PLAYER
 
 
-def player_phase_active():
-    """Alias of `input_suppressed()` for callers that mean the phase, not the
-    input policy."""
-    return _ui_phase == PHASE_PLAYER
-
-
 def begin_player_phase():
     """Phase 1 -> 2 handoff: from now on Rivulet is silent until
     `end_player_phase()`. Called by `close_windows_for_playback()`, i.e. right
@@ -481,7 +539,7 @@ class UiHeartbeat:
         self.start()
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, _exc_type, _exc, _tb):
         self.stop()
         return False
 
@@ -618,11 +676,6 @@ def unregister_transient_dialog(dialog):
         if _TRANSIENT_DIALOGS[index] is dialog:
             del _TRANSIENT_DIALOGS[index]
             return
-
-
-def transient_dialog_active():
-    """True while a spinner/progress dialog is on screen."""
-    return bool(_TRANSIENT_DIALOGS)
 
 
 def redirect_back_to_transient(action):

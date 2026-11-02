@@ -161,7 +161,7 @@ def test_busy_dialog_whose_show_raises_does_not_leave_a_transient_registered(loa
         with uicommon.busy_dialog('My Heading'):
             pass  # pragma: no cover - create() raised first
 
-    assert uicommon.transient_dialog_active() is False
+    assert uicommon._TRANSIENT_DIALOGS == []
 
 
 # ---------------------------------------------------------------------------
@@ -424,7 +424,6 @@ class _ProbeWindow:
 def test_phase_defaults_to_addon_and_input_is_live(load_uicommon):
     ctx = load_uicommon()
     assert ctx.uicommon.input_suppressed() is False
-    assert ctx.uicommon.player_phase_active() is False
 
 
 def test_begin_and_end_player_phase_flip_the_flag_and_publish_it(load_uicommon):

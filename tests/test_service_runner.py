@@ -28,6 +28,7 @@ import sys
 import pytest
 
 import lib.libserver as libserver
+import lib.logrotate as logrotate
 import lib.serverbin as serverbin
 import lib.service_runner as service_runner
 from tests.kodistubs import install_kodi_stubs
@@ -710,7 +711,7 @@ def test_main_healthy_loop_rotates_log_on_a_coarse_cadence_not_every_tick(monkey
     monkeypatch.setattr(service_runner, 'resolve_binary', lambda *a, **kw: '/opt/bin/rivulet-engine')
     # service_runner.ServerProcess is deliberately left un-patched here --
     # only subprocess.Popen is faked (fake_popen) -- so the real
-    # maybe_rotate_log()/_rotate_log() gating logic under test actually runs.
+    # maybe_rotate_log() gating logic under test actually runs.
 
     log_path = tmp_path / service_runner.LOG_FILENAME
     log_path.write_bytes(b'hello')  # small, pre-existing log: start()'s own rotation is a no-op
@@ -719,7 +720,7 @@ def test_main_healthy_loop_rotates_log_on_a_coarse_cadence_not_every_tick(monkey
         0.0,                                          # AutoloadTrigger construction (autoload stays disabled)
         0.0,                                          # iteration 1: ServerProcess.start()
         100.0,                                         # iteration 2: gated tick, well inside the window
-        service_runner.LOG_ROTATE_CHECK_INTERVAL,      # iteration 3: crosses the interval boundary
+        logrotate.LOG_ROTATE_CHECK_INTERVAL,      # iteration 3: crosses the interval boundary
     ])
     monkeypatch.setattr(service_runner.time, 'monotonic', lambda: next(monotonic_values))
 
@@ -740,7 +741,7 @@ def test_main_healthy_loop_rotates_log_on_a_coarse_cadence_not_every_tick(monkey
     def _grow_log_then_snapshot(_monitor):
         # Simulates the still-running child appending past the threshold
         # between iteration 2's (gated, no-op) check and iteration 3's.
-        log_path.write_bytes(log_path.read_bytes() + b'x' * (service_runner.LOG_ROTATE_BYTES + 1))
+        log_path.write_bytes(log_path.read_bytes() + b'x' * (logrotate.LOG_ROTATE_BYTES + 1))
         getsize_counts_at_tick.append(len(getsize_calls))
 
     intervals = []
@@ -762,7 +763,7 @@ def test_main_healthy_loop_rotates_log_on_a_coarse_cadence_not_every_tick(monkey
 
     backup = tmp_path / (service_runner.LOG_FILENAME + '.1')
     assert backup.exists()
-    assert backup.stat().st_size == len(b'hello') + service_runner.LOG_ROTATE_BYTES + 1
+    assert backup.stat().st_size == len(b'hello') + logrotate.LOG_ROTATE_BYTES + 1
     assert not log_path.exists()  # renamed away; a fresh one appears only on the next start()
 
 

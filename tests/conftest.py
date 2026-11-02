@@ -53,9 +53,14 @@ def _fresh_process_state():
       fetched a URL would decide every later test's hit or miss.
     * `lib.ui.previews`: one test's coverflow must not hand another test's
       `open_detail` a fallback it never set up.
+    * `lib.ui.posterwarm`'s warmer (`_seen`, `_queue`, `_running`,
+      `_thread`, `_serving`): a URL one test queued is "already seen" in
+      the next, and a warmer left marked running swallows its batches.
 
     `newhome` imports Kodi, so it is never imported here: only a copy some
-    test already loaded can hold the flag, and that is the copy reset. A
+    test already loaded can hold the flag, and that is the copy reset.
+    `posterwarm` is reset the same way, so its lazy Kodi imports never run
+    here either. A
     module a test reloads under `install_kodi_stubs` starts fresh anyway and
     is discarded when the test ends; this runs before and after it, on the
     copies that stay in `sys.modules`."""
@@ -71,6 +76,9 @@ def _fresh_process_state():
         newhome = sys.modules.get('lib.ui.newhome')
         if newhome is not None:
             newhome._library_dirty = False
+        posterwarm = sys.modules.get('lib.ui.posterwarm')
+        if posterwarm is not None:
+            posterwarm.reset_warmer()
 
     _clear()
     yield

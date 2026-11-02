@@ -20,7 +20,6 @@ from lib import settings as _settings
 ADDON = xbmcaddon.Addon()
 ADDON_ID = ADDON.getAddonInfo('id')
 ADDON_NAME = ADDON.getAddonInfo('name')
-ADDON_ICON = ADDON.getAddonInfo('icon')
 ADDON_FANART = ADDON.getAddonInfo('fanart')
 
 _LOG_PREFIX = '[%s] ' % ADDON_ID

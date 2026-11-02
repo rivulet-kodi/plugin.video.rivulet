@@ -112,11 +112,6 @@ def trailer_urls(yt, server_url=None):
         yield url
 
 
-def trailer_url(yt):
-    """The first of `trailer_urls(yt)`, or ``''``."""
-    return next(iter(trailer_urls(yt)), '')
-
-
 def _full_meta(meta, stype, sid):
     """`meta`, or the full meta when `meta` has no trailer field (a
     catalog preview drops them)."""

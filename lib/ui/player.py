@@ -357,18 +357,6 @@ def _fetch_subtitle_urls(behavior_hints, stype, sid):
         return []
 
 
-def _attach_subtitles(list_item, behavior_hints, stype, sid):
-    """Best-effort, blocking addon-subtitle lookup straight onto
-    `list_item` (see `_fetch_subtitle_urls()` for the language filter).
-    `_resolve_playable_item()` uses `_SubtitleFetch` instead so the
-    lookup overlaps stream preparation; this stays the one-shot form."""
-    if not setting_bool('subs_enable', True):
-        return
-    urls = _fetch_subtitle_urls(behavior_hints, stype, sid)
-    if urls:
-        list_item.setSubtitles(urls)
-
-
 class _SubtitleFetch:
     """Addon subtitle lookup on a background thread, started when stream
     preparation starts so it overlaps the server resolve and the torrent
@@ -706,7 +694,7 @@ class _KeepAlivePin:
 
 
 #: The torrent session currently handed off to Kodi: `(server, info_hash,
-#: pin)`, set when pre-buffer succeeds, consumed by `_end_session()`.
+#: pin)`, set when pre-buffer succeeds, consumed by `_end_session_if()`.
 _session_lock = threading.Lock()
 _session = None
 
@@ -747,17 +735,9 @@ def _release_session(session, remove=True):
         server.remove_engine(info_hash, timeout=2)
 
 
-def _end_session():
-    """Playback ended (or never started): release the current session."""
-    global _session
-    with _session_lock:
-        current, _session = _session, None
-    if current is not None:
-        _release_session(current)
-
-
 def _end_session_if(pin):
-    """End the current session only if it is still `pin`'s. The identity
+    """Playback ended (or never started): release the current session -
+    but only if it is still `pin`'s. The identity
     check and the pop share one lock hold: checked apart, a session
     registered in between would be ended by the old watcher."""
     global _session
@@ -775,7 +755,7 @@ def _current_pin():
 
 def _watch_playback_end():
     """Spawn a daemon that waits for the just-started playback to begin and
-    end, then runs `_end_session()`. No-op when no torrent session exists."""
+    end, then runs `_end_session_if()`. No-op when no torrent session exists."""
     with _session_lock:
         if _session is None:
             return
@@ -936,7 +916,7 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=None):
 
     # Normalize here too: the play-URL path already normalizes via
     # normalize_info_hash (server.py:148), but this pre-buffer polling
-    # (create_engine/file_stats/etc.) used the raw stream value directly,
+    # (create_engine/iter_front/etc.) used the raw stream value directly,
     # so a base32 or whitespace-padded infoHash (both explicitly accepted
     # by normalize_info_hash) polled the wrong URL and playback was
     # refused even though the actual play URL was fine.

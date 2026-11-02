@@ -104,6 +104,7 @@ from lib.ui.uicommon import (
     CANCELLED,
     BaseWindow,
     busy_dialog,
+    close_quietly,
     close_windows_for_playback,
     deliver_queued_input,
     end_player_phase,
@@ -1201,22 +1202,6 @@ def _query_addon_streams_retrying(client, transport_url, addon_name, stype, sid)
     return pairs, failed, reason
 
 
-def _supported_stream_addons(stype, sid):
-    """Every installed addon whose manifest declares `stream` support
-    for (stype, sid) - the exact filter the old serial loop applied
-    before its own `for`, factored out so both `_fetch_stream_pairs()`
-    and `open_streams()`'s own fan-out share one list."""
-    from lib.stremio.addons import addon_supports
-
-    store = get_store()
-    addons = []
-    for descriptor in store.get_enabled_addons():
-        manifest = descriptor.get('manifest') or {}
-        if addon_supports(manifest, 'stream', stype, sid):
-            addons.append((descriptor, manifest))
-    return addons
-
-
 #: Anime ids stream addons take as they are; their episode numbers do not
 #: map onto an IMDb season and episode.
 _NATIVE_PREFIXES = ('kitsu:', 'mal:', 'anilist:', 'anidb:')
@@ -1916,17 +1901,7 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
                 feed.stop()
             return False
         finally:
-            # A normal return means StreamsWindow already closed itself (its
-            # own onAction/onClick calls self.close()) before .start() returned
-            # - but an exception raised from WITHIN .start() (onInit(), or a
-            # callback mid-doModal()) skips that self-close entirely. Close
-            # unconditionally here so no exit path leaves a zombie modal
-            # window behind; closing an already-closed window is a safe no-op.
-            if win is not None:
-                try:
-                    win.close()
-                except Exception:
-                    pass
+            close_quietly(win)
 
         if live:
             # The live streaming phase only ever feeds the FIRST window

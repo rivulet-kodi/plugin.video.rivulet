@@ -19,11 +19,11 @@ fetch it, not on every remote click.
 """
 
 import json
-import math
 import os
-import tempfile
 import threading
 import time
+
+from lib.stremio import jsonfile
 
 #: About half a megabyte. Oldest pages go first. A single page that is
 #: itself over the budget is kept: evicting it would make the cache
@@ -133,31 +133,12 @@ def cache_key(transport, ctype, cid, extra=None):
 
 
 def _atomic_write(path, payload):
-    directory = os.path.dirname(path) or '.'
-    fd, tmp_path = tempfile.mkstemp(prefix='.tmp-pages-', dir=directory)
-    try:
-        with os.fdopen(fd, 'w') as handle:
-            handle.write(json.dumps(payload, separators=(',', ':')))
-        os.replace(tmp_path, path)
-    except Exception:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
-        raise
+    jsonfile.write_json(path, payload, '.tmp-pages-')
 
 
 def _valid_entry(entry):
     """Reject malformed disk entries before they reach age/eviction math."""
-    if not isinstance(entry, dict):
-        return False
-    stamp = entry.get('stored_at')
-    if isinstance(stamp, bool) or not isinstance(stamp, (int, float)):
-        return False
-    try:
-        if not math.isfinite(stamp):
-            return False
-    except OverflowError:
+    if not isinstance(entry, dict) or not jsonfile.finite_number(entry.get('stored_at')):
         return False
     metas = entry.get('metas')
     return isinstance(metas, list) and all(isinstance(meta, dict) for meta in metas)
@@ -177,11 +158,7 @@ class PageCache:
         return self._clock()
 
     def _load(self):
-        try:
-            with open(self.path) as handle:
-                payload = json.load(handle)
-        except (OSError, ValueError):
-            return
+        payload = jsonfile.read_json(self.path)
         entries = payload.get('entries') if isinstance(payload, dict) else None
         if isinstance(entries, dict):
             self._entries = {key: entry for key, entry in entries.items() if _valid_entry(entry)}

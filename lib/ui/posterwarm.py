@@ -264,7 +264,9 @@ def _drain():
 
 
 def reset_warmer():
-    """Test hook. Drops the queued URL set."""
+    """Forget every queued and seen URL and the warmer thread. Only
+    tests/conftest.py's `_fresh_process_state` calls it: in Kodi each
+    plugin run is a fresh interpreter, but pytest shares one process."""
     global _running, _thread, _serving
     with _lock:
         _seen.clear()

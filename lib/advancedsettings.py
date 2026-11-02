@@ -24,7 +24,7 @@ STATUS_EXISTS = 'exists'
 
 
 class AdvancedSettingsError(Exception):
-    """Raised when install()/read_recommended_xml() hits an I/O error."""
+    """Raised when install() hits an I/O error."""
 
 
 def install(source_path, dest_path):
@@ -116,18 +116,3 @@ def _publish(tmp_path, dest_path):
         return True
     os.remove(tmp_path)
     return True
-
-
-def read_recommended_xml(source_path):
-    """Return the recommended advancedsettings.xml contents as text.
-
-    Useful for callers that want to preview/log the template without
-    installing it. Raises AdvancedSettingsError on any read failure.
-    """
-    try:
-        with open(source_path, encoding='utf-8') as fh:
-            return fh.read()
-    except OSError as exc:
-        raise AdvancedSettingsError(
-            'failed to read advancedsettings.xml template: %s' % exc
-        ) from exc

@@ -1817,12 +1817,6 @@ def _shelf_worker(window_ref):
                     window._shelf_running -= 1
 
 
-def _join_shelf_extends(window):
-    """Test hook; production applies results on Action(noop)."""
-    for thread in list(getattr(window, '_shelf_threads', [])):
-        thread.join(timeout=2)
-
-
 def _apply_shelf_extends(window):
     with _shelf_lock(window):
         ready = list(getattr(window, '_shelf_ready', []))
@@ -2025,13 +2019,6 @@ def _drain_library_meta(window_ref, idle, stop):
             xbmc.executebuiltin('Action(noop)')
         except Exception:
             pass
-
-
-def _join_library_meta(window):
-    """Test hook. Production applies the answer on the worker's noop."""
-    idle = getattr(window, '_library_meta_idle', None)
-    if idle is not None:
-        idle.wait(timeout=2)
 
 
 _HERO_PROPS = (
@@ -2323,6 +2310,48 @@ def _set_fill_image(window, image):
         pass
 
 
+def _overlay_hero_facts(window, item, meta, facts_raw):
+    """`meta` (the hero's catalog line) with the cached ratings for the
+    poster's `hero_facts` merged in. Shared by `paint_hero` and the search
+    screen's hero (`lib.ui.newsearch._paint_hero`); each decides when to
+    call it.
+
+    A ratings key rebuilds the line from the cached scores. No key, or a
+    cache miss, leaves the catalog line alone and returns at once. Once
+    scores apply, the result is kept on the card, so the next paint of
+    this title skips the decode and the merge (#17)."""
+    from lib.ui.ratingsched import overlay_text
+
+    try:
+        facts = json.loads(facts_raw)
+    except ValueError:
+        return meta
+    if not isinstance(facts, dict):
+        return meta
+    overlaid = overlay_text(facts, meta, _upcoming_facts(window))
+    if overlaid != meta:
+        item.setProperty('hero_meta', overlaid)
+        item.setProperty('facts_done', '1')
+    return overlaid
+
+
+def _hero_logo(window, item):
+    """The title logo to show for `item`, or '' to keep the text title.
+
+    The text title stays up until Kodi has loaded the logo once (#10);
+    meanwhile the wanted logo is warmed. The next titles' logos are
+    warmed and checked ahead, so they are ready on arrival. Shared by
+    `paint_hero` and `lib.ui.newsearch._paint_hero`."""
+    from lib.ui import logocheck
+
+    wanted_logo = item.getProperty('hero_logo') or ''
+    logo = wanted_logo if _logo_known_good(wanted_logo) else ''
+    upcoming_logos = _upcoming_logos(window)
+    _warm_logos(window, ([wanted_logo] if wanted_logo and not logo else []) + upcoming_logos)
+    logocheck.ask(upcoming_logos)
+    return logo
+
+
 def paint_hero(window, item=None):
     """Paint the backdrop from the focused poster.
 
@@ -2358,33 +2387,10 @@ def paint_hero(window, item=None):
     from lib.ui.ratingsched import needs_refresh
 
     if facts_raw and (item.getProperty('facts_done') != '1' or needs_refresh(facts_raw)):
-        # A ratings key rebuilds this from the cached scores. No key, or
-        # a cache miss, leaves the catalog line alone and returns at once.
-        from lib.ui.ratingsched import overlay_text
-
-        try:
-            facts = json.loads(facts_raw)
-        except ValueError:
-            facts = None
-        if isinstance(facts, dict):
-            overlaid = overlay_text(facts, meta, _upcoming_facts(window))
-            if overlaid != meta:
-                # Scores applied: keep the result on the card, so the next
-                # paint of this title skips the decode and the merge (#17).
-                item.setProperty('hero_meta', overlaid)
-                item.setProperty('facts_done', '1')
-            meta = overlaid
+        meta = _overlay_hero_facts(window, item, meta, facts_raw)
     plot = item.getProperty('hero_plot') or item.getProperty('subtitle') or ''
     fanart = item.getProperty('fanart') or ''
-    wanted_logo = item.getProperty('hero_logo') or ''
-    # The text title stays up until Kodi has loaded the logo once (#10).
-    logo = wanted_logo if _logo_known_good(wanted_logo) else ''
-    upcoming_logos = _upcoming_logos(window)
-    _warm_logos(window, ([wanted_logo] if wanted_logo and not logo else []) + upcoming_logos)
-    # The next titles' logos are checked ahead, so they are ready on arrival.
-    from lib.ui import logocheck
-
-    logocheck.ask(upcoming_logos)
+    logo = _hero_logo(window, item)
     fill = item.getProperty('hero_fill') == '1' and bool(fanart)
     runtime = item.getProperty('hero_runtime') or ''
     # Every action repaints (worker noops, mouse moves, a key that did not

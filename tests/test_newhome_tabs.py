@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from lib import homelayout
+from tests.homehooks import join_shelf_extends
 from tests.test_newhome import _FakeStore
 from tests.test_newhome import load_homewindow as load_homewindow
 
@@ -255,7 +256,7 @@ def test_library_split_keeps_newest_first_and_lazily_extends(load_homewindow, mo
     win.setFocusId(30041)
     win.getControl(30041).selectItem(19)
     hw._maybe_extend_focused_shelf(win)
-    hw._join_shelf_extends(win)
+    join_shelf_extends(win)
     hw._apply_shelf_extends(win)
     assert win.getControl(30041).size() == 48
     assert win.getControl(30041).getSelectedPosition() == 19
@@ -274,7 +275,7 @@ def test_prefetch_threshold_is_exactly_five_and_append_keeps_the_selected_poster
     selected = control.getSelectedItem()
     resets = control.reset_calls
     hw._maybe_extend_focused_shelf(win)
-    hw._join_shelf_extends(win)
+    join_shelf_extends(win)
     hw._apply_shelf_extends(win)
     assert control.size() == 30
     assert control.getSelectedItem() is selected
@@ -361,7 +362,7 @@ def test_page_safety_ceiling_stops_at_2000_and_logs(load_homewindow, monkeypatch
     win.setFocusId(30041)
     win.getControl(30041).selectItem(23)
     hw._maybe_extend_focused_shelf(win)
-    hw._join_shelf_extends(win)
+    join_shelf_extends(win)
     hw._apply_shelf_extends(win)
     assert len(state['metas']) == 2000
     assert state['exhausted']
@@ -388,11 +389,11 @@ def test_tab_switch_discards_old_arrivals_and_already_ready_batches(load_homewin
     assert started.wait(1)
     if ready_before_switch:
         release.set()
-        hw._join_shelf_extends(win)
+        join_shelf_extends(win)
         assert win._shelf_ready
     hw._switch_tab(win, 'mystuff')
     release.set()
-    hw._join_shelf_extends(win)
+    join_shelf_extends(win)
     hw._apply_shelf_extends(win)
     assert original['pending'] == pending
     assert all(m['id'] != 'tt1000' for m in original['metas'])
@@ -430,7 +431,7 @@ def test_page_worker_bound_one_per_row_two_overall_and_newest_queued_first(load_
     hw._schedule_shelf_extend(win, 30043, 24)
     hw._schedule_shelf_extend(win, 30044, 24)
     release.set()
-    hw._join_shelf_extends(win)
+    join_shelf_extends(win)
     hw._apply_shelf_extends(win)
     assert peak == [2]
     assert len(order) == 4

@@ -25,19 +25,17 @@ _RELOAD_MODULE_NAMES = (
 
 class _FakeStore:
     """Fake `lib.store.Store`: an in-memory search-history list plus
-    `get_addons()`/`get_enabled_addons()`'s backing list. `add_search_query`/`clear_search_history`
-    reproduce the real Store's move-to-front dedup and clear contract (see
-    lib/store.py, not touched by this change) closely enough that
-    `_run_search`'s post-search `_reload()` reflects the just-recorded
-    query in the same order the real Store would; `.search_queries`/
-    `.cleared` additionally record every call so a test can assert
-    exactly what was persisted."""
+    `get_addons()`/`get_enabled_addons()`'s backing list. `add_search_query`
+    reproduces the real Store's move-to-front dedup (see lib/store.py)
+    closely enough that `_run_search`'s post-search `_reload()` reflects
+    the just-recorded query in the same order the real Store would;
+    `.search_queries` additionally records every call so a test can
+    assert exactly what was persisted."""
 
     def __init__(self, addons=None, history=None):
         self._addons = addons or []
         self._history = list(history or [])
         self.search_queries = []  # [query, ...] - every add_search_query() call
-        self.cleared = 0          # clear_search_history() call count
 
     def get_addons(self):
         return self._addons
@@ -55,10 +53,6 @@ class _FakeStore:
             return
         self._history = [q for q in self._history if q.lower() != query.lower()]
         self._history.insert(0, query)
-
-    def clear_search_history(self):
-        self.cleared += 1
-        self._history = []
 
 
 class _FakeAddonClient:

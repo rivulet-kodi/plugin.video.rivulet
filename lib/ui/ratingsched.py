@@ -382,12 +382,6 @@ def _provider_key(provider, key):
     return '%s\n%s' % (provider, _token(key))
 
 
-def _available_key(provider, key):
-    with _lock:
-        until = _provider_until.get(_provider_key(provider, key), 0)
-    return '' if until > time.monotonic() else key
-
-
 def _safe_category(category):
     # Only known categories and exception class names enter diagnostics.
     text = str(category)

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 M0Rf30
 # SPDX-License-Identifier: MIT
 
-"""Tests for lib.ui.detailwindow: `_episode_rows()`/`_group_by_season()`
+"""Tests for lib.ui.detailwindow: `_ordered_videos()`/`_group_by_season()`
 and `DetailWindow` (including its season-selector bar, id `SEASON_BAR`/
 30007), Rivulet's custom replacement for the classical `meta()`/
 `videos()` directories, exercised against the shared fake xbmc/xbmcgui
@@ -75,11 +75,11 @@ def _window_with_focused_row(detailwindow_mod, meta, stype, row_id):
 
 
 # ---------------------------------------------------------------------------
-# _episode_rows() - pure flatten/sort/label logic
+# _ordered_videos()/_episode_label() - pure flatten/sort/label logic
 # ---------------------------------------------------------------------------
 
 
-def test_episode_rows_orders_specials_last_despite_lowest_season_number(load_detailwindow):
+def test_ordered_videos_orders_specials_last_despite_lowest_season_number(load_detailwindow):
     ctx = load_detailwindow()
     videos = [
         {'id': 'v-special', 'season': 0, 'episode': 1, 'title': 'A Special'},
@@ -88,9 +88,9 @@ def test_episode_rows_orders_specials_last_despite_lowest_season_number(load_det
         {'id': 'v-2x01', 'season': 2, 'episode': 1, 'title': 'S2 Ep One'},
     ]
 
-    rows = ctx.detailwindow._episode_rows(videos)
+    ordered = ctx.detailwindow._ordered_videos(videos)
 
-    assert [row_id for row_id, _label in rows] == ['v-1x01', 'v-1x02', 'v-2x01', 'v-special']
+    assert [video['id'] for video in ordered] == ['v-1x01', 'v-1x02', 'v-2x01', 'v-special']
 
 
 @pytest.mark.parametrize('video,expected_label', [
@@ -100,31 +100,27 @@ def test_episode_rows_orders_specials_last_despite_lowest_season_number(load_det
     ({'id': 'v4', 'season': 1, 'episode': 1}, 'S01E01 \u00b7 v4'),
 ], ids=['title', 'missing-season-and-episode-default-to-zero', 'title-missing-falls-back-to-name',
         'title-and-name-missing-falls-back-to-id'])
-def test_episode_rows_label_format_and_title_fallback_chain(load_detailwindow, video, expected_label):
+def test_episode_label_format_and_title_fallback_chain(load_detailwindow, video, expected_label):
     ctx = load_detailwindow()
 
-    rows = ctx.detailwindow._episode_rows([video])
-
-    assert rows == [(video['id'], expected_label)]
+    assert ctx.detailwindow._episode_label(video) == expected_label
 
 
-def test_episode_rows_filters_out_videos_without_an_id(load_detailwindow):
+def test_ordered_videos_filters_out_videos_without_an_id(load_detailwindow):
     ctx = load_detailwindow()
     videos = [
         {'season': 1, 'episode': 1, 'title': 'No Id'},
         {'id': 'v1', 'season': 1, 'episode': 2, 'title': 'Has Id'},
     ]
 
-    rows = ctx.detailwindow._episode_rows(videos)
-
-    assert rows == [('v1', 'S01E02 \u00b7 Has Id')]
+    assert [video['id'] for video in ctx.detailwindow._ordered_videos(videos)] == ['v1']
 
 
 @pytest.mark.parametrize('videos', [[], None], ids=['empty-list', 'none'])
-def test_episode_rows_empty_or_none_input_returns_empty_list(load_detailwindow, videos):
+def test_ordered_videos_empty_or_none_input_returns_empty_list(load_detailwindow, videos):
     ctx = load_detailwindow()
 
-    assert ctx.detailwindow._episode_rows(videos) == []
+    assert ctx.detailwindow._ordered_videos(videos) == []
 
 
 # ---------------------------------------------------------------------------
@@ -1728,11 +1724,10 @@ _WATCHED_VIDEOS = [
 
 
 def _watched_item(*watched_ids):
-    from lib.stremio.watchedbitfield import set_video_watched
+    from lib.stremio.watchedbitfield import WatchedBitfield
     ids = [video['id'] for video in _WATCHED_VIDEOS]
-    serial = None
-    for video_id in watched_ids:
-        serial = set_video_watched(serial, ids, video_id, True)
+    flags = [video_id in watched_ids for video_id in ids]
+    serial = WatchedBitfield.construct_from_array(flags, ids).serialize()
     return {'_id': 'tt1', 'state': {'watched': serial}}
 
 

@@ -727,14 +727,14 @@ def test_back_reaching_a_screen_while_a_spinner_is_up_cancels_the_spinner_not_th
         closes = _count_closes(win)
         spinner = ctx.dialogs.RivuletBusy()
         spinner.create('Loading')
-        assert ctx.uicommon.transient_dialog_active() is True
+        assert bool(ctx.uicommon._TRANSIENT_DIALOGS) is True
 
         win.onAction(xbmcgui.Action(92))
 
         assert spinner.iscanceled() is True, name
         assert closes == [] and win.closed is False, name
         spinner.close()
-        assert ctx.uicommon.transient_dialog_active() is False
+        assert bool(ctx.uicommon._TRANSIENT_DIALOGS) is False
 
         win.onAction(xbmcgui.Action(92))  # normal Back once the spinner is gone
         assert closes == [True] and win.closed is True, name
@@ -851,6 +851,6 @@ def test_unregister_is_by_identity_and_tolerates_unknown_dialogs(load_ui):
     ctx.uicommon.register_transient_dialog(second)
     ctx.uicommon.unregister_transient_dialog(_D())  # unknown: no-op
     ctx.uicommon.unregister_transient_dialog(first)
-    assert ctx.uicommon.transient_dialog_active() is True
+    assert bool(ctx.uicommon._TRANSIENT_DIALOGS) is True
     ctx.uicommon.unregister_transient_dialog(second)
-    assert ctx.uicommon.transient_dialog_active() is False
+    assert bool(ctx.uicommon._TRANSIENT_DIALOGS) is False

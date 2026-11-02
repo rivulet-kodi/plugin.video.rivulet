@@ -4,8 +4,8 @@
 """Tests for lib.advancedsettings (opt-in advancedsettings.xml installer).
 
 Pure Python (no Kodi imports), same rationale as lib/serverbin.py /
-tests/test_serverbin.py: install()/read_recommended_xml() only ever touch
-paths handed to them explicitly, so every test drives real files under
+tests/test_serverbin.py: install() only ever touches
+paths handed to it explicitly, so every test drives real files under
 pytest's tmp_path - no fixture, no filesystem access outside tmp_path, no
 network.
 """
@@ -20,7 +20,6 @@ from lib.advancedsettings import (
     STATUS_INSTALLED,
     AdvancedSettingsError,
     install,
-    read_recommended_xml,
 )
 
 _TEMPLATE_TEXT = (
@@ -303,23 +302,6 @@ def test_install_refuses_when_existing_dest_is_empty_or_malformed(tmp_path, exis
 
     assert status == STATUS_EXISTS
     assert dest.read_text(encoding='utf-8') == existing_content
-
-
-# ---------------------------------------------------------------------------
-# read_recommended_xml()
-# ---------------------------------------------------------------------------
-
-
-def test_read_recommended_xml_returns_file_contents(tmp_path):
-    source = tmp_path / 'source.xml'
-    source.write_text(_TEMPLATE_TEXT, encoding='utf-8')
-
-    assert read_recommended_xml(str(source)) == _TEMPLATE_TEXT
-
-
-def test_read_recommended_xml_raises_advancedsettingserror_when_missing(tmp_path):
-    with pytest.raises(AdvancedSettingsError):
-        read_recommended_xml(str(tmp_path / 'missing.xml'))
 
 
 # ---------------------------------------------------------------------------

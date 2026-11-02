@@ -6,6 +6,7 @@ import pytest
 
 from lib import homelayout
 from lib.stremio.addons import AddonError
+from tests.homehooks import join_shelf_extends
 from tests.test_newhome import _FakeStore
 from tests.test_newhome import load_homewindow as load_homewindow
 from tests.test_newhome_tabs import metas
@@ -55,7 +56,7 @@ def test_first_paint_ignores_a_thirteen_second_page_then_applies_only_current_re
             win.close()
     finally:
         release.set()
-    hw._join_shelf_extends(win)
+    join_shelf_extends(win)
     hw._apply_shelf_extends(win)
     assert len(state['items']) == (20 if leave else 24)
     assert calls == [20]
@@ -78,7 +79,7 @@ def test_failed_page_is_shared_by_tab_return_rebuild_and_new_home_then_retried(l
     monkeypatch.setattr(ctx.views, '_fetch_catalog', fetch)
     win, _ = prepare(ctx, monkeypatch)
     win.onInit()
-    hw._join_shelf_extends(win)
+    join_shelf_extends(win)
     hw._apply_shelf_extends(win)
     assert calls == [20]
     hw._switch_tab(win, 'mystuff')
@@ -98,7 +99,7 @@ def test_failed_page_is_shared_by_tab_return_rebuild_and_new_home_then_retried(l
     second.getControl(30041).selectItem(19)
     second.setFocusId(30041)
     hw._maybe_extend_focused_shelf(second)
-    hw._join_shelf_extends(second)
+    join_shelf_extends(second)
     hw._apply_shelf_extends(second)
     assert calls == [20, 20, 40]
     assert len(state['metas']) == 40

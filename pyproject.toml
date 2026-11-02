@@ -26,6 +26,45 @@ show_missing = true
 skip_covered = false
 fail_under = 90
 
+[tool.vulture]
+# Dead-code check over what ships, plus the whitelist of names reached
+# dynamically (each entry there says who reaches it).
+paths = ["lib", "default.py", "service.py", "vulture_whitelist.py"]
+# Kept verbatim so they stay diffable against upstream; their unused API
+# is upstream's, not ours.
+exclude = [
+    # Nayuki QR-Code-generator (MIT), python/qrcodegen.py at 777682a.
+    "lib/qrcodegen.py",
+    # Port of pieroxy's lz-string (https://github.com/pieroxy/lz-string),
+    # kept bit-for-bit with it; its decoder is the reference inverse.
+    "lib/stremio/lzstring.py",
+]
+min_confidence = 60
+sort_by_size = true
+ignore_names = [
+    # xbmcgui.WindowXML / WindowXMLDialog: Kodi calls these on our screens.
+    "onInit",
+    "onClick",
+    # xbmc.Player: Kodi calls these (service_runner.py, streamswindow.py).
+    "onAVStarted",
+    "onPlayBackStopped",
+    "onPlayBackEnded",
+    "onPlayBackError",
+    # xbmc.Monitor: Kodi calls it when a setting changes (service_runner.py).
+    "onSettingsChanged",
+    # http.server / socketserver hooks the stdlib reads or calls by name
+    # (pairing.py's handler and server).
+    "do_GET",
+    "do_POST",
+    "log_message",
+    "version_string",
+    "handle_error",
+    "protocol_version",
+    "daemon_threads",
+    "allow_reuse_address",
+    "close_connection",
+]
+
 [tool.ruff]
 target-version = "py38"
 line-length = 100
@@ -103,3 +142,29 @@ module = [
     "lib.stremio.linklogin",
 ]
 disable_error_code = ["import-untyped"]
+
+# Duplication gate: `pylint lib default.py service.py` (`make dupes`, and
+# the `lint-type` CI job). Pylint is used for ONE check, duplicate-code
+# (R0801); ruff stays the linter. Six or more matching lines, after
+# dropping imports, docstrings and comments, fail it. Extract a helper in
+# the right layer instead (never an xbmc import into a Kodi-independent
+# module). Copies kept on purpose (Kodi independence, per-call-site
+# fan-out bounds, two protocol shapes that only look alike) get a
+# file-level `# pylint: disable=duplicate-code` with the reason beside it;
+# none are needed today.
+[tool.pylint.main]
+# 3.8 is the floor (Kodi 19); pylint parses with the running interpreter,
+# this only keeps version-dependent checks honest.
+py-version = "3.8"
+reports = false
+score = false
+
+[tool.pylint."messages control"]
+disable = ["all"]
+enable = ["duplicate-code"]
+
+[tool.pylint.similarities]
+min-similarity-lines = 6
+ignore-imports = true
+ignore-docstrings = true
+ignore-comments = true

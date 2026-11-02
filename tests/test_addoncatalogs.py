@@ -25,7 +25,6 @@ from lib.stremio.addoncatalogs import (
     fetch_addon_catalog,
     fetch_addon_catalog_cached,
     fetch_addon_catalogs,
-    iter_addon_catalogs,
     iter_unique_addon_catalogs,
 )
 from lib.stremio.addons import AddonError
@@ -37,11 +36,11 @@ def _addon(transport_url, manifest):
 
 
 # ---------------------------------------------------------------------------
-# iter_addon_catalogs
+# iter_unique_addon_catalogs: source discovery
 # ---------------------------------------------------------------------------
 
 
-def test_iter_addon_catalogs_finds_a_non_cinemeta_addon():
+def test_iter_unique_addon_catalogs_finds_a_non_cinemeta_addon():
     """Proves there is no Cinemeta special-casing: an unrelated addon
     publishing addonCatalogs is picked up exactly like any other."""
     addons = [
@@ -50,7 +49,7 @@ def test_iter_addon_catalogs_finds_a_non_cinemeta_addon():
             "addonCatalogs": [{"type": "movie", "id": "top", "name": "Top"}],
         }),
     ]
-    results = list(iter_addon_catalogs(addons))
+    results = list(iter_unique_addon_catalogs(addons))
     assert len(results) == 1
     transport_url, manifest, addon_catalog = results[0]
     assert transport_url == "https://other.example/manifest.json"
@@ -58,7 +57,7 @@ def test_iter_addon_catalogs_finds_a_non_cinemeta_addon():
     assert addon_catalog["id"] == "top"
 
 
-def test_iter_addon_catalogs_ignores_manifest_catalogs_field():
+def test_iter_unique_addon_catalogs_ignores_manifest_catalogs_field():
     """manifest['catalogs'] (meta catalogs) is a different field from
     manifest['addonCatalogs'] and must never be confused with it."""
     addons = [
@@ -67,40 +66,7 @@ def test_iter_addon_catalogs_ignores_manifest_catalogs_field():
             "catalogs": [{"type": "movie", "id": "top"}],
         }),
     ]
-    assert list(iter_addon_catalogs(addons)) == []
-
-
-def test_iter_addon_catalogs_aggregates_across_multiple_addons():
-    addons = [
-        _addon("https://a.example/manifest.json", {"id": "a", "addonCatalogs": [{"type": "movie", "id": "x"}]}),
-        _addon("https://b.example/manifest.json", {"id": "b", "addonCatalogs": [{"type": "series", "id": "y"}]}),
-    ]
-    results = list(iter_addon_catalogs(addons))
-    assert len(results) == 2
-    assert {r[0] for r in results} == {"https://a.example/manifest.json", "https://b.example/manifest.json"}
-
-
-def test_iter_addon_catalogs_no_addon_catalogs_field_yields_nothing():
-    addons = [_addon("https://a.example/manifest.json", {"id": "a"})]
-    assert list(iter_addon_catalogs(addons)) == []
-
-
-def test_iter_addon_catalogs_no_addons_yields_nothing():
-    assert list(iter_addon_catalogs([])) == []
-    assert list(iter_addon_catalogs(None)) == []
-
-
-def test_iter_addon_catalogs_yields_every_descriptor_for_one_addon():
-    addons = [
-        _addon("https://a.example/manifest.json", {
-            "id": "a",
-            "addonCatalogs": [
-                {"type": "movie", "id": "top"},
-                {"type": "series", "id": "top"},
-            ],
-        }),
-    ]
-    assert len(list(iter_addon_catalogs(addons))) == 2
+    assert list(iter_unique_addon_catalogs(addons)) == []
 
 
 # ---------------------------------------------------------------------------

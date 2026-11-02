@@ -7,7 +7,7 @@ These run once per launch, outside onInit, which Kodi repeats when Home
 reopens after playback. Keeping them here preserves their call timing.
 """
 from lib.ui.dependencies import get_store
-from lib.ui.uicommon import UiHeartbeat, open_window
+from lib.ui.uicommon import UiHeartbeat, close_quietly, open_window
 
 
 def _migrate_mystuff_setting():
@@ -148,10 +148,7 @@ def open_home():
         except Exception as exc:
             raise HomeOpenError(addon_error_detail(exc)) from exc
         finally:
-            try:
-                win.close()
-            except Exception:
-                pass
+            close_quietly(win)
             # Still inside `open_home`, so the window and its controls
             # exist: free the Home `ListItem`s now, not at interpreter
             # teardown (the Kodi segfault `release_items` documents).

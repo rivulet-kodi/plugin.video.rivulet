@@ -46,7 +46,7 @@ import threading
 import time
 from urllib.parse import urlparse
 
-from lib import serverenv
+from lib import logrotate, serverenv
 
 try:
     import ctypes
@@ -61,22 +61,17 @@ except ImportError:  # pragma: no cover - no known CPython build lacks ctypes
 #: an AttributeError surfacing from deep inside _load_library().
 LIBRARY_SUPPORTED = ctypes is not None
 
-#: Duplicated from lib.service_runner's identical constants rather than
+#: Duplicated from lib.service_runner.STOP_GRACE_SECONDS rather than
 #: imported, on purpose: lib.service_runner is the orchestration layer
 #: that reaches for THIS module (lazily, to keep import cost off every
 #: platform that never needs it -- see its _resolve_library_candidate()),
-#: so the reverse import direction would invert that layering. Keep in
-#: sync with lib.service_runner.LOG_ROTATE_BYTES/LOG_ROTATE_CHECK_INTERVAL
-#: if either ever changes.
-LOG_ROTATE_BYTES = 5 * 1024 * 1024
-LOG_ROTATE_CHECK_INTERVAL = 300.0
-
-#: Same duplication rationale: mirrors lib.service_runner.STOP_GRACE_SECONDS
-#: (see there for why the old 5.0s was too short). `ServerStop()` drains for
+#: so the reverse import direction would invert that layering (the log
+#: rotation both share lives below both of them, in lib.logrotate). See
+#: lib.service_runner for why the old 5.0s was too short. `ServerStop()` drains for
 #: 5s internally, so joining the run thread for just 5s raced that drain.
 STOP_GRACE_SECONDS = 10.0
 
-#: Same duplication rationale as the rotation constants above, mirroring
+#: Same duplication rationale as STOP_GRACE_SECONDS above, mirroring
 #: lib.service_runner.DEFAULT_HTTP_PORT.
 DEFAULT_HTTP_PORT = 11470
 
@@ -206,28 +201,6 @@ class LibraryServer:
         env.update(self.extra_env)
         return env
 
-    def _rename_to_backup(self):
-        """Same rename-log-aside rotation lib.service_runner.ServerProcess
-        uses -- see that method's docstring. No open fd of our own to
-        worry about here: the Go library appends to `log_path` itself,
-        so a bare `os.rename()` is the whole story on every platform
-        (see `maybe_rotate_log()` for why the Windows open-file caveat
-        that method carries doesn't apply here)."""
-        try:
-            backup = self.log_path + ".1"
-            if os.path.exists(backup):
-                os.remove(backup)
-            os.rename(self.log_path, backup)
-        except OSError:
-            pass
-
-    def _rotate_log(self):
-        try:
-            if os.path.getsize(self.log_path) > LOG_ROTATE_BYTES:
-                self._rename_to_backup()
-        except OSError:
-            pass
-
     def start(self):
         """Load the library (once per process -- see `_load_library()`)
         and run `ServerStart` on a background daemon thread, which
@@ -237,7 +210,7 @@ class LibraryServer:
         if self.running:
             return
         os.makedirs(self.app_path, exist_ok=True)
-        self._rotate_log()
+        logrotate.rotate_if_oversized(self.log_path)
 
         self._lib = _load_library(self.library_path, log_fn=self._log_fn)
         env_json = json.dumps(self.build_env()).encode("utf-8")
@@ -266,20 +239,18 @@ class LibraryServer:
         renamed aside (the first rotation), truncating the new live name
         (`.1`) back to zero via a plain `os.truncate()` by path has the
         exact same effect as ServerProcess's same-inode ftruncate() --
-        there is no writer-owned Python fd to keep undisturbed here."""
+        there is no writer-owned Python fd to keep undisturbed here, and
+        for the same reason no Windows open-file fallback after the rename:
+        no handle of ours keeps it from succeeding."""
         now = time.monotonic()
-        if self._last_rotate_check is not None and now - self._last_rotate_check < LOG_ROTATE_CHECK_INTERVAL:
+        if not logrotate.check_due(self._last_rotate_check, now):
             return
         self._last_rotate_check = now
-        live_path = self.log_path if os.path.exists(self.log_path) else self.log_path + ".1"
-        try:
-            oversized = os.path.getsize(live_path) > LOG_ROTATE_BYTES
-        except OSError:
-            return
-        if not oversized:
+        live_path = logrotate.oversized_live_log(self.log_path)
+        if live_path is None:
             return
         if live_path == self.log_path:
-            self._rename_to_backup()
+            logrotate.rename_to_backup(self.log_path)
         else:
             try:
                 os.truncate(live_path, 0)

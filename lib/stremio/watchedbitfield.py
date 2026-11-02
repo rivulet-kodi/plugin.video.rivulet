@@ -21,7 +21,7 @@ Two failure modes must not invent a bitmap:
 * An anchor video id that is not in the current video list makes the
   JavaScript constructor return a *blank* field. Treating that blank as
   the new value would wipe every watched bit the next time we saved.
-  Callers that write (``set_video_watched``) therefore get ``None`` and
+  Callers that write (``set_all_watched``) therefore get ``None`` and
   leave the original string untouched. Callers that only paint
   checkmarks (``watched_video_ids``) get ``None`` and show nothing.
 """
@@ -244,40 +244,14 @@ def watched_video_ids(serialized, video_ids):
     return {video_id for video_id in field.video_ids if field.get_video(video_id)}
 
 
-def set_video_watched(serialized, video_ids, video_id, watched=True):
-    """Return the new ``state.watched`` string, or ``None`` to mean
-    "do not replace the caller's string".
-
-    ``None`` covers an unparseable payload, an unknown anchor, a video
-    id that is not in ``video_ids``, and a missing bitmap that we also
-    cannot place (no id list). A missing bitmap with a known video id
-    starts a fresh field -- that is how the first watched episode of a
-    show is recorded.
-    """
-    video_ids = list(video_ids or [])
-    if not video_id or video_id not in video_ids:
-        return None
-    if not serialized:
-        field = WatchedBitfield.construct_from_array([False] * len(video_ids), video_ids)
-        field.set_video(video_id, watched)
-        return field.serialize()
-    try:
-        field = _load(serialized, video_ids)
-    except BitFieldError:
-        return None
-    if field.anchor_not_found:
-        return None
-    if not field.set_video(video_id, watched):
-        return None
-    return field.serialize()
-
-
 def set_all_watched(serialized, video_ids, watched=True):
-    """Like :func:`set_video_watched` for every id in ``video_ids`` at
-    once -- the title-level "Mark as (un)watched" action -- decoding and
-    re-encoding the bitmap a single time. Same ``None`` contract: the
-    caller keeps its original string when the payload cannot be trusted
-    or ``video_ids`` is empty.
+    """Return the new ``state.watched`` string with every id in
+    ``video_ids`` set to ``watched`` -- the title-level "Mark as
+    (un)watched" action -- decoding and re-encoding the bitmap a single
+    time, or ``None`` to mean "do not replace the caller's string".
+
+    ``None`` covers an unparseable payload, an unknown anchor and an
+    empty ``video_ids``. A missing bitmap starts a fresh field.
     """
     video_ids = list(video_ids or [])
     if not video_ids:

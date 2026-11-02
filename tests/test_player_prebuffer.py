@@ -1518,7 +1518,7 @@ def test_magnet_url_stream_is_prebuffered(kodi_stubs, monkeypatch):
     assert (handle, succeeded) == (33, True)
 
 
-def test_end_session_stops_pin_and_removes_engine(kodi_stubs):
+def test_end_session_if_stops_pin_and_removes_engine(kodi_stubs):
     player = kodi_stubs.player
     removed = []
     stopped = []
@@ -1531,15 +1531,16 @@ def test_end_session_stops_pin_and_removes_engine(kodi_stubs):
         def stop(self):
             stopped.append(True)
 
-    player._register_session(_Server(), INFO_HASH, _Pin())
-    player._end_session()
-    player._end_session()  # idempotent
+    pin = _Pin()
+    player._register_session(_Server(), INFO_HASH, pin)
+    player._end_session_if(pin)
+    player._end_session_if(pin)  # idempotent
 
     assert removed == [(INFO_HASH, 2)]
     assert stopped == [True]
 
 
-def test_end_session_keeps_engine_when_bt_keep_torrents_on(kodi_stubs):
+def test_end_session_if_keeps_engine_when_bt_keep_torrents_on(kodi_stubs):
     kodi_stubs.env.addon.settings['bt_keep_torrents'] = 'true'
     player = kodi_stubs.player
     removed = []
@@ -1553,8 +1554,9 @@ def test_end_session_keeps_engine_when_bt_keep_torrents_on(kodi_stubs):
         def stop(self):
             stopped.append(True)
 
-    player._register_session(_Server(), INFO_HASH, _Pin())
-    player._end_session()
+    pin = _Pin()
+    player._register_session(_Server(), INFO_HASH, pin)
+    player._end_session_if(pin)
 
     assert removed == []
     assert stopped == [True]

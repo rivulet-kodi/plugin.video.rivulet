@@ -1,4 +1,4 @@
-.PHONY: venv test cov random parallel lint format typecheck check
+.PHONY: venv test cov random parallel lint format typecheck deadcode dupes check
 
 # PYTHON auto-selects .venv/bin/python when a venv exists (created by the
 # `venv` target below or manually), else falls back to plain `python3` -
@@ -39,4 +39,13 @@ format:
 typecheck:
 	$(PYTHON) -m mypy
 
-check: lint typecheck test
+# Unused code; paths, exclusions and ignored callback names live in
+# pyproject.toml [tool.vulture], specific uses in vulture_whitelist.py.
+deadcode:
+	$(PYTHON) -m vulture
+
+# Duplicated blocks (pylint duplicate-code only); see [tool.pylint.*].
+dupes:
+	$(PYTHON) -m pylint lib default.py service.py
+
+check: lint typecheck deadcode dupes test

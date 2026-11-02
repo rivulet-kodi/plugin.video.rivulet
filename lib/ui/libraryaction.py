@@ -184,33 +184,6 @@ def apply_library_writes(entries):
     return out
 
 
-def offer(meta):
-    """One-row menu: Add when the title is not in the library, Remove
-    when it is. Returns `'added'`, `'removed'`, or None. The toast is
-    the same copy the title page uses (`#30297` / `#30298`)."""
-    from lib.ui import dialogs
-    from lib.ui.compat import L, notify
-    from lib.ui.dependencies import get_store
-    from lib.ui.uicommon import CANCELLED
-
-    auth = get_store().get_auth()
-    if not auth:
-        notify(L(30190))
-        return None
-    item, lookup_ok = _lookup(auth, meta.get('id'))
-    if item is CANCELLED:
-        return None
-    if not lookup_ok:
-        notify(L(30302))
-        return None
-    in_library = bool(item) and not item.get('removed')
-    label = L(30294) if in_library else L(30293)
-    picked = dialogs.choose(meta.get('name') or meta.get('id') or '', [label])
-    if picked != 0:
-        return None
-    return _write(auth, meta, in_library)
-
-
 def poster_menu(meta, extra=()):
     """The menu key on a Home or hub poster: `extra` rows first (``(label,
     callable)`` pairs: Go to series on a New Episodes card), then the
@@ -224,9 +197,11 @@ def poster_menu(meta, extra=()):
     record, so the menu never offers the action the badge already shows.
 
     Signed out, or when the library lookup fails, the menu still offers
-    the trailer. Returns what `offer` does, plus `'watched'` and
-    `'unwatched'`: `'added'`, `'removed'` or None (a trailer, an extra
-    row, or nothing picked).
+    the trailer. The library row is Add when the title is not in the
+    library and Remove when it is; its toast is the same copy the title
+    page uses (`#30297` / `#30298`). Returns `'added'`, `'removed'`,
+    `'watched'`, `'unwatched'` or None (a trailer, an extra row, or
+    nothing picked).
     """
     from lib.ui import dialogs, watchmarks
     from lib.ui.compat import L

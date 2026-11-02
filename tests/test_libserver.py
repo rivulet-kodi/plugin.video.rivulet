@@ -26,6 +26,7 @@ import time
 import pytest
 
 import lib.libserver as libserver
+import lib.logrotate as logrotate
 from lib.libserver import LibraryLoadError, LibraryServer, _load_library
 
 
@@ -384,7 +385,7 @@ def test_library_server_version_after_load(monkeypatch, tmp_path):
 
 def test_maybe_rotate_log_is_a_noop_below_the_check_interval(tmp_path):
     log_path = tmp_path / "server.log"
-    log_path.write_bytes(b"x" * (libserver.LOG_ROTATE_BYTES + 1))
+    log_path.write_bytes(b"x" * (logrotate.LOG_ROTATE_BYTES + 1))
     server = LibraryServer("/fake/librivulet-engine.so", "http://127.0.0.1:11470", "/app", str(log_path))
     server._last_rotate_check = time.monotonic()
 
@@ -396,24 +397,24 @@ def test_maybe_rotate_log_is_a_noop_below_the_check_interval(tmp_path):
 
 def test_maybe_rotate_log_renames_an_oversized_log_once_the_interval_elapses(tmp_path):
     log_path = tmp_path / "server.log"
-    log_path.write_bytes(b"x" * (libserver.LOG_ROTATE_BYTES + 1))
+    log_path.write_bytes(b"x" * (logrotate.LOG_ROTATE_BYTES + 1))
     server = LibraryServer("/fake/librivulet-engine.so", "http://127.0.0.1:11470", "/app", str(log_path))
-    server._last_rotate_check = time.monotonic() - libserver.LOG_ROTATE_CHECK_INTERVAL - 1
+    server._last_rotate_check = time.monotonic() - logrotate.LOG_ROTATE_CHECK_INTERVAL - 1
 
     server.maybe_rotate_log()
 
     assert not log_path.exists()
     backup = tmp_path / "server.log.1"
     assert backup.exists()
-    assert backup.stat().st_size == libserver.LOG_ROTATE_BYTES + 1
+    assert backup.stat().st_size == logrotate.LOG_ROTATE_BYTES + 1
 
 
 def test_maybe_rotate_log_truncates_the_backup_when_it_grows_oversized_again(tmp_path):
     log_path = tmp_path / "server.log"
     backup = tmp_path / "server.log.1"
-    backup.write_bytes(b"x" * (libserver.LOG_ROTATE_BYTES + 1))
+    backup.write_bytes(b"x" * (logrotate.LOG_ROTATE_BYTES + 1))
     server = LibraryServer("/fake/librivulet-engine.so", "http://127.0.0.1:11470", "/app", str(log_path))
-    server._last_rotate_check = time.monotonic() - libserver.LOG_ROTATE_CHECK_INTERVAL - 1
+    server._last_rotate_check = time.monotonic() - logrotate.LOG_ROTATE_CHECK_INTERVAL - 1
 
     server.maybe_rotate_log()  # log_path itself is gone, so `.1` is the live file this time
 
@@ -425,7 +426,7 @@ def test_maybe_rotate_log_does_nothing_when_under_threshold(tmp_path):
     log_path = tmp_path / "server.log"
     log_path.write_bytes(b"small")
     server = LibraryServer("/fake/librivulet-engine.so", "http://127.0.0.1:11470", "/app", str(log_path))
-    server._last_rotate_check = time.monotonic() - libserver.LOG_ROTATE_CHECK_INTERVAL - 1
+    server._last_rotate_check = time.monotonic() - logrotate.LOG_ROTATE_CHECK_INTERVAL - 1
 
     server.maybe_rotate_log()
 

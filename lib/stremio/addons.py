@@ -751,6 +751,24 @@ def catalog_extra_options(catalog, name):
     return result
 
 
+def iter_manifests(addons):
+    """Yield `(transport_url, manifest)` for every installed-addon
+    descriptor (`lib.store.Store.get_addons()` shape:
+    `{"transportUrl": ..., "manifest": {...}}`) that is a dict with a dict
+    manifest, skipping anything else. `addons` may be None.
+
+    The store file and account sync can both hand back malformed entries,
+    and every walk over the installed addons (catalogs here, addon
+    catalogs, subtitles) must survive them the same way. `transport_url`
+    is passed through unchecked; callers that need one test it."""
+    for descriptor in addons or []:
+        if not isinstance(descriptor, dict):
+            continue
+        manifest = descriptor.get('manifest')
+        if isinstance(manifest, dict):
+            yield descriptor.get('transportUrl'), manifest
+
+
 def iter_catalogs(addons, extra_required=None, types=None):
     """Yield `(transport_url, manifest, catalog)` for every catalog declared
     by `addons` - a list of descriptor dicts shaped like
@@ -776,13 +794,7 @@ def iter_catalogs(addons, extra_required=None, types=None):
     surfaces are grouped.
     """
     wanted = set(types) if types is not None else None
-    for descriptor in addons or []:
-        if not isinstance(descriptor, dict):
-            continue
-        manifest = descriptor.get('manifest')
-        if not isinstance(manifest, dict):
-            continue
-        transport_url = descriptor.get('transportUrl')
+    for transport_url, manifest in iter_manifests(addons):
         catalogs = manifest.get('catalogs')
         for catalog in catalogs if isinstance(catalogs, list) else ():
             if not isinstance(catalog, dict):

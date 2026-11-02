@@ -25,10 +25,10 @@ Band ordering (the flat list is grouped, not sorted by one key):
 `BAND_NEXT_UP` is why finishing an episode is not the same as finishing
 a title: at 99% of S1E2 the old "Continue watching" row dropped the show
 entirely (its >=95% cutoff), exactly when the viewer most wants S1E3.
-Resolving which episode that is needs the series meta, so the band is
-computed here as "this series is next-up" and the actual episode is
-resolved lazily by `lib.ui.binge.next_video()` once the meta is in hand
-(see `resolve_next_up()`).
+Resolving which episode that is needs the series meta, so the band only
+says "this series is next-up": a Home paint does not fan out a meta fetch
+for every series just to name the episode (see
+`lib.ui.newhome._played_metas()`).
 
 The merge and band helpers are pure functions of their arguments, so
 tests/test_mystuff.py exercises every band with plain dicts. Account reads
@@ -206,26 +206,6 @@ def merge_entries(progress_entries, library_entries):
     return merged
 
 
-def resolve_next_up(item, meta):
-    """For a `BAND_NEXT_UP` item, the `meta['videos']` entry after the
-    episode the viewer just finished (`item['video_id']`), via
-    `lib.ui.binge.next_video()` - or None when the series has no next
-    episode (a finished final season), the meta carries no videos, or
-    `item` is not in that band.
-
-    Kept separate from `merge_entries()` on purpose: the merge is a pure
-    local-cache operation, while this needs the series meta, which the
-    caller only has after its fetch fan-out.
-    """
-    if not item or item.get('band') != BAND_NEXT_UP:
-        return None
-    video_id = item.get('video_id')
-    if not video_id:
-        return None
-    from lib.ui.binge import next_video
-    return next_video(meta, video_id)
-
-
 def _read_library_entries(store):
     """Raw account read: Home must distinguish failure from an empty library."""
     from lib.ui.dependencies import get_api
@@ -259,16 +239,7 @@ def _enrich(items, fetch_meta=None, map_items=None):
     fetch_meta = fetch_meta or views._fetch_meta
     map_items = map_items or views._map_addons
 
-    # A next-up item is fetched even when it already has name and poster:
-    # those come from the library entry, which carries no `videos`, and
-    # without that list `_label_next_episodes()` cannot say which episode
-    # is next. That is the COMMON case - a series you are part-way through
-    # is usually also in your library - so skipping it left the band
-    # showing a bare "NEXT UP" exactly where the episode matters most.
-    needs_fetch = [
-        item for item in items
-        if not item.get('name') or not item.get('poster') or item.get('band') == BAND_NEXT_UP
-    ]
+    needs_fetch = [item for item in items if not item.get('name') or not item.get('poster')]
     if not needs_fetch:
         return items
 
@@ -307,47 +278,4 @@ def _enrich(items, fetch_meta=None, map_items=None):
         item['name'] = item.get('name') or meta.get('name')
         item['poster'] = item.get('poster') or meta.get('poster')
         item['background'] = item.get('background') or meta.get('background')
-        # Kept for resolve_next_up(): the grid never draws `videos`, but
-        # re-fetching the same meta later just to answer "which episode
-        # is next" would double this screen's addon traffic.
-        if item.get('band') == BAND_NEXT_UP and meta.get('videos'):
-            item['videos'] = meta['videos']
     return [item for item in items if item.get('name')]
-
-
-def _label_next_episodes(items):
-    """Fill in `next_label` ("S1E3") on every next-up item whose series
-    meta `_enrich()` already fetched, so the card can name the episode it
-    would actually play rather than a bare "NEXT UP".
-
-    Uses the `videos` list `_enrich()` stashed on the item, so this costs
-    no extra addon traffic.
-
-    Also demotes a series that turns out to have NO next episode: if its
-    meta arrived and nothing follows the episode just finished, the title
-    is finished rather than next-up, so it moves to `BAND_RECENT` before
-    the Home rows are built from the list. An item whose meta never arrived is
-    left where it is - with no `videos` there is no way to tell "final
-    season" from "not fetched yet". Mutates `items` in place, like the
-    enrich pass above it.
-    """
-    for item in items:
-        if item.get('band') != BAND_NEXT_UP:
-            continue
-        videos = item.get('videos') or []
-        video = resolve_next_up(item, {'videos': videos})
-        if not video:
-            # No next episode. If the meta actually arrived and simply has
-            # nothing after this one - a finished final season - the title
-            # is not "next up" at all; it is finished, and belongs with the
-            # other watched titles. Without a meta we cannot tell the two
-            # apart, so the band is left alone and the card keeps its
-            # unqualified "NEXT UP".
-            if videos:
-                item['band'] = BAND_RECENT
-            continue
-        season, episode = video.get('season'), video.get('episode')
-        if season is None or episode is None:
-            continue
-        from lib.ui.playbackmeta import episode_code
-        item['next_label'] = episode_code(season, episode)

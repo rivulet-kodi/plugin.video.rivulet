@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """Tests for lib.ui.streamswindow's addon-fetch side of open_streams():
-_supported_stream_addons()/_query_addon_streams() aggregation, the
+_query_addon_streams() aggregation, the
 safe-category failure-reason contract (_safe_failure_reason()) that
 fixed issue #34's log-noise bug, _summarize_addon_failures()'s cap on
 named addons in the single aggregate WARNING line, busy_dialog progress
@@ -144,10 +144,10 @@ def test_open_streams_filters_unsupported_addons_and_forwards_aggregate_to_the_w
     assert result is False
 
 
-def test_supported_stream_addons_skips_disabled_addon(load_streamswindow):
+def test_open_streams_never_dispatches_to_a_disabled_addon(load_streamswindow, monkeypatch):
     """A disabled addon stays installed but must never be dispatched for
-    streams - `_supported_stream_addons()` fans out over
-    `get_enabled_addons()`, not every installed descriptor."""
+    streams - `open_streams()` fans out over `get_enabled_addons()`, not
+    every installed descriptor."""
     ctx = load_streamswindow()
     sw = ctx.streamswindow
     enabled = {
@@ -159,11 +159,19 @@ def test_supported_stream_addons_skips_disabled_addon(load_streamswindow):
         'manifest': {'name': 'Disabled', 'resources': ['stream'], 'types': ['movie']},
         'flags': {'disabled': True},
     }
-    _wire_data_layer(sw, _FakeStore(addons=[enabled, disabled]), _FakeAddonClient({}))
+    client = _FakeAddonClient({'t-enabled': [{'url': 'https://a.example/a.mp4'}]})
+    _wire_data_layer(sw, _FakeStore(addons=[enabled, disabled]), client)
 
-    addons = sw._supported_stream_addons('movie', 'tt1')
+    class RecordingWindow(sw.StreamsWindow):
+        def start(self, pairs, stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
+            return True
 
-    assert [descriptor['transportUrl'] for descriptor, _manifest in addons] == ['t-enabled']
+    monkeypatch.setattr(sw, 'StreamsWindow', RecordingWindow)
+    monkeypatch.setattr(sw, '_wait_for_playback_end', lambda *a, **k: (False, False))
+
+    sw.open_streams('movie', 'tt1')
+
+    assert [call[0] for call in client.calls] == ['t-enabled']
 
 
 def test_open_streams_forwards_heading_art_and_meta_to_the_window(load_streamswindow, monkeypatch):

@@ -15,6 +15,7 @@ import weakref
 
 import pytest
 
+from tests.homehooks import join_library_meta, join_shelf_extends
 from tests.kodistubs import install_kodi_stubs
 
 #: The real addon directory, for the few assertions that must check what
@@ -131,7 +132,7 @@ def load_homewindow():
                     thread = getattr(window, '_library_meta_thread', None)
                     if thread is not None:
                         thread.join(1)
-                    ctx.newhome._join_shelf_extends(window)
+                    join_shelf_extends(window)
 
             stack.callback(close_sessions)
             return ctx
@@ -265,7 +266,7 @@ def test_library_focus_fetches_meta_and_paints_the_backdrop(load_homewindow, mon
     assert win.getProperty('HeroFill') == '1'
     assert win.getControl(ctx.homewindow.BACKGROUND).image == 's'
     release.set()
-    ctx.homewindow._join_library_meta(win)
+    join_library_meta(win)
     win.onAction(xbmcgui.Action(999))
 
     assert win.getControl(ctx.homewindow.BACKGROUND).image == 'wide.jpg'
@@ -307,7 +308,7 @@ def test_library_focus_keeps_a_full_bleed_poster_when_meta_has_no_backdrop(load_
     ctx.homewindow._switch_tab(win, 'mystuff')
     ctx.homewindow._focus_first(win)
     ctx.homewindow.paint_hero(win)
-    ctx.homewindow._join_library_meta(win)
+    join_library_meta(win)
     win.onAction(xbmcgui.Action(999))
     win.onAction(xbmcgui.Action(999))
 
@@ -1330,7 +1331,7 @@ def test_library_meta_worker_keeps_only_the_latest_focus(load_homewindow, monkey
         hw._schedule_library_meta(win, item)
         assert win._library_meta_thread is worker
     release.set()
-    hw._join_library_meta(win)
+    join_library_meta(win)
     hw._apply_library_meta(win)
     assert fetched == ['tt0', 'tt39']
     assert all(not item.getProperty('hero_plot') for item in items[:-1])
@@ -1381,7 +1382,7 @@ def test_library_worker_retires_when_idle_without_retaining_the_window(load_home
     for i in range(30):
         item = hw._poster_item({'id': 'tt%d' % i, 'type': 'movie'}, sparse=True)
         hw._schedule_library_meta(win, item)
-        hw._join_library_meta(win)
+        join_library_meta(win)
         assert win._library_meta_idle.is_set()
         workers.append(win._library_meta_thread)
         win._library_meta_thread.join(1)
@@ -1407,14 +1408,14 @@ def test_a_stale_library_result_does_not_leave_its_poster_loading(load_homewindo
     win.getControl(hw.LIBRARY_SHELF).addItems([item])
     monkeypatch.setattr(hw, '_fetch_library_meta', lambda *args: {'description': 'loaded'})
     hw._schedule_library_meta(win, item)
-    hw._join_library_meta(win)
+    join_library_meta(win)
     win.setFocusId(hw.BTN_SETTINGS)
     hw._apply_library_meta(win)
     assert item.getProperty('meta_state') == ''
     assert item.getProperty('hero_plot') == ''
     win.setFocusId(hw.LIBRARY_SHELF)
     hw._schedule_library_meta(win, item)
-    hw._join_library_meta(win)
+    join_library_meta(win)
     hw._apply_library_meta(win)
     assert item.getProperty('hero_plot') == 'loaded'
 

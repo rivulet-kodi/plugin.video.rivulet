@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2026 M0Rf30
 # SPDX-License-Identifier: MIT
 
-"""Tests for lib.s4me: the Kodi-independent S4Me bridge glue (manifest/
-descriptor shape, RunScript() command construction, and BridgeSupervisor's
+"""Tests for lib.s4me: the Kodi-independent S4Me bridge glue (manifest
+URL, RunScript() command construction, and BridgeSupervisor's
 launch/store-sync state machine)."""
 import pytest
 
@@ -79,39 +79,6 @@ def test_run_script_command_has_single_comma_separated_arg():
     # would fragment into an extra positional RunScript() arg.
     inner = command[len("RunScript("):-1]
     assert inner.count(",") == 1
-
-
-# --- descriptor_for -----------------------------------------------------
-
-
-def test_descriptor_for_is_protected_unofficial_and_flagged_builtin():
-    descriptor = s4me.descriptor_for(11480)
-    assert descriptor["transportUrl"] == "http://127.0.0.1:11480/manifest.json"
-    assert descriptor["manifest"] == s4me.MANIFEST
-    assert descriptor["flags"] == {"official": False, "protected": True, "builtin": "s4me"}
-
-
-def test_descriptor_for_different_ports_differ_only_in_transport_url():
-    a = s4me.descriptor_for(11480)
-    b = s4me.descriptor_for(11481)
-    assert a["transportUrl"] != b["transportUrl"]
-    assert a["manifest"] == b["manifest"]
-    assert a["flags"] == b["flags"]
-
-
-# --- parse_channels_setting -----------------------------------------------
-
-
-@pytest.mark.parametrize("raw,expected", [
-    (None, None),
-    ("", None),
-    ("   ", None),
-    ("vvvvid", ("vvvvid",)),
-    ("vvvvid,eurostreaming", ("vvvvid", "eurostreaming")),
-    (" vvvvid , eurostreaming ,, ", ("vvvvid", "eurostreaming")),
-])
-def test_parse_channels_setting(raw, expected):
-    assert s4me.parse_channels_setting(raw) == expected
 
 
 # --- BridgeSupervisor -----------------------------------------------------

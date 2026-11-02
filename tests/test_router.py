@@ -9,7 +9,7 @@ router.py only imports xbmc/xbmcgui/xbmcplugin (and lib.ui.player/views)
 lazily inside run()/_download_server_binary()/_fail_gracefully() - never at
 module scope - so a bare `import lib.ui.router` needs no stubs at all for
 its own pure helper (_parse_params). The actual URL-building/stream-token
-logic (url_for/encode_stream/decode_stream) lives in lib.ui.urlutil, which
+logic (url_for/decode_stream) lives in lib.ui.urlutil, which
 has no Kodi dependency at all and is exercised directly below, without
 load_router().
 
@@ -31,6 +31,7 @@ import os
 import subprocess
 import sys
 import types
+import zlib
 from urllib.parse import parse_qsl, urlencode, urlparse
 
 import pytest
@@ -150,7 +151,7 @@ def test_parse_params(load_router, raw_qs, expected):
 
 
 # ---------------------------------------------------------------------------
-# url_for / encode_stream / decode_stream (lib.ui.urlutil - pure, no Kodi
+# url_for / decode_stream (lib.ui.urlutil - pure, no Kodi
 # dependency, no router/dispatch state)
 # ---------------------------------------------------------------------------
 
@@ -193,6 +194,16 @@ def test_url_for_round_trips_special_characters_through_parse_params(load_router
     assert ctx.router._parse_params(query_string) == {'action': 'meta', 'type': 'movie', 'id': tricky_id}
 
 
+def _encode_stream(stream):
+    """A pre-0.8.0 `stream=` token, as the classical directory listings
+    wrote it (lib.ui.urlutil.decode_stream()'s docstring): base64url of
+    zlib-deflated compact JSON. Production no longer writes these, so the
+    encoder lives here, as the fixture builder for what must keep
+    decoding."""
+    payload = json.dumps(stream or {}, separators=(',', ':')).encode('utf-8')
+    return base64.urlsafe_b64encode(zlib.compress(payload, 1)).decode('ascii')
+
+
 STREAM_SAMPLE = {
     'name': 'Stream4Me \U0001f3ac',
     'title': 'Movie.2024.2160p.HDR.x265-GROUP \U0001f525',
@@ -203,22 +214,17 @@ STREAM_SAMPLE = {
 
 # Deliberately chosen so that the STANDARD (non-urlsafe) base64 encoding of
 # its COMPRESSED payload contains both '+' and '/' (verified out of band) -
-# a regression guard for encode_stream() using urlsafe_b64encode (required
+# a regression guard for the token using the urlsafe base64 alphabet (required
 # for the token to round-trip unmangled through url_for()'s urlencode()
 # inside a plugin:// querystring) rather than plain b64encode. It is picked
-# against the compressed bytes, not the raw JSON, because encode_stream()
-# deflates before base64-encoding.
+# against the compressed bytes, not the raw JSON, because the token is
+# deflated before base64-encoding.
 STREAM_WITH_PLUS_AND_SLASH_BYTES = {'infoHash': '.ZhyiA4uoR{gna(t%mU<djA<Wt.GS}U8po/', 'n': 5}
 
 
-def test_encode_decode_stream_round_trips_unicode_and_nested_dict():
-    token = urlutil.encode_stream(STREAM_SAMPLE)
+def test_decode_stream_round_trips_unicode_and_nested_dict():
+    token = _encode_stream(STREAM_SAMPLE)
     assert urlutil.decode_stream(token) == STREAM_SAMPLE
-
-
-def test_encode_stream_none_and_empty_dict_are_equivalent():
-    assert urlutil.decode_stream(urlutil.encode_stream(None)) == {}
-    assert urlutil.decode_stream(urlutil.encode_stream({})) == {}
 
 
 def test_decode_stream_empty_or_missing_token_returns_empty_dict():
@@ -240,31 +246,14 @@ def test_decode_stream_valid_base64_non_json_returns_empty_dict():
     assert urlutil.decode_stream(token) == {}
 
 
-def test_encode_stream_uses_urlsafe_alphabet_for_plus_slash_producing_payload():
-    token = urlutil.encode_stream(STREAM_WITH_PLUS_AND_SLASH_BYTES)
+def test_decode_stream_reads_the_urlsafe_alphabet_for_plus_slash_producing_payload():
+    token = _encode_stream(STREAM_WITH_PLUS_AND_SLASH_BYTES)
 
     assert '+' not in token
     assert '/' not in token
     assert '-' in token
     assert '_' in token
     assert urlutil.decode_stream(token) == STREAM_WITH_PLUS_AND_SLASH_BYTES
-
-
-def test_encode_stream_compresses_the_token():
-    """The token is the largest thing in a streams listing, so it is
-    deflated before base64-encoding - a Torrentio-shaped stream carries a
-    long release name plus a repetitive tracker list."""
-    stream = dict(
-        STREAM_SAMPLE,
-        sources=['udp://tracker.opentrackr.org:1337/announce'] * 8,
-    )
-    token = urlutil.encode_stream(stream)
-    uncompressed = base64.urlsafe_b64encode(
-        json.dumps(stream, separators=(',', ':')).encode('utf-8')
-    ).decode('ascii')
-
-    assert len(token) < len(uncompressed) / 2
-    assert urlutil.decode_stream(token) == stream
 
 
 def test_decode_stream_still_reads_a_legacy_uncompressed_token():
@@ -411,7 +400,7 @@ def test_run_play_decodes_stream_and_calls_player(load_router, monkeypatch):
         'infoHash': 'deadbeef' * 5,
         'behaviorHints': {'bingeGroup': 'x'},
     }
-    token = urlutil.encode_stream(stream)
+    token = _encode_stream(stream)
     query = urlencode({'action': 'play', 'stream': token, 'type': 'movie', 'id': 'tt1'})
     monkeypatch.setattr(sys, 'argv', ['plugin://plugin.video.rivulet/', '9', '?' + query])
 
@@ -466,7 +455,7 @@ def test_run_handler_exception_on_play_resolves_url_as_failed(load_router, monke
         raise RuntimeError('boom')
 
     ctx.player.play = _raise
-    token = urlutil.encode_stream({})
+    token = _encode_stream({})
     query = urlencode({'action': 'play', 'stream': token, 'type': 'movie', 'id': 'tt1'})
     monkeypatch.setattr(sys, 'argv', ['plugin://x/', '5', '?' + query])
 

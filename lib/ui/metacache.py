@@ -42,9 +42,10 @@ never break the caller's real fetch - it is treated as a cache miss.
 """
 import json
 import os
-import tempfile
 import threading
 import time
+
+from lib.stremio import jsonfile
 
 FILENAME = 'meta_cache.json'
 
@@ -100,11 +101,7 @@ def _path(data_dir):
 
 
 def _read_entries(data_dir):
-    try:
-        with open(_path(data_dir)) as fh:
-            entries = json.load(fh)
-    except (OSError, ValueError):
-        return {}
+    entries = jsonfile.read_json(_path(data_dir))
     return entries if isinstance(entries, dict) else {}
 
 
@@ -136,17 +133,8 @@ def _evict(entries):
 
 
 def _atomic_write(path, data):
-    directory = os.path.dirname(path) or '.'
-    fd, tmp_path = tempfile.mkstemp(prefix='.tmp-', dir=directory)
-    try:
-        with os.fdopen(fd, 'w') as fh:
-            json.dump(data, fh, separators=(',', ':'))
-        os.replace(tmp_path, path)
-    except OSError:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
+    """Raises OSError on failure; `store_cached_metas()` swallows it."""
+    jsonfile.write_json(path, data, '.tmp-')
 
 
 def load_cached_meta(data_dir, stype, sid):

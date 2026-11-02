@@ -60,9 +60,13 @@ from lib.ui.uicommon import (
     BACK_ACTIONS,
     CANCELLED,
     BaseWindow,
+    append_keeping_focus,
+    close_quietly,
     gated_input,
+    log_paging_failure,
     open_window,
     run_cancellable,
+    take_pending_pages,
 )
 
 LIST = 30360
@@ -453,42 +457,18 @@ class AddonCatalogWindow(BaseWindow):
                     self._pending_pages.append(list(page))
                 xbmc.executebuiltin('Action(noop)')
         except Exception as exc:
-            # Daemon thread with nobody to catch for it; a failed walk
-            # must never take the window down - but a paging failure is
-            # still worth a LOGWARNING (not LOGDEBUG): it means later
-            # pages silently never appear, which otherwise looks like a
-            # short catalog rather than a bug.
-            try:
-                from lib.stremio.addons import addon_error_detail
-                from lib.ui.compat import log
-
-                log('addoncatalogwindow: catalog paging worker failed: %s' % addon_error_detail(exc), xbmc.LOGWARNING)
-            except Exception:
-                pass
+            # A failed walk must never take the window down.
+            log_paging_failure('addoncatalogwindow', exc)
 
     def _apply_pending_pages(self):
         """Append whatever the paging worker has queued onto the live
-        list. Always call this from the UI thread.
-
-        Appending (rather than rebuilding) leaves every already-rendered
-        row untouched. `addItems()` resets a ControlList's selection to
-        0 though, so the focused position is saved and restored around
-        the call - same guard `infowindow.ShowcaseWindow._apply_pending_pages()`
-        applies for the same reason."""
-        with self._paging_lock:
-            if not self._pending_pages:
-                return
-            pages, self._pending_pages = self._pending_pages, []
+        list, keeping the focused row (`append_keeping_focus()`). Always
+        call this from the UI thread."""
         items = []
-        for page in pages:
+        for page in take_pending_pages(self):
             items.extend(self._page_items(page))
-        if not items:
-            return
-        control = self.getControl(LIST)
-        focus_index = control.getSelectedPosition()
-        control.addItems(items)
-        if focus_index > 0:
-            control.selectItem(focus_index)
+        if items:
+            append_keeping_focus(self.getControl(LIST), items)
 
     def _open_search(self):
         """The "Search addon catalogs" row: prompts for a query the same
@@ -697,8 +677,8 @@ def _configure_url(transport_url):
 def open_addon_catalog():
     """Browse and install addons from every installed addon's own
     `addon_catalog`. Mirrors `lib.ui.addonswindow.open_addons()`'s own
-    open/doModal/close-once-on-exception shape exactly - see that
-    function's docstring for why the `finally: win.close()` is
+    open/doModal/close-once-on-exception shape exactly - see
+    `lib.ui.uicommon.close_quietly()` for why the close in `finally:` is
     unconditional."""
     import xbmc
 
@@ -713,8 +693,4 @@ def open_addon_catalog():
         log('addoncatalogwindow: window failed to open: %r' % (exc,), xbmc.LOGERROR)
         notify(L(30032))
     finally:
-        if win is not None:
-            try:
-                win.close()
-            except Exception:
-                pass
+        close_quietly(win)

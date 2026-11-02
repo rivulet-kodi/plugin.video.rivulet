@@ -48,6 +48,7 @@ from lib.ui.uicommon import (
     BACK_ACTIONS,
     CANCELLED,
     ModalStackWindow,
+    close_quietly,
     escape_label,
     gated_input,
     open_window,
@@ -147,19 +148,12 @@ def _episode_title(video):
 def _episode_label(video):
     """'S01E03 \u00b7 The Title' - `_episode_code()` and
     `_episode_title()` joined, kept as the item's plain Label (every
-    existing caller - `_episode_rows()`, `_episode_heading()`, the
+    existing caller - `DetailWindow.start()`'s `rows`, `_episode_heading()`, the
     row's own `xbmcgui.ListItem(...)` constructor - still reads the one
     combined string); DetailWindow.xml's itemlayout instead reads the
     two halves apart via the `code`/`title` Properties
     `_episode_properties()` sets alongside it."""
     return '%s \u00b7 %s' % (_episode_code(video), _episode_title(video))
-
-
-def _episode_rows(videos):
-    """Flatten+sort a meta's `videos` array (via `_ordered_videos()`)
-    into `(id, label)` pairs for `DetailWindow`'s list - pure, so it is
-    trivially unit-testable on its own."""
-    return [(video.get('id'), _episode_label(video)) for video in _ordered_videos(videos)]
 
 
 def _season_label(season):
@@ -1183,14 +1177,4 @@ def open_detail(stype, sid):
         notify(L(30032))
         return False
     finally:
-        # A normal return means DetailWindow already closed itself (its own
-        # onAction/onClick calls self.close()) before .start() returned -
-        # but an exception raised from WITHIN .start() (onInit(), or a
-        # callback mid-doModal()) skips that self-close entirely. Close
-        # unconditionally here so no exit path leaves a zombie modal
-        # window behind; closing an already-closed window is a safe no-op.
-        if win is not None:
-            try:
-                win.close()
-            except Exception:
-                pass
+        close_quietly(win)

@@ -467,8 +467,9 @@ def parse_channels_setting(raw):
     """Parse the `s4me_channels` comma-list setting into a tuple of
     stripped, non-empty channel ids, or `None` when blank -- `None` means
     "use every one of Stream4Me's own active channels" rather than a
-    fixed allow-list. Identical logic to `lib.s4me.parse_channels_setting`
-    (duplicated here on purpose -- see this module's docstring)."""
+    fixed allow-list. Only the bridge reads this setting, so this is the
+    one copy: `lib/` never parses it (see this module's docstring for why
+    nothing here is imported from there)."""
     if not raw or not raw.strip():
         return None
     return tuple(c.strip() for c in raw.split(",") if c.strip())

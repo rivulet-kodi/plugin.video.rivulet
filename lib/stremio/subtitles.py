@@ -21,7 +21,7 @@ fetch remote fonts, so carrying it through would be dead weight.
 """
 from urllib.parse import urlparse
 
-from lib.stremio.addons import addon_supports
+from lib.stremio.addons import addon_supports, iter_manifests
 from lib.stremio.fanout import map_bounded
 
 # ISO 639-1 (2-letter) -> ISO 639-2/B (3-letter) codes for the languages
@@ -173,18 +173,9 @@ def collect_subtitles(client, addons, rtype, rid, extra=None):
     within addons) keep only the first occurrence.
     """
     transport_urls = []
-    for descriptor in addons or []:
-        if not isinstance(descriptor, dict):
-            continue
-        manifest = descriptor.get('manifest')
-        if not isinstance(manifest, dict):
-            continue
-        if not addon_supports(manifest, 'subtitles', rtype, rid):
-            continue
-        transport_url = descriptor.get('transportUrl')
-        if not transport_url:
-            continue
-        transport_urls.append(transport_url)
+    for transport_url, manifest in iter_manifests(addons):
+        if transport_url and addon_supports(manifest, 'subtitles', rtype, rid):
+            transport_urls.append(transport_url)
 
     seen_urls = set()
     subs = []
