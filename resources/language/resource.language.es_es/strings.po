@@ -1259,3 +1259,15 @@ msgstr "Sin resultados para «%s»"
 msgctxt "#30548"
 msgid "IN CINEMA"
 msgstr "EN CINES"
+
+msgctxt "#30549"
+msgid "Piece cache folder (empty = add-on data)"
+msgstr "Carpeta de la caché de piezas (vacío = datos del complemento)"
+
+msgctxt "#30550"
+msgid "Where downloaded torrent data is stored when the memory cache is off. Point it at a USB drive, a hard disk or tmpfs to spare an SD card or eMMC from streaming writes. Empty keeps it in the add-on's data folder. Needs rivulet-engine 0.28.0 or later."
+msgstr "Dónde se guardan los datos de torrent descargados cuando la caché en memoria está desactivada. Apúntala a una unidad USB, un disco duro o tmpfs para ahorrar a la tarjeta SD o eMMC las escrituras del streaming. Vacío la mantiene en la carpeta de datos del complemento. Requiere rivulet-engine 0.28.0 o posterior."
+
+msgctxt "#30551"
+msgid "Keep downloaded torrent data in RAM only, never on disk. Actual memory use can reach about twice this budget. 0 writes the data to disk."
+msgstr "Mantener los datos de torrent descargados solo en RAM, nunca en disco. El uso real de memoria puede llegar a cerca del doble de este límite. 0 escribe los datos en disco."

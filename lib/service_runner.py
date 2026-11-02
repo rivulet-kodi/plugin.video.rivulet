@@ -209,6 +209,8 @@ EXTRA_ENV_SETTINGS = (
     ("dht_bootstrap", "RIVULET_DHT_BOOTSTRAP", "string"),
     ("memory_cache_size_mb", "RIVULET_MEMORY_CACHE_SIZE", "mb_to_bytes"),
     ("mem_limit_mb", "RIVULET_MEM_LIMIT", "mb_to_bytes"),
+    # Disk piece cache off addon_data, e.g. away from an SD card (issue #96).
+    ("cache_dir", "RIVULET_CACHE_ROOT", "string"),
     ("proxy_prebuffer", "RIVULET_PROXY_PREBUFFER", "int"),
     ("proxy_seg_cache_ttl", "RIVULET_PROXY_SEG_CACHE_TTL", "int"),
     ("proxy_password", "RIVULET_PROXY_PASSWORD", "string"),

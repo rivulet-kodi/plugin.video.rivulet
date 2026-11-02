@@ -1259,3 +1259,15 @@ msgstr "「%s」の結果はありません"
 msgctxt "#30548"
 msgid "IN CINEMA"
 msgstr "劇場公開中"
+
+msgctxt "#30549"
+msgid "Piece cache folder (empty = add-on data)"
+msgstr "ピースキャッシュのフォルダー（空 = アドオンデータ）"
+
+msgctxt "#30550"
+msgid "Where downloaded torrent data is stored when the memory cache is off. Point it at a USB drive, a hard disk or tmpfs to spare an SD card or eMMC from streaming writes. Empty keeps it in the add-on's data folder. Needs rivulet-engine 0.28.0 or later."
+msgstr "メモリキャッシュがオフのとき、ダウンロードしたトレントデータを保存する場所です。USB ドライブ、ハードディスク、tmpfs を指定すると、ストリーミングによる SD カードや eMMC への書き込みを避けられます。空のままにするとアドオンのデータフォルダーに保存します。rivulet-engine 0.28.0 以降が必要です。"
+
+msgctxt "#30551"
+msgid "Keep downloaded torrent data in RAM only, never on disk. Actual memory use can reach about twice this budget. 0 writes the data to disk."
+msgstr "ダウンロードしたトレントデータを RAM のみに保持し、ディスクには書き込みません。実際のメモリ使用量はこの上限の約 2 倍になることがあります。0 にするとディスクに書き込みます。"

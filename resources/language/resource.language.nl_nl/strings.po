@@ -1259,3 +1259,15 @@ msgstr "Geen resultaten voor ‘%s’"
 msgctxt "#30548"
 msgid "IN CINEMA"
 msgstr "IN DE BIOSCOOP"
+
+msgctxt "#30549"
+msgid "Piece cache folder (empty = add-on data)"
+msgstr "Map voor de stukkencache (leeg = add-on-gegevens)"
+
+msgctxt "#30550"
+msgid "Where downloaded torrent data is stored when the memory cache is off. Point it at a USB drive, a hard disk or tmpfs to spare an SD card or eMMC from streaming writes. Empty keeps it in the add-on's data folder. Needs rivulet-engine 0.28.0 or later."
+msgstr "Waar gedownloade torrentgegevens worden opgeslagen als de geheugencache uit staat. Kies een USB-stick, een harde schijf of tmpfs om een SD-kaart of eMMC de schrijfacties van het streamen te besparen. Leeg houdt ze in de gegevensmap van de add-on. Vereist rivulet-engine 0.28.0 of nieuwer."
+
+msgctxt "#30551"
+msgid "Keep downloaded torrent data in RAM only, never on disk. Actual memory use can reach about twice this budget. 0 writes the data to disk."
+msgstr "Gedownloade torrentgegevens alleen in RAM houden, nooit op schijf. Het werkelijke geheugengebruik kan oplopen tot ongeveer het dubbele van dit budget. 0 schrijft de gegevens naar schijf."

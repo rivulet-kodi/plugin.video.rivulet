@@ -1259,3 +1259,15 @@ msgstr "لا توجد نتائج لـ “%s”"
 msgctxt "#30548"
 msgid "IN CINEMA"
 msgstr "في السينمات"
+
+msgctxt "#30549"
+msgid "Piece cache folder (empty = add-on data)"
+msgstr "مجلد ذاكرة القطع المؤقتة (فارغ = بيانات الإضافة)"
+
+msgctxt "#30550"
+msgid "Where downloaded torrent data is stored when the memory cache is off. Point it at a USB drive, a hard disk or tmpfs to spare an SD card or eMMC from streaming writes. Empty keeps it in the add-on's data folder. Needs rivulet-engine 0.28.0 or later."
+msgstr "مكان تخزين بيانات التورنت المنزّلة عند إيقاف ذاكرة RAM المؤقتة. وجّهه إلى محرك USB أو قرص صلب أو tmpfs لتجنيب بطاقة SD أو eMMC كتابات البث. الفارغ يبقيه في مجلد بيانات الإضافة. يتطلب rivulet-engine 0.28.0 أو أحدث."
+
+msgctxt "#30551"
+msgid "Keep downloaded torrent data in RAM only, never on disk. Actual memory use can reach about twice this budget. 0 writes the data to disk."
+msgstr "الاحتفاظ ببيانات التورنت المنزّلة في الذاكرة RAM فقط وعدم كتابتها على القرص. قد يصل الاستخدام الفعلي للذاكرة إلى نحو ضعف هذه الميزانية. القيمة 0 تكتب البيانات على القرص."
