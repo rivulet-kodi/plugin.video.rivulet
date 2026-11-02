@@ -20,6 +20,20 @@ jobs:
           VERSION=$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('addon.xml').getroot().get('version'))")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Check tag matches addon.xml version
+        # A release is a release/X.Y.Z PR bumping addon.xml, then a vX.Y.Z
+        # tag on its merge commit; a mismatched tag would publish a zip whose
+        # version disagrees with the tag name.
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.addon.outputs.version }}
+        run: |
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::tag $TAG does not match addon.xml version v$VERSION"
+            exit 1
+          fi
+
       - name: Build addon package
         run: |
           git archive --format=zip --prefix=plugin.video.rivulet/ \

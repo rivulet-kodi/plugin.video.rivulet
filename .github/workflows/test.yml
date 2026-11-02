@@ -9,10 +9,11 @@ on:
 
 jobs:
   test:
-    # ubuntu-latest moved to 26.04, for which actions/setup-python ships no
-    # 3.8 build ("version '3.8' ... was not found for Ubuntu 26.04"). The 3.8
-    # leg holds the Kodi 19 floor, so it stays on the last image that has it.
-    runs-on: ${{ matrix.python-version == '3.8' && 'ubuntu-24.04' || 'ubuntu-latest' }}
+    # Interpreters come from uv (python-build-standalone), not
+    # actions/setup-python: the latter ships no 3.8 build for Ubuntu 26.04,
+    # and the 3.8 leg holds the Kodi 19 floor. uv keeps every leg on
+    # ubuntu-latest without depending on what the runner image provides.
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -21,14 +22,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v7
+      - name: Set up Python ${{ matrix.python-version }} (uv)
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3 (no floating major tag upstream)
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
+          activate-environment: true
+          enable-cache: true
+          cache-dependency-glob: requirements-dev.txt
 
       - name: Install dependencies
-        run: python -m pip install -r requirements-dev.txt
+        run: uv pip install -r requirements-dev.txt
 
       - name: Run tests with coverage
         # Threshold is explicit here (not only [tool.coverage.report] fail_under)
@@ -45,23 +48,25 @@ jobs:
           path: coverage.xml
 
   compat-py38-requests:
-    # Pinned for the same reason as the 3.8 `test` leg above.
-    runs-on: ubuntu-24.04
+    # 3.8 comes from uv for the same reason as the 3.8 `test` leg above.
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Set up Python 3.8
-        uses: actions/setup-python@v7
+      - name: Set up Python 3.8 (uv)
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3 (no floating major tag upstream)
         with:
           python-version: '3.8'
-          cache: pip
+          activate-environment: true
+          enable-cache: true
+          cache-dependency-glob: requirements-dev.txt
 
       - name: Install dev dependencies
-        run: python -m pip install -r requirements-dev.txt
+        run: uv pip install -r requirements-dev.txt
 
       - name: Force requests floor to 2.22.0
-        run: python -m pip install "requests==2.22.0"
+        run: uv pip install "requests==2.22.0"
 
       - name: Record installed requests version
         run: python -c "import requests; print('requests', requests.__version__)"
