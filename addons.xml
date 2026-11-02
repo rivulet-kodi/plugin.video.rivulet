@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.38.1" provider-name="M0RF30">
+<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.39.0" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0" />
     <import addon="script.module.requests" version="2.22.0" />
@@ -12,7 +12,11 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse and search catalogs by type, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote rivulet-engine streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.38.1:
+    <news>v0.39.0:
+- New: Settings &gt; Server resources &gt; "Piece cache folder" moves downloaded torrent data off the add-on's data folder, for example to a USB drive, a hard disk or tmpfs, so streaming does not wear out an SD card or eMMC.
+- Fix: with the memory cache on, high-bitrate (4K) streams no longer stutter and stall. The cache now drops what you have already watched before what is about to play.
+- Change: the streaming server is updated to rivulet-engine 0.29.0.
+v0.38.1:
 - Fix: you can type straight into Search from a keyboard. The search bar has the focus when Search opens, and letter keys no longer trigger Kodi shortcuts such as the shutdown menu. Enter opens Kodi's keyboard; confirm it to search.
 v0.38.0:
 - New: series get the watched check on their poster too, as in the Stremio apps: it appears once you have watched an episode, here or in another Stremio app.
