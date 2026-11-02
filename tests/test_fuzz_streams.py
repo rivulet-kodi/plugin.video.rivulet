@@ -105,12 +105,12 @@ def test_sort_streams_is_a_stable_permutation(pairs, key):
 
 @given(
     st.lists(st.tuples(_infos, st.none()), max_size=6),
-    # Settings give 0 ("off") or a positive limit; a negative one is no input.
-    st.integers(min_value=0, max_value=3000),
-    st.integers(min_value=0, max_value=2**40),
+    st.integers(min_value=-10, max_value=3000),
+    st.integers(min_value=-10, max_value=2**40),
     st.booleans(),
     st.booleans(),
 )
+@example([(streaminfo.parse_stream({'behaviorHints': {'videoSize': 1}}, ''), None)], 0, -1, False, False)
 def test_filter_streams_keeps_an_ordered_subset_that_satisfies_every_active_filter(
     entries, min_height, max_size, exclude_cam, cached_only,
 ):
