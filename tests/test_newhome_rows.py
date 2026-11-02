@@ -132,21 +132,6 @@ def test_an_empty_page_ends_the_row(home, monkeypatch, pages):
 # --- Continue from the account --------------------------------------------------------
 
 
-@pytest.mark.parametrize('entry, percent', [
-    ({'state': {'timeOffset': 30, 'duration': 120}}, 25.0),
-    ({'state': {'timeOffset': 0, 'duration': 120}}, 0.0),
-    ({'state': {'timeOffset': 30, 'duration': 0}}, None),
-    ({'state': {'timeOffset': 30, 'duration': True}}, None),
-    ({'state': {'timeOffset': '30', 'duration': 120}}, None),
-    ({'state': {'timeOffset': True, 'duration': 120}}, None),
-    ({'state': {'timeOffset': 30, 'duration': '120'}}, None),
-    ({'state': 'junk'}, None),
-    ('junk', None),
-])
-def test_state_percent(home, entry, percent):
-    assert home.home._state_percent(entry) == percent
-
-
 def _entry(**overrides):
     entry = {
         '_id': 'tt1', 'name': 'One', 'type': 'movie', 'poster': 'p', 'background': 'b',
@@ -176,26 +161,58 @@ def test_titles_part_way_through_on_the_account_are_continued(home):
 
 
 def test_series_with_a_next_episode_pointer_on_the_account_are_next_up(home):
-    """#99: stremio-core keeps a series on Continue while `timeOffset` > 0.
-    Finishing an episode in a Stremio app leaves `timeOffset` 1 on the next
-    episode; one finished here keeps its offset at the end."""
+    """#99: finishing an episode in a Stremio app leaves `timeOffset` 1
+    on the next episode. A 95%+ record names the episode just finished
+    (possibly a finale), so it is not a pointer."""
     def series(sid, **state):
         return _entry(_id=sid, type='series', state=dict({'duration': 3600000}, **state))
 
     metas = home.home._library_continue_metas([
         series('tt1', timeOffset=1, video_id='tt1:1:3'),              # advanced by a Stremio app
-        series('tt2', timeOffset=3590000, video_id='tt2:1:2'),        # finished here
+        series('tt2', timeOffset=3590000, video_id='tt2:1:2'),        # finished, maybe a finale
         series('tt3', timeOffset=1, video_id='tt3:2:1', duration=0),  # pointer with no duration
         series('tt4', timeOffset=0, video_id='tt4:1:8'),              # nothing left to play
         series('tt5', timeOffset=1),                                  # no episode to point at
         series('tt6', timeOffset=600000, video_id='tt6:1:1'),         # mid-episode
     ])
     assert [(meta['id'], meta['band'], meta['video_id']) for meta in metas] == [
-        ('tt1', 'next_up', 'tt1:1:3'),
-        ('tt2', 'next_up', 'tt2:1:2'),
-        ('tt3', 'next_up', 'tt3:2:1'),
         ('tt6', 'resume', 'tt6:1:1'),
+        ('tt1', 'next_up', 'tt1:1:3'),
+        ('tt3', 'next_up', 'tt3:2:1'),
     ]
+
+
+@pytest.mark.parametrize('stype', ['movie', 'series'])
+@pytest.mark.parametrize('state', [
+    {'timeOffset': '30', 'duration': 120},
+    {'timeOffset': True, 'duration': 120},
+    {'timeOffset': 30, 'duration': '120'},
+    {'timeOffset': 30, 'duration': True},
+    {'timeOffset': float('inf'), 'duration': 120},
+    {'timeOffset': 1, 'duration': float('inf')},
+    {'timeOffset': float('nan'), 'duration': 120},
+    'junk',
+])
+def test_malformed_account_state_is_not_continued(home, stype, state):
+    """A Continue card int()s these fields: Infinity would raise there."""
+    entry = _entry(type=stype, state=state)
+    if isinstance(state, dict):
+        state['video_id'] = 'tt1:1:1'
+    assert home.home._library_continue_metas([entry]) == []
+
+
+def test_account_resume_records_outrank_next_up_under_the_cap(home):
+    def at(sid, offset, when, stype='series'):
+        return _entry(_id=sid, type=stype, state={
+            'timeOffset': offset, 'duration': 3600000, 'video_id': sid + ':1:1', 'lastWatched': when})
+
+    metas = home.home._library_continue_metas([
+        at('tt1', 1, '2026-11-03T10:00:00Z'),
+        at('tt2', 600000, '2026-11-01T10:00:00Z'),
+        at('tt3', 1, '2026-11-02T10:00:00Z'),
+        at('tt4', 600000, '2026-11-02T10:00:00Z', 'movie'),
+    ])
+    assert [meta['id'] for meta in metas] == ['tt4', 'tt2', 'tt1', 'tt3']
 
 
 def test_a_continue_row_without_a_video_id_resumes_the_title(home):
