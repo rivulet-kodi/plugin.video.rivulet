@@ -927,6 +927,7 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         payload = library.library_add_payload(self.meta) if add else library.library_remove_payload(item)
         if not self._push_library_item(auth, payload):
             return
+        self._note_library_write(payload)
         notify(L(30297) if add else L(30298))
 
     def _toggle_watched(self, auth, item, watched, lookup_ok):
@@ -955,7 +956,26 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         if not self._push_library_item(auth, payload):
             return
         self._remember_watched(payload)
+        self._note_library_write(payload)
         notify(L(30299) if watched else L(30300))
+
+    @staticmethod
+    def _note_library_write(payload):
+        """Tell Home about a library write that just landed.
+
+        The account's datastore can answer the next Home read before it
+        reflects this write, which would bring back a poster check (or
+        library membership) the user just changed. Home paints from the
+        remembered payload until the account catches up, and re-reads the
+        library on its next paint. Same pair of calls as
+        `libraryaction._mark`/`_write`; imported lazily so opening this
+        window never pulls Home in.
+        """
+        from lib.ui.mystuff import note_library_write
+        from lib.ui.newhome import mark_library_dirty
+
+        note_library_write(payload)
+        mark_library_dirty()
 
     @staticmethod
     def _push_library_item(auth, payload):
