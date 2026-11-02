@@ -119,6 +119,15 @@ _CONTEXT = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _fresh_context():
+    """Restamp `_CONTEXT` before every test. Stamped once at import, it
+    went stale (`MAX_STARTUP_AGE_SECONDS`) for any test that ran more than
+    60 s after collection, and the player rejected it: the 3.8 CI leg with
+    coverage crossed that line once the fuzz tests lengthened the suite."""
+    _CONTEXT['started_at'] = service_runner.library.iso8601_utc()
+
+
 @contextlib.contextmanager
 def _progress_player_env(store, api, sync_enabled=True, spawn_fn=None):
     """Builds one `build_progress_player()` instance against the shared
