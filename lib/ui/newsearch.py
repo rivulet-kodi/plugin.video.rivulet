@@ -10,7 +10,14 @@ is Discover (the first page of the first plain movie catalog); as
 letters are picked it becomes the results.
 
 Picking letters fills the bar; the Search pill (or OK from the phone)
-runs the search. It runs the way the classic search does, on the screen's
+runs the search. The bar itself is an edit control and has the focus
+when the screen opens: Kodi hands raw key presses only to a focused edit
+control, and everywhere else runs them through the keymap, where most
+letters are commands ("s" opens the shutdown menu, "x" stops, "c" opens
+the context menu). With a label for a bar, a laptop keyboard could not
+type at all. Each change in the bar reaches `onClick(QUERY)`; Enter or OK
+on the bar opens Kodi's own keyboard (core edit-control behaviour, which
+an add-on cannot intercept) and confirming it runs the search. It runs the way the classic search does, on the screen's
 own thread under the Rivulet spinner (`searchwindow.run_query`): Back on
 the spinner cancels, and the results replace Discover with the focus on
 them. rev18/rev19 searched on a worker as letters were picked and applied
@@ -45,6 +52,9 @@ MAX_QUERY = 60
 #: two lines of plot.
 SEARCH_STACK = {'title_h': 100, 'plot_h': 82}
 _BACK_ACTIONS = frozenset((9, 10, 92))
+#: ACTION_SELECT_ITEM and ACTION_MOUSE_LEFT_CLICK: on the bar, Kodi opens
+#: its keyboard for these before Python sees them.
+_BAR_OPEN_ACTIONS = frozenset((7, 100))
 
 
 class NewSearchWindow(BaseWindow):
@@ -61,6 +71,11 @@ class NewSearchWindow(BaseWindow):
         self._lock = threading.Lock()
         self._ready = []
         self._hero_painted = None
+        #: The bar reported a change since the last action. Kodi queues
+        #: the bar's click before the action that caused it, so a Select
+        #: on the bar that arrives with this set followed a confirmed
+        #: keyboard dialog, and one without it a cancelled dialog.
+        self._bar_changed = False
 
     def start(self):
         self.should_close_caller = False
@@ -70,6 +85,11 @@ class NewSearchWindow(BaseWindow):
     # --- screen ------------------------------------------------------------
 
     def onInit(self):
+        from lib.ui.compat import L
+
+        # Heads Kodi's keyboard, opened by OK/Enter on the bar; without it
+        # Kodi titles it "Enter value".
+        self.getControl(QUERY).setType(xbmcgui.INPUT_TYPE_TEXT, L(30001))
         letters = self.getControl(LETTERS)
         letters.reset()
         items = []
@@ -86,11 +106,11 @@ class NewSearchWindow(BaseWindow):
         else:
             self._welcome()
             self._load_discover()
-        self.setFocusId(LETTERS)
+        self.setFocusId(QUERY)
 
     def _paint_query(self):
-        text = escape_label(self.query)
-        self.getControl(QUERY).setLabel('%s[COLOR 8007090B]|[/COLOR]' % text)
+        # Edit text, not a label: Kodi draws the cursor while it has focus.
+        self.getControl(QUERY).setText(self.query)
 
     def _welcome(self):
         from lib.ui import newhome, newlook
@@ -136,6 +156,11 @@ class NewSearchWindow(BaseWindow):
         if action_id in _BACK_ACTIONS:
             self.close()
             return
+        bar_changed, self._bar_changed = self._bar_changed, False
+        if action_id in _BAR_OPEN_ACTIONS and self.getFocusId() == QUERY:
+            if bar_changed and not self._searching:
+                self._go()
+            return
         if action_id == 117:
             if self.getFocusId() == ROW:
                 from lib.ui.libraryaction import meta_from_item, poster_menu
@@ -158,6 +183,9 @@ class NewSearchWindow(BaseWindow):
             # up. Acting on them would edit or start a search under the one
             # still running, whose results would then be painted for a
             # query the bar no longer shows.
+            return
+        if control_id == QUERY:
+            self._bar_edited()
             return
         if control_id == LETTERS:
             item = self.getControl(LETTERS).getSelectedItem()
@@ -182,6 +210,21 @@ class NewSearchWindow(BaseWindow):
         elif key and len(self.query) < MAX_QUERY:
             self.query += key.lower() if self.query and not self.query.endswith(' ') else key
         self._paint_query()
+        self._query_changed()
+
+    def _bar_edited(self):
+        """Typed (or confirmed in Kodi's keyboard) into the bar: take its
+        text as the query, cut to `MAX_QUERY` like picked letters."""
+        bar = self.getControl(QUERY)
+        text = bar.getText() or ''
+        if len(text) > MAX_QUERY:
+            text = text[:MAX_QUERY]
+            bar.setText(text)
+        self.query = text
+        self._bar_changed = True
+        self._query_changed()
+
+    def _query_changed(self):
         if not self.query.strip():
             # An empty bar is Discover again.
             self._metas = []

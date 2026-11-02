@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <!-- New-look search, ported from RevRivulet 32503ae. -->
 <window>
-    <defaultcontrol>30202</defaultcontrol>
+    <defaultcontrol>30201</defaultcontrol>
     <depth>0.52</depth>
     <coordinates><left>0</left><top>0</top></coordinates>
     <controls>
@@ -23,11 +23,15 @@
 <control type="image"><left>0</left><top>0</top><width>1920</width><height>220</height><texture colordiffuse="FFFFFFFF">newlook_fade_top.png</texture><aspectratio>stretch</aspectratio></control>
 <control type="label"><left>80</left><top>36</top><width>900</width><height>50</height><font>font13</font><textcolor>FFEDEDED</textcolor><aligny>center</aligny><label>[B]$ADDON[plugin.video.rivulet 30001][/B]</label></control>
 <control type="label"><left>1040</left><top>36</top><width>800</width><height>50</height><font>font13</font><textcolor>FFEDEDED</textcolor><align>right</align><aligny>center</aligny><label>[B]$INFO[System.Time]$INFO[Weather.Temperature,  •  ,][/B]</label></control>
-<!-- The search bar: what has been picked so far, and a cursor. -->
+<!-- The search bar: an edit control, so a physical keyboard types straight into it (Kodi only
+     passes raw keys to a focused edit control; anywhere else they go through the keymap, where
+     "s" opens the shutdown menu). Focused, it gets a white ring with a dark gap. -->
+<control type="image"><left>52</left><top>88</top><width>816</width><height>92</height><texture border="46" colordiffuse="FFFFFFFF">pill_fill.png</texture><visible>Control.HasFocus(30201)</visible></control>
+<control type="image"><left>56</left><top>92</top><width>808</width><height>84</height><texture border="42" colordiffuse="FF07090B">pill_fill.png</texture><visible>Control.HasFocus(30201)</visible></control>
 <control type="image"><left>60</left><top>96</top><width>800</width><height>76</height><texture border="38" colordiffuse="FFFFFFFF">pill_fill.png</texture></control>
 <control type="image"><left>80</left><top>106</top><width>56</width><height>56</height><texture colordiffuse="FF07090B">newlook_icon_search.png</texture></control>
-<control type="label" id="30201"><left>146</left><top>96</top><width>690</width><height>76</height><font>font13</font><textcolor>FF07090B</textcolor><aligny>center</aligny><label></label></control>
-<control type="button" id="30204"><left>880</left><top>106</top><width>200</width><height>56</height><font>font13</font><textcolor>E6EDEDED</textcolor><focusedcolor>FF07090B</focusedcolor><align>center</align><aligny>center</aligny><texturefocus border="28" colordiffuse="FFFFFFFF">pill_fill.png</texturefocus><texturenofocus border="28" colordiffuse="24FFFFFF">pill_fill.png</texturenofocus><label>[B]$ADDON[plugin.video.rivulet 30511][/B]</label><onup>30204</onup><ondown>30202</ondown><onleft>30202</onleft><onright>30203</onright></control>
+<control type="edit" id="30201"><left>146</left><top>96</top><width>690</width><height>76</height><font>font13</font><textcolor>FF07090B</textcolor><focusedcolor>FF07090B</focusedcolor><textoffsetx>0</textoffsetx><aligny>center</aligny><texturefocus></texturefocus><texturenofocus></texturenofocus><label></label><onup>30201</onup><ondown>30202</ondown><onleft>30201</onleft><onright>30204</onright></control>
+<control type="button" id="30204"><left>880</left><top>106</top><width>200</width><height>56</height><font>font13</font><textcolor>E6EDEDED</textcolor><focusedcolor>FF07090B</focusedcolor><align>center</align><aligny>center</aligny><texturefocus border="28" colordiffuse="FFFFFFFF">pill_fill.png</texturefocus><texturenofocus border="28" colordiffuse="24FFFFFF">pill_fill.png</texturenofocus><label>[B]$ADDON[plugin.video.rivulet 30511][/B]</label><onup>30204</onup><ondown>30202</ondown><onleft>30201</onleft><onright>30203</onright></control>
 <control type="button" id="30203"><left>1100</left><top>106</top><width>240</width><height>56</height><font>font13</font><textcolor>E6EDEDED</textcolor><focusedcolor>FF07090B</focusedcolor><align>center</align><aligny>center</aligny><texturefocus border="28" colordiffuse="FFFFFFFF">pill_fill.png</texturefocus><texturenofocus border="28" colordiffuse="24FFFFFF">pill_fill.png</texturenofocus><label>[B]$ADDON[plugin.video.rivulet 30505][/B]</label><onup>30203</onup><ondown>30202</ondown><onleft>30204</onleft><onright>30203</onright></control>
 <!-- What the search is doing: "Searching for ...", "No results for ...". -->
 <control type="label" id="30205"><left>880</left><top>214</top><width>960</width><height>60</height><font>font13</font><textcolor>E6EDEDED</textcolor><aligny>center</aligny><label></label></control>
@@ -35,7 +39,7 @@
 <control type="panel" id="30202">
                 <left>100</left><top>192</top><width>728</width><height>104</height>
                 <orientation>vertical</orientation>
-                <onup>30204</onup><ondown>30215</ondown>
+                <onup>30201</onup><ondown>30215</ondown>
                 <onleft>30202</onleft><onright>30204</onright>
                 <scrolltime>0</scrolltime>
                 <itemlayout width="52" height="52"><control type="label"><left>0</left><top>0</top><width>52</width><height>52</height><font>font13</font><textcolor>B3EDEDED</textcolor><align>center</align><aligny>center</aligny><label>$INFO[ListItem.Label]</label></control></itemlayout>

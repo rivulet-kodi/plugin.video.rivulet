@@ -65,7 +65,7 @@ def test_welcome_discover_letters_search_history_detail_flow(load_search, monkey
     ctx = load_search()
     win = _init(ctx, monkeypatch)
     s = ctx.newsearch
-    assert win.getFocusId() == s.LETTERS
+    assert win.getFocusId() == s.QUERY
     assert not win.getProperty('SearchHasRow')
     assert win.getControl(30020).label == '[B]STR30508[/B]'
     assert win.getControl(30022).text == 'STR30509'
@@ -92,7 +92,7 @@ def test_welcome_discover_letters_search_history_detail_flow(load_search, monkey
         win.getControl(s.LETTERS).selectItem(s.KEYS.index(letter))
         win.onClick(s.LETTERS)
     assert win.query == 'Alien'
-    assert win.getControl(s.QUERY).label == 'Alien[COLOR 8007090B]|[/COLOR]'
+    assert win.getControl(s.QUERY).getText() == 'Alien'
     calls = _results(ctx, monkeypatch)
     win.onClick(s.GO)
     assert calls == [(ctx.store, 'Alien', threading.get_ident())]
@@ -169,7 +169,7 @@ def test_partial_notice_and_phone_search(load_search, monkeypatch):
     assert win.query == 'Alien' and calls[0][1] == 'Alien'
     assert win.getFocusId() == ctx.newsearch.ROW
     assert win.getControl(ctx.newsearch.STATUS).label
-    assert win.getControl(ctx.newsearch.QUERY).label.startswith('Alien')
+    assert win.getControl(ctx.newsearch.QUERY).getText() == 'Alien'
     monkeypatch.setattr(ctx.pairwindow, 'phone_search', lambda: None)
     win._phone()
     assert len(calls) == 1
@@ -350,7 +350,8 @@ def test_search_xml_native_controls_and_textures(load_search):
         ctx.win.getControl(cid)
     assert 30006 not in ids
     assert not [c for c in root.iter('control') if c.get('type') == 'grouplist' and c.get('id')]
-    assert root.findtext('defaultcontrol') == '30202'
+    assert root.findtext('defaultcontrol') == '30201'
+    assert ids[30201] == 'edit'
     assert not root.findall('.//animation[@type="WindowClose"]')
     for texture in root.iter():
         if texture.tag in {'texture', 'texturefocus', 'texturenofocus'} and texture.text and not texture.text.startswith('$'):
@@ -369,11 +370,13 @@ def test_search_static_geometry_and_navigation(load_search, monkeypatch, logo):
     selected += [c for c in top if not c.get('id') and _rect(c)[1] in {36, 630, 680}]
     for a, b in itertools.combinations(selected, 2):
         assert _apart(_rect(a), _rect(b)), (_rect(a), _rect(b))
-    nav = {30202: (30204, 30215, 30202, 30204), 30204: (30204, 30202, 30202, 30203), 30203: (30203, 30202, 30204, 30203), 30215: (30202, 30215, 30215, 30215)}
+    nav = {30201: (30201, 30202, 30201, 30204), 30202: (30201, 30215, 30202, 30204), 30204: (30204, 30202, 30201, 30203), 30203: (30203, 30202, 30204, 30203), 30215: (30202, 30215, 30215, 30215)}
     for cid, expected in nav.items():
         assert tuple(int(ids[cid].findtext(n)) for n in ['onup', 'ondown', 'onleft', 'onright']) == expected
     win = _init(ctx, monkeypatch)
     import xbmcgui
+    assert win.getFocusId() == 30201
+    win.setFocusId(30202)
     win.onAction(xbmcgui.Action(4))
     assert win.getFocusId() == 30202 and not win.getProperty('SearchHasRow')
     win.onAction(xbmcgui.Action(92))
@@ -542,3 +545,71 @@ def test_clicks_delivered_during_a_running_search_are_ignored(load_search, monke
     monkeypatch.setattr(ctx.detailwindow, 'open_detail', lambda *args: False)
     win.onClick(s.ROW)
     assert ctx.store.search_queries == ['Alien']
+
+
+def _type(win, s, text):
+    """What Kodi does for each key typed into the focused bar: the edit
+    control changes its text and sends a click, then Python sees the key
+    action (KEY_UNICODE)."""
+    import xbmcgui
+    for size in range(1, len(text) + 1):
+        win.getControl(s.QUERY).setText(text[:size])
+        win.onClick(s.QUERY)
+        win.onAction(xbmcgui.Action(0xF200))
+
+
+def test_physical_keyboard_types_into_the_bar_and_confirmed_enter_searches(load_search, monkeypatch):
+    ctx = load_search()
+    win = _init(ctx, monkeypatch)
+    s = ctx.newsearch
+    assert win.getFocusId() == s.QUERY
+    assert win.getControl(s.QUERY).input_type == (0, 'STR30001')
+    calls = _results(ctx, monkeypatch)
+    _type(win, s, 'alien')
+    assert win.query == 'alien' and calls == []
+    import xbmcgui
+    # Enter: Kodi opens its keyboard first; Done sends the bar's click,
+    # then Python gets the Select.
+    win.onClick(s.QUERY)
+    win.onAction(xbmcgui.Action(7))
+    assert [text for _, text, _ in calls] == ['alien']
+    assert win.getFocusId() == s.ROW and win._metas == [META]
+
+
+def test_cancelled_keyboard_on_the_bar_does_not_search(load_search, monkeypatch):
+    ctx = load_search()
+    win = _init(ctx, monkeypatch)
+    s = ctx.newsearch
+    calls = _results(ctx, monkeypatch)
+    _type(win, s, 'alien')
+    import xbmcgui
+    win.onAction(xbmcgui.Action(7))  # keyboard cancelled: no click came first
+    assert calls == [] and win.getFocusId() == s.QUERY
+
+
+def test_bar_text_is_cut_to_the_limit_and_clearing_it_shows_discover(load_search, monkeypatch):
+    ctx = load_search()
+    win = _init(ctx, monkeypatch)
+    s = ctx.newsearch
+    win.getControl(s.QUERY).setText('A' * 100)
+    win.onClick(s.QUERY)
+    assert win.query == 'A' * s.MAX_QUERY
+    assert win.getControl(s.QUERY).getText() == 'A' * s.MAX_QUERY
+    win._discover = [META]
+    win._metas = [dict(META, id='other')]
+    win.getControl(s.QUERY).setText('')
+    win.onClick(s.QUERY)
+    assert win.query == '' and win._metas == []
+    assert win.getControl(s.ROW_HEADING).label == '[B]STR30506[/B]'
+
+
+def test_picked_letters_show_in_the_bar_and_typing_continues_from_them(load_search, monkeypatch):
+    ctx = load_search()
+    win = _init(ctx, monkeypatch)
+    s = ctx.newsearch
+    for letter in 'AL':
+        win.getControl(s.LETTERS).selectItem(s.KEYS.index(letter))
+        win.onClick(s.LETTERS)
+    assert win.getControl(s.QUERY).getText() == 'Al'
+    _type(win, s, 'Alien')
+    assert win.query == 'Alien'
