@@ -125,10 +125,13 @@ def test_slim_library_item_never_raises_and_feeds_the_same_verdict(item):
     if slim is None:
         assert not (isinstance(item, dict) and isinstance(item.get('_id'), str) and item['_id'])
         return
-    assert set(slim) <= {'_id', 'type', 'removed', '_mtime', 'state'}
+    expected = set(library._SLIM_ITEM_KEYS)
+    if isinstance(item.get('state'), dict):
+        expected.add('state')
+    assert set(slim) == expected
     assert slim['_id'] == item['_id']
     if isinstance(slim.get('state'), dict):
-        assert set(slim['state']) == {'timesWatched'}
+        assert set(slim['state']) == set(library._SLIM_STATE_KEYS)
     # "Still in wire shape": the cut-down record gives the verdict the
     # full one does (typed records only - that is title_verdicts' own rule).
     assert library.item_watched(slim) == library.item_watched(item)
