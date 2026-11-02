@@ -785,7 +785,7 @@ def _played_metas(store, library_entries, variant='', suppressed=None, deadline=
         if len(posters) >= SHELF_CAP:
             return posters
     dismissed = _continue_dismissals(store)
-    for meta in _library_continue_metas(library_entries):
+    for meta in _library_continue_metas(library_entries) + _new_episode_metas(store, library_entries):
         if meta.get('id') in suppressed or not matches_continue(meta, variant):
             continue
         # Removed from Continue and not watched since: the account still
@@ -801,6 +801,48 @@ def _played_metas(store, library_entries, variant='', suppressed=None, deadline=
         if len(posters) >= SHELF_CAP:
             break
     return posters
+
+
+def _new_episode_metas(store, library_entries, now=None):
+    """Caught-up library series with an episode out since their last
+    watch, as next-up on the oldest such episode, newest release first.
+
+    The Stremio apps list these on Continue through their notifications
+    (#99); the service keeps the latest episodes in ``last_videos.json``
+    (`lib.service_runner.ProgressPuller`), so this reads a file and makes
+    no request. `lib.stremio.lastvideos.new_videos` is the rule.
+    """
+    from lib.stremio.lastvideos import new_videos
+    from lib.ui.mystuff import BAND_NEXT_UP
+
+    try:
+        latest = store.get_last_videos()
+    except Exception:
+        return []
+    if not latest:
+        return []
+    now = now or time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    metas = []
+    for entry in library_entries or []:
+        if not isinstance(entry, dict) or not (entry.get('name') or entry.get('poster')):
+            continue
+        fresh = new_videos(entry, latest.get(entry.get('_id')), now)
+        if not fresh:
+            continue
+        metas.append({
+            'id': entry['_id'],
+            'name': entry.get('name'),
+            'type': entry.get('type'),
+            'poster': entry.get('poster'),
+            'background': entry.get('background'),
+            'band': BAND_NEXT_UP,
+            'video_id': fresh[0][0],
+            'position_ms': None,
+            'duration_ms': None,
+            'watched_at': fresh[-1][1],
+        })
+    metas.sort(key=lambda meta: meta['watched_at'], reverse=True)
+    return metas
 
 
 def _iso_seconds(value):

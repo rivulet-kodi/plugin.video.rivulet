@@ -989,6 +989,73 @@ def test_progress_puller_pulls_everything_after_an_incremental_the_cache_could_n
     assert [r["_id"] for r in store.get_library_cache()] == ["tt1"]
 
 
+def _series_record(item_id):
+    return {"_id": item_id, "type": "series", "removed": False, "temp": False, "_mtime": "2026-10-01T00:00:00Z",
+            "state": {"lastWatched": "2026-10-01T00:00:00Z", "timeOffset": 0, "duration": 0,
+                      "flaggedWatched": 0, "video_id": item_id + ":1:1"}}
+
+
+_CINEMETA = {
+    "transportUrl": "https://v3-cinemeta.strem.io/manifest.json",
+    "manifest": {"id": "com.linvo.cinemeta", "types": ["series"], "idPrefixes": ["tt"],
+                 "resources": ["catalog"],
+                 "catalogs": [{"type": "series", "id": "last-videos",
+                               "extra": [{"name": "lastVideosIds", "isRequired": True}]}]},
+}
+
+
+class _LastVideosClient:
+    def __init__(self):
+        self.calls = []
+        self.fail = False
+
+    def catalog_detailed(self, base, rtype, cid, extra):
+        from lib.stremio.addons import AddonError
+
+        self.calls.append(extra)
+        if self.fail:
+            raise AddonError("down")
+        return [{"id": "tt1", "videos": [{"id": "tt1:1:2", "released": "2026-10-20T00:00:00Z"}]}]
+
+
+def test_progress_puller_refreshes_last_videos_every_six_hours(tmp_path):
+    """#99: the new-episode list Continue reads; a run where every
+    catalog failed keeps the old file and retries on the next pull."""
+    from lib.store import Store
+
+    api = _PullApi([["tt1", 1]], {"tt1": _series_record("tt1")})
+    client = _LastVideosClient()
+    store = Store(str(tmp_path / "data"))
+    store.set_auth({"authKey": "k1", "user": {}})
+    store.set_addons([_CINEMETA])
+    clock = [1000.0]
+    puller = service_runner.ProgressPuller(
+        store, api, lambda level, msg: None, service_runner.LogLevels("I", "W", "E"),
+        lambda: True, lambda: False, lambda: False, clock=lambda: clock[0], spawn_fn=_run_inline,
+        client_factory=lambda: client,
+    )
+    puller.poll()
+    assert client.calls == [[("lastVideosIds", "tt1")]]
+    assert store.get_last_videos() == {"tt1": [["tt1:1:2", "2026-10-20T00:00:00Z"]]}
+
+    clock[0] += service_runner.LIBRARY_PULL_INTERVAL_SECONDS
+    puller.poll()
+    assert len(client.calls) == 1  # library pulled again, last videos not due
+
+    client.fail = True
+    clock[0] += service_runner.LAST_VIDEOS_INTERVAL_SECONDS
+    puller.poll()
+    assert store.get_last_videos() == {"tt1": [["tt1:1:2", "2026-10-20T00:00:00Z"]]}
+    client.fail = False
+    clock[0] += service_runner.LIBRARY_PULL_INTERVAL_SECONDS
+    puller.poll()
+    assert len(client.calls) == 3
+
+    store.set_auth(None)
+    puller.poll()
+    assert store.get_last_videos() == {}
+
+
 @pytest.mark.parametrize("stand_down", ["sign_out", "sync_off", "another_account"])
 def test_progress_puller_drops_the_library_cache_it_can_no_longer_keep(tmp_path, stand_down):
     """Nothing would keep the copy current, so a mark cleared elsewhere

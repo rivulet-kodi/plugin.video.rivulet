@@ -581,6 +581,14 @@ class AddonClient:
         url = build_resource_url(base, 'stream', rtype, sid)
         return self._get_field(url, 'streams', 'list')
 
+    def catalog_detailed(self, base, rtype, cid, extra=None):
+        """GET a catalog that answers full metas (``metasDetailed``, with
+        ``videos``) rather than previews: Cinemeta's ``last-videos``
+        does (stremio-core ``ResourceResponse::MetasDetailed``). `catalog()`
+        reads ``metas`` only, which such an answer lacks."""
+        url = build_resource_url(base, 'catalog', rtype, cid, extra)
+        return self._get_field(url, 'metasDetailed', 'list')
+
     def subtitles(self, base, rtype, sid, extra=None):
         """GET a subtitles resource -> list of subtitle objects (resp['subtitles'])."""
         url = build_resource_url(base, 'subtitles', rtype, sid, extra)

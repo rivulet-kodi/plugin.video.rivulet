@@ -215,6 +215,34 @@ def test_account_resume_records_outrank_next_up_under_the_cap(home):
     assert [meta['id'] for meta in metas] == ['tt4', 'tt2', 'tt1', 'tt3']
 
 
+def test_caught_up_series_with_a_new_episode_are_next_up_on_it(home, tmp_path):
+    """#99: Stremio's notifications. The service keeps the latest episodes
+    of library series; one out since the last watch puts the series on
+    Continue on that episode, until it is watched or removed from Continue."""
+    from lib.store import Store
+
+    store = Store(str(tmp_path))
+    store.set_last_videos({
+        'tt1': [['tt1:1:1', '2026-09-01T00:00:00Z'], ['tt1:1:2', '2026-10-05T00:00:00Z'],
+                ['tt1:1:3', '2026-10-12T00:00:00Z']],
+        'tt2': [['tt2:1:1', '2026-09-01T00:00:00Z']],
+    })
+
+    def series(sid, last):
+        return _entry(_id=sid, type='series', temp=False, removed=False,
+                      state={'timeOffset': 0, 'duration': 0, 'lastWatched': last})
+
+    entries = [series('tt1', '2026-10-01T00:00:00Z'), series('tt2', '2026-10-01T00:00:00Z')]
+    metas = home.home._new_episode_metas(store, entries, now='2026-11-03T00:00:00Z')
+    assert [(m['id'], m['band'], m['video_id'], m['watched_at']) for m in metas] == [
+        ('tt1', 'next_up', 'tt1:1:2', '2026-10-12T00:00:00Z'),
+    ]
+    assert [m['id'] for m in home.home._played_metas(store, entries)] == ['tt1']
+
+    store.remove_progress_title('series', 'tt1')
+    assert home.home._played_metas(store, entries) == []
+
+
 def test_a_continue_row_without_a_video_id_resumes_the_title(home):
     entry = _entry()
     del entry['state']['video_id']
