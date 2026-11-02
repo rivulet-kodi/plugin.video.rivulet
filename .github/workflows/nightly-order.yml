@@ -1,0 +1,47 @@
+name: Nightly test-order hunt
+
+# Not a required check. pytest-randomly shuffles test order per run, so a
+# leaked module global can pass every PR run and fail one unlucky order
+# (PR #87 failed on 3.8 that way). This sweeps several fixed seeds plus
+# fresh random ones every night so such leaks surface off the PR path.
+# Reproduce a failure locally with: pytest tests/ --randomly-seed=<seed>
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  order:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ '3.8', '3.13' ]
+        seed: [ '1', '12345', '87', 'random-1', 'random-2', 'random-3' ]
+    name: order (${{ matrix.python-version }}, ${{ matrix.seed }})
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python ${{ matrix.python-version }} (uv)
+        uses: astral-sh/setup-uv@v10
+        with:
+          python-version: ${{ matrix.python-version }}
+          activate-environment: true
+          enable-cache: true
+          cache-dependency-glob: requirements-dev.txt
+
+      - name: Install dependencies
+        run: uv pip install -r requirements-dev.txt
+
+      - name: Run suite under seed
+        env:
+          SEED: ${{ matrix.seed }}
+        run: |
+          case "$SEED" in
+            random-*) SEED=$(python -c "import random; print(random.randrange(2**32))") ;;
+          esac
+          echo "Using --randomly-seed=$SEED (python ${{ matrix.python-version }})"
+          echo "### python ${{ matrix.python-version }}: \`--randomly-seed=$SEED\`" >> "$GITHUB_STEP_SUMMARY"
+          pytest tests/ -q --randomly-seed="$SEED"

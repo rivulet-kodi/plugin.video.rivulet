@@ -4,7 +4,7 @@
 
 Rivulet (`plugin.video.rivulet`) is a Kodi video addon implementing a **Stremio addon-protocol client**: it browses catalogs published by community Stremio addons, resolves streams, and plays them through an embedded or remote `rivulet-engine` streaming server. It ships its own 1920x1080 skin rather than drawing through the user's Kodi skin.
 
-Two independently versioned artifacts live here: the addon (`addon.xml`, currently 0.24.2) and the Kodi repository addon that delivers it (`repository.rivulet/addon.xml`, currently 1.0.2).
+Two independently versioned artifacts live here: the addon (`addon.xml`) and the Kodi repository addon that delivers it (`repository.rivulet/addon.xml`). Each file's `version` attribute is the only place its version lives.
 
 ## Architecture & Data Flow
 
@@ -52,7 +52,7 @@ Browsing: `lib/ui/views.py` fans a request across installed addons -> `lib/strem
 **Prefer the uv invocations — they need no local setup and are what these gates were last verified with:**
 
 ```bash
-uvx --with-requirements requirements-dev.txt pytest tests/ -q          # 3724 passed, ~27s
+uvx --with-requirements requirements-dev.txt pytest tests/ -q          # all pass; well under a minute
 uvx --with-requirements requirements-dev.txt ruff check lib tests
 uvx --with-requirements requirements-dev.txt mypy
 uvx --with-requirements requirements-dev.txt pytest tests/ --cov --cov-report=term-missing
@@ -83,9 +83,9 @@ make parallel    # pytest -n auto
 - `log(msg, level=xbmc.LOGDEBUG)` (`compat.py:54`), prefixed automatically.
 - `setting_bool(key, default)` / `setting_int(key, default, minimum=None)` (`compat.py:64,79`) parse the **raw `getSetting()` string on purpose** — `getSettingBool()` was observed misbehaving live. Do not "simplify" these to the typed API.
 
-**Error handling.** Typed exceptions per domain (`AddonError`, `DownloadError`, `UnsupportedPlatformError`); `B904` (`raise ... from exc`) is intentionally disabled for `lib/*` in `pyproject.toml:55-58`. URLs are never logged raw — use `safe_url_for_log()` from `lib/stremio/addons.py`. **An HTTP 200 can still be a failure:** AIOStreams answers a failing catalog/meta request with one synthetic `aiostreamserror.<json>` meta (`is_error_meta()`); `AddonClient.catalog()`/`meta()` turn it into an `AddonError` (category `addon reported error (HTTP nnn)`) so every `except AddonError` site reports it — left alone it surfaced as a "1 results" coverflow whose only title was the error. Errors raised while a response body streams are converted too; never let a bare `requests` exception escape `AddonClient`.
+**Error handling.** Typed exceptions per domain (`AddonError`, `DownloadError`, `UnsupportedPlatformError`); `B904` (`raise ... from exc`) is intentionally disabled for `lib/*` in `pyproject.toml` `[tool.ruff.lint.per-file-ignores]`. URLs are never logged raw — use `safe_url_for_log()` from `lib/stremio/addons.py`. **An HTTP 200 can still be a failure:** AIOStreams answers a failing catalog/meta request with one synthetic `aiostreamserror.<json>` meta (`is_error_meta()`); `AddonClient.catalog()`/`meta()` turn it into an `AddonError` (category `addon reported error (HTTP nnn)`) so every `except AddonError` site reports it — left alone it surfaced as a "1 results" coverflow whose only title was the error. Errors raised while a response body streams are converted too; never let a bare `requests` exception escape `AddonClient`.
 
-**String formatting is printf-style.** `UP031` is globally ignored (`pyproject.toml:44-48`); ~198 sites use `"%s" %`. Consistent with the 3.8 floor. Do not modernize them.
+**String formatting is printf-style.** `UP031` is globally ignored (`pyproject.toml` `[tool.ruff.lint]`); ~198 sites use `"%s" %`. Consistent with the 3.8 floor. Do not modernize them.
 
 **State and persistence** (`lib/store.py`) — JSON files under the addon's `addon_data` dir: `addons`, `auth`, `search_history` (15 entries), `now_playing`, `resume_offset`, `progress` (500 entries, 180-day sweep, daily), `progress_dismissed` (titles removed from Continue, so the library pull cannot restore them), `last_version`, `home_layout`.
 - Reads distinguish *missing* (seed/empty), *unreadable* (an `OSError` other than not-found: never write over it) and *corrupt* (kept as `<name>.corrupt` before the default replaces it). `_atomic_write` fsyncs and retries `os.replace` on `PermissionError`.
@@ -104,7 +104,7 @@ make parallel    # pytest -n auto
 
 **Home's `ListItem`s are freed by `newhome.release_items()`, never by interpreter teardown.** A Python `ListItem` shares its native item with the list control; whichever owner dies last runs `CGUIListItem::~CGUIListItem` -> `CGUIControlLookup::RemoveLookup()`, which walks the item's layout into the window's control tree. Freed after the window is gone (Kodi's `CPythonInvoker::onExecutionDone` sweeping the interpreter) that is a SIGSEGV in `__dynamic_cast`. So `homewindow.open_home()` calls `release_items(win)` after the final `doModal()` return: workers stopped and joined, every Python reference dropped (rows, tab snapshots, the focused library item), list controls reset, cycles collected, all while the controls still exist. Rules that keep it true: `ListItem`s are made on the GUI thread only (loaders return plain records, `_attach_items` builds items); worker threads get a `weakref` to the window and plain data, never a row state or an item; no module global holds a window (`posterwarm._target` is a weakref). `NewHomeWindow.close()` must not release: it also runs for the playback force-close, after which Home reopens and needs its rows. `tests/test_home_teardown.py` checks all of this.
 
-**Localization.** 310 ids spanning `#30000`-`#30547` (gaps are normal — never renumber, and allocate above the current maximum) in `resources/language/resource.language.en_gb/strings.po`, the source of truth. Adding a user-visible string means adding it to **all 14 locales**, with `msgctxt "#3XXXX"`. Skin XML reads them as `$LOCALIZE(30360)`.
+**Localization.** Ids start at `#30000`; gaps are normal — never renumber, and allocate new ids above the current maximum in `resources/language/resource.language.en_gb/strings.po`, the source of truth. Adding a user-visible string means adding it to **all 14 locales**, with `msgctxt "#3XXXX"`. Skin XML reads them as `$LOCALIZE(30360)`.
 
 **Settings.** `resources/settings.xml`, ids are `<category>_<feature>` (`home_show_movies`, `server_enable`, `bt_listen_port`). `server_enable` is first in its category on purpose: Kodi otherwise opens Settings inside the `server_url` text box, trapping the arrow keys.
 
@@ -120,8 +120,8 @@ make parallel    # pytest -n auto
 
 | Path | Why |
 |---|---|
-| `addon.xml` | **Single source of version truth** (Kodi reads it). Cutting a release = bump `version` + prepend a `<news>` entry, then tag `vX.Y.Z` |
-| `pyproject.toml` | ruff/mypy/pytest/coverage config. Its `[project] version` is inert dev metadata and is **stale (0.6.1)** — never treat it as the release version |
+| `addon.xml` | **Single source of version truth** (Kodi reads it). Bumped only by a release PR; see Release below |
+| `pyproject.toml` | ruff/mypy/pytest/coverage config only. It deliberately has no `[project]` table: the addon is not pip-installable and a second version there only went stale |
 | `requirements-dev.txt` | Every floor is deliberate; comments explain the 3.8 leg and the `mypy<2.0` cap |
 | `lib/ui/router.py` | Action dispatch; add new plugin actions here |
 | `lib/ui/compat.py` | The only sanctioned path to Kodi APIs that differ by version |
@@ -130,24 +130,32 @@ make parallel    # pytest -n auto
 | `tests/kodistubs/install.py` | Make a new module importable under test by adding it to the reload targets |
 | `.coderabbit.yaml` | Review instructions, including the deliberate non-findings |
 
+## Release
+
+Never push a release straight to `main`; that bypasses the required checks (0.37.0 did).
+
+1. Open a `release/X.Y.Z` PR that bumps `version` in `addon.xml` and prepends a `<news>` entry (0.35.0, PR #83, is the model).
+2. Merge it once `test (3.8)`, `test (3.11)`, `test (3.13)`, `compat-py38-requests`, `lint-type` and `build` are green.
+3. Tag the merge commit: `git tag -a vX.Y.Z -m "X.Y.Z" <merge-sha> && git push origin vX.Y.Z`. The `build` workflow fails a tag that is not `v` + the `addon.xml` version.
+
 ## Runtime/Tooling Preferences
 
 - **Python 3.8 is a hard floor** (Kodi 19 "Matrix"). No walrus-free worries, but no 3.9+ syntax or stdlib.
 - Runtime dependency is declared to Kodi, not pip: `addon.xml` imports `xbmc.python 3.0.0` and `script.module.requests 2.22.0`. The `compat-py38-requests` CI job pins `requests==2.22.0` to hold that floor honest.
-- `mypy` is capped `<2.0`: 2.x dropped `--python-version 3.8/3.9` and would silently discard this project's target. `pyproject.toml:76` sets `python_version = "3.9"` — the lowest current mypy accepts — with real 3.8 compatibility guarded by the CI matrix instead.
+- `mypy` is capped `<2.0`: 2.x dropped `--python-version 3.8/3.9` and would silently discard this project's target. `pyproject.toml` `[tool.mypy]` sets `python_version = "3.9"` — the lowest current mypy accepts — with real 3.8 compatibility guarded by the CI matrix instead.
 - Ruff: `select = ["E", "F", "I", "B", "UP"]`, `target-version = "py38"`, `line-length = 100`.
 - Dependabot covers `github-actions` only; pip is excluded because these floors are decisions, not lag.
 
 ## Testing & QA
 
-pytest, **3724 tests, ~92% coverage against `fail_under = 90`** with branch coverage on. Roughly 30s for the full suite — there is no excuse for not running it.
+pytest, **coverage gated at `fail_under = 90`** with branch coverage on. The full suite runs in well under a minute — there is no excuse for not running it.
 
 - **Kodi is faked, not installed.** `tests/kodistubs/install.py` is a context manager that snapshots `sys.modules`, injects fresh fake `xbmc`/`xbmcgui`/`xbmcplugin`/`xbmcaddon`/`xbmcvfs` modules, re-imports the targets against them, and restores everything exactly on exit, after joining any Home worker thread the session started (one that outlives its test re-imports `lib.ui.background` against restored `sys.modules` and fails an unrelated test). Fakes are per-test, and `tests/kodistubs/fakes.py:Env` records every Kodi call for assertions.
 - **The fake `WindowXML` validates control ids against the real skin XML** (`tests/kodistubs/modules.py`), so a Python/skin mismatch fails in tests.
-- **Tests are order-randomized** (`pytest-randomly`). Never rely on cross-test state.
-- **Warnings are errors**: `filterwarnings = ["error", ...]` (`pyproject.toml:12-16`). `ResourceWarning` therefore fails the suite — this is why `lib/service_runner.py` closes `HTTPError` responses inside its health-check loop, and why `PERF203` there is deliberate.
+- **Tests are order-randomized** (`pytest-randomly`). Never rely on cross-test state. A nightly workflow (`.github/workflows/nightly-order.yml`, not a required check) sweeps fixed and random `--randomly-seed` values on 3.8 and latest Python; reproduce a failure with the seed it prints.
+- **Warnings are errors**: `filterwarnings = ["error", ...]` (`pyproject.toml` `[tool.pytest.ini_options]`). `ResourceWarning` therefore fails the suite — this is why `lib/service_runner.py` closes `HTTPError` responses inside its health-check loop, and why `PERF203` there is deliberate.
 - **Network is blocked at the socket level** by an autouse fixture in `tests/conftest.py`; use `FakeSession`/`FakeResponse` from there.
 - Windows are exercised by calling `onInit`/`onClick`/`onAction` directly, not through a Kodi event loop.
-- `tests/test_glyph_coverage.py` and `tests/test_skin_xml.py` need real Estuary fonts at `/usr/share/kodi/addons/skin.estuary/fonts`; they run locally on a machine with Kodi installed and skip in CI. Expect **3724 passed** locally (skips only when optional deps such as PIL are missing).
+- `tests/test_glyph_coverage.py` and `tests/test_skin_xml.py` need real Estuary fonts at `/usr/share/kodi/addons/skin.estuary/fonts`; they run locally on a machine with Kodi installed and skip in CI. Expect everything to pass locally (skips only when optional deps such as PIL are missing).
 
 CI gates every PR with six required checks: `build`, `lint-type`, `test (3.8)`, `test (3.11)`, `test (3.13)`, `compat-py38-requests`. `main` requires them plus conversation resolution and linear history; squash-merge only.
