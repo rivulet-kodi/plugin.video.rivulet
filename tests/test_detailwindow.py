@@ -1872,9 +1872,13 @@ def test_open_time_fetch_older_than_the_context_menu_lookup_is_dropped(load_deta
 def test_series_mark_watched_reaches_home_before_the_account_echoes_it(load_detailwindow, monkeypatch):
     """The account's next read can still hold the old record. Home paints
     from the write this window remembered, so the series check shows."""
+    ctx = load_detailwindow()
+    # Imported only once the stubs are in: `newhome` imports xbmcgui at
+    # module level, so importing it first passes only when an earlier
+    # test happened to leave it in sys.modules (random order, CI seed
+    # 1095510647 on 3.11 did not).
     from lib.ui import newhome, watchmarks
 
-    ctx = load_detailwindow()
     win = _make_window(ctx.detailwindow)
     win.meta = {'id': 'tt1', 'name': 'Breaking Bad', 'type': 'series'}
     old = {'_id': 'tt1', 'type': 'series', 'removed': False, '_mtime': '2026-05-01T00:00:00Z',
@@ -1902,9 +1906,9 @@ def test_series_mark_watched_reaches_home_before_the_account_echoes_it(load_deta
 
 
 def test_series_library_add_is_remembered_for_home(load_detailwindow, monkeypatch):
-    from lib.ui import libraryaction, newhome
-
     ctx = load_detailwindow()
+    from lib.ui import libraryaction, newhome  # after the stubs; see above
+
     win = _make_window(ctx.detailwindow)
     win.meta = {'id': 'tt1', 'name': 'Breaking Bad', 'type': 'series'}
     _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, item=None)
@@ -1917,9 +1921,9 @@ def test_series_library_add_is_remembered_for_home(load_detailwindow, monkeypatc
 
 
 def test_a_failed_series_write_is_not_remembered_for_home(load_detailwindow, monkeypatch):
-    from lib.ui import libraryaction, newhome
-
     ctx = load_detailwindow()
+    from lib.ui import libraryaction, newhome  # after the stubs; see above
+
     win = _make_window(ctx.detailwindow)
     win.meta = {'id': 'tt1', 'name': 'Breaking Bad', 'type': 'series'}
     _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, item=None, put_error=ApiError('boom'))
