@@ -615,3 +615,64 @@ def watched_title_ids(verdicts, progress_entries):
             continue
         marks.add(item_id)
     return frozenset(marks)
+
+
+def newer_verdicts(older, newer):
+    """Two :func:`title_verdicts` maps folded into one, keeping per title
+    the verdict with the later ``mtime`` (``newer`` on a tie).
+
+    Two reads of the same account can disagree only by age: the cached
+    copy the background pull wrote (``Store.get_library_cache``) and a
+    live read this process made since (Home's Continue/Library rows).
+    Neither is newer as a whole -- the pull may have run after the live
+    read, or a title may have changed on another device in between -- so
+    the comparison is per record, on the record's own ``_mtime``.
+    """
+    merged = dict(older)
+    for item_id, verdict in newer.items():
+        current = merged.get(item_id)
+        if current is None or verdict[1] >= current[1]:
+            merged[item_id] = verdict
+    return merged
+
+
+def episode_ticked(percent):
+    """Whether an episode row that displays `percent` (the rounded 0-100
+    "N% WATCHED" figure the series page prints from local progress, or
+    ``None`` when it prints nothing) wears the watched tick.
+
+    The tick sits next to that printed figure, so it is decided on the
+    same rounded number, at :data:`WATCHED_THRESHOLD_RATIO` -- the point
+    the account counts the episode as watched -- rather than on
+    :func:`progress_finished`'s strict ``>`` over raw milliseconds: a row
+    reading "70% WATCHED" with no tick beside it would look like a bug.
+    """
+    return percent is not None and percent >= round(WATCHED_THRESHOLD_RATIO * 100)
+
+
+#: The ``libraryItem`` fields ``Store.get_library_cache`` keeps per record:
+#: exactly what :func:`title_verdicts` and the pending-write overlay
+#: (``lib.ui.libraryaction.apply_library_writes``) read. A full record runs
+#: to a kilobyte (name, poster, behaviour hints, the episode bitfield); a
+#: slim one is under a hundred bytes, which is what lets the service
+#: rewrite the file on every pull. A new reader of the cache that needs
+#: another field adds it here.
+_SLIM_ITEM_KEYS = ('_id', 'type', 'removed', '_mtime')
+_SLIM_STATE_KEYS = ('timesWatched',)
+
+
+def slim_library_item(item):
+    """`item` (one account ``libraryItem`` record) cut down to the fields
+    the watched verdict reads, still in wire shape (``state`` nested) so
+    :func:`title_verdicts` accepts it unchanged; or ``None`` for a record
+    with no string ``_id`` to key it by."""
+    if not isinstance(item, dict):
+        return None
+    item_id = item.get('_id')
+    if not isinstance(item_id, str) or not item_id:
+        return None
+    slim = {key: item.get(key) for key in _SLIM_ITEM_KEYS}
+    state = item.get('state')
+    if isinstance(state, dict):
+        slim['state'] = {key: state.get(key) for key in _SLIM_STATE_KEYS}
+    return slim

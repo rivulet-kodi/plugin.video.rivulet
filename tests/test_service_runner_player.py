@@ -8,6 +8,7 @@ plus its pure should_push_now() and is_context_stale() helpers.
 """
 import contextlib
 import datetime
+import os
 import sys
 
 import pytest
@@ -949,6 +950,73 @@ def test_progress_puller_full_then_incremental(tmp_path):
     puller.poll()
     assert api.calls[-1] == ("k1", ["tt1"], False)
     assert store.get_progress("movie", "tt1")["position_ms"] == 7000
+
+
+def test_progress_puller_keeps_the_library_cache_full_then_incremental(tmp_path):
+    """The watched check reads `library.json`: a full pull writes every
+    record, an incremental one updates the changed ones in place and drops
+    those the account no longer lists."""
+    api = _PullApi([["tt1", 1], ["tt2", 1]], {
+        "tt1": _pull_record("tt1", 4000, "2099-01-01T00:00:00Z"),
+        "tt2": _pull_record("tt2", 5000, "2099-01-01T00:00:00Z"),
+    })
+    puller, store, clock, _ = _puller(tmp_path, api)
+    puller.poll()
+    assert sorted(r["_id"] for r in store.get_library_cache()) == ["tt1", "tt2"]
+
+    watched = _pull_record("tt1", 0, "2099-01-01T00:01:00Z")
+    watched["state"]["timesWatched"] = 1
+    api.meta = [["tt1", 2], ["tt3", 1]]
+    api.records = {"tt1": watched, "tt3": _pull_record("tt3", 1000, "2099-01-01T00:00:00Z")}
+    clock[0] += service_runner.LIBRARY_PULL_INTERVAL_SECONDS
+    puller.poll()
+    assert api.calls[-1] == ("k1", ["tt1", "tt3"], False)
+    cache = {r["_id"]: r for r in store.get_library_cache()}
+    assert sorted(cache) == ["tt1", "tt3"]
+    assert cache["tt1"]["state"]["timesWatched"] == 1
+
+
+def test_progress_puller_pulls_everything_after_an_incremental_the_cache_could_not_take(tmp_path):
+    api = _PullApi([["tt1", 1]], {"tt1": _pull_record("tt1", 4000, "2099-01-01T00:00:00Z")})
+    puller, store, clock, _ = _puller(tmp_path, api)
+    puller.poll()
+    os.remove(os.path.join(store.data_dir, "library.json"))
+    api.meta = [["tt1", 2]]
+    for _ in range(2):
+        clock[0] += service_runner.LIBRARY_PULL_INTERVAL_SECONDS
+        puller.poll()
+    assert [c[2] for c in api.calls] == [True, False, True]
+    assert [r["_id"] for r in store.get_library_cache()] == ["tt1"]
+
+
+@pytest.mark.parametrize("stand_down", ["sign_out", "sync_off", "another_account"])
+def test_progress_puller_drops_the_library_cache_it_can_no_longer_keep(tmp_path, stand_down):
+    """Nothing would keep the copy current, so a mark cleared elsewhere
+    would stay on this device's posters."""
+    api = _PullApi([["tt1", 1]], {"tt1": _pull_record("tt1", 4000, "2099-01-01T00:00:00Z")})
+    sync = [True]
+    from lib.store import Store
+
+    store = Store(str(tmp_path / "data"))
+    store.set_auth({"authKey": "k1", "user": {}})
+    puller = service_runner.ProgressPuller(
+        store, api, lambda level, msg: None, service_runner.LogLevels("I", "W", "E"),
+        lambda: sync[0], lambda: False, lambda: False, clock=lambda: 1000.0, spawn_fn=_run_inline,
+    )
+    puller.poll()
+    assert store.get_library_cache()
+    if stand_down == "sign_out":
+        store.set_auth(None)
+    elif stand_down == "sync_off":
+        sync[0] = False
+    else:
+        from lib.stremio.api import ApiError
+
+        # The new account's first pull fails: the old copy must still go.
+        api.fail = ApiError("offline")
+        store.set_auth({"authKey": "k2", "user": {}})
+    puller.poll()
+    assert store.get_library_cache() == []
 
 
 def test_progress_puller_new_login_pulls_immediately(tmp_path):

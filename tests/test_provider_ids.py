@@ -131,7 +131,6 @@ def test_search_match_needs_the_same_name_type_and_year():
 def test_previews_are_remembered_by_id(load):
     from lib.ui import previews
 
-    previews.forget_all()
     previews.remember({'id': 'tmdb:603', 'name': 'The Matrix', 'type': 'movie', 'poster': 'p.jpg', 'genres': ['x']})
     assert previews.lookup('tmdb:603') == {'id': 'tmdb:603', 'name': 'The Matrix', 'type': 'movie', 'poster': 'p.jpg'}
     assert previews.lookup('nope') is None
@@ -144,7 +143,6 @@ def test_open_detail_falls_back_to_the_imdb_id(load, monkeypatch):
     import lib.ui.views as views
     from lib.ui import previews
 
-    previews.forget_all()
     previews.remember({'id': 'tmdb:603', 'name': 'The Matrix', 'imdb_id': 'tt0133093'})
     asked = []
     movie = {'id': 'tt0133093', 'type': 'movie', 'name': 'The Matrix'}
@@ -166,7 +164,6 @@ def test_a_movie_nobody_has_a_meta_for_opens_its_streams_from_the_preview(load, 
     import lib.ui.views as views
     from lib.ui import previews
 
-    previews.forget_all()
     previews.remember({'id': 'tt0133093', 'type': 'movie', 'name': 'The Matrix', 'poster': 'p.jpg'})
     monkeypatch.setattr(views, '_fetch_meta', lambda stype, sid, **kw: None)
     opened = []
@@ -440,7 +437,6 @@ def test_a_provider_lists_empty_meta_does_not_hide_cinemetas_series(load, monkey
                                _addon('lists', 'Streaming Catalogs', ['movie', 'series'])])
     monkeypatch.setattr(views, 'get_store', lambda: store)
     monkeypatch.setattr(views, 'get_client', lambda: _Client())
-    previews.forget_all()
     previews.remember({'id': 'tt0944947', 'type': 'series', 'name': 'Game of Thrones'})
 
     started = []

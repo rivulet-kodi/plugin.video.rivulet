@@ -135,10 +135,16 @@ def test_hero_facts_keep_what_the_tag_reads():
 
 
 class _Store:
-    def __init__(self, auth=None, progress=None, fail=False):
+    def __init__(self, auth=None, progress=None, fail=False, cache=None):
         self._auth = auth
         self._progress = progress or []
         self._fail = fail
+        self._cache = cache or []
+
+    def get_library_cache(self):
+        if self._fail:
+            raise OSError('disk')
+        return self._cache
 
     def get_auth(self):
         if self._fail:
@@ -206,7 +212,6 @@ def test_a_local_finish_marks_it_signed_out():
 def test_a_refresh_without_entries_reuses_the_last_account_read():
     store = _Store(auth={'authKey': 'k'})
     watchmarks.refresh(store, [_record(timesWatched=1)])
-    assert watchmarks.account_loaded() is True
     watchmarks.refresh(store)
     assert watchmarks.is_watched({'id': 'tt1', 'type': 'movie'}) is True
 
@@ -236,9 +241,38 @@ def test_a_stale_flag_with_no_count_shows_no_check():
     assert watchmarks.is_watched({'id': 'tt1', 'type': 'movie'}) is False
 
 
-def test_account_loaded_follows_the_account():
-    assert watchmarks.account_loaded() is False
-    watchmarks.refresh(_Store(auth={'authKey': 'k'}), [])
-    assert watchmarks.account_loaded() is True
-    watchmarks.refresh(_Store(auth=None))
-    assert watchmarks.account_loaded() is False
+def test_the_service_cache_marks_cards_with_no_read_of_its_own():
+    """The coverflow and a catalog-only Home read nothing; the service's
+    last pull answers for the account."""
+    watchmarks.refresh(_Store(auth={'authKey': 'k'}, cache=[_record(timesWatched=1)]))
+    assert watchmarks.is_watched({'id': 'tt1', 'type': 'movie'}) is True
+
+
+def test_no_cache_yet_waits_for_the_first_pull():
+    watchmarks.refresh(_Store(auth={'authKey': 'k'}))
+    assert watchmarks.is_watched({'id': 'tt1', 'type': 'movie'}) is False
+
+
+def test_a_pending_write_overrides_the_cache_it_postdates():
+    from lib.ui import libraryaction
+
+    watched = _record(mtime='2026-05-01T00:00:00Z', timesWatched=1)
+    unmarked = library.mark_watched_payload(watched, False, now=datetime.datetime(2026, 6, 1, tzinfo=datetime.timezone.utc))
+    libraryaction.note_library_write(unmarked)
+    watchmarks.refresh(_Store(auth={'authKey': 'k'}, cache=[watched]))
+    assert watchmarks.is_watched({'id': 'tt1', 'type': 'movie'}) is False
+
+
+@pytest.mark.parametrize('cache_mtime, live_mtime, watched', [
+    ('2026-06-01T00:00:00Z', '2026-05-01T00:00:00Z', True),
+    ('2026-05-01T00:00:00Z', '2026-06-01T00:00:00Z', False),
+])
+def test_the_newer_of_the_cache_and_a_live_read_wins(cache_mtime, live_mtime, watched):
+    store = _Store(auth={'authKey': 'k'}, cache=[_record(mtime=cache_mtime, timesWatched=1)])
+    watchmarks.refresh(store, [_record(mtime=live_mtime, timesWatched=0)])
+    assert watchmarks.is_watched({'id': 'tt1', 'type': 'movie'}) is watched
+
+
+def test_signed_out_ignores_a_cache_left_on_disk():
+    watchmarks.refresh(_Store(auth=None, cache=[_record(timesWatched=1)]))
+    assert watchmarks.is_watched({'id': 'tt1', 'type': 'movie'}) is False

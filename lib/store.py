@@ -37,6 +37,13 @@ JSON files live under ``data_dir``:
   ``datastore_put`` and pulls the account's watch state back in through
   :func:`Store.merge_remote_progress`, both only when logged in AND the
   "sync_progress" setting is on.
+* ``library.json`` -- a slim copy of the account's ``libraryItem``
+  records (``lib.library.slim_library_item``), written by the service's
+  library pull in the same pass as its progress merge
+  (:meth:`Store.merge_library_cache`) and read for the watched check
+  (:meth:`Store.get_library_cache`), so a paint never calls the account
+  just to learn which titles are watched. Capped at
+  :data:`MAX_LIBRARY_ENTRIES`.
 * ``progress_dismissed.json`` -- titles removed from Continue, with the
   time, so the library pull does not bring them back (see
   :meth:`Store.remove_progress_title`). Read fresh, not cached.
@@ -100,6 +107,8 @@ HOME_LAYOUT_FILENAME = "home_layout.json"
 #: ``{"<type>\x1f<id>": "<iso8601 dismissed at>"}`` -- titles removed from
 #: Continue. See :meth:`Store.remove_progress_title`.
 PROGRESS_DISMISSED_FILENAME = "progress_dismissed.json"
+#: Slim account ``libraryItem`` records. See :meth:`Store.merge_library_cache`.
+LIBRARY_FILENAME = "library.json"
 
 #: Most-recent-first cap for the persisted search history list.
 MAX_SEARCH_HISTORY = 15
@@ -117,6 +126,15 @@ MAX_PROGRESS_ENTRIES = 500
 #: :data:`PROGRESS_SWEEP_INTERVAL_SECONDS` late -- see
 #: :func:`_prune_progress`.
 MAX_PROGRESS_AGE_DAYS = 180
+
+#: Hard cap on the records kept in ``library.json``; past it the records
+#: with the oldest ``_mtime`` go first. Every title ever watched leaves a
+#: record (a ``temp`` one when it was never added), so a long-lived account
+#: runs to thousands. At roughly 110 bytes a slim record this bounds the
+#: file near 220 KB, which :meth:`Store._cached_read` re-checksums on every
+#: paint; a title untouched for longer than the newest 2000 have been loses
+#: only the account's word on its check, and local progress still counts.
+MAX_LIBRARY_ENTRIES = 2000
 
 #: Wall-clock interval between full age-based sweeps of
 #: ``progress.json`` in :meth:`Store.set_progress` (see
@@ -1059,6 +1077,7 @@ class Store:
         self._progress_path = os.path.join(self.data_dir, PROGRESS_FILENAME)
         self._dismissed_path = os.path.join(self.data_dir, PROGRESS_DISMISSED_FILENAME)
         self._last_version_path = os.path.join(self.data_dir, LAST_VERSION_FILENAME)
+        self._library_path = os.path.join(self.data_dir, LIBRARY_FILENAME)
         #: Per-instance memoisation for `_cached_read`: `path -> ((mtime_ns,
         #: size), parsed_value)`. A single process/screen-render often
         #: calls e.g. `get_addons()` many times; a fresh eMMC/SD `open()`
@@ -1066,8 +1085,8 @@ class Store:
         #: NEVER consulted by `update_addons`'s compare-and-swap, which
         #: must always observe the current on-disk bytes -- see
         #: `_cached_read`'s docstring. Its key set is closed on purpose --
-        #: exactly seven fixed paths (addons, auth, search_history,
-        #: now_playing, resume_offset, last_version, progress), which is
+        #: exactly eight fixed paths (addons, auth, search_history,
+        #: now_playing, resume_offset, last_version, progress, library), which is
         #: why it needs no size cap; `home_layout.json` is deliberately not
         #: one of them. Adding a path is a decision to revisit that bound.
         self._read_cache = {}
@@ -1944,3 +1963,65 @@ class Store:
                 "updated_at": value.get("updated_at"),
             })
         return entries
+
+    # -- account library cache ---------------------------------------------
+
+    def get_library_cache(self):
+        """The slim account records ``library.json`` holds, as a list, or
+        ``[]`` when it is missing, unreadable or corrupt. Served from the
+        per-instance read cache -- see `_cached_read` -- so the returned
+        list is shared: callers read it, never mutate it."""
+        records = self._cached_read(self._library_path, None)
+        return records if isinstance(records, list) else []
+
+    def merge_library_cache(self, records, live_ids=None):
+        """Fold `records` (``lib.library.slim_library_item`` output) pulled
+        from the account into ``library.json``, and return whether the file
+        now reflects the account.
+
+        ``live_ids`` is ``None`` when `records` is the whole library (the
+        first pull for an account): the file is replaced wholesale, like
+        ``auth.json``, so it needs no read and has nothing to protect. An
+        incremental pull passes every id the account still lists
+        (``datastoreMeta``): the changed records replace theirs in place
+        and a record the account no longer lists is dropped. That needs a
+        complete file to start from, so a missing, unreadable or corrupt
+        one (kept as ``library.json.corrupt``) writes nothing and returns
+        ``False``, and the caller pulls the whole library next time.
+
+        Plain read-modify-write: only the service's pull writes this file.
+        Bounded to :data:`MAX_LIBRARY_ENTRIES`, newest ``_mtime`` kept.
+        """
+        if live_ids is None:
+            current = {}
+        else:
+            status, existing = _load_json(self._library_path, list)
+            if status == _CORRUPT:
+                _keep_corrupt_copy(self._library_path)
+            if status != _OK:
+                return False
+            live = set(live_ids)
+            current = {
+                record["_id"]: record for record in existing
+                if isinstance(record, dict) and record.get("_id") in live
+            }
+        for record in records:
+            if isinstance(record, dict) and isinstance(record.get("_id"), str):
+                current[record["_id"]] = record
+        kept = list(current.values())
+        if len(kept) > MAX_LIBRARY_ENTRIES:
+            kept = heapq.nlargest(MAX_LIBRARY_ENTRIES, kept, key=lambda r: str(r.get("_mtime") or ""))
+        # Compact (see `_atomic_write`): machine-only, rewritten every pull.
+        _atomic_write(self._library_path, kept, compact=True)
+        self._invalidate_cache(self._library_path)
+        return True
+
+    def clear_library_cache(self):
+        """Delete ``library.json``: the account it mirrors is signed out, or
+        the pull that keeps it current is switched off, and a stale copy
+        would keep showing checks the account may since have cleared."""
+        try:
+            os.remove(self._library_path)
+        except OSError:
+            pass
+        self._invalidate_cache(self._library_path)

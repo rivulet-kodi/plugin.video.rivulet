@@ -58,23 +58,6 @@ _BASE_LOCALIZED = {30348: 'Showing %d of %d'}
 
 
 @pytest.fixture(autouse=True)
-def _clear_catalog_cache():
-    """`addoncatalogs._catalog_cache` is a module-level dict shared by every
-    test in this process (see its own docstring for why it cannot be a
-    per-call fixture-scoped object) - without resetting it, whichever test
-    happens to run first for a given (transport_url, type, id) key decides
-    every later test's fetched entries regardless of that test's OWN queued
-    FakeSession response, since pytest-randomly reorders tests every run.
-    Mirrors tests/test_addoncatalogs.py's own fixture of the same name;
-    duplicated rather than imported/shared because that module imports
-    addoncatalogs directly with no kodi stubs, while every test here
-    reloads a fresh addoncatalogwindow module instead."""
-    addoncatalogs._catalog_cache.clear()
-    yield
-    addoncatalogs._catalog_cache.clear()
-
-
-@pytest.fixture(autouse=True)
 def _disable_builtin_addon_catalog_source(monkeypatch):
     """Every test above this point (and most below it) was written
     against a world with only installed-addon sources; leaving

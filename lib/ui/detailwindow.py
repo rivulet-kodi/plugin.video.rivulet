@@ -27,7 +27,8 @@ ACTION_CONTEXT_MENU opens `_open_context_menu()`'s combined actions
 menu for the whole title: 'Cast & Crew' plus the Stremio account
 library write actions this addon otherwise only READS from
 (`lib.ui.mystuff`) - Add/Remove library and Mark (un)watched, both
-pushed via `lib.stremio.api.StremioAPI.put_library_item()` using
+pushed through `lib.ui.libraryaction.push_write()` (the addon's one
+library write path, which also tells Home) using
 payloads `lib.library` builds (`library_add_payload`/
 `library_remove_payload`/`mark_watched_payload`). See
 `_open_context_menu()` for why the row wording is fetched live every
@@ -38,7 +39,7 @@ import time
 
 import xbmcgui
 
-from lib.library import WATCHED_THRESHOLD_RATIO
+from lib.library import episode_ticked, item_watched
 from lib.stremio.addons import _base_type
 from lib.stremio.watchedbitfield import sorted_video_ids, watched_video_ids
 from lib.ui.playbackmeta import episode_code as _pm_episode_code
@@ -61,10 +62,6 @@ SEASON_BAR = 30007
 OPTIONS = 30009
 TRAILER = 30012
 LOGO = 30023
-#: The tick on an episode row from local progress. Derived from the
-#: threshold that flags the title on the account (`library`), so a row
-#: ticks at the same point the account would count it as watched (#85).
-_WATCHED_TICK_PERCENT = round(WATCHED_THRESHOLD_RATIO * 100)
 
 #: Right-aligned "N EPISODES" readout for the season the episode list
 #: (LIST) is currently showing - a plain window label DetailWindow sets
@@ -519,7 +516,7 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
             progress = self._episode_progress(self.stype, sid, video.get('id'))
             percent = _watched_percent(progress)
             properties['watched_percent'] = L(_WATCHED_STRING_ID) % percent if percent is not None else ''
-            properties['watched'] = '1' if percent is not None and percent >= _WATCHED_TICK_PERCENT else ''
+            properties['watched'] = '1' if episode_ticked(percent) else ''
             properties['aired'] = _short_date(properties.get('aired'))
             # One setProperties() call instead of one setProperty() call
             # per key - each is a Python->C++ boundary crossing.
@@ -774,10 +771,10 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         dispatch by index) rather than a menu-of-menus.
 
         The Add/Remove and watched ROW WORDING must reflect the
-        account's CURRENT state, never a locally-cached guess (this
-        addon caches no library items at all -- see
-        `lib.ui.mystuff._read_library_entries()`'s identical live
-        fetch) -- `_current_library_state()` fetches it fresh every time
+        account's CURRENT state, never a locally-cached guess (the
+        service's `library.json` copy can be a pull interval old, and a
+        write built from it would overwrite newer state) --
+        `_current_library_state()` fetches it fresh every time
         this menu opens, logged in or not. `lookup_ok` is forwarded
         unchanged to `_toggle_library()`/`_toggle_watched()`: a failed
         lookup still renders the (unavoidably guessed) default wording
@@ -794,7 +791,11 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         auth, item, lookup_ok = state
         self._remember_watched(item)
         in_library = bool(item) and not item.get('removed')
-        watched = bool(item) and bool((item.get('state') or {}).get('flaggedWatched'))
+        # `timesWatched > 0`, the account's own rule (`item_watched`): an
+        # official client's unmark leaves `flaggedWatched` at 1, and reading
+        # that flag offered "Mark as unwatched" on a series every other app
+        # shows as unwatched.
+        watched = item_watched(item)
 
         rows = [
             L(30196),
@@ -838,7 +839,7 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         sentinel, which is the actual bug this tri-state return fixes
         -- `_toggle_library()`/`_toggle_watched()` would otherwise
         build a FRESH payload from `self.meta` and have
-        `_push_library_item()` overwrite the account's existing
+        `libraryaction.push_write()` overwrite the account's existing
         server-side record (watch counts, timestamps, flags) because a
         transient network error looked identical to "no such record".
         Callers MUST check `lookup_ok` before trusting `item`, never
@@ -917,6 +918,7 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         write never leaves the user believing it landed."""
         from lib import library
         from lib.ui.compat import L, notify
+        from lib.ui.libraryaction import push_write
 
         if auth is None:
             notify(L(30190))
@@ -925,9 +927,8 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
             notify(L(30302))
             return
         payload = library.library_add_payload(self.meta) if add else library.library_remove_payload(item)
-        if not self._push_library_item(auth, payload):
+        if not push_write(auth, payload):
             return
-        self._note_library_write(payload)
         notify(L(30297) if add else L(30298))
 
     def _toggle_watched(self, auth, item, watched, lookup_ok):
@@ -944,6 +945,7 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         which a failed lookup never establishes."""
         from lib import library
         from lib.ui.compat import L, notify
+        from lib.ui.libraryaction import push_write
 
         if auth is None:
             notify(L(30190))
@@ -953,61 +955,10 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
             return
         base = item if item is not None else library.build_library_item(self.meta)
         payload = library.mark_watched_payload(base, watched, video_ids=sorted_video_ids(self.videos))
-        if not self._push_library_item(auth, payload):
+        if not push_write(auth, payload):
             return
         self._remember_watched(payload)
-        self._note_library_write(payload)
         notify(L(30299) if watched else L(30300))
-
-    @staticmethod
-    def _note_library_write(payload):
-        """Tell Home about a library write that just landed.
-
-        The account's datastore can answer the next Home read before it
-        reflects this write, which would bring back a poster check (or
-        library membership) the user just changed. Home paints from the
-        remembered payload until the account catches up, and re-reads the
-        library on its next paint. Same pair of calls as
-        `libraryaction._mark`/`_write`; imported lazily so opening this
-        window never pulls Home in.
-        """
-        from lib.ui.mystuff import note_library_write
-        from lib.ui.newhome import mark_library_dirty
-
-        note_library_write(payload)
-        mark_library_dirty()
-
-    @staticmethod
-    def _push_library_item(auth, payload):
-        """Shared `StremioAPI.put_library_item()` call + failure
-        notification for `_toggle_library()`/`_toggle_watched()` --
-        returns `True` on success, or notifies `L(30301)` and returns
-        `False` on any `ApiError` (network failure or a server-side
-        error envelope alike) so neither caller's own success
-        notification runs after a write that never actually landed.
-        The write itself runs under `run_cancellable()`, same as the
-        lookup in `_current_library_state()`; Back stops the wait and
-        counts as "not confirmed" (returns `False`, no notification)."""
-        import xbmc
-
-        from lib.stremio.api import ApiError
-        from lib.ui.compat import L, log, notify
-        from lib.ui.dependencies import get_api
-
-        try:
-            if run_cancellable(
-                lambda: get_api().put_library_item(auth.get('authKey'), payload), L(30033),
-            ) is CANCELLED:
-                # Back = "stop waiting". The request itself cannot be
-                # recalled and may still land; what matters is that the
-                # user is neither blocked nor told it succeeded.
-                log('detailwindow: library write cancelled while pending', xbmc.LOGINFO)
-                return False
-        except ApiError as exc:
-            log('detailwindow: library write failed: %r' % (exc,), xbmc.LOGWARNING)
-            notify(L(30301))
-            return False
-        return True
 
     @gated_input
     def onClick(self, control_id):

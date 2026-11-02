@@ -362,10 +362,14 @@ def test_back_during_a_library_write_is_not_reported_as_success_or_failure(load_
     spinners = _track_spinners(monkeypatch, ctx)
     _press_back_on_pump(ctx, spinners)
     win = make_window(ctx.detailwindow.DetailWindow)
+    win.meta = {'id': 'tt1', 'name': 'Show', 'type': 'movie'}
 
     with _gate() as gate:
         monkeypatch.setattr(ctx.dependencies, 'get_api', lambda: _SlowApi(gate))
-        assert win._push_library_item({'authKey': 'tok'}, {'_id': 'tt1'}) is False
+        started = time.monotonic()
+        win._toggle_library({'authKey': 'tok'}, None, True, True)
+
+        _assert_prompt(started)
     assert ctx.env.notifications == []
 
 

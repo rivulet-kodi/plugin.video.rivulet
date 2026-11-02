@@ -1945,14 +1945,14 @@ def test_enrich_merge_carries_dvd_release_so_the_tag_clears(load_infowindow, mon
     assert win._enrich_pending[0]['cinema'] == ''
 
 
-def test_start_reads_the_account_once_for_the_watched_check(load_infowindow, monkeypatch):
-    """A coverflow opened in a fresh interpreter has no account answer;
-    `start()` reads it under the spinner, once, and a failure is silent."""
+def test_a_fresh_coverflow_shows_the_account_check_from_the_service_cache(load_infowindow, monkeypatch):
+    """A coverflow opened in a fresh interpreter has no live read of its
+    own; the service's cached copy of the library answers, with no
+    `datastore_get` on the way in."""
     ctx = load_infowindow()
     import lib.ui.dependencies as dependencies
-    import lib.ui.mystuff as mystuff
-    import lib.ui.uicommon as uicommon
-    from lib.ui import watchmarks
+
+    record = {'_id': 'tt1', 'type': 'movie', '_mtime': '2026-05-01T00:00:00Z', 'state': {'timesWatched': 1}}
 
     class _Store:
         def get_auth(self):
@@ -1961,35 +1961,18 @@ def test_start_reads_the_account_once_for_the_watched_check(load_infowindow, mon
         def get_progress_entries(self):
             return []
 
-    reads = []
-    record = {'_id': 'tt1', 'type': 'movie', '_mtime': '2026-05-01T00:00:00Z', 'state': {'timesWatched': 1}}
+        def get_library_cache(self):
+            return [record]
+
+    class _Api:
+        def datastore_get(self, *args, **kwargs):
+            raise AssertionError('the coverflow must not read the account')
+
     monkeypatch.setattr(dependencies, 'get_store', lambda: _Store())
-    monkeypatch.setattr(mystuff, '_read_library_entries', lambda store: reads.append(True) or [record])
-    monkeypatch.setattr(uicommon, 'run_cancellable', lambda func, heading, message='': func())
+    monkeypatch.setattr(dependencies, 'get_api', lambda: _Api())
     win = ctx.infowindow.ShowcaseWindow()
-    win.start([_make_meta('tt1', 'Dune')])
-    assert reads == [True]
-    assert watchmarks.is_watched({'id': 'tt1', 'type': 'movie'}) is True
-    win.start([_make_meta('tt1', 'Dune')])
-    assert reads == [True]
-
-
-def test_start_survives_a_failed_account_read(load_infowindow, monkeypatch):
-    ctx = load_infowindow()
-    import lib.ui.dependencies as dependencies
-    import lib.ui.mystuff as mystuff
-    import lib.ui.uicommon as uicommon
-    from lib.ui import watchmarks
-
-    class _Store:
-        def get_auth(self):
-            return {'authKey': 'k'}
-
-    def boom(store):
-        raise OSError('offline')
-
-    monkeypatch.setattr(dependencies, 'get_store', lambda: _Store())
-    monkeypatch.setattr(mystuff, '_read_library_entries', boom)
-    monkeypatch.setattr(uicommon, 'run_cancellable', lambda func, heading, message='': func())
-    ctx.infowindow.ShowcaseWindow().start([_make_meta('tt1', 'Dune')])
-    assert watchmarks.account_loaded() is False
+    _spawned(monkeypatch, ctx, win)
+    win.start([_make_meta('tt1', 'Dune'), _make_meta('tt2', 'Arrival')])
+    win.onInit()
+    control = win.getControl(ctx.infowindow.SELECT)
+    assert [control.getListItem(i).getProperty('watched') for i in range(2)] == ['1', '']

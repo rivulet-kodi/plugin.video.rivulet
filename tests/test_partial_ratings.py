@@ -245,7 +245,6 @@ def test_refresh_discards_inflight_results_and_provider_state(tmp_path, monkeypa
 def test_missing_imdb_facts_use_only_existing_memory_or_disk(sched, cache, tmp_path, monkeypatch, source):
     from lib.ui import dependencies, metacache, previews
     s = sched.module
-    previews.forget_all()
     meta = {'id': 'tmdb:1368337', 'type': 'movie', 'imdb_id': SID}
     if source == 'previews':
         previews.remember(meta)
@@ -267,7 +266,6 @@ def test_missing_imdb_facts_use_only_existing_memory_or_disk(sched, cache, tmp_p
     s.stop()
     summaries = [m for m, _ in sched.env.log_calls if 'ratings: session fetched ' in m]
     assert len(summaries) == 1 and '1 missing-imdb-id' in summaries[0]
-    previews.forget_all()
 
 
 def test_home_completed_card_guard_retries_partial_and_expired_scores(tmp_path, monkeypatch):
@@ -306,7 +304,7 @@ def test_home_completed_card_guard_retries_partial_and_expired_scores(tmp_path, 
 
 
 def test_session_counts_complete_partial_cache_hits_and_missing_ids_once(sched, cache, tmp_path, monkeypatch):
-    from lib.ui import dependencies, previews
+    from lib.ui import dependencies
     s = sched.module
     calls = [response(payload=OMDB), response(payload=MDB), response(payload=OMDB), response(503)]
     monkeypatch.setattr('requests.get', _get(calls))
@@ -315,7 +313,6 @@ def test_session_counts_complete_partial_cache_hits_and_missing_ids_once(sched, 
     monkeypatch.setattr(s, '_keys', lambda: (_SECRET, _SECRET))
     monkeypatch.setattr(s, '_get_cache', lambda *args: cache)
     monkeypatch.setattr(dependencies, 'get_store', lambda: type('Store', (), {'data_dir': str(tmp_path)})())
-    previews.forget_all()
     s.overlay_text({'id': SID}, 'catalog')
     s.overlay_text({'id': SID}, 'catalog')
     s.overlay_text({'id': 'kitsu:nomatch', 'type': 'series'}, 'catalog')
