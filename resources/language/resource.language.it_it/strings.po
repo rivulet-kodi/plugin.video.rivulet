@@ -1259,3 +1259,15 @@ msgstr "Nessun risultato per “%s”"
 msgctxt "#30548"
 msgid "IN CINEMA"
 msgstr "AL CINEMA"
+
+msgctxt "#30549"
+msgid "Piece cache folder (empty = add-on data)"
+msgstr "Cartella della cache dei pezzi (vuoto = dati dell'add-on)"
+
+msgctxt "#30550"
+msgid "Where downloaded torrent data is stored when the memory cache is off. Point it at a USB drive, a hard disk or tmpfs to spare an SD card or eMMC from streaming writes. Empty keeps it in the add-on's data folder."
+msgstr "Dove vengono salvati i dati torrent scaricati quando la cache in memoria è disattivata. Indica un'unità USB, un disco rigido o un tmpfs per risparmiare alla scheda SD o alla eMMC le scritture dello streaming. Vuoto la lascia nella cartella dati dell'add-on."
+
+msgctxt "#30551"
+msgid "Keep downloaded torrent data in RAM only, never on disk. Actual memory use can reach about twice this budget. 0 writes the data to disk."
+msgstr "Tiene i dati torrent scaricati solo in RAM, mai su disco. L'uso effettivo di memoria può arrivare a circa il doppio di questo limite. 0 scrive i dati su disco."

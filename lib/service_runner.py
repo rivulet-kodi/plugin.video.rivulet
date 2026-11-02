@@ -7,7 +7,7 @@ Launch interface verified against ~/rivulet-kodi/rivulet-engine @ cmd/rivulet-en
   - No CLI flags besides a `version`/`-version`/`--version` subcommand that just
     prints and exits (main.go:126-135) -- the daemon itself takes NO arguments.
   - All runtime config is via environment variables (main.go:141-181):
-      APP_PATH   - data/cache root, default "~/.stremio-server" (main.go:141-144)
+      APP_PATH   - data/cache root, default "~/.rivulet-engine" (main.go:141-144)
       HTTP_PORT  - enginefs HTTP API port, default 11470 (main.go:150)
     (APP_PATH and HTTP_PORT are pinned internally so the addon and the child
     process agree on where data lives and which port `server_url` points at;
@@ -209,6 +209,8 @@ EXTRA_ENV_SETTINGS = (
     ("dht_bootstrap", "RIVULET_DHT_BOOTSTRAP", "string"),
     ("memory_cache_size_mb", "RIVULET_MEMORY_CACHE_SIZE", "mb_to_bytes"),
     ("mem_limit_mb", "RIVULET_MEM_LIMIT", "mb_to_bytes"),
+    # Disk piece cache off addon_data, e.g. away from an SD card (issue #96).
+    ("cache_dir", "RIVULET_CACHE_ROOT", "string"),
     ("proxy_prebuffer", "RIVULET_PROXY_PREBUFFER", "int"),
     ("proxy_seg_cache_ttl", "RIVULET_PROXY_SEG_CACHE_TTL", "int"),
     ("proxy_password", "RIVULET_PROXY_PASSWORD", "string"),
