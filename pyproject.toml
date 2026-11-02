@@ -5,6 +5,10 @@ filterwarnings = [
     "error",
     "ignore::DeprecationWarning",
     "ignore::PendingDeprecationWarning",
+    # Hypothesis warns when it renders a very large failing example. It only
+    # does so while reporting a failure, where "error" would replace the real
+    # assertion with this warning.
+    "ignore:Generating overly large repr:hypothesis.errors.HypothesisWarning",
 ]
 
 [tool.coverage.run]

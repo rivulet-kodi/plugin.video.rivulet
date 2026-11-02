@@ -117,7 +117,11 @@ def _behavior_hints(meta):
     (upstream flattens unknown keys into a separate `.other` map) is
     dropped -- a `LibraryItem.behaviorHints` on the wire only ever has
     these three."""
-    hints = (meta or {}).get('behaviorHints') or {}
+    hints = (meta or {}).get('behaviorHints')
+    if not isinstance(hints, dict):
+        # An addon's meta: a bool/string here is not worth an
+        # `AttributeError` out of "Add to Library".
+        hints = {}
     return {
         'defaultVideoId': hints.get('defaultVideoId'),
         'featuredVideoId': hints.get('featuredVideoId'),
@@ -165,10 +169,34 @@ def _resolve_video_id(item, video_id):
     or any meta with no separate episodes, has no other video to name)."""
     if video_id:
         return video_id
-    default_video_id = (item.get('behaviorHints') or {}).get('defaultVideoId')
-    if default_video_id:
+    hints = item.get('behaviorHints')
+    # `behaviorHints` is the account's JSON: a bool or string there must
+    # fall through to `_id`, not raise `AttributeError` out of every push.
+    default_video_id = hints.get('defaultVideoId') if isinstance(hints, dict) else None
+    if default_video_id and isinstance(default_video_id, str):
         return default_video_id
     return item.get('_id')
+
+
+def _whole(value):
+    """A wire counter/time field as an ``int``, ``0`` when it is not one.
+
+    ``LibraryItemState``'s fields are numbers on the wire, but the record
+    is an account's JSON: a string, list or ``Infinity`` there (hand-edited,
+    or written by a buggy third-party client) made ``int()`` raise
+    ``TypeError``/``ValueError``/``OverflowError`` inside
+    :func:`merge_playback` and :func:`mark_watched_payload`, and the caller
+    then dropped that playback push (or the mark) on every attempt, for as
+    long as the record stayed that way. A field that is not a number counts
+    as the ``0`` a missing one does, which is what the writer then
+    overwrites it with. Negative is not a number of milliseconds or of
+    times watched either: a ``timesWatched`` of -1 made "Mark as watched"
+    write 0, so the title never read as watched.
+    """
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError, OverflowError):
+        return 0
 
 
 def merge_playback(item, position_ms, duration_ms, video_id=None, now=None):
@@ -227,12 +255,12 @@ def merge_playback(item, position_ms, duration_ms, video_id=None, now=None):
     position_ms = max(0, int(position_ms))
     duration_ms = max(0, int(duration_ms))
     resolved_video_id = _resolve_video_id(item, video_id)
-    previous_offset = int(state.get('timeOffset') or 0)
+    previous_offset = _whole(state.get('timeOffset'))
 
     state['lastWatched'] = now_iso
 
     if state.get('video_id') != resolved_video_id:
-        state['overallTimeWatched'] = int(state.get('overallTimeWatched') or 0) + int(state.get('timeWatched') or 0)
+        state['overallTimeWatched'] = _whole(state.get('overallTimeWatched')) + _whole(state.get('timeWatched'))
         state['timeWatched'] = 0
         state['flaggedWatched'] = 0
         state['video_id'] = resolved_video_id
@@ -254,8 +282,8 @@ def merge_playback(item, position_ms, duration_ms, video_id=None, now=None):
         previous_offset = 0
     else:
         delta = max(0, position_ms - previous_offset)
-        state['timeWatched'] = int(state.get('timeWatched') or 0) + delta
-        state['overallTimeWatched'] = int(state.get('overallTimeWatched') or 0) + delta
+        state['timeWatched'] = _whole(state.get('timeWatched')) + delta
+        state['overallTimeWatched'] = _whole(state.get('overallTimeWatched')) + delta
 
     if position_ms > previous_offset:
         state['timeOffset'] = position_ms
@@ -263,7 +291,7 @@ def merge_playback(item, position_ms, duration_ms, video_id=None, now=None):
 
     if not state.get('flaggedWatched') and duration_ms > 0 and state['timeWatched'] > duration_ms * WATCHED_THRESHOLD_RATIO:
         state['flaggedWatched'] = 1
-        state['timesWatched'] = int(state.get('timesWatched') or 0) + 1
+        state['timesWatched'] = _whole(state.get('timesWatched')) + 1
 
     item = dict(item)
     item['state'] = state
@@ -393,10 +421,10 @@ def mark_watched_payload(item, watched, now=None, video_ids=None):
     # `timesWatched`, not `flaggedWatched`: it is what "watched" means
     # upstream, and a record left at flag 1 / times 0 by an official unmark
     # must still count up when marked again.
-    was_watched = int(state.get('timesWatched') or 0) > 0
+    was_watched = _whole(state.get('timesWatched')) > 0
     state['flaggedWatched'] = 1 if watched else 0
     if watched and not was_watched:
-        state['timesWatched'] = int(state.get('timesWatched') or 0) + 1
+        state['timesWatched'] = _whole(state.get('timesWatched')) + 1
     elif not watched:
         state['timesWatched'] = 0
     if video_ids:
@@ -469,6 +497,12 @@ def progress_from_library_item(item):
     item_id = item.get('_id')
     content_type = item.get('type')
     state = item.get('state')
+    # Strings only: the entry is keyed into `progress.json` by joining its
+    # id and type, so a numeric/bool/list `_id` or `type` in a hostile
+    # record would raise `TypeError` in `Store.merge_remote_progress` and
+    # abort the whole pull, not just skip this record.
+    if not isinstance(item_id, str) or not isinstance(content_type, str):
+        return None
     if not item_id or not content_type or not isinstance(state, dict):
         return None
     if item.get('removed') and not item.get('temp'):
@@ -575,9 +609,13 @@ def progress_finished(entry):
     try:
         position = int(entry.get('position_ms') or 0)
         duration = int(entry.get('duration_ms') or 0)
+        # Inside the `try`: an integer past ~1.8e308 (a JSON number is
+        # unbounded) converts fine above but raises OverflowError when the
+        # ratio turns it into a float. Such a duration is garbage, and
+        # garbage never counts as finished.
+        return duration > 0 and position > duration * WATCHED_THRESHOLD_RATIO
     except (AttributeError, TypeError, ValueError, OverflowError):
         return False
-    return duration > 0 and position > duration * WATCHED_THRESHOLD_RATIO
 
 
 def watched_title_ids(verdicts, progress_entries):

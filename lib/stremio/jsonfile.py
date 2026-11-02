@@ -54,7 +54,9 @@ def read_json(path):
     try:
         with open(path) as handle:
             return json.load(handle)
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
+        # RecursionError: a document nested past the interpreter's limit
+        # is not a ValueError to `json`, but is as unusable as a torn one.
         return None
 
 

@@ -10,6 +10,11 @@ pytest>=7.4
 pytest-cov>=4.1
 pytest-randomly>=3.15
 pytest-xdist>=3.5
+# Property-based fuzzing (tests/test_fuzz_*.py). 6.80 is the first release
+# declaring Python >=3.8 (6.32-6.79 say >=3.7), and 6.113 is the last that
+# still installs on the 3.8 leg (6.114 needs 3.9), so pip resolves 6.113.x
+# there and the current release everywhere else.
+hypothesis>=6.80
 ruff>=0.6
 # mypy>=2.0 dropped `--python-version 3.8/3.9` support (checks now require
 # 3.10+), which would silently defeat this project's py38/py39-scoped mypy
