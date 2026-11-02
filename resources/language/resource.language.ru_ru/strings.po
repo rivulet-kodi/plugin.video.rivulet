@@ -1265,8 +1265,8 @@ msgid "Piece cache folder (empty = add-on data)"
 msgstr "Папка кэша фрагментов (пусто = данные дополнения)"
 
 msgctxt "#30550"
-msgid "Where downloaded torrent data is stored when the memory cache is off. Point it at a USB drive, a hard disk or tmpfs to spare an SD card or eMMC from streaming writes. Empty keeps it in the add-on's data folder. Needs rivulet-engine 0.28.0 or later."
-msgstr "Где хранятся загруженные данные торрента, когда кэш в памяти выключен. Укажите USB-накопитель, жёсткий диск или tmpfs, чтобы избавить SD-карту или eMMC от записи при потоковом воспроизведении. Пусто — данные остаются в папке дополнения. Требуется rivulet-engine 0.28.0 или новее."
+msgid "Where downloaded torrent data is stored when the memory cache is off. Point it at a USB drive, a hard disk or tmpfs to spare an SD card or eMMC from streaming writes. Empty keeps it in the add-on's data folder."
+msgstr "Где хранятся загруженные данные торрента, когда кэш в памяти выключен. Укажите USB-накопитель, жёсткий диск или tmpfs, чтобы избавить SD-карту или eMMC от записи при потоковом воспроизведении. Пусто — данные остаются в папке дополнения."
 
 msgctxt "#30551"
 msgid "Keep downloaded torrent data in RAM only, never on disk. Actual memory use can reach about twice this budget. 0 writes the data to disk."

@@ -38,6 +38,12 @@ from tests.kodistubs import install_kodi_stubs
 _RELOAD_MODULE_NAMES = (
     'lib.ui.compat', 'lib.ui.router', 'lib.ui.addonsync', 'lib.ui.views', 'lib.ui.infowindow',
     'lib.ui.dialogs',
+    # run_cancellable() polls xbmc.Monitor() through uicommon's own `xbmc`
+    # binding. Left out, views imported whatever uicommon an earlier test's
+    # player import leaked, bound to that test's stubs - after
+    # test_cancel_via_monitor_waitforabort_resolves_false every login saw
+    # Kodi "shutting down" and returned CANCELLED.
+    'lib.ui.uicommon',
 )
 
 #: Generous safety-valve timeout (seconds) for the Barrier/Event-gated

@@ -1265,8 +1265,8 @@ msgid "Piece cache folder (empty = add-on data)"
 msgstr "Pasta do cache de peças (vazio = dados do complemento)"
 
 msgctxt "#30550"
-msgid "Where downloaded torrent data is stored when the memory cache is off. Point it at a USB drive, a hard disk or tmpfs to spare an SD card or eMMC from streaming writes. Empty keeps it in the add-on's data folder. Needs rivulet-engine 0.28.0 or later."
-msgstr "Onde os dados de torrent baixados são guardados quando o cache em memória está desligado. Aponte para um pendrive, um disco rígido ou tmpfs para poupar o cartão SD ou a eMMC das gravações do streaming. Vazio mantém na pasta de dados do complemento. Requer rivulet-engine 0.28.0 ou posterior."
+msgid "Where downloaded torrent data is stored when the memory cache is off. Point it at a USB drive, a hard disk or tmpfs to spare an SD card or eMMC from streaming writes. Empty keeps it in the add-on's data folder."
+msgstr "Onde os dados de torrent baixados são guardados quando o cache em memória está desligado. Aponte para um pendrive, um disco rígido ou tmpfs para poupar o cartão SD ou a eMMC das gravações do streaming. Vazio mantém na pasta de dados do complemento."
 
 msgctxt "#30551"
 msgid "Keep downloaded torrent data in RAM only, never on disk. Actual memory use can reach about twice this budget. 0 writes the data to disk."

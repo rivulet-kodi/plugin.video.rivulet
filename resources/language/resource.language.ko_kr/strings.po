@@ -1265,8 +1265,8 @@ msgid "Piece cache folder (empty = add-on data)"
 msgstr "조각 캐시 폴더 (비우면 = 애드온 데이터)"
 
 msgctxt "#30550"
-msgid "Where downloaded torrent data is stored when the memory cache is off. Point it at a USB drive, a hard disk or tmpfs to spare an SD card or eMMC from streaming writes. Empty keeps it in the add-on's data folder. Needs rivulet-engine 0.28.0 or later."
-msgstr "메모리 캐시가 꺼져 있을 때 다운로드한 토렌트 데이터를 저장하는 위치입니다. USB 드라이브, 하드 디스크 또는 tmpfs를 지정하면 스트리밍으로 인한 SD 카드나 eMMC 쓰기를 줄일 수 있습니다. 비워 두면 애드온 데이터 폴더에 저장합니다. rivulet-engine 0.28.0 이상이 필요합니다."
+msgid "Where downloaded torrent data is stored when the memory cache is off. Point it at a USB drive, a hard disk or tmpfs to spare an SD card or eMMC from streaming writes. Empty keeps it in the add-on's data folder."
+msgstr "메모리 캐시가 꺼져 있을 때 다운로드한 토렌트 데이터를 저장하는 위치입니다. USB 드라이브, 하드 디스크 또는 tmpfs를 지정하면 스트리밍으로 인한 SD 카드나 eMMC 쓰기를 줄일 수 있습니다. 비워 두면 애드온 데이터 폴더에 저장합니다."
 
 msgctxt "#30551"
 msgid "Keep downloaded torrent data in RAM only, never on disk. Actual memory use can reach about twice this budget. 0 writes the data to disk."

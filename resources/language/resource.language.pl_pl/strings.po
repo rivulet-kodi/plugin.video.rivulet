@@ -1265,8 +1265,8 @@ msgid "Piece cache folder (empty = add-on data)"
 msgstr "Folder pamięci podręcznej fragmentów (puste = dane dodatku)"
 
 msgctxt "#30550"
-msgid "Where downloaded torrent data is stored when the memory cache is off. Point it at a USB drive, a hard disk or tmpfs to spare an SD card or eMMC from streaming writes. Empty keeps it in the add-on's data folder. Needs rivulet-engine 0.28.0 or later."
-msgstr "Miejsce zapisu pobranych danych torrent, gdy pamięć podręczna w RAM jest wyłączona. Wskaż dysk USB, dysk twardy lub tmpfs, aby oszczędzić kartę SD lub eMMC przed zapisami podczas strumieniowania. Puste pozostawia je w folderze danych dodatku. Wymaga rivulet-engine 0.28.0 lub nowszego."
+msgid "Where downloaded torrent data is stored when the memory cache is off. Point it at a USB drive, a hard disk or tmpfs to spare an SD card or eMMC from streaming writes. Empty keeps it in the add-on's data folder."
+msgstr "Miejsce zapisu pobranych danych torrent, gdy pamięć podręczna w RAM jest wyłączona. Wskaż dysk USB, dysk twardy lub tmpfs, aby oszczędzić kartę SD lub eMMC przed zapisami podczas strumieniowania. Puste pozostawia je w folderze danych dodatku."
 
 msgctxt "#30551"
 msgid "Keep downloaded torrent data in RAM only, never on disk. Actual memory use can reach about twice this budget. 0 writes the data to disk."
