@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MIT
 
 """Hero rendering and shared Home helpers for the single Home."""
-import contextlib
 import datetime
 
 import pytest
@@ -15,7 +14,6 @@ from lib.ui.playbackmeta import (
     hero_panel_text,
     new_look_hero_parts,
 )
-from tests.kodistubs import install_kodi_stubs
 
 NOW = datetime.datetime(2020, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
 LATER = datetime.datetime(2020, 1, 1, 0, 5, 0, tzinfo=datetime.timezone.utc)
@@ -131,42 +129,40 @@ def test_library_add_from_existing_without_a_row_is_a_fresh_add():
     assert added['_ctime'] == NOW_ISO
 
 
-# --- mystuff: a library write shows before the account echoes it -------------------
+# --- libraryaction: a library write shows before the account echoes it ------------
 
 @pytest.fixture
-def mystuff():
-    with contextlib.ExitStack() as stack:
-        module = stack.enter_context(install_kodi_stubs(reload=('lib.ui.compat', 'lib.ui.mystuff'))).mystuff
-        module.clear_library_writes()
-        yield module
-        module.clear_library_writes()
+def ledger():
+    from lib.ui import libraryaction
+
+    return libraryaction
 
 
-def test_no_pending_write_leaves_the_read_alone(mystuff):
+def test_no_pending_write_leaves_the_read_alone(ledger):
     rows = [{'_id': 'tt1', 'name': 'One'}]
-    assert mystuff.apply_library_writes(rows) == rows
-    assert mystuff.apply_library_writes(None) == []
+    assert ledger.apply_library_writes(rows) == rows
+    assert ledger.apply_library_writes(None) == []
 
 
-def test_a_noted_add_and_remove_overlay_the_account_read(mystuff):
+def test_a_noted_add_and_remove_overlay_the_account_read(ledger):
     added = {'_id': 'tt9', 'type': 'series', 'name': 'Added', 'removed': False,
              '_ctime': '2026-10-15T00:00:00Z', '_mtime': '2026-10-15T00:00:00Z'}
     account = [{'_id': 'tt1', 'type': 'movie', 'name': 'Older', '_ctime': '2020-01-01T00:00:00Z'}]
-    mystuff.note_library_write(added)
-    assert [row['_id'] for row in mystuff.apply_library_writes(account)] == ['tt1', 'tt9']
+    ledger.note_library_write(added)
+    assert [row['_id'] for row in ledger.apply_library_writes(account)] == ['tt1', 'tt9']
 
     removed = dict(added, removed=True, _mtime='2026-10-15T00:01:00Z')
-    mystuff.note_library_write(removed)
-    rows = mystuff.apply_library_writes(account + [dict(added)])
+    ledger.note_library_write(removed)
+    rows = ledger.apply_library_writes(account + [dict(added)])
     assert [row['_id'] for row in rows if not row.get('removed')] == ['tt1']
 
 
-def test_the_account_catching_up_retires_the_write(mystuff):
+def test_the_account_catching_up_retires_the_write(ledger):
     added = {'_id': 'tt9', 'removed': False, '_mtime': '2026-10-15T00:00:00Z'}
-    mystuff.note_library_write(added)
+    ledger.note_library_write(added)
     echoed = [{'_id': 'tt9', 'removed': False, '_mtime': '2026-10-15T00:00:05Z'}]
-    assert mystuff.apply_library_writes(echoed) == echoed
-    assert mystuff.apply_library_writes([]) == []
+    assert ledger.apply_library_writes(echoed) == echoed
+    assert ledger.apply_library_writes([]) == []
 
 
 

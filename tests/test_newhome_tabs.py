@@ -24,10 +24,10 @@ def addons():
     ]}}]
 
 
-def build(ctx, monkeypatch, layout=None, installed=None, progress=None, library=None, auth=None):
+def build(ctx, monkeypatch, layout=None, installed=None, progress=None, library=None, auth=None, cache=None):
     hw = ctx.newhome
     store = _FakeStore(auth=auth, addons=addons() if installed is None else installed,
-                       progress_entries=progress or [])
+                       progress_entries=progress or [], library_cache=cache)
     store.get_home_layout = lambda: layout or homelayout.default_layout()
     calls = []
 
@@ -569,50 +569,25 @@ def test_catalog_worker_failure_and_cancelled_load_leave_home_available(load_hom
     assert hw._load_rows(win, store, None) == []
 
 
-def test_catalog_only_tab_reads_the_account_library_once_for_the_watched_check(load_homewindow, monkeypatch):
-    """Movie cards read the account's watched state, so a signed-in load
-    reads the library even with no Continue/Library row; the next tab
-    reuses it rather than reading again."""
-    ctx = load_homewindow()
-    layout = homelayout.default_layout()
-    layout['tabs']['home'] = ['new:movie']
-    reads = []
-    entries = [{'_id': 'tt0', 'type': 'movie', '_mtime': '2026-05-01T00:00:00Z', 'state': {'timesWatched': 1}}]
-
-    def read(*_args):
-        reads.append(True)
-        return list(entries)
-
-    win, _, _ = build(ctx, monkeypatch, layout=layout, auth={'authKey': 'k'}, library=entries)
-    monkeypatch.setattr(ctx.newhome, '_fetch_library', read)
-    ctx.newhome._switch_tab(win, 'mystuff')
-    assert reads == []
-    assert win._library_entries == entries
-
-
-def test_catalog_only_layout_shows_the_account_watched_badge(load_homewindow, monkeypatch):
-    """No Continue/Library row, no local progress: the badge comes from the
-    account record's `timesWatched` alone."""
+def test_a_catalog_only_home_badges_from_the_service_cache_without_a_read(load_homewindow, monkeypatch):
+    """No Continue/Library row means nothing on Home needs the account's
+    records, so Home reads none: the movie cards' check comes from the
+    service's cached copy of the library."""
     ctx = load_homewindow()
     layout = homelayout.default_layout()
     layout['tabs']['home'] = ['new:movie']
     # `metas(0, 30, 'movie')` are tt0..tt29.
-    entries = [{'_id': 'tt0', 'type': 'movie', '_mtime': '2026-05-01T00:00:00Z', 'state': {'timesWatched': 1}}]
-    win, _, _ = build(ctx, monkeypatch, layout=layout, auth={'authKey': 'k'}, library=entries)
+    cache = [{'_id': 'tt0', 'type': 'movie', '_mtime': '2026-05-01T00:00:00Z', 'state': {'timesWatched': 1}}]
+    win, store, _ = build(ctx, monkeypatch, layout=layout, auth={'authKey': 'k'}, cache=cache)
     items = win.getControl(30041).items
     assert items[0].getProperty('sid') == 'tt0' and items[0].getProperty('watched') == '1'
     assert items[1].getProperty('watched') == ''
 
-
-def test_a_failed_catalog_only_library_read_does_not_flag_the_tab_incomplete(load_homewindow, monkeypatch):
-    ctx = load_homewindow()
-    layout = homelayout.default_layout()
-    layout['tabs']['home'] = ['new:movie']
-    win, _, _ = build(ctx, monkeypatch, layout=layout, auth={'authKey': 'k'})
-    monkeypatch.setattr(ctx.newhome, '_fetch_library', lambda *_: None)
+    reads = []
+    monkeypatch.setattr(ctx.newhome, '_fetch_library', lambda *_: reads.append(True) or [])
     win._library_entries = None
-    ctx.newhome._load_rows(win, ctx.newhome.get_store(), {'authKey': 'k'})
-    assert getattr(win, '_library_failed', False) is False
+    ctx.newhome._load_rows(win, store, {'authKey': 'k'})
+    assert reads == []
 
 
 def test_personal_refresh_retains_catalog_snapshots_and_library_page_positions(load_homewindow, monkeypatch):

@@ -1048,6 +1048,13 @@ class ProgressPuller:
     never raised into the supervision loop. Merge precedence is
     `Store.merge_remote_progress`'s: newer `updated_at` wins.
 
+    The same pass keeps `library.json` (`Store.merge_library_cache`), a
+    slim copy of the pulled records the watched check on movie and series
+    cards reads (`lib.ui.watchmarks`), so a Home with no Continue/Library
+    row and a coverflow need no account read of their own. A full pull
+    replaces it, an incremental one updates the changed records in place;
+    signed out, sync off or another account, it is deleted (`_stand_down`).
+
     The pull itself runs on a daemon worker thread (`spawn_fn`), one at
     a time: it is several synchronous API calls with a 15s timeout each,
     and running them inline would stall `Supervisor.run()`'s health
@@ -1071,21 +1078,27 @@ class ProgressPuller:
         self._auth_key = None
         self._mtimes = None
         self._next_at = 0.0
+        #: Whether `library.json` may hold records. True at start: the file
+        #: can be left from an earlier session. See `_stand_down`.
+        self._cache_may_exist = True
 
     def poll(self):
         try:
             if self._worker is not None and self._worker.is_alive():
                 return
             if not self._sync_enabled():
-                self._auth_key = None
+                self._stand_down()
                 return
             auth = self._store.get_auth() or {}
             auth_key = auth.get("authKey")
             if not auth_key:
-                self._auth_key = None
+                self._stand_down()
                 return
             now = self._clock()
             if auth_key != self._auth_key:
+                if self._auth_key is not None:
+                    # Another sign-in: the cache is the previous one's.
+                    self._stand_down()
                 self._auth_key = auth_key
                 self._mtimes = None
                 self._next_at = 0.0
@@ -1097,6 +1110,17 @@ class ProgressPuller:
             self._worker = self._spawn(lambda: self._run(auth_key, self._mtimes))
         except Exception as exc:  # noqa: BLE001 - a Stremio API hiccup must never crash the service loop
             self._log(self._levels.warning, "library pull failed: %r" % (exc,))
+
+    def _stand_down(self):
+        """No pull for now (signed out, sync switched off, or another
+        account): forget this account and drop its `library.json`, once.
+        The watched check reads that file, and nothing would keep it
+        current, so a mark cleared on another device would stay on here.
+        Local progress still marks what this device played."""
+        self._auth_key = None
+        if self._cache_may_exist:
+            self._store.clear_library_cache()
+            self._cache_may_exist = False
 
     def _run(self, auth_key, known_mtimes):
         try:
@@ -1128,7 +1152,13 @@ class ProgressPuller:
             return
         entries = [e for e in (library.progress_from_library_item(i) for i in items) if e is not None]
         written = self._store.merge_remote_progress(entries) if entries else 0
-        self._mtimes = mtimes
+        records = [r for r in (library.slim_library_item(i) for i in items) if r is not None]
+        cached = self._store.merge_library_cache(records, None if known_mtimes is None else mtimes)
+        self._cache_may_exist = True
+        # An incremental pull the cache could not take leaves it short of
+        # the changes just fetched; forgetting the mtimes makes the next
+        # pull a full one, which rewrites the cache wholesale.
+        self._mtimes = mtimes if cached else None
         self._log(self._levels.info, "library pull: %d records, %d progress entries updated" % (len(items), written))
 
 

@@ -34,43 +34,50 @@ if str(REPO_ROOT) not in sys.path:
 from tests.kodistubs import install_kodi_stubs
 
 
-# --- hard network block (defense in depth) ----------------------------------
 @pytest.fixture(autouse=True)
-def _fresh_previews():
-    """lib.ui.previews is process-wide; one test's coverflow must not
-    hand another test's open_detail a fallback it never set up."""
-    from lib.ui import previews
+def _fresh_process_state():
+    """The one reset for module-level state that outlives a test. Tests
+    run in random order (`pytest-randomly`), so anything one leaves behind
+    decides another's outcome only under some orders; reset it here, never
+    by hand in a test file.
 
-    previews.forget_all()
-    yield
-    previews.forget_all()
+    * `lib.ui.watchmarks`: the watched set between paints. A card built in
+      one test must not wear another test's check.
+    * `lib.ui.libraryaction`'s pending library writes: every landed toggle
+      notes one, and a write left for `tt1` overrides the account record a
+      later test reads through `apply_library_writes` (it failed CI only
+      under the orders that ran a toggle test first).
+    * `lib.ui.newhome._library_dirty`: a landed write sets it, and a later
+      Home test would re-read its library on return.
+    * `lib.stremio.addoncatalogs._catalog_cache`: whichever test first
+      fetched a URL would decide every later test's hit or miss.
+    * `lib.ui.previews`: one test's coverflow must not hand another test's
+      `open_detail` a fallback it never set up.
 
-
-@pytest.fixture(autouse=True)
-def _fresh_watchmarks():
-    """lib.ui.watchmarks holds the watched set between paints, process-wide;
-    a card built in one test must not wear another test's check.
-
-    `lib.ui.mystuff`'s pending library writes are process-wide too, and
-    every successful detail-window or poster-menu toggle notes one: a write
-    left behind for `tt1` overrides the account record a later test reads
-    through `apply_library_writes`, which failed CI only under the random
-    orders that ran a toggle test first. `mystuff` imports Kodi modules, so
-    it is never imported here: only a copy some test already loaded can
-    hold a stale write, and that is the copy cleared."""
-    from lib.ui import watchmarks
+    `newhome` imports Kodi, so it is never imported here: only a copy some
+    test already loaded can hold the flag, and that is the copy reset. A
+    module a test reloads under `install_kodi_stubs` starts fresh anyway and
+    is discarded when the test ends; this runs before and after it, on the
+    copies that stay in `sys.modules`."""
 
     def _clear():
+        from lib.stremio import addoncatalogs
+        from lib.ui import libraryaction, previews, watchmarks
+
+        previews.forget_all()
         watchmarks.reset()
-        mystuff = sys.modules.get('lib.ui.mystuff')
-        if mystuff is not None:
-            mystuff.clear_library_writes()
+        libraryaction.clear_library_writes()
+        addoncatalogs._catalog_cache.clear()
+        newhome = sys.modules.get('lib.ui.newhome')
+        if newhome is not None:
+            newhome._library_dirty = False
 
     _clear()
     yield
     _clear()
 
 
+# --- hard network block (defense in depth) ----------------------------------
 @pytest.fixture(autouse=True)
 def _block_real_network(monkeypatch):
     """Fail loudly if any code path tries to open a real socket."""

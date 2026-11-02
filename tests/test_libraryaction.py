@@ -11,10 +11,8 @@ from tests.kodistubs import install_kodi_stubs
 
 @pytest.fixture
 def action():
-    with install_kodi_stubs(reload=('lib.ui.compat', 'lib.ui.dialogs', 'lib.ui.mystuff', 'lib.ui.libraryaction')) as ctx:
-        ctx.mystuff.clear_library_writes()
+    with install_kodi_stubs(reload=('lib.ui.compat', 'lib.ui.dialogs', 'lib.ui.libraryaction')) as ctx:
         yield ctx
-        ctx.mystuff.clear_library_writes()
 
 
 class _Api:
@@ -53,7 +51,6 @@ def _wire(monkeypatch, api, auth=_AUTH, pick=0, cancel_on=None):
     """`cancel_on`: the n-th spinner (0-based) that gets Back."""
     import lib.ui.dependencies as dependencies
     import lib.ui.dialogs as dialogs
-    import lib.ui.newhome as newhome
     import lib.ui.uicommon as uicommon
 
     spinners = []
@@ -69,7 +66,6 @@ def _wire(monkeypatch, api, auth=_AUTH, pick=0, cancel_on=None):
     monkeypatch.setattr(dependencies, 'get_store', lambda: _Store(auth))
     monkeypatch.setattr(uicommon, 'run_cancellable', _run)
     monkeypatch.setattr(dialogs, 'choose', lambda heading, rows: shown.append((heading, rows)) or pick)
-    monkeypatch.setattr(newhome, '_library_dirty', False)
     return spinners, shown
 
 
@@ -127,23 +123,35 @@ def test_lookup_cancelled_is_not_ok(action, monkeypatch):
     assert found is uicommon.CANCELLED and ok is False
 
 
-def test_push_lands_fails_or_is_cancelled(action, monkeypatch):
-    api = _Api()
-    _wire(monkeypatch, api)
-    assert action.libraryaction._push(_AUTH, {'_id': 'tt1'}) is True
-    assert api.puts == [('key', {'_id': 'tt1'})]
+def test_a_landed_write_is_remembered_and_dirties_home(action, monkeypatch):
+    """`push_write` is the one write path: a write that landed shows on
+    Home before the account echoes it, and Home re-reads its library."""
+    import lib.ui.newhome as newhome
 
-    _wire(monkeypatch, _Api(put_error=_api_error()))
-    assert action.libraryaction._push(_AUTH, {'_id': 'tt1'}) is False
-    assert action.env.notifications[-1][1] == 'STR30301'
-
-    count = len(action.env.notifications)
     api = _Api()
-    _wire(monkeypatch, api, cancel_on=0)
-    assert action.libraryaction._push(_AUTH, {'_id': 'tt1'}) is False
-    # Back says nothing and writes nothing.
-    assert len(action.env.notifications) == count
-    assert api.puts == []
+    spinners, _ = _wire(monkeypatch, api)
+    payload = {'_id': 'tt1', 'removed': False, '_mtime': '2026-10-15T00:00:00Z'}
+    assert action.libraryaction.push_write(_AUTH, payload) is True
+    assert api.puts == [('key', payload)]
+    assert spinners == ['STR30033']
+    assert newhome._library_dirty is True
+    assert action.libraryaction.apply_library_writes([]) == [payload]
+    # The success toast is the caller's: only it knows what landed.
+    assert action.env.notifications == []
+
+
+@pytest.mark.parametrize('cancel, toast', [(None, 'STR30301'), (0, None)])
+def test_a_write_that_did_not_land_records_nothing(action, monkeypatch, cancel, toast):
+    """Refused by the server (`#30301`) or Back on the spinner (silent):
+    nothing remembered, Home left clean."""
+    import lib.ui.newhome as newhome
+
+    api = _Api(put_error=_api_error() if cancel is None else None)
+    _wire(monkeypatch, api, cancel_on=cancel)
+    assert action.libraryaction.push_write(_AUTH, {'_id': 'tt1'}) is False
+    assert newhome._library_dirty is False
+    assert action.libraryaction.apply_library_writes([]) == []
+    assert [text for _heading, text, *_rest in action.env.notifications] == ([toast] if toast else [])
 
 
 # --- the one-row menu -------------------------------------------------------------
@@ -169,7 +177,7 @@ def test_offer_adds_a_title_not_in_the_library(action, monkeypatch):
     assert action.env.notifications[-1][1] == 'STR30297'
     # Home re-reads its library and shows the add before the account echoes it.
     assert newhome._library_dirty is True
-    assert [row['_id'] for row in action.mystuff.apply_library_writes([])] == ['tt1']
+    assert [row['_id'] for row in action.libraryaction.apply_library_writes([])] == ['tt1']
 
 
 def test_offer_removes_a_title_in_the_library(action, monkeypatch):
@@ -263,7 +271,7 @@ def test_a_write_cancelled_at_either_spinner_changes_nothing(action, monkeypatch
         assert action.libraryaction._write(_AUTH, _META, False) is None
         assert api.puts == []
         assert newhome._library_dirty is False
-    assert action.mystuff.apply_library_writes([]) == []
+    assert action.libraryaction.apply_library_writes([]) == []
     assert action.env.notifications == []
 
 
@@ -274,7 +282,7 @@ def test_a_write_the_server_refuses_is_not_shown_on_home(action, monkeypatch):
     assert action.libraryaction._write(_AUTH, _META, False) is None
     assert action.env.notifications[-1][1] == 'STR30301'
     assert newhome._library_dirty is False
-    assert action.mystuff.apply_library_writes([]) == []
+    assert action.libraryaction.apply_library_writes([]) == []
 
 
 # --- the poster menu -------------------------------------------------------------
@@ -332,7 +340,7 @@ def test_library_transport_errors_never_log_credentials(action, monkeypatch):
     error = ApiError('https://user:secret@server.test/private?token=hidden')
     _wire(monkeypatch, _Api(get_error=error, put_error=error))
     assert action.libraryaction._lookup(_AUTH, 'tt1') == (None, False)
-    assert action.libraryaction._push(_AUTH, {}) is False
+    assert action.libraryaction.push_write(_AUTH, {}) is False
     messages = [msg for msg, _ in action.env.log_calls if 'libraryaction:' in msg]
     assert len(messages) == 2
     assert all('ApiError' in msg and 'secret' not in msg and 'hidden' not in msg
@@ -396,7 +404,7 @@ def test_a_landed_mark_shows_on_home_and_dirties_it(action, monkeypatch):
     _wire(monkeypatch, _Api(record=None), pick=1)
     action.libraryaction.poster_menu(_META)
     assert newhome._library_dirty is True
-    assert any(entry.get('_id') == 'tt1' for entry in action.mystuff.apply_library_writes([]))
+    assert any(entry.get('_id') == 'tt1' for entry in action.libraryaction.apply_library_writes([]))
 
 
 def test_a_failed_lookup_at_write_time_never_marks(action, monkeypatch):

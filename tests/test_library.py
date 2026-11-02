@@ -690,3 +690,31 @@ def test_mark_watched_counts_up_from_a_stale_flag():
     marked = library.mark_watched_payload(item, True, now=NOW)
     assert marked["state"]["timesWatched"] == 1
     assert library.item_watched(marked)
+
+
+def test_newer_verdicts_keeps_the_later_record_per_title():
+    older = {"tt1": (True, "2026-05-02T00:00:00Z"), "tt2": (True, "2026-05-01T00:00:00Z")}
+    newer = {"tt1": (False, "2026-05-01T00:00:00Z"), "tt2": (False, "2026-05-01T00:00:00Z"),
+             "tt3": (True, "")}
+    assert library.newer_verdicts(older, newer) == {
+        "tt1": (True, "2026-05-02T00:00:00Z"),
+        # A tie goes to the later read.
+        "tt2": (False, "2026-05-01T00:00:00Z"),
+        "tt3": (True, ""),
+    }
+
+
+@pytest.mark.parametrize("percent, ticked", [(None, False), (69, False), (70, True), (100, True)])
+def test_an_episode_row_ticks_at_the_printed_watched_threshold(percent, ticked):
+    assert library.episode_ticked(percent) is ticked
+
+
+def test_a_slim_record_gives_the_same_verdict_as_the_full_one():
+    full = {"_id": "tt1", "type": "series", "removed": True, "temp": True, "name": "Dune",
+            "poster": "p.jpg", "_mtime": "2026-05-01T00:00:00Z",
+            "state": {"timesWatched": 2, "flaggedWatched": 0, "watched": "bitfield", "timeOffset": 5}}
+    slim = library.slim_library_item(full)
+    assert library.title_verdicts([slim]) == library.title_verdicts([full])
+    assert "name" not in slim and "watched" not in slim["state"]
+    assert library.slim_library_item({"type": "movie"}) is None
+    assert library.slim_library_item("junk") is None

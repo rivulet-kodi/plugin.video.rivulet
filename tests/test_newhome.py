@@ -43,12 +43,17 @@ class _FakeStore:
     supplies the catalogs the type rows auto-hide against (defaulting to
     one of every type), and `get_auth()`/`get_progress_entries()`
     (defaulting to logged out with nothing cached) feed the personal
-    rows. Tests supply the library read explicitly when signed in."""
+    rows. Tests supply the library read explicitly when signed in;
+    `library_cache` stands in for the service's `library.json`."""
 
-    def __init__(self, auth=None, addons=None, progress_entries=None):
+    def __init__(self, auth=None, addons=None, progress_entries=None, library_cache=None):
         self._auth = auth
         self._addons = _ALL_TYPE_ADDONS if addons is None else addons
         self._progress_entries = [] if progress_entries is None else progress_entries
+        self._library_cache = [] if library_cache is None else library_cache
+
+    def get_library_cache(self):
+        return self._library_cache
 
     def get_home_layout(self):
         from lib.homelayout import default_layout

@@ -14,7 +14,15 @@ here changes the API client or the payload builders.
 A failed lookup must not be treated as "no record": that used to
 overwrite a real server-side item. Signed out, the menu tells the
 viewer to sign in and writes nothing.
+
+Every account library write in the addon goes through `push_write` here,
+which also keeps the pending-write ledger (`note_library_write` /
+`apply_library_writes`) Home and the watched check paint from. Nothing at
+module level imports Kodi, so `lib.ui.watchmarks` (and the test suite's
+conftest) can import this module bare.
 """
+import threading
+from typing import Dict
 
 
 def meta_from_item(item):
@@ -56,9 +64,25 @@ def _lookup(auth, item_id):
     return found, True
 
 
-def _push(auth, payload):
-    """True when `put_library_item` landed. Back or an `ApiError`
-    notifies nothing on cancel and `#30301` on failure."""
+def push_write(auth, payload):
+    """Put `payload` on the account and, once it landed, tell Home. True
+    when it landed.
+
+    The one library write path: the poster menu here and the series page
+    (`detailwindow._toggle_library`/`_toggle_watched`) both come through
+    it. A landed write is remembered (`note_library_write`) because the
+    account's next read can still predate it, and Home is marked to
+    re-read its library (`newhome.mark_library_dirty`). A caller that put
+    the record but skipped those two left Home showing the old library
+    membership and check (the PR #87 review), which is why they are not
+    the caller's job.
+
+    Back on the spinner notifies nothing: the request cannot be recalled
+    and may still land, but the viewer is neither blocked nor told it
+    did. An `ApiError` notifies `#30301`. Either way nothing is
+    remembered and Home stays clean. The success toast is the caller's,
+    as only it knows which action landed.
+    """
     import xbmc
 
     from lib.stremio.addons import addon_error_detail
@@ -77,7 +101,87 @@ def _push(auth, payload):
         log('libraryaction: write failed: %s' % addon_error_detail(exc), xbmc.LOGWARNING)
         notify(L(30301))
         return False
+    from lib.ui.newhome import mark_library_dirty
+
+    note_library_write(payload)
+    mark_library_dirty()
     return True
+
+
+# Writes that have been pushed and must show before the account's next
+# read echoes them. Keyed by `_id`. A later read drops a write once the
+# account row is at least as new and agrees on `removed`. Kept here, next
+# to the one path that records them, rather than in a Kodi-importing
+# module: `lib.ui.watchmarks` overlays them on the cached library and must
+# stay importable without Kodi.
+_library_writes: Dict[str, dict] = {}
+_library_write_lock = threading.Lock()
+
+
+def clear_library_writes():
+    """Test hook. Production never calls this."""
+    with _library_write_lock:
+        _library_writes.clear()
+
+
+def note_library_write(item):
+    """Remember a libraryItem this process just put.
+
+    Painting from this copy is what makes Add and Remove show up on Home's
+    Library row, and a mark on the watched check, without waiting for the
+    account to echo the change.
+    """
+    if not isinstance(item, dict):
+        return
+    item_id = item.get('_id')
+    if not item_id:
+        return
+    with _library_write_lock:
+        _library_writes[item_id] = item
+
+
+def apply_library_writes(entries):
+    """`entries` (a libraryItem read: live, or `Store.get_library_cache`)
+    with this process's pending writes laid over it. An account row at
+    least as new as the write, and agreeing on `removed`, wins and retires
+    the write."""
+    with _library_write_lock:
+        pending = dict(_library_writes)
+    if not pending:
+        return list(entries or [])
+    out = []
+    seen = set()
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            out.append(entry)
+            continue
+        item_id = entry.get('_id')
+        overlay = pending.pop(item_id, None) if item_id else None
+        if overlay is None:
+            out.append(entry)
+            if item_id:
+                seen.add(item_id)
+            continue
+        remote_m = entry.get('_mtime') or ''
+        local_m = overlay.get('_mtime') or ''
+        if remote_m >= local_m and bool(entry.get('removed')) == bool(overlay.get('removed')):
+            with _library_write_lock:
+                current = _library_writes.get(item_id)
+                if (
+                    isinstance(current, dict)
+                    and (current.get('_mtime') or '') <= remote_m
+                    and bool(current.get('removed')) == bool(entry.get('removed'))
+                ):
+                    _library_writes.pop(item_id, None)
+            out.append(entry)
+        else:
+            out.append(overlay)
+        if item_id:
+            seen.add(item_id)
+    for item_id, item in pending.items():
+        if item_id not in seen:
+            out.append(item)
+    return out
 
 
 def offer(meta):
@@ -186,13 +290,8 @@ def _mark(auth, meta, watched):
         return None
     base = fresh if isinstance(fresh, dict) else library.build_library_item(meta)
     payload = library.mark_watched_payload(base, watched)
-    if not _push(auth, payload):
+    if not push_write(auth, payload):
         return None
-    from lib.ui.mystuff import note_library_write
-    from lib.ui.newhome import mark_library_dirty
-
-    note_library_write(payload)
-    mark_library_dirty()
     notify(L(30299) if watched else L(30300))
     return 'watched' if watched else 'unwatched'
 
@@ -221,12 +320,7 @@ def _write(auth, meta, in_library):
         payload = library.library_add_from_existing(
             meta, fresh if isinstance(fresh, dict) else None,
         )
-    if not _push(auth, payload):
+    if not push_write(auth, payload):
         return None
-    from lib.ui.mystuff import note_library_write
-    from lib.ui.newhome import mark_library_dirty
-
-    note_library_write(payload)
-    mark_library_dirty()
     notify(L(30298) if in_library else L(30297))
     return 'removed' if in_library else 'added'

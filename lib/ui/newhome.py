@@ -699,13 +699,10 @@ def _home_personal_jobs(cached, library_failed, suppressed, store, auth, plan, s
     ready = threading.Event()
     jobs = []
     needs_library = any(kind in ('continue', 'library') for _, kind, _, _, _ in plan)
-    # The movie cards' watched check reads the same account records, so a
-    # signed-in load reads them even when no Continue/Library row is
-    # planned. Still one read, still gated by the window's own cache and
-    # failure flag: a layout of catalogs only costs one `datastore_get` per
-    # build, not one per row.
-    reads_library = needs_library or bool(auth)
-    if reads_library and (cached is None or library_failed):
+    # Only the personal rows read the account here. The watched check on
+    # catalog cards comes from the service's cached copy
+    # (`watchmarks.refresh`), so a layout of catalogs only reads nothing.
+    if needs_library and (cached is None or library_failed):
         def library():
             try:
                 entries['value'] = _fetch_library(store, auth)
@@ -814,7 +811,8 @@ def _fetch_library(store, auth):
     """The account library, [] when signed out, or None on a failed read."""
     if not auth:
         return []
-    from lib.ui.mystuff import _read_library_entries, apply_library_writes
+    from lib.ui.libraryaction import apply_library_writes
+    from lib.ui.mystuff import _read_library_entries
 
     try:
         # A write this session already pushed (`libraryaction`) shows
@@ -1046,7 +1044,7 @@ def _load_rows(window, store, auth):
         continued = fetched.pop('continue', {})
         rows = _make_row_states(store, auth, cached if entries is None and cached is not None else entries, plan, fetched,
                                 suppressed, continued)
-        return entries if needs_library or auth or cached is not None else None, rows
+        return entries if needs_library or cached is not None else None, rows
 
     try:
         loaded = run_cancellable(load, L(30033))

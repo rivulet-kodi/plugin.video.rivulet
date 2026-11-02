@@ -230,6 +230,12 @@ def _server_client():
 #: below RESUME_MIN_PERCENT is "barely started, not worth asking"; at/
 #: above RESUME_MAX_PERCENT is "basically finished, nothing meaningful
 #: left to resume".
+#:
+#: This is a separate decision from "is it watched?", on purpose: a title
+#: counts as watched past `lib.library.WATCHED_THRESHOLD_RATIO` (70%, the
+#: account's rule, and every watched verdict lives there), yet a viewer
+#: stopped at 80% still has a fifth of it to resume into. Do not align the
+#: two numbers.
 RESUME_MIN_PERCENT = 1.0
 RESUME_MAX_PERCENT = 95.0
 

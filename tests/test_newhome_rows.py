@@ -217,6 +217,7 @@ def test_signed_out_reads_no_library(home, monkeypatch):
 
 
 def test_a_library_read_that_breaks_is_not_cached_as_empty(home, monkeypatch):
+    import lib.ui.libraryaction as libraryaction
     import lib.ui.mystuff as mystuff
 
     def _boom(store):
@@ -225,20 +226,17 @@ def test_a_library_read_that_breaks_is_not_cached_as_empty(home, monkeypatch):
     monkeypatch.setattr(mystuff, '_read_library_entries', _boom)
     assert home.home._fetch_library(object(), {'authKey': 'k'}) is None
     monkeypatch.setattr(mystuff, '_read_library_entries', lambda store: [])
-    monkeypatch.setattr(mystuff, 'apply_library_writes', lambda rows: 'junk')
+    monkeypatch.setattr(libraryaction, 'apply_library_writes', lambda rows: 'junk')
     assert home.home._fetch_library(object(), {'authKey': 'k'}) is None
 
 
 def test_a_pending_write_shows_on_the_library_read(home, monkeypatch):
+    import lib.ui.libraryaction as libraryaction
     import lib.ui.mystuff as mystuff
 
-    mystuff.clear_library_writes()
     monkeypatch.setattr(mystuff, '_read_library_entries', lambda store: [{'_id': 'tt1', '_ctime': '2020'}])
-    mystuff.note_library_write({'_id': 'tt9', 'removed': False, '_ctime': '2026', '_mtime': '2026'})
-    try:
-        rows = home.home._fetch_library(object(), {'authKey': 'k'})
-    finally:
-        mystuff.clear_library_writes()
+    libraryaction.note_library_write({'_id': 'tt9', 'removed': False, '_ctime': '2026', '_mtime': '2026'})
+    rows = home.home._fetch_library(object(), {'authKey': 'k'})
     assert sorted(row['_id'] for row in rows) == ['tt1', 'tt9']
 
 

@@ -34,9 +34,6 @@ The merge and band helpers are pure functions of their arguments, so
 tests/test_mystuff.py exercises every band with plain dicts. Account reads
 and metadata enrichment below are the explicit I/O boundary.
 """
-import threading
-from typing import Dict
-
 from lib.ui.dependencies import get_store
 
 #: Progress band edges, as a percent of duration. Mirrors
@@ -44,6 +41,8 @@ from lib.ui.dependencies import get_store
 #: what `lib.ui.continuewatching` used before this module replaced it
 #: (importing `lib.ui.player` for two floats would pull in its
 #: xbmcplayer-derived playback machinery, which this module never needs).
+#: Which band a title sits in is a resume question, not "is it watched?":
+#: that verdict is `lib.library`'s alone (`WATCHED_THRESHOLD_RATIO`, 70%).
 RESUME_MIN_PERCENT = 1.0
 RESUME_MAX_PERCENT = 95.0
 
@@ -225,79 +224,6 @@ def resolve_next_up(item, meta):
         return None
     from lib.ui.binge import next_video
     return next_video(meta, video_id)
-
-
-# Writes that have been pushed and must show before the next
-# datastoreGet echoes them. Keyed by `_id`. A later fetch drops a
-# write once the account row is at least as new and agrees on `removed`.
-# Only the new-look Home (`lib.ui.newhome`) records and applies these.
-_library_writes: Dict[str, dict] = {}
-_library_write_lock = threading.Lock()
-
-
-def clear_library_writes():
-    """Test hook. Production never calls this."""
-    with _library_write_lock:
-        _library_writes.clear()
-
-
-def note_library_write(item):
-    """Remember a libraryItem this process just put.
-
-    Painting from this copy is what makes Add and Remove show up on the
-    new-look Home's Library row without waiting for the account to echo
-    the change.
-    """
-    if not isinstance(item, dict):
-        return
-    item_id = item.get('_id')
-    if not item_id:
-        return
-    with _library_write_lock:
-        _library_writes[item_id] = item
-
-
-def apply_library_writes(entries):
-    """`entries` (a libraryItem datastore read) with this process's
-    pending writes laid over it. An account row at least as new as the
-    write, and agreeing on `removed`, wins and retires the write."""
-    with _library_write_lock:
-        pending = dict(_library_writes)
-    if not pending:
-        return list(entries or [])
-    out = []
-    seen = set()
-    for entry in entries or []:
-        if not isinstance(entry, dict):
-            out.append(entry)
-            continue
-        item_id = entry.get('_id')
-        overlay = pending.pop(item_id, None) if item_id else None
-        if overlay is None:
-            out.append(entry)
-            if item_id:
-                seen.add(item_id)
-            continue
-        remote_m = entry.get('_mtime') or ''
-        local_m = overlay.get('_mtime') or ''
-        if remote_m >= local_m and bool(entry.get('removed')) == bool(overlay.get('removed')):
-            with _library_write_lock:
-                current = _library_writes.get(item_id)
-                if (
-                    isinstance(current, dict)
-                    and (current.get('_mtime') or '') <= remote_m
-                    and bool(current.get('removed')) == bool(entry.get('removed'))
-                ):
-                    _library_writes.pop(item_id, None)
-            out.append(entry)
-        else:
-            out.append(overlay)
-        if item_id:
-            seen.add(item_id)
-    for item_id, item in pending.items():
-        if item_id not in seen:
-            out.append(item)
-    return out
 
 
 def _read_library_entries(store):

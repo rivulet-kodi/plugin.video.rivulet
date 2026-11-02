@@ -766,7 +766,7 @@ class _FakeAuthStore:
 
 class _FakeLibraryApi:
     """Records every get_library_item()/put_library_item() call - the
-    two calls `_current_library_state()`/`_push_library_item()` make
+    two calls `_current_library_state()`/`libraryaction.push_write()` make
     through `lib.ui.dependencies.get_api()`."""
 
     def __init__(self, item=None, get_error=None, put_error=None):
@@ -793,7 +793,7 @@ def _stub_choose(monkeypatch, ctx, answers, capture=None):
 
 
 def _wire_library_deps(monkeypatch, ctx, auth=None, item=None, get_error=None, put_error=None):
-    """Common wiring for `_current_library_state()`/`_push_library_item()`:
+    """Common wiring for `_current_library_state()`/`libraryaction.push_write()`:
     a fake `Store` (just `get_auth()`) via `get_store()` and a fake
     `StremioAPI` via `get_api()` - both resolved through
     `lib.ui.dependencies` exactly like `get_client()` already is in this
@@ -843,20 +843,25 @@ def test_context_menu_rows_offer_add_and_mark_watched_when_not_in_library(load_d
     assert captured == [('Breaking Bad', ['STR30196', 'STR30293', 'STR30295', 'STR30499'])]
 
 
-def test_context_menu_rows_offer_remove_and_mark_unwatched_when_already_in_library_and_watched(
-    load_detailwindow, monkeypatch,
-):
+@pytest.mark.parametrize('state, mark_row', [
+    ({'flaggedWatched': 1, 'timesWatched': 2}, 'STR30296'),
+    # What an official app's unmark leaves: the flag up, the count at 0.
+    # Stremio reads that as unwatched (`LibraryItem::watched()` is
+    # `times_watched > 0`), and so does the poster check.
+    ({'flaggedWatched': 1, 'timesWatched': 0}, 'STR30295'),
+])
+def test_context_menu_mark_row_follows_times_watched(load_detailwindow, monkeypatch, state, mark_row):
     ctx = load_detailwindow()
     win = _make_window(ctx.detailwindow)
-    win.meta = {'id': 'tt1', 'name': 'Breaking Bad'}
-    item = {'_id': 'tt1', 'removed': False, 'state': {'flaggedWatched': 1}}
+    win.meta = {'id': 'tt1', 'name': 'Breaking Bad', 'type': 'series'}
+    item = {'_id': 'tt1', 'type': 'series', 'removed': False, 'state': state}
     _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok'}, item=item)
     captured = []
     _stub_choose(monkeypatch, ctx, -1, capture=captured)
 
     win._open_context_menu()
 
-    assert captured == [('Breaking Bad', ['STR30196', 'STR30294', 'STR30296', 'STR30499'])]
+    assert captured == [('Breaking Bad', ['STR30196', 'STR30294', mark_row, 'STR30499'])]
 
 
 def test_context_menu_removed_record_still_offers_add_not_remove(load_detailwindow, monkeypatch):
@@ -1088,19 +1093,6 @@ def test_current_library_state_wraps_the_lookup_in_a_busy_dialog(load_detailwind
 
     win._current_library_state()
 
-    assert busy.created == [('STR30033', '')]
-    assert busy.closed == 1
-
-
-def test_push_library_item_wraps_the_write_in_a_busy_dialog(load_detailwindow, monkeypatch):
-    ctx = load_detailwindow()
-    win = _make_window(ctx.detailwindow)
-    _, api = _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok'})
-    busy = _record_busy_calls(monkeypatch, ctx.dialogs)
-
-    result = win._push_library_item({'authKey': 'tok'}, {'_id': 'tt1'})
-
-    assert result is True
     assert busy.created == [('STR30033', '')]
     assert busy.closed == 1
 
@@ -1882,75 +1874,63 @@ def test_open_time_fetch_older_than_the_context_menu_lookup_is_dropped(load_deta
     assert _watched_marks(win, ctx) == ['', '', '1']
 
 
-def _noted_writes_cleared(monkeypatch):
-    from lib.ui import mystuff, newhome
-
-    mystuff.clear_library_writes()
-    monkeypatch.setattr(newhome, '_library_dirty', False)
-    return mystuff, newhome
-
-
 def test_series_mark_watched_reaches_home_before_the_account_echoes_it(load_detailwindow, monkeypatch):
     """The account's next read can still hold the old record. Home paints
     from the write this window remembered, so the series check shows."""
+    from lib.ui import newhome, watchmarks
+
     ctx = load_detailwindow()
-    mystuff, newhome = _noted_writes_cleared(monkeypatch)
-    try:
-        win = _make_window(ctx.detailwindow)
-        win.meta = {'id': 'tt1', 'name': 'Breaking Bad', 'type': 'series'}
-        old = {'_id': 'tt1', 'type': 'series', 'removed': False, '_mtime': '2026-05-01T00:00:00Z',
-               'state': {'flaggedWatched': 0, 'timesWatched': 0}}
-        _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, item=old)
-        _stub_choose(monkeypatch, ctx, 2)  # "Mark as watched"
+    win = _make_window(ctx.detailwindow)
+    win.meta = {'id': 'tt1', 'name': 'Breaking Bad', 'type': 'series'}
+    old = {'_id': 'tt1', 'type': 'series', 'removed': False, '_mtime': '2026-05-01T00:00:00Z',
+           'state': {'flaggedWatched': 0, 'timesWatched': 0}}
+    _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, item=old)
+    _stub_choose(monkeypatch, ctx, 2)  # "Mark as watched"
 
-        win._open_context_menu()
+    win._open_context_menu()
 
-        assert newhome._library_dirty is True
-        from lib.ui import watchmarks
+    assert newhome._library_dirty is True
 
-        class _Store:
-            def get_auth(self):
-                return {'authKey': 'tok-123'}
+    class _Store:
+        def get_auth(self):
+            return {'authKey': 'tok-123'}
 
-            def get_progress_entries(self):
-                return []
+        def get_progress_entries(self):
+            return []
 
-        # What `_fetch_library` does with a read that predates the write.
-        watchmarks.refresh(_Store(), mystuff.apply_library_writes([old]))
-        assert watchmarks.is_watched({'id': 'tt1', 'type': 'series'}) is True
-    finally:
-        mystuff.clear_library_writes()
+        def get_library_cache(self):
+            # The service's last pull, from before the write.
+            return [old]
+
+    watchmarks.refresh(_Store())
+    assert watchmarks.is_watched({'id': 'tt1', 'type': 'series'}) is True
 
 
 def test_series_library_add_is_remembered_for_home(load_detailwindow, monkeypatch):
+    from lib.ui import libraryaction, newhome
+
     ctx = load_detailwindow()
-    mystuff, newhome = _noted_writes_cleared(monkeypatch)
-    try:
-        win = _make_window(ctx.detailwindow)
-        win.meta = {'id': 'tt1', 'name': 'Breaking Bad', 'type': 'series'}
-        _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, item=None)
-        _stub_choose(monkeypatch, ctx, 1)  # "Add to Library"
+    win = _make_window(ctx.detailwindow)
+    win.meta = {'id': 'tt1', 'name': 'Breaking Bad', 'type': 'series'}
+    _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, item=None)
+    _stub_choose(monkeypatch, ctx, 1)  # "Add to Library"
 
-        win._open_context_menu()
+    win._open_context_menu()
 
-        assert [e['_id'] for e in mystuff.apply_library_writes([])] == ['tt1']
-        assert newhome._library_dirty is True
-    finally:
-        mystuff.clear_library_writes()
+    assert [e['_id'] for e in libraryaction.apply_library_writes([])] == ['tt1']
+    assert newhome._library_dirty is True
 
 
 def test_a_failed_series_write_is_not_remembered_for_home(load_detailwindow, monkeypatch):
+    from lib.ui import libraryaction, newhome
+
     ctx = load_detailwindow()
-    mystuff, newhome = _noted_writes_cleared(monkeypatch)
-    try:
-        win = _make_window(ctx.detailwindow)
-        win.meta = {'id': 'tt1', 'name': 'Breaking Bad', 'type': 'series'}
-        _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, item=None, put_error=ApiError('boom'))
-        _stub_choose(monkeypatch, ctx, 2)
+    win = _make_window(ctx.detailwindow)
+    win.meta = {'id': 'tt1', 'name': 'Breaking Bad', 'type': 'series'}
+    _wire_library_deps(monkeypatch, ctx, auth={'authKey': 'tok-123'}, item=None, put_error=ApiError('boom'))
+    _stub_choose(monkeypatch, ctx, 2)
 
-        win._open_context_menu()
+    win._open_context_menu()
 
-        assert mystuff.apply_library_writes([]) == []
-        assert newhome._library_dirty is False
-    finally:
-        mystuff.clear_library_writes()
+    assert libraryaction.apply_library_writes([]) == []
+    assert newhome._library_dirty is False

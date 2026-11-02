@@ -323,39 +323,10 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         self._reset_paging_state()
         if not self.metas:
             return None
-        self._load_account_marks()
         if more_pages is not None:
             self._spawn_paging(more_pages)
         self.doModal()
         return self.selected
-
-    def _load_account_marks(self):
-        """Give the watched check the account's answer when this process
-        has none yet.
-
-        Home feeds it on every signed-in load, so a coverflow opened from
-        Home never reads. One opened by a plugin route in a fresh
-        interpreter has nothing, and local progress alone would miss a
-        movie watched on another device. The read runs under the usual
-        spinner, before the window opens, never inside onInit (which also
-        runs again on every reopen after playback). A failure leaves the
-        check to local progress: it is cosmetic.
-        """
-        try:
-            from lib.ui import watchmarks
-            from lib.ui.compat import L
-            from lib.ui.dependencies import get_store
-            from lib.ui.mystuff import _read_library_entries, apply_library_writes
-            from lib.ui.uicommon import run_cancellable
-
-            store = get_store()
-            if not store.get_auth() or watchmarks.account_loaded():
-                return
-            raw = run_cancellable(lambda: _read_library_entries(store), L(30033))
-            if isinstance(raw, list):
-                watchmarks.refresh(store, apply_library_writes(raw))
-        except Exception:
-            pass
 
     def _spawn_paging(self, more_pages):
         """Walk `more_pages` on a daemon thread, queueing each page for
@@ -450,7 +421,8 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         # The check is a set lookup per card (`watchmarks`); recompute the
         # set once here, which is also what a reopen after playback runs,
         # so a movie just finished shows watched when the strip comes back.
-        # The library itself is not re-read: no network on the way in.
+        # The account's answer is the service's cached copy of the library,
+        # so even a coverflow opened in a fresh interpreter reads no network.
         try:
             from lib.ui import watchmarks
             from lib.ui.dependencies import get_store

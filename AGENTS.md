@@ -13,7 +13,7 @@ Three layers, and the dependency direction is **enforced by convention, not tool
 ```
 lib/stremio/   protocol + HTTP. Kodi-independent, pure Python.
 lib/store.py   persistence. Kodi-independent.
-lib/library.py playback-progress wire format. Kodi-independent, pure.
+lib/library.py playback-progress wire format, watched verdict. Kodi-independent, pure.
       |
       v
 lib/ui/        every xbmc* import lives here (except service_runner.py)
@@ -87,12 +87,16 @@ make parallel    # pytest -n auto
 
 **String formatting is printf-style.** `UP031` is globally ignored (`pyproject.toml` `[tool.ruff.lint]`); ~198 sites use `"%s" %`. Consistent with the 3.8 floor. Do not modernize them.
 
-**State and persistence** (`lib/store.py`) — JSON files under the addon's `addon_data` dir: `addons`, `auth`, `search_history` (15 entries), `now_playing`, `resume_offset`, `progress` (500 entries, 180-day sweep, daily), `progress_dismissed` (titles removed from Continue, so the library pull cannot restore them), `last_version`, `home_layout`.
+**State and persistence** (`lib/store.py`) — JSON files under the addon's `addon_data` dir: `addons`, `auth`, `search_history` (15 entries), `now_playing`, `resume_offset`, `progress` (500 entries, 180-day sweep, daily), `progress_dismissed` (titles removed from Continue, so the library pull cannot restore them), `library` (a slim copy of the account's library records, 2000 newest kept; written only by the service's library pull, deleted when signed out, on another sign-in or with `sync_progress` off), `last_version`, `home_layout`.
 - Reads distinguish *missing* (seed/empty), *unreadable* (an `OSError` other than not-found: never write over it) and *corrupt* (kept as `<name>.corrupt` before the default replaces it). `_atomic_write` fsyncs and retries `os.replace` on `PermissionError`.
 - `update_addons()` (`store.py:977`) is the **only** compare-and-swap path, because Kodi runs `default.py` as concurrent OS processes. It deliberately bypasses the read cache — it must see current on-disk bytes.
 - Everything else is plain read-modify-write, with the rationale at `store.py:43-53` (a lost search-history or progress entry is low-stakes).
 - No `fcntl`/`msvcrt`: the addon runs on Linux, Windows, Android and macOS.
-- `_cached_read()` memoizes on an `os.stat()` fingerprint; its key set is a closed seven paths (`addons`, `auth`, `search_history`, `now_playing`, `resume_offset`, `last_version`, `progress`; `home_layout` is deliberately read fresh, outside it), so its missing size cap is safe. Making that key set data-controlled would not be.
+- `_cached_read()` memoizes on an `os.stat()` fingerprint; its key set is a closed eight paths (`addons`, `auth`, `search_history`, `now_playing`, `resume_offset`, `last_version`, `progress`, `library`; `home_layout` is deliberately read fresh, outside it), so its missing size cap is safe. Making that key set data-controlled would not be.
+
+**Account library writes and the watched check.**
+- Every write to the account library goes through `lib.ui.libraryaction.push_write()`: the cancellable `put_library_item`, the failure toast, and on success the pending-write note (`note_library_write`, overlaid on later reads by `apply_library_writes`) and `newhome.mark_library_dirty()`. A new write site calls it; it never pairs those steps itself.
+- "Is this watched?" has one answer: `lib.library` (`item_watched`, `timesWatched > 0` as stremio-core's `LibraryItem::watched()`; `watched_title_ids`; `episode_ticked`). `lib.ui.watchmarks` only caches the set for a paint, built from the `library` store file plus pending writes, any live read Home made (newer record wins) and local progress. With no `library` file yet, account checks wait for the first pull. Player and Continue resume bands (`RESUME_*_PERCENT`) are a separate decision.
 
 **Dependency injection.** `lib/ui/dependencies.py` exposes lazy singletons (`get_store()`, `get_client()`) injected into windows; windows do not construct their own.
 
@@ -155,6 +159,7 @@ pytest, **coverage gated at `fail_under = 90`** with branch coverage on. The ful
 - **Tests are order-randomized** (`pytest-randomly`). Never rely on cross-test state. A nightly workflow (`.github/workflows/nightly-order.yml`, not a required check) sweeps fixed and random `--randomly-seed` values on 3.8 and latest Python; reproduce a failure with the seed it prints.
 - **Warnings are errors**: `filterwarnings = ["error", ...]` (`pyproject.toml` `[tool.pytest.ini_options]`). `ResourceWarning` therefore fails the suite — this is why `lib/service_runner.py` closes `HTTPError` responses inside its health-check loop, and why `PERF203` there is deliberate.
 - **Network is blocked at the socket level** by an autouse fixture in `tests/conftest.py`; use `FakeSession`/`FakeResponse` from there.
+- **Process-wide module state is reset in one place**: `_fresh_process_state` in `tests/conftest.py` (watched set, pending library writes, `newhome._library_dirty`, the addon-catalog cache, previews). New module-level state that outlives a test goes there, never into per-file fixtures or hand clears.
 - Windows are exercised by calling `onInit`/`onClick`/`onAction` directly, not through a Kodi event loop.
 - `tests/test_glyph_coverage.py` and `tests/test_skin_xml.py` need real Estuary fonts at `/usr/share/kodi/addons/skin.estuary/fonts`; they run locally on a machine with Kodi installed and skip in CI. Expect everything to pass locally (skips only when optional deps such as PIL are missing).
 

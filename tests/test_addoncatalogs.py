@@ -32,19 +32,6 @@ from lib.stremio.addons import AddonError
 from tests.conftest import FakeResponse, FakeSession
 
 
-@pytest.fixture(autouse=True)
-def _clear_catalog_cache():
-    """`addoncatalogs._catalog_cache` is a module-level dict shared by every
-    test in this process (see its own docstring for why it cannot be a
-    per-call fixture-scoped object) - without resetting it, whichever test
-    happens to run first for a given URL would decide every later test's
-    cache-hit/miss outcome under pytest-randomly. Scoped to this file only:
-    no other test module touches this cache."""
-    addoncatalogs._catalog_cache.clear()
-    yield
-    addoncatalogs._catalog_cache.clear()
-
-
 def _addon(transport_url, manifest):
     return {"transportUrl": transport_url, "manifest": manifest, "flags": {}}
 

@@ -1710,3 +1710,67 @@ def test_non_string_search_history_entries_do_not_break_adding(tmp_path):
     store.add_search_query("alien")
 
     assert store.get_search_history() == ["alien", "dune"]
+
+
+# --- library.json: the service's slim copy of the account library -----------
+
+
+def _slim(item_id, mtime="2026-05-01T00:00:00Z", watched=1):
+    return {"_id": item_id, "type": "movie", "removed": False, "_mtime": mtime,
+            "state": {"timesWatched": watched}}
+
+
+def test_library_cache_missing_reads_empty_and_refuses_an_incremental_merge(tmp_path):
+    """An incremental pull only carries what changed; folded into nothing
+    it would pass for the whole library."""
+    store = make_store(tmp_path)
+    assert store.get_library_cache() == []
+    assert store.merge_library_cache([_slim("tt1")], live_ids={"tt1"}) is False
+    assert not os.path.exists(os.path.join(store.data_dir, "library.json"))
+
+
+def test_library_cache_corrupt_is_kept_aside_and_refuses_an_incremental_merge(tmp_path):
+    store = make_store(tmp_path)
+    path = os.path.join(store.data_dir, "library.json")
+    with open(path, "w") as fh:
+        fh.write("[{not json")
+    assert store.get_library_cache() == []
+    assert store.merge_library_cache([_slim("tt1")], live_ids={"tt1"}) is False
+    with open(path + ".corrupt") as fh:
+        assert fh.read() == "[{not json"
+    # A full pull replaces it.
+    assert store.merge_library_cache([_slim("tt1")]) is True
+    assert store.get_library_cache() == [_slim("tt1")]
+
+
+def test_library_cache_full_merge_replaces_and_incremental_updates_and_prunes(tmp_path):
+    store = make_store(tmp_path)
+    assert store.merge_library_cache([_slim("tt1"), _slim("tt2"), _slim("tt3")]) is True
+    assert store.merge_library_cache([_slim("tt9")]) is True
+    assert store.get_library_cache() == [_slim("tt9")]
+
+    store.merge_library_cache([_slim("tt1"), _slim("tt2")])
+    # tt1 changed, tt2 left the account, tt3 is new.
+    changed = _slim("tt1", "2026-06-01T00:00:00Z", watched=0)
+    assert store.merge_library_cache([changed, _slim("tt3")], live_ids={"tt1", "tt3"}) is True
+    assert sorted(store.get_library_cache(), key=lambda r: r["_id"]) == [changed, _slim("tt3")]
+
+
+def test_library_cache_keeps_the_newest_records_past_the_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr(store_module, "MAX_LIBRARY_ENTRIES", 2)
+    store = make_store(tmp_path)
+    store.merge_library_cache([
+        _slim("tt1", "2026-01-01T00:00:00Z"),
+        _slim("tt2", "2026-03-01T00:00:00Z"),
+        _slim("tt3", "2026-02-01T00:00:00Z"),
+    ])
+    assert sorted(r["_id"] for r in store.get_library_cache()) == ["tt2", "tt3"]
+
+
+def test_library_cache_clear_deletes_the_file(tmp_path):
+    store = make_store(tmp_path)
+    store.merge_library_cache([_slim("tt1")])
+    assert store.get_library_cache()
+    store.clear_library_cache()
+    store.clear_library_cache()  # already gone: no error
+    assert store.get_library_cache() == []
