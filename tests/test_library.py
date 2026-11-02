@@ -13,6 +13,8 @@ pinned datastorePut wire fixture).
 """
 import datetime
 
+import pytest
+
 import lib.library as library
 
 NOW = datetime.datetime(2020, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
@@ -243,13 +245,13 @@ def test_merge_playback_video_id_change_resets_stale_time_offset_even_at_positio
     assert resumed["state"]["timeWatched"] == 91000  # accumulated from the reset baseline
 
 
-# --- merge_playback: watched threshold (90%) ------------------------------
+# --- merge_playback: watched threshold (70%, stremio-core's own) ------------------------------
 
 
 def test_merge_playback_below_threshold_does_not_flag_watched():
     item = library.build_library_item(_meta(), now=NOW)
     item["state"]["video_id"] = "tt1"
-    merged = library.merge_playback(item, 89000, 100000, video_id="tt1", now=NOW)
+    merged = library.merge_playback(item, 69000, 100000, video_id="tt1", now=NOW)
     assert merged["state"]["flaggedWatched"] == 0
     assert merged["state"]["timesWatched"] == 0
 
@@ -257,13 +259,13 @@ def test_merge_playback_below_threshold_does_not_flag_watched():
 def test_merge_playback_crossing_threshold_flags_watched_and_increments_times_watched():
     item = library.build_library_item(_meta(), now=NOW)
     item["state"]["video_id"] = "tt1"
-    merged = library.merge_playback(item, 91000, 100000, video_id="tt1", now=NOW)
+    merged = library.merge_playback(item, 71000, 100000, video_id="tt1", now=NOW)
     assert merged["state"]["flaggedWatched"] == 1
     assert merged["state"]["timesWatched"] == 1
 
 
 def test_merge_playback_exactly_at_threshold_boundary_not_yet_flagged():
-    """`WATCHED_THRESHOLD_RATIO` is a strict `>`, not `>=` -- exactly 90%
+    """`WATCHED_THRESHOLD_RATIO` is a strict `>`, not `>=` -- exactly 70%
     watched time has not yet crossed it."""
     item = library.build_library_item(_meta(), now=NOW)
     item["state"]["video_id"] = "tt1"
@@ -418,12 +420,21 @@ def test_mark_watched_payload_sets_flagged_watched_and_increments_counter():
     assert watched["_mtime"] == LATER_ISO
 
 
-def test_mark_watched_payload_unwatched_clears_flag_without_touching_counter():
+def test_mark_watched_payload_unwatched_clears_flag_and_counter():
+    """stremio-core's `mark_as_watched(false)` zeroes `timesWatched`, and
+    `LibraryItem::watched()` is `timesWatched > 0`: leaving the counter up
+    kept the title watched on every official client (issue #85)."""
     item = library.build_library_item(_meta(), now=NOW)
     watched = library.mark_watched_payload(item, True, now=NOW)
     unwatched = library.mark_watched_payload(watched, False, now=LATER)
     assert unwatched["state"]["flaggedWatched"] == 0
-    assert unwatched["state"]["timesWatched"] == 1  # history is never erased by un-marking
+    assert unwatched["state"]["timesWatched"] == 0
+    assert not library.item_watched(unwatched)
+
+
+def test_watched_threshold_matches_stremio_core():
+    """`WATCHED_THRESHOLD_COEF` in stremio-core's src/constants.rs."""
+    assert library.WATCHED_THRESHOLD_RATIO == 0.7
 
 
 def test_mark_watched_payload_idempotent_across_repeated_calls():
@@ -540,3 +551,97 @@ def test_mark_watched_payload_keeps_untrusted_bitfield():
     item = {'_id': 'tt1', 'state': {'watched': 'garbage'}}
     done = library.mark_watched_payload(item, True, video_ids=['a', 'b'])
     assert done['state']['watched'] == 'garbage'
+
+
+# --- watched derivation (issue #85) ------------------------------------------
+
+
+def _record(item_id="tt1", kind="movie", mtime=NOW_ISO, **state):
+    return {"_id": item_id, "type": kind, "_mtime": mtime, "removed": False, "state": state}
+
+
+def _progress(item_id="tt1", position=80000, duration=100000, updated_at=LATER_ISO, video_id=None, kind="movie"):
+    return {"id": item_id, "type": kind, "video_id": video_id, "position_ms": position,
+            "duration_ms": duration, "updated_at": updated_at}
+
+
+@pytest.mark.parametrize("state, expected", [
+    ({"flaggedWatched": 1}, True),
+    # What an official client's "Mark as watched" writes: the counter alone.
+    ({"timesWatched": 1}, True),
+    ({"flaggedWatched": 0, "timesWatched": 0}, False),
+    ({}, False),
+    ({"timesWatched": "x"}, False),
+    ({"timesWatched": None}, False),
+])
+def test_item_watched_reads_flag_or_counter(state, expected):
+    assert library.item_watched({"_id": "tt1", "state": state}) is expected
+
+
+def test_item_watched_tolerates_junk():
+    assert library.item_watched({"_id": "tt1"}) is False
+    assert library.item_watched({"_id": "tt1", "state": "x"}) is False
+    assert library.item_watched(None) is False
+
+
+def test_movie_verdicts_keeps_movies_only_with_their_mtime():
+    entries = [
+        _record("tt1", flaggedWatched=1),
+        _record("tt2", timesWatched=0),
+        # A series' counter is episodes watched: says nothing about the show.
+        _record("tt3", kind="series", timesWatched=4, flaggedWatched=1),
+        {"_id": "", "type": "movie"},
+        "junk",
+    ]
+    assert library.movie_verdicts(entries) == {"tt1": (True, NOW_ISO), "tt2": (False, NOW_ISO)}
+    assert library.movie_verdicts(None) == {}
+
+
+def test_movie_verdicts_keeps_removed_records():
+    """Removing from the library does not unwatch."""
+    removed = _record("tt1", flaggedWatched=1)
+    removed["removed"] = True
+    assert library.movie_verdicts([removed]) == {"tt1": (True, NOW_ISO)}
+
+
+@pytest.mark.parametrize("position, expected", [(70000, False), (70001, True), (100000, True), (0, False)])
+def test_progress_finished_is_strictly_past_the_threshold(position, expected):
+    assert library.progress_finished({"position_ms": position, "duration_ms": 100000}) is expected
+
+
+@pytest.mark.parametrize("entry", [{"position_ms": 5, "duration_ms": 0}, {}, {"position_ms": "x", "duration_ms": 10}, None])
+def test_progress_finished_without_a_duration_is_false(entry):
+    assert library.progress_finished(entry) is False
+
+
+def test_watched_ids_account_flag_wins():
+    verdicts = library.movie_verdicts([_record("tt1", flaggedWatched=1)])
+    assert library.watched_movie_ids(verdicts, []) == frozenset({"tt1"})
+
+
+def test_watched_ids_local_finish_counts_before_the_push_lands():
+    """Watched in Rivulet, account not yet told (or signed out)."""
+    assert library.watched_movie_ids({}, [_progress(position=71000)]) == frozenset({"tt1"})
+    # Account has an older, unwatched record: the later local sample wins.
+    verdicts = library.movie_verdicts([_record("tt1", mtime=NOW_ISO, timesWatched=0)])
+    assert library.watched_movie_ids(verdicts, [_progress(position=71000, updated_at=LATER_ISO)]) == frozenset({"tt1"})
+
+
+def test_watched_ids_a_newer_unwatched_account_record_beats_a_stale_local_finish():
+    """Mark as unwatched: its payload carries a newer `_mtime` than the
+    100% sample local progress still holds, and must clear the badge."""
+    verdicts = library.movie_verdicts([_record("tt1", mtime=LATER_ISO, timesWatched=0)])
+    assert library.watched_movie_ids(verdicts, [_progress(position=100000, updated_at=NOW_ISO)]) == frozenset()
+    # Equal stamps: the account is "at least as new".
+    assert library.watched_movie_ids(verdicts, [_progress(position=100000, updated_at=LATER_ISO)]) == frozenset()
+
+
+def test_watched_ids_ignores_unfinished_series_and_episode_progress():
+    entries = [
+        _progress("tt1", position=60000),
+        _progress("tt2", kind="series", position=100000),
+        _progress("tt3", video_id="tt3:1:1", position=100000),
+        {"id": 5, "type": "movie", "position_ms": 100000, "duration_ms": 100000},
+        "junk",
+    ]
+    assert library.watched_movie_ids({}, entries) == frozenset()

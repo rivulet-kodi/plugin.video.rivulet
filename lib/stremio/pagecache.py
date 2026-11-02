@@ -46,6 +46,11 @@ _SLIM_FIELDS = (
     'id', 'type', 'name', 'poster', 'background', 'logo',
     'year', 'releaseInfo', 'released', 'runtime', 'imdbRating', 'popularity',
     'genres',
+    # The IN CINEMA tag (`playbackmeta.in_cinema()`) is "recent `released`
+    # and no `dvdRelease`". Dropping the second half would tag every
+    # recent title that already has a home release as soon as its page
+    # came back from this cache.
+    'dvdRelease',
     # The hide-adult check runs on every read of a cached page
     # (lib/ui/catalogpages.py), so the signals it reads are kept.
     'adult', 'genre',

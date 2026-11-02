@@ -981,7 +981,7 @@ def test_context_menu_mark_unwatched_clears_flag_on_existing_record(load_detailw
 
     _auth_key, payload = api.put_calls[0]
     assert payload['state']['flaggedWatched'] == 0
-    assert payload['state']['timesWatched'] == 3  # history untouched by un-marking
+    assert payload['state']['timesWatched'] == 0  # as stremio-core's mark_as_watched(false)
     assert ctx.env.notifications == [('Rivulet', 'STR30300', 'info', 4000)]
 
 

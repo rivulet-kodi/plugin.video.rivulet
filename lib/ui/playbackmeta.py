@@ -10,6 +10,7 @@ Kodi stub. Split out of lib.ui.player to keep that module's Kodi-facing
 responsibility (actually starting playback) separate from this one
 (deriving the metadata it displays).
 """
+import datetime
 import os
 import re
 from urllib.parse import parse_qsl
@@ -269,6 +270,67 @@ def year_range(value, now_word):
     return '%s%s%s' % (stripped, text[len(stripped):].strip(), now_word)
 
 
+#: How long after its `released` date a movie with no home release yet is
+#: still tagged IN CINEMA. See `in_cinema()`.
+IN_CINEMA_WINDOW_DAYS = 120
+
+
+def _release_date(value):
+    """The `datetime.date` of a Cinemeta-style ISO `released` value
+    (``2026-09-12T00:00:00.000Z``), or None when it is missing, not a
+    string, or does not start with a full ``YYYY-MM-DD`` (a bare year
+    says nothing about whether the film is still in theatres)."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.datetime.strptime(value.strip()[:10], '%Y-%m-%d').date()
+    except ValueError:
+        return None
+
+
+def in_cinema(meta, now=None):
+    """Whether a catalog `meta` is a movie that is probably still in
+    theatres, the state official Stremio apps show as an "In cinema" tag.
+
+    INFERRED RULE, not upstream-verified. The tag is not computed in
+    stremio-core or stremio-web (both were read for it) and the mobile
+    apps are closed source, so this is reconstructed from what the data
+    allows: Cinemeta's movie metas carry `released` (the theatrical date)
+    and add `dvdRelease` only once a digital/home release exists (on its
+    top catalog 13 of 49 titles had one). A movie therefore reads as in
+    cinemas when
+
+    * `type` is ``movie``,
+    * `released` parses to a date that is not in the future and is at most
+      `IN_CINEMA_WINDOW_DAYS` days old, and
+    * there is no `dvdRelease`.
+
+    The 120-day ceiling is a judgement call that also guards against a
+    catalog that never fills `dvdRelease` in: without it such a title
+    would be tagged forever. An addon that omits `released`, or sends a
+    bare year, is never tagged.
+
+    `now` is a `datetime` (naive is read as UTC) or a `date`; it defaults
+    to the current UTC time. Pure: no xbmc, no network.
+    """
+    if not isinstance(meta, dict) or meta.get('type') != 'movie':
+        return False
+    if str(meta.get('dvdRelease') or '').strip():
+        return False
+    released = _release_date(meta.get('released'))
+    if released is None:
+        return False
+    if now is None:
+        now = datetime.datetime.now(datetime.timezone.utc)
+    if isinstance(now, datetime.datetime):
+        if now.tzinfo is not None:
+            now = now.astimezone(datetime.timezone.utc)
+        today = now.date()
+    else:
+        today = now
+    return 0 <= (today - released).days <= IN_CINEMA_WINDOW_DAYS
+
+
 #: Brand names on the hero's scores line. Left untranslated, the
 #: same way the hero already prints "IMDb": they name a scale, and a
 #: translation would make the number harder to recognise.
@@ -377,7 +439,7 @@ def _panel_year(meta, now_word):
     return year_range(source, now_word or '')
 
 
-def hero_panel_text(meta, runtime_text='', now_word=''):
+def hero_panel_text(meta, runtime_text='', now_word='', cinema_word=''):
     """The hero's facts: one per line, missing ones omitted.
 
     Order is the one the panel is read in: Rotten Tomatoes, Metascore,
@@ -390,6 +452,10 @@ def hero_panel_text(meta, runtime_text='', now_word=''):
     like `"155 min"` arrives. `now_word` closes an open series range
     (`"2022–now"`). Both are passed in so this module stays free of
     xbmc.
+
+    `cinema_word` (the localized IN CINEMA tag, passed in for the same
+    reason) is appended to the year line when `in_cinema(meta)` holds, so
+    the tag sits where the release year is read.
     """
     if not isinstance(meta, dict):
         return ''
@@ -399,6 +465,8 @@ def hero_panel_text(meta, runtime_text='', now_word=''):
         if value:
             lines.append('%s %s' % (label, value))
     year = _panel_year(meta, now_word)
+    if cinema_word and in_cinema(meta):
+        year = '%s \u00b7 %s' % (year, cinema_word) if year else cinema_word
     if year:
         lines.append(year)
     runtime = _fact(runtime_text) or _fact(meta.get('runtime'))

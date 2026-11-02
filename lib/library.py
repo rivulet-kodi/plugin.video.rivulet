@@ -57,14 +57,17 @@ DEFAULT_POSTER_SHAPE = 'poster'
 #: before this addon flags it "watched" (`flaggedWatched=1`, `timesWatched`
 #: incremented once -- see `merge_playback`).
 #:
-#: NOTE: stremio-core's own player model uses a DIFFERENT, lower
-#: coefficient for this exact check (`WATCHED_THRESHOLD_COEF = 0.7`,
-#: src/constants.rs:43, consumed by `ActionPlayer::TimeChanged` at
-#: src/models/player.rs:571-573) -- this addon deliberately requires a
-#: stricter 90% instead (project decision for this feature), so the real
-#: upstream figure is documented here rather than left for a future
-#: reader to assume this constant is upstream-verified.
-WATCHED_THRESHOLD_RATIO = 0.9
+#: This is stremio-core's own figure for the same check
+#: (`WATCHED_THRESHOLD_COEF = 0.7`, src/constants.rs, consumed by the
+#: `TimeChanged` arm of `src/models/player.rs`), and it has to stay equal
+#: to it: the flag is what every other Stremio client reads back, so a
+#: stricter value here leaves a movie stopped in its credits (70-90%)
+#: watched on the official apps and unwatched everywhere Rivulet draws it
+#: (issue #85). It is deliberately NOT the same number as the resume
+#: prompt's `RESUME_MAX_PERCENT` (95%): that decides whether there is
+#: anything left worth resuming into, this decides whether the title
+#: counts as seen.
+WATCHED_THRESHOLD_RATIO = 0.7
 
 #: Every `LibraryItemState` time field is milliseconds on the wire
 #: (library_item.rs:228-243); a playback position sampled off Kodi's own
@@ -356,7 +359,7 @@ def mark_watched_payload(item, watched, now=None, video_ids=None):
     `item['state']['flaggedWatched']` to `watched` -- the explicit
     "Mark as watched"/"Mark as unwatched" action, using exactly the
     `flaggedWatched`/`timesWatched` pair `merge_playback()` already
-    flips automatically at the 90% threshold (see
+    flips automatically at the 70% threshold (see
     `WATCHED_THRESHOLD_RATIO`); this function just lets the user set the
     same two fields by hand instead of waiting for enough playback.
 
@@ -366,10 +369,14 @@ def mark_watched_payload(item, watched, now=None, video_ids=None):
     increment, and is what makes this function idempotent: feeding its
     own output back in with the same `watched` value is a no-op past the
     first call, since the second call's `was_watched` reads back the
-    `True` the first call just wrote. Marking unwatched never
-    decrements `timesWatched` -- that counter is a history of how many
-    times the title WAS completed, not a live flag, so un-marking must
-    not erase that history.
+    `True` the first call just wrote.
+
+    Marking unwatched resets `timesWatched` to 0, as stremio-core's own
+    `LibraryItem::mark_as_watched(false)` does. That counter is not a
+    private history here: the official clients decide "watched" from
+    `timesWatched > 0` alone (`LibraryItem::watched()`), so an unmark that
+    left it standing was undone on every other device (issue #85) and
+    Rivulet's own badge (`movie_verdicts`) could never clear.
 
     An `item` with no `state` at all yet (never played, never added)
     gets a fresh default one first, same as `merge_playback()`.
@@ -388,6 +395,8 @@ def mark_watched_payload(item, watched, now=None, video_ids=None):
     state['flaggedWatched'] = 1 if watched else 0
     if watched and not was_watched:
         state['timesWatched'] = int(state.get('timesWatched') or 0) + 1
+    elif not watched:
+        state['timesWatched'] = 0
     if video_ids:
         updated = watchedbitfield.set_all_watched(state.get('watched'), video_ids, watched)
         if updated is not None:
@@ -494,3 +503,108 @@ def progress_from_library_item(item):
         'duration_ms': duration,
         'updated_at': updated_at,
     }
+
+
+def item_watched(item):
+    """Whether one account `libraryItem` record counts as watched.
+
+    ``state.timesWatched > 0`` is stremio-core's own answer
+    (``LibraryItem::watched()``), and it is the ONLY signal an official
+    client's "Mark as watched" sets: that action bumps ``timesWatched``
+    and leaves ``flaggedWatched`` alone (``mark_as_watched(true)``).
+    ``flaggedWatched`` is what a playback that crossed
+    :data:`WATCHED_THRESHOLD_RATIO` sets, together with its own
+    ``timesWatched`` bump, and what this addon's explicit mark writes, so
+    accepting either covers every writer.
+
+    Only meaningful for a movie. For a series ``timesWatched`` counts
+    episodes ("incremented once for each video watched"), so it says
+    nothing about the title as a whole -- see :func:`movie_verdicts`.
+    """
+    state = item.get('state') if isinstance(item, dict) else None
+    if not isinstance(state, dict):
+        return False
+    if state.get('flaggedWatched'):
+        return True
+    try:
+        return int(state.get('timesWatched') or 0) > 0
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def movie_verdicts(entries):
+    """``{movie id: (watched, mtime)}`` for every movie record in
+    `entries` (a ``libraryItem`` datastore read).
+
+    ``mtime`` is the record's ``_mtime`` in :func:`iso8601_utc`'s form
+    (``''`` when absent/unparseable): it is what lets
+    :func:`watched_movie_ids` decide whether the account or a local
+    playback sample is the more recent word. Tombstoned (``removed``)
+    records are kept: removing a title from the library does not unwatch
+    it, and a title watched without ever being added is a ``temp``,
+    ``removed`` record by construction (:func:`build_library_item`).
+    Anything that is not a movie is skipped, for the reason given in
+    :func:`item_watched`.
+    """
+    verdicts = {}
+    for entry in entries or []:
+        if not isinstance(entry, dict) or entry.get('type') != 'movie':
+            continue
+        item_id = entry.get('_id')
+        if not isinstance(item_id, str) or not item_id:
+            continue
+        verdicts[item_id] = (item_watched(entry), _normalize_iso(entry.get('_mtime')) or '')
+    return verdicts
+
+
+def progress_finished(entry):
+    """Whether a local progress entry (`Store.get_progress_entries()`
+    shape) has played past :data:`WATCHED_THRESHOLD_RATIO` of its
+    duration. Strictly past, like :func:`merge_playback`'s own check.
+
+    This reads where playback stopped, while the account flag counts time
+    actually watched, so a viewer who skipped ahead can read as finished
+    here before the account agrees -- a provisional answer
+    :func:`watched_movie_ids` hands back to the account the moment the
+    account has a newer word.
+    """
+    try:
+        position = int(entry.get('position_ms') or 0)
+        duration = int(entry.get('duration_ms') or 0)
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return False
+    return duration > 0 and position > duration * WATCHED_THRESHOLD_RATIO
+
+
+def watched_movie_ids(verdicts, progress_entries):
+    """The frozenset of movie ids that should wear the watched badge.
+
+    `verdicts` is :func:`movie_verdicts` of the account's library (empty
+    when signed out or the library has not been read), `progress_entries`
+    is `Store.get_progress_entries()`.
+
+    * An account record that says watched wins outright.
+    * A movie finished in local progress (:func:`progress_finished`) is
+      watched even before the playback push has landed on the account,
+      which lags by up to ``LIBRARY_PUSH_INTERVAL_SECONDS`` -- UNLESS the
+      account has a record at least as new as that local sample. The
+      record is then the later word, and for an explicit "Mark as
+      unwatched" it is the whole point: the stale 100% sample would
+      otherwise keep the badge on for good (local progress has no way to
+      say "unwatched").
+
+    Pure and cheap (one pass over each input), so callers compute it once
+    per paint and look titles up in the result.
+    """
+    marks = {item_id for item_id, (watched, _mtime) in verdicts.items() if watched}
+    for entry in progress_entries or []:
+        if not isinstance(entry, dict) or entry.get('type') != 'movie' or entry.get('video_id'):
+            continue
+        item_id = entry.get('id')
+        if not isinstance(item_id, str) or item_id in marks or not progress_finished(entry):
+            continue
+        account = verdicts.get(item_id)
+        if account is not None and account[1] >= str(entry.get('updated_at') or ''):
+            continue
+        marks.add(item_id)
+    return frozenset(marks)

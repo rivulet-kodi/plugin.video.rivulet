@@ -286,7 +286,7 @@ def test_extra_rows_come_first_and_run(action, monkeypatch):
     extra = [('Go to series', lambda: ran.append('series')), ('', lambda: ran.append('blank')), ('Broken', 'not callable')]
     assert action.libraryaction.poster_menu(_META, extra) is None
     # Rows without a label or an action are dropped.
-    assert shown == [('Dune', ['Go to series', 'STR30293', 'STR30499'])]
+    assert shown == [('Dune', ['Go to series', 'STR30293', 'STR30295', 'STR30499'])]
     assert ran == ['series']
 
 
@@ -314,7 +314,7 @@ def test_back_on_the_menu_lookup_opens_no_menu(action, monkeypatch):
     assert shown == []
 
 
-@pytest.mark.parametrize('pick', [None, -1, 2, 7])
+@pytest.mark.parametrize('pick', [None, -1, 3, 7])
 def test_a_pick_outside_the_menu_does_nothing(action, monkeypatch, pick):
     import lib.ui.trailer as trailer
 
@@ -337,3 +337,85 @@ def test_library_transport_errors_never_log_credentials(action, monkeypatch):
     assert len(messages) == 2
     assert all('ApiError' in msg and 'secret' not in msg and 'hidden' not in msg
                and 'user:' not in msg for msg in messages)
+
+
+# --- Mark as watched / unwatched on a movie poster (issue #85) ------------------
+
+
+def _watched_record(watched=True, mtime='2020-01-01T00:00:00Z'):
+    return {'_id': 'tt1', 'type': 'movie', 'removed': False, '_mtime': mtime,
+            'state': {'flaggedWatched': int(watched), 'timesWatched': int(watched)}}
+
+
+def test_a_movie_menu_offers_mark_watched_between_library_and_trailer(action, monkeypatch):
+    _, shown = _wire(monkeypatch, _Api(record=None), pick=None)
+    action.libraryaction.poster_menu(_META)
+    assert shown == [('Dune', ['STR30293', 'STR30295', 'STR30499'])]
+
+
+def test_a_series_menu_has_no_mark_row(action, monkeypatch):
+    _, shown = _wire(monkeypatch, _Api(record=None), pick=None)
+    action.libraryaction.poster_menu(dict(_META, type='series'))
+    assert shown == [('Dune', ['STR30293', 'STR30499'])]
+
+
+def test_the_mark_row_follows_the_check_and_unmarks(action, monkeypatch):
+    from lib.ui import watchmarks
+
+    class _Marked:
+        def get_auth(self):
+            return _AUTH
+
+        def get_progress_entries(self):
+            return []
+
+    api = _Api(record=_watched_record())
+    _, shown = _wire(monkeypatch, api, pick=1)
+    watchmarks.refresh(_Marked(), [_watched_record()])
+    assert action.libraryaction.poster_menu(_META) == 'unwatched'
+    assert shown == [('Dune', ['STR30294', 'STR30296', 'STR30499'])]
+    payload = api.puts[0][1]
+    assert payload['state']['flaggedWatched'] == 0 and payload['state']['timesWatched'] == 0
+    assert action.env.notifications[-1][1] == 'STR30300'
+
+
+def test_marking_a_new_title_watched_writes_the_implicit_record(action, monkeypatch):
+    api = _Api(record=None)
+    _wire(monkeypatch, api, pick=1)
+    assert action.libraryaction.poster_menu(_META) == 'watched'
+    key, payload = api.puts[0]
+    assert key == 'key' and payload['_id'] == 'tt1' and payload['type'] == 'movie'
+    assert payload['state']['flaggedWatched'] == 1 and payload['state']['timesWatched'] == 1
+    assert payload['removed'] is True and payload['temp'] is True
+    assert action.env.notifications[-1][1] == 'STR30299'
+
+
+def test_a_landed_mark_shows_on_home_and_dirties_it(action, monkeypatch):
+    import lib.ui.newhome as newhome
+
+    _wire(monkeypatch, _Api(record=None), pick=1)
+    action.libraryaction.poster_menu(_META)
+    assert newhome._library_dirty is True
+    assert any(entry.get('_id') == 'tt1' for entry in action.mystuff.apply_library_writes([]))
+
+
+def test_a_failed_lookup_at_write_time_never_marks(action, monkeypatch):
+    class _Flaky(_Api):
+        def get_library_item(self, auth_key, item_id):
+            self.gets.append((auth_key, item_id))
+            if len(self.gets) > 1:
+                raise _api_error()
+            return None
+
+    api = _Flaky()
+    _wire(monkeypatch, api, pick=1)
+    assert action.libraryaction.poster_menu(_META) is None
+    assert api.puts == []
+    assert action.env.notifications[-1][1] == 'STR30302'
+
+
+def test_a_failed_mark_write_says_so_and_returns_nothing(action, monkeypatch):
+    api = _Api(record=None, put_error=_api_error())
+    _wire(monkeypatch, api, pick=1)
+    assert action.libraryaction.poster_menu(_META) is None
+    assert action.env.notifications[-1][1] == 'STR30301'

@@ -1255,3 +1255,7 @@ msgstr "搜索"
 msgctxt "#30513"
 msgid "No results for “%s”"
 msgstr "没有“%s”的结果"
+
+msgctxt "#30548"
+msgid "IN CINEMA"
+msgstr "影院热映"

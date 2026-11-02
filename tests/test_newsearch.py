@@ -508,7 +508,7 @@ def test_context_menu_add_writes_the_selected_title_to_the_library(load_search, 
     _, menus = _wire(monkeypatch, api, pick=0)
     import xbmcgui
     win.onAction(xbmcgui.Action(117))
-    assert len(menus) == 1 and menus[0][1] == ['STR30293', 'STR30499']
+    assert len(menus) == 1 and menus[0][1] == ['STR30293', 'STR30295', 'STR30499']
     assert len(api.puts) == 1
     payload = api.puts[0][1]
     assert payload['_id'] == META['id'] and payload['type'] == META['type']

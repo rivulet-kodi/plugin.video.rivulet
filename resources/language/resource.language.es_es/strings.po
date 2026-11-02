@@ -1255,3 +1255,7 @@ msgstr "Buscar"
 msgctxt "#30513"
 msgid "No results for “%s”"
 msgstr "Sin resultados para «%s»"
+
+msgctxt "#30548"
+msgid "IN CINEMA"
+msgstr "EN CINES"

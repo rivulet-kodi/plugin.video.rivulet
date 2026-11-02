@@ -623,7 +623,7 @@ class StreamsWindow(BaseWindow):
         self._rendered_visible_pairs = list(display_pairs)
 
         from lib.ui.compat import L
-        from lib.ui.playbackmeta import year_range
+        from lib.ui.playbackmeta import in_cinema, year_range
 
         meta = self.meta or {}
         # A still-running series' open-ended range is closed with the
@@ -638,7 +638,10 @@ class StreamsWindow(BaseWindow):
             meta.get('releaseInfo') or meta.get('year') or '', L(_NOW_STRING_ID)
         ))
         runtime = escape_label(str(meta.get('runtime') or ''))
-        top_line = ' \u00b7 '.join(part for part in (year, runtime) if part)
+        # IN CINEMA sits next to the year, as on the coverflow and Home
+        # hero (`playbackmeta.in_cinema`, an inferred rule).
+        cinema = escape_label(L(30548)) if in_cinema(meta) else ''
+        top_line = ' \u00b7 '.join(part for part in (year, cinema, runtime) if part)
         lines = [top_line] if top_line else []
         rating = meta.get('imdbRating')
         if rating:
