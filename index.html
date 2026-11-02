@@ -10,7 +10,7 @@
 <meta property="og:description" content="Browse catalogs, resolve streams and play them through a built-in streaming server. Install in three steps.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://rivulet-kodi.github.io/plugin.video.rivulet/">
-<meta property="og:image" content="https://rivulet-kodi.github.io/plugin.video.rivulet/screenshots/discover-catalogs.png">
+<meta property="og:image" content="https://rivulet-kodi.github.io/plugin.video.rivulet/screenshots/home.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 240'%3E%3Ccircle cx='120' cy='120' r='118' fill='%230e1424'/%3E%3Ccircle cx='120' cy='120' r='74' fill='none' stroke='%235eead4' stroke-width='9' opacity='.4'/%3E%3Ccircle cx='120' cy='120' r='34' fill='%232dd4bf'/%3E%3Cpolygon points='110,104 110,136 138,120' fill='%230e1424'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -49,6 +49,7 @@ code{font-family:var(--mono);background:var(--text-06);border:1px solid var(--bo
 /* eyebrow label used above every section heading */
 .eyebrow{font-family:var(--mono);font-size:13px;letter-spacing:.14em;color:var(--accent);text-transform:uppercase}
 .section-head{text-align:center;max-width:640px;margin:0 auto 48px}
+.section-head p{margin-top:14px;color:var(--text-60)}
 .section-head h2{margin-top:14px;font-size:clamp(28px,4vw,40px);font-weight:700;letter-spacing:-.01em}
 
 /* buttons */
@@ -327,39 +328,28 @@ footer{border-top:1px solid var(--border)}
     <div class="section-head">
       <div class="eyebrow">See it in action</div>
       <h2>The couch-first UI, screen by screen</h2>
+      <p>The Home, series and search screens are based on <a href="https://github.com/TheGildedGoo/plugin.video.rivulet">RevRivulet</a> by TheGildedGoo, who also took these screenshots (<a href="https://github.com/rivulet-kodi/plugin.video.rivulet/issues/67">#67</a>).</p>
     </div>
     <div class="shot-grid">
       <figure class="shot-card">
-        <img src="screenshots/home.png" alt="Rivulet's custom Home menu with Movies, Series, Anime, Search, Continue, Add-ons and Settings rows" loading="lazy">
-        <figcaption>Home — Movies, Series, Anime, Search and Continue, one row away.</figcaption>
+        <img src="screenshots/home.png" alt="Rivulet's Home with Home, Movies and Series tabs, a full-screen backdrop hero for The Matrix with its logo, rating, runtime and synopsis, and a Continue row of landscape cards" loading="lazy">
+        <figcaption>Home — a backdrop hero for the focused title, with Continue right below.</figcaption>
       </figure>
       <figure class="shot-card">
-        <img src="screenshots/discover-catalogs.png" alt="Catalog picker listing the movie catalogs published by installed Stremio add-ons" loading="lazy">
-        <figcaption>Pick a type, then a catalog — filtered to Movies, Series or Anime.</figcaption>
+        <img src="screenshots/series-episodes.png" alt="Breaking Bad's series page with season tabs, Season 2's episode list with thumbnails, air dates and synopses, and the focused episode's still on the right" loading="lazy">
+        <figcaption>Series — season tabs and an episode list, progress bar included.</figcaption>
+      </figure>
+      <figure class="shot-card">
+        <img src="screenshots/search.png" alt="Search screen with an on-screen A to Z keyboard, the query Alien typed in, a backdrop for the top result and a row of result posters" loading="lazy">
+        <figcaption>Search — type with the remote or your phone, results on one page.</figcaption>
       </figure>
       <figure class="shot-card">
         <img src="screenshots/discover-coverflow.png" alt="A catalog opened into a coverflow with a featured title's synopsis" loading="lazy">
         <figcaption>Open a catalog into a full coverflow, poster and synopsis included.</figcaption>
       </figure>
       <figure class="shot-card">
-        <img src="screenshots/detail-streams.png" alt="Title detail merged with a list of resolved stream sources" loading="lazy">
-        <figcaption>Title details and resolved stream sources, merged into one view.</figcaption>
-      </figure>
-      <figure class="shot-card">
-        <img src="screenshots/resolving-stream.png" alt="Preparing stream dialog live-resolving a torrent with peer and speed stats" loading="lazy">
-        <figcaption>Live stream resolution — real peers, real speed, no guesswork.</figcaption>
-      </figure>
-      <figure class="shot-card">
-        <img src="screenshots/search.png" alt="Search screen's empty new-search entry state" loading="lazy">
-        <figcaption>Search, ready when you are.</figcaption>
-      </figure>
-      <figure class="shot-card">
-        <img src="screenshots/search-results.png" alt="Search results for star wars rendered as a coverflow" loading="lazy">
-        <figcaption>Results land as a coverflow, not a bare list.</figcaption>
-      </figure>
-      <figure class="shot-card">
-        <img src="screenshots/mystuff.png" alt="Continue screen's coverflow mixing part-way-through titles, next-up episodes and saved library items" loading="lazy">
-        <figcaption>Continue — what you're watching, what's next, and what you've saved, one coverflow.</figcaption>
+        <img src="screenshots/detail-streams.png" alt="Stream source list for a title, each row showing resolution, quality tags, size and source add-on" loading="lazy">
+        <figcaption>Every source from every add-on, ranked, with quality and size up front.</figcaption>
       </figure>
       <figure class="shot-card">
         <img src="screenshots/addons-manager.png" alt="Rivulet's in-app Stremio add-on manager listing installed add-ons" loading="lazy">
