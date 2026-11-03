@@ -821,6 +821,16 @@ class StreamsWindow(BaseWindow):
             return
         info, stream = self.pairs[int(focused.getProperty('position'))]
 
+        # An addon's trailer row: played like the Trailer button, under a
+        # spinner until it runs, with no resume prompt and no progress.
+        # Through play_direct() the screens closed while the engine was
+        # still fetching it, leaving nothing on screen for seconds.
+        from lib.ui.trailer import play_youtube, stream_trailer_id
+        yt = stream_trailer_id(stream)
+        if yt:
+            play_youtube(yt, self.heading or (self.meta or {}).get('name'))
+            return
+
         # item_meta carries the content title/art/meta this window
         # already has in hand (see the module docstring's heading/art/
         # meta kwargs) into the player's OSD - only the keys actually

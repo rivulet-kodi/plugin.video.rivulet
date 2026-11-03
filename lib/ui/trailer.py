@@ -141,12 +141,8 @@ def play_trailer(meta, stype='', sid=''):
     the screens first, so a stalled trailer left Kodi's Videos window
     with a black player behind it.
     """
-    import xbmc
-    import xbmcgui
-
-    from lib.stremio.addons import safe_url_for_log
-    from lib.ui.compat import L, log, notify
-    from lib.ui.uicommon import CANCELLED, escape_label, run_cancellable
+    from lib.ui.compat import L, notify
+    from lib.ui.uicommon import CANCELLED
 
     full = _full_meta(meta if isinstance(meta, dict) else {}, stype, sid)
     if full is CANCELLED:
@@ -155,8 +151,29 @@ def play_trailer(meta, stype='', sid=''):
     if not yt:
         notify(L(30497))
         return False
+    return play_youtube(yt, (full or {}).get('name'))
+
+
+def stream_trailer_id(stream):
+    """The YouTube id of a stream that is only a ``ytId`` (an addon's
+    trailer row), or ``''``. Kodi-free."""
+    if not isinstance(stream, dict) or stream.get('url') or stream.get('infoHash') or stream.get('externalUrl'):
+        return ''
+    yt = str(stream.get('ytId') or '').strip()
+    return yt if _YT_ID.match(yt) else ''
+
+
+def play_youtube(yt, name=None):
+    """Play YouTube id `yt` as a trailer of the title called `name`,
+    blocking until it stops. True when one played. See `play_trailer()`."""
+    import xbmc
+    import xbmcgui
+
+    from lib.stremio.addons import safe_url_for_log
+    from lib.ui.compat import L, log, notify
+    from lib.ui.uicommon import CANCELLED, escape_label, run_cancellable
+
     # Addon-supplied: the label reaches the player OSD and the spinner.
-    name = (full or {}).get('name')
     name = escape_label(name) if isinstance(name, str) else ''
     label = ('%s – %s' % (name, L(30499))) if name else L(30499)
     server = run_cancellable(lambda: _server_url(yt), label)

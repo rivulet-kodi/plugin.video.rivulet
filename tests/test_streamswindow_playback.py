@@ -150,6 +150,26 @@ def test_onclick_dispatches_the_focused_pairs_own_stream_to_play_direct(load_str
     assert win.closed is True
 
 
+def test_a_trailer_row_plays_as_a_trailer_not_as_the_title(load_streamswindow, monkeypatch):
+    ctx = load_streamswindow()
+    import lib.ui.trailer as trailer
+
+    win = _make_window(ctx.streamswindow)
+    win.pairs = [({'raw': 'T'}, {'ytId': 'K5MGifjkW8w', 'title': 'Trailer'})]
+    win.stype, win.sid, win.heading = 'movie', 'tt1', 'The Title'
+    win.onInit()
+    direct, played = [], []
+    monkeypatch.setattr(ctx.player, 'play_direct', lambda *a, **k: direct.append(a) or True)
+    monkeypatch.setattr(trailer, 'play_youtube', lambda yt, name=None: played.append((yt, name)) or True)
+
+    win.onClick(ctx.streamswindow.LIST)
+
+    # play_direct() would ask to resume the title and record its progress.
+    assert direct == []
+    assert played == [('K5MGifjkW8w', 'The Title')]
+    assert win.played is False
+
+
 def test_onclick_forwards_the_windows_video_id_to_play_direct(load_streamswindow, monkeypatch):
     ctx = load_streamswindow()
     win = _make_window(ctx.streamswindow)

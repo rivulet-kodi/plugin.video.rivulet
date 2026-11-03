@@ -37,6 +37,20 @@ def test_no_usable_trailer(trailer, meta):
     assert trailer.trailer.trailer_id(meta) == ''
 
 
+@pytest.mark.parametrize(('stream', 'expected'), [
+    ({'ytId': 'K5MGifjkW8w'}, 'K5MGifjkW8w'),
+    ({'ytId': ' K5MGifjkW8w '}, 'K5MGifjkW8w'),
+    ({'ytId': 'K5MGifjkW8w', 'url': 'https://x/v.mp4'}, ''),
+    ({'ytId': 'K5MGifjkW8w', 'infoHash': 'a' * 40}, ''),
+    ({'ytId': 'K5MGifjkW8w', 'externalUrl': 'https://x'}, ''),
+    ({'ytId': 'not/an id'}, ''),
+    ({'url': 'https://x/v.mp4'}, ''),
+    (None, ''),
+])
+def test_only_a_stream_that_is_just_a_youtube_id_is_a_trailer(trailer, stream, expected):
+    assert trailer.trailer.stream_trailer_id(stream) == expected
+
+
 def test_a_server_stream_that_answers_goes_first_then_the_youtube_addon(trailer, monkeypatch):
     monkeypatch.setattr(trailer.trailer, '_youtube_addon_url', lambda yt: 'plugin://plugin.video.youtube/play/?video_id=%s' % yt)
     monkeypatch.setattr(trailer.trailer, '_server_url', lambda yt: 'http://127.0.0.1:11470/yt/%s' % yt)
