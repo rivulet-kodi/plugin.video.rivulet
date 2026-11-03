@@ -25,6 +25,7 @@ white rounded rectangle at twice the card's size.
 ``python tools/make_look_textures.py --check`` redraws everything in
 memory and compares it with the shipped files, pixel for pixel.
 """
+import math
 import os
 import sys
 
@@ -90,17 +91,37 @@ def _addons(draw, scale):
 
 
 def _settings(draw, scale):
-    draw.ellipse((22 * scale, 22 * scale, 42 * scale, 42 * scale), outline=WHITE, width=4 * scale)
+    """A gear: a ring with eight teeth joined to its rim.
+
+    The earlier drawing was a circle with eight detached radial ticks,
+    which is the standard brightness/sun glyph - users read it as a
+    display control, not as settings. Teeth have to touch the rim and be
+    wide enough to read as teeth: these are trapezoids spanning 20 deg at
+    the rim, so the silhouette is a gear at a glance and at 56px on a TV.
+    """
+    # The toothed outline, one closed polygon alternating between the
+    # tooth tip radius and the rim. Stroked, not filled, at the 4px the
+    # search lens and the addons squares use, so the three icons sit at
+    # the same visual weight.
+    r_rim, r_tip, half = 15.0, 23.0, math.radians(11)
+    points = []
     for index in range(8):
-        # Eight ticks around the hub. A full gear polygon is more ink than a TV needs.
-        angle = index * 45
-        import math
-        rad = math.radians(angle)
-        x0 = 32 + int(round(math.cos(rad) * 14))
-        y0 = 32 + int(round(math.sin(rad) * 14))
-        x1 = 32 + int(round(math.cos(rad) * 22))
-        y1 = 32 + int(round(math.sin(rad) * 22))
-        draw.line((x0 * scale, y0 * scale, x1 * scale, y1 * scale), fill=WHITE, width=4 * scale)
+        mid = math.radians(index * 45)
+        gap = math.radians(45) / 2 - half
+        for angle, radius in (
+            (mid - half - gap, r_rim),
+            (mid - half, r_tip),
+            (mid + half, r_tip),
+            (mid + half + gap, r_rim),
+        ):
+            points.append(
+                ((32 + math.cos(angle) * radius) * scale,
+                 (32 + math.sin(angle) * radius) * scale)
+            )
+    draw.polygon(points, outline=WHITE, width=4 * scale)
+    # The bore, concentric and wide enough to stay open at 56px: a small
+    # one closes up into a dot and the glyph reads as a flower.
+    draw.ellipse((23 * scale, 23 * scale, 41 * scale, 41 * scale), outline=WHITE, width=4 * scale)
 
 
 def _ramp(points, span):
