@@ -996,6 +996,9 @@ def test_a_stream_with_no_quality_or_source_is_titled_by_its_own_lines():
     assert stream_fields(web)["title"] == "VidXgo \u00b7 Movie \u00b7 [ITA] \u00b7 Proxy (ON)"
     trailer = parse_stream({"name": "StreamViX\n\U0001f3ac Trailer", "title": "The Echo Chamber"}, addon_name="StreamViX")
     assert stream_fields(trailer)["title"] == "Trailer \u00b7 The Echo Chamber"
+    # `description` is Stremio's newer name for `title`.
+    described = parse_stream({"name": "StreamViX", "description": "Mixdrop\n[ITA]"}, addon_name="StreamViX")
+    assert stream_fields(described)["title"] == "Mixdrop \u00b7 [ITA]"
     # A row with a quality chip or source keeps its columns; no title line.
     assert stream_fields(parse_stream(AIOSTREAMS_STREAM, addon_name="AIOStreams"))["title"] == ""
 
@@ -1461,3 +1464,13 @@ def test_parse_stream_caps_the_filename_before_the_release_group_regex():
 
 def test_escape_label_neutralises_escvar():
     assert "$ESCVAR[" not in escape_label("$ESCVAR[Foo]")
+
+
+@pytest.mark.parametrize(("name", "service", "cached"), [
+    ("4K \u207d\u1d3f\u1d30\u207e\u26a1", "RD", True),   # AIOStreams superscript, cached
+    ("4K \u207d\u1d3f\u1d30\u207e", "RD", False),         # same service, not cached
+    ("4K \u207d\u1d56\u00b2\u1d56\u207e", "", None),     # P2P: no debrid, no state
+])
+def test_superscript_service_codes_read_as_plain_ones(name, service, cached):
+    info = parse_stream({"name": name, "description": "x"}, addon_name="AIOStreams")
+    assert (info["service"], info["cached"]) == (service, cached)

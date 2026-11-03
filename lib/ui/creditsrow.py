@@ -105,8 +105,16 @@ def open_credit(window, links):
     position = window.getControl(CREDITS).getSelectedPosition()
     if not 0 <= position < len(links):
         return
+    # A second OK queued while the search spinner pumps input would
+    # otherwise stack a second results screen over the first.
+    if getattr(window, '_credit_open', False):
+        return
     from lib.ui.dependencies import get_client, get_store
     from lib.ui.infowindow import open_credit_link
 
-    open_credit_link(get_store(), get_client(), links[position])
+    window._credit_open = True
+    try:
+        open_credit_link(get_store(), get_client(), links[position])
+    finally:
+        window._credit_open = False
     window.setFocusId(CREDITS)

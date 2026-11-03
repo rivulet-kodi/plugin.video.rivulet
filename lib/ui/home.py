@@ -2233,14 +2233,16 @@ def _apply_library_meta(window):
 
 
 def _fill_continue_card(item, meta):
-    """A Continue card with no wide picture takes the fetched backdrop."""
-    if item.getProperty('land'):
+    """A Continue card with no wide picture, or only the metahub guess,
+    takes the fetched backdrop."""
+    if item.getProperty('land') and item.getProperty('land_guess') != '1':
         return
     background = meta.get('background') if isinstance(meta, dict) else ''
     if isinstance(background, str) and background:
         from lib.ui.urlutil import sized_image
 
         item.setProperty('land', sized_image(background, 'backdrop'))
+        item.setProperty('land_guess', '')
 
 
 def _upcoming_facts(window, count=2):
@@ -2763,12 +2765,15 @@ def _continue_item(entry):
     The card itself is wide art with the show and the episode written
     bottom-left, the way the New Episodes cards read (#9).
     """
+    from lib.newepisodes import background_url
     from lib.ui.uicommon import escape_label
 
     item = _poster_item(entry)
     land, code = _continue_card(entry)
     props = {
         'land': land,
+        # Only a guess at Cinemeta's picture: a fetched backdrop wins.
+        'land_guess': '1' if land and land == background_url(entry.get('id')) else '',
         'card_show': escape_label(entry.get('name') or ''),
         'card_code': code,
     }

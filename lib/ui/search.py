@@ -71,6 +71,8 @@ class SearchWindow(BaseWindow):
         self._lock = threading.Lock()
         self._ready = []
         self._hero_painted = None
+        #: Status line for results handed over by `open_search(query)`.
+        self._notice = ''
         #: The bar reported a change since the last action. Kodi queues
         #: the bar's click before the action that caused it, so a Select
         #: on the bar that arrives with this set followed a confirmed
@@ -101,6 +103,12 @@ class SearchWindow(BaseWindow):
         self._paint_query()
         if self._metas:
             self._show(self._metas, results=True)
+            if self._notice:
+                self._status(self._notice)
+            # Clearing the bar goes back to Discover, so load it as a
+            # search from the bar would have.
+            if not self._discover:
+                self._load_discover()
         elif self._discover:
             self._show(self._discover, results=False)
         else:
@@ -420,7 +428,7 @@ def open_search(query=None):
     spinner over the calling screen, and the screen opens on its results
     with the name in the bar. Nothing found: the screen does not open and
     the user is told, as the coverflow it replaces did. Back on the
-    spinner stays where the user was.
+    spinner, or a name that is only blanks, stays where the user was.
     """
     import xbmc
 
@@ -433,12 +441,20 @@ def open_search(query=None):
         from lib.ui.searchwindow import SearchReport, _search_notice, run_query
 
         query = query.strip()[:MAX_QUERY]
+        if not query:
+            return False
         report = SearchReport()
-        metas = list(run_query(get_store(), get_client(), query, report=report) or [])
+        try:
+            metas = list(run_query(get_store(), get_client(), query, report=report) or [])
+        except Exception as exc:
+            log('search: search failed: %s' % type(exc).__name__, xbmc.LOGWARNING)
+            notify(L(30032))
+            return False
         if report.canceled:
             return False
+        notice = _search_notice(report)
         if not metas:
-            notify(_search_notice(report) or _with_query(L(30513), query))
+            notify(notice or _with_query(L(30513), query))
             return False
     window = None
     try:
@@ -447,6 +463,9 @@ def open_search(query=None):
             window.query = query
             window._metas = metas
             window._results_query = query
+            # Some catalogs failed or were too slow: said on the status
+            # line, as a search from the bar does.
+            window._notice = notice or ''
         return window.start()
     except Exception as exc:  # a skin failure must surface, not vanish
         from lib.stremio.addons import addon_error_detail

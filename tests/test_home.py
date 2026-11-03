@@ -1212,6 +1212,11 @@ def test_continue_cards_are_wide_art_with_the_show_and_episode(load_homewindow):
     # still gets a wide picture before any meta fetch, Cinemeta's own.
     recorded = ctx.homewindow._continue_item({'id': 'tt12300742', 'type': 'movie', 'name': 'Bugonia', 'poster': 'p.jpg'})
     assert recorded.getProperty('land') == 'https://images.metahub.space/background/medium/tt12300742/img'
+    # The addon's own backdrop, once fetched, replaces the guess.
+    ctx.homewindow._fill_continue_card(recorded, {'background': 'https://img/real.jpg'})
+    assert recorded.getProperty('land') == 'https://img/real.jpg'
+    ctx.homewindow._fill_continue_card(recorded, {'background': 'https://img/other.jpg'})
+    assert recorded.getProperty('land') == 'https://img/real.jpg'
 
     bare = ctx.homewindow._continue_item({
         'id': 'kitsu:1', 'type': 'series', 'name': 'Show', 'poster': 'p.jpg', 'video_id': 'kitsu:1:4',

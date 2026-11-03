@@ -92,9 +92,8 @@ def open_single_catalog(transport_url, manifest, catalog, extra=None, meta_filte
     ctype = catalog.get('type')
     catalog_name = escape_label(catalog.get('name') or catalog.get('id'))
     addon_name = escape_label(manifest.get('name'))
-    # "ADDON · CATALOG" when both are on hand, matching the design's
-    # breadcrumb (e.g. "CINEMETA · POPULAR MOVIES") - otherwise just
-    # the catalog name, which is always present.
+    # "Addon · Catalog" when both are on hand, the coverflow's page
+    # title - otherwise just the catalog name, which is always present.
     catalog_title = '%s \u00b7 %s' % (addon_name, catalog_name) if addon_name else catalog_name
 
     # A catalog that declares `skip` is walked page by page rather

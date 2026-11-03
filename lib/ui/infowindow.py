@@ -300,8 +300,9 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         window closed without a selection. An empty `metas` never opens
         the modal at all and returns None immediately.
 
-        `catalog_title`, if given, is the header's page title - see `_header_label()`. Left as None,
-        the header stays the bare "RIVULET" it always was.
+        `catalog_title`, if given, is the header's page title - see
+        `_header_label()`. Left as None, the header stays a bare
+        "RIVULET".
 
         `more_pages`, if given, is an iterable of further meta pages
         (`lib.ui.views.iter_catalog_pages` past its first page). It is
@@ -739,8 +740,8 @@ def open_showcase(metas, catalog_title=None, more_pages=None):
     the window is closed first (it may not have had a chance to self-close,
     e.g. if onInit() or a mid-modal callback raised).
 
-    `catalog_title`, if given, becomes the header's page title - see `ShowcaseWindow.start()`. `more_pages` is the
-    catalog's remaining pages, appended to the strip as they arrive -
+    `catalog_title`, if given, becomes the header's page title - see
+    `ShowcaseWindow.start()`. `more_pages` is the catalog's remaining pages, appended to the strip as they arrive -
     see `ShowcaseWindow.start()` for why they are not waited on."""
     from lib.ui.compat import ADDON
     path = ADDON.getAddonInfo('path')

@@ -269,7 +269,8 @@ def test_oninit_summary_counts_are_zero_when_there_are_no_pairs(load_streamswind
 
     assert win.getControl(ctx.streamswindow.SOURCES_COUNT).label == 'SOURCES: 0'
     assert win.getControl(ctx.streamswindow.ADDONS_COUNT).label == 'ADDONS: 0'
-    assert win.getControl(ctx.streamswindow.CACHED_COUNT).label == 'CACHED: 0'
+    # Nothing to count: no stream that could be cached.
+    assert win.getControl(ctx.streamswindow.CACHED_COUNT).label == ''
 
 
 def test_oninit_escapes_addon_supplied_markup_in_provider_property_via_line_and_heading(load_streamswindow):
@@ -1157,3 +1158,18 @@ def test_streamswindow_add_pairs_after_close_is_a_silent_noop(load_streamswindow
 
     assert win.pairs == [(info, stream)]  # nothing merged
     assert ctx.env.executed_builtins == []  # never even woke the GUI thread
+
+
+def test_the_skin_compares_quality_color_against_the_values_it_is_sent():
+    """The gold branch compared against FFD700 while stream_fields() sends
+    FFFFD700: a 2160p row drew its quality grey."""
+    import os
+    import re
+
+    from lib.stremio.streaminfo import _QUALITY_COLOR_HEX
+
+    path = os.path.join(os.path.dirname(__file__), '..', 'resources', 'skins', 'Default', '1080i', 'StreamsWindow.xml')
+    with open(path, encoding='utf-8') as handle:
+        compared = set(re.findall(r'quality_color\),([0-9A-Fa-f]+)\)', handle.read()))
+    assert compared
+    assert compared <= set(_QUALITY_COLOR_HEX.values())

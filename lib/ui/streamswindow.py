@@ -690,7 +690,11 @@ class StreamsWindow(BaseWindow):
         addon_count = provider_count
         self.getControl(SOURCES_COUNT).setLabel(L(_SOURCES_STRING_ID) % source_count)
         self.getControl(ADDONS_COUNT).setLabel(L(_ADDONS_STRING_ID) % addon_count)
-        self.getControl(CACHED_COUNT).setLabel(L(_CACHED_STRING_ID) % cached_count)
+        # Only debrid streams can be cached. A list of plain torrents and
+        # web hosts has nothing to count, and a green "CACHED: 0" over it
+        # read as a fault.
+        has_cache_state = any(info.get('cached') is not None for info, _stream in display_pairs)
+        self.getControl(CACHED_COUNT).setLabel(L(_CACHED_STRING_ID) % cached_count if has_cache_state else '')
 
     def _row_render(self, info, include_addon):
         """Cache `info`'s own (line1, line2, properties) row material by
