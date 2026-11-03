@@ -242,7 +242,8 @@ def textures():
     }
     for half in range(11):
         out['look_stars_%02d.png' % half] = _stars(half)
-    for name, fn in (('search', _search), ('addons', _addons), ('settings', _settings), ('close', _close)):
+    icons = (('search', _search), ('addons', _addons), ('settings', _settings), ('close', _close))
+    for name, fn in icons:
         out['look_icon_%s.png' % name] = _look_icon(fn, False)
         out['look_icon_%s_focus.png' % name] = _look_icon(fn, True)
     return out
