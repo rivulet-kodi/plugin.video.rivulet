@@ -2730,10 +2730,13 @@ def _continue_card(entry):
     The card is 16:9; the poster scaled into it was a slice through the
     middle of the poster. An episode with a Cinemeta id uses that
     episode's still (the picture the New Episodes cards use), anything
-    else its backdrop. ``""`` when there is neither: the skin then shows
-    the poster whole on the plate.
+    else its backdrop. A local progress record carries only a name and a
+    poster, so an imdb id with no backdrop takes Cinemeta's metahub one:
+    without it the card showed the poster until a focus fetched the meta.
+    ``""`` when there is none of these: the skin then shows the poster
+    whole on the plate.
     """
-    from lib.newepisodes import episode_still_url
+    from lib.newepisodes import background_url, episode_still_url
     from lib.ui.urlutil import sized_image
 
     land = ''
@@ -2747,6 +2750,8 @@ def _continue_card(entry):
     if not land:
         background = entry.get('background') or ''
         land = sized_image(background, 'backdrop') if isinstance(background, str) else ''
+    if not land:
+        land = background_url(entry.get('id'))
     return land, code
 
 

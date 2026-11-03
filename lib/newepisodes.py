@@ -64,6 +64,14 @@ def _episode_still(video, series_id):
     return ""
 
 
+def background_url(imdb_id):
+    """The metahub backdrop Cinemeta writes into a meta's ``background``
+    for an imdb id, or ``""`` for any other id scheme."""
+    if not _is_imdb_id(imdb_id):
+        return ""
+    return "https://images.metahub.space/background/medium/%s/img" % imdb_id
+
+
 def episode_still_url(series_id, season, episode):
     """The metahub still for one Cinemeta episode, or ``""``.
 

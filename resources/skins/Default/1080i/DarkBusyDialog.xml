@@ -11,74 +11,80 @@
             <!-- No WindowClose animation on purpose: Kodi drops every action while the topmost modal plays one (test_skin_xml.py rule 9). -->
             <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="A6000000">white.png</texture></control>
 
-            <control type="image"><left>680</left><top>450</top><width>560</width><height>180</height><texture border="32" colordiffuse="F207090B">dlg_panel.png</texture></control>
-            <control type="image"><left>680</left><top>450</top><width>560</width><height>180</height><texture border="32" colordiffuse="24EDEDED">dlg_stroke.png</texture></control>
-
-            <control type="label" id="30320">
-                <left>680</left><top>486</top><width>560</width><height>40</height>
-                <font>font32</font><textcolor>FFEDEDED</textcolor>
-                <align>center</align>
-                <label></label>
-            </control>
-
-            <control type="label" id="30321">
-                <left>680</left><top>536</top><width>560</width><height>32</height>
-                <font>font12</font><textcolor>B3EDEDED</textcolor>
-                <align>center</align>
-                <label></label>
-                <visible>!String.IsEmpty(Control.GetLabel(30321))</visible>
-            </control>
-
-            <!-- Marching-squares activity cue: default (indeterminate)
-                 state. Each square carries its own gate - hidden the
-                 instant 30322 below actually shows a real percent - and
-                 a staggered Conditional fade so the row reads as a wave
-                 travelling left to right rather than five static dots. -->
-            <control type="image">
-                <left>896</left><top>576</top><width>16</width><height>16</height>
-                <texture colordiffuse="FFEDEDED">pill_fill.png</texture>
-                <visible>!Control.IsVisible(30322)</visible>
-                <animation effect="fade" start="100" end="40" time="700" delay="0" pulse="true" condition="!Control.IsVisible(30322)">Conditional</animation>
-            </control>
-            <control type="image">
-                <left>924</left><top>576</top><width>16</width><height>16</height>
-                <texture colordiffuse="B3EDEDED">pill_fill.png</texture>
-                <visible>!Control.IsVisible(30322)</visible>
-                <animation effect="fade" start="100" end="40" time="700" delay="120" pulse="true" condition="!Control.IsVisible(30322)">Conditional</animation>
-            </control>
-            <control type="image">
-                <left>952</left><top>576</top><width>16</width><height>16</height>
-                <texture colordiffuse="73EDEDED">pill_fill.png</texture>
-                <visible>!Control.IsVisible(30322)</visible>
-                <animation effect="fade" start="100" end="40" time="700" delay="240" pulse="true" condition="!Control.IsVisible(30322)">Conditional</animation>
-            </control>
-            <control type="image">
-                <left>980</left><top>576</top><width>16</width><height>16</height>
-                <texture colordiffuse="40EDEDED">pill_fill.png</texture>
-                <visible>!Control.IsVisible(30322)</visible>
-                <animation effect="fade" start="100" end="40" time="700" delay="360" pulse="true" condition="!Control.IsVisible(30322)">Conditional</animation>
-            </control>
-            <control type="image">
-                <left>1008</left><top>576</top><width>16</width><height>16</height>
-                <texture colordiffuse="1FEDEDED">pill_fill.png</texture>
-                <visible>!Control.IsVisible(30322)</visible>
-                <animation effect="fade" start="100" end="40" time="700" delay="480" pulse="true" condition="!Control.IsVisible(30322)">Conditional</animation>
-            </control>
-
-            <!-- Determinate state: no <visible> tag on purpose - mirrors
-                 infowindow.py's LOADING (id 30001) control, the one other
-                 place in this skin where Python owns a control's
-                 visibility outright via setVisible(). A static
-                 <visible>false</visible> here would fight Kodi's own
-                 condition evaluator every frame and setVisible(True)
-                 from RivuletBusy.update() would never stick. The caller
-                 (lib/ui/dialogs.py) is responsible for calling
-                 getControl(30322).setVisible(False) as part of create()
-                 so it starts hidden as specified. -->
-            <control type="progress" id="30322">
-                <left>728</left><top>576</top><width>464</width><height>12</height>
-                <texturebg colordiffuse="24EDEDED">white.png</texturebg>
-                <midtexture colordiffuse="FFEDEDED">white.png</midtexture>
+            <!-- Kodi shows its own busy circle while the player opens a file
+                 (a trailer starts under this dialog, lib/ui/trailer.py): the card
+                 steps aside then, so only one spinner is on screen. -->
+            <control type="group">
+                <visible>!Window.IsActive(busydialog) + !Window.IsActive(busydialognocancel)</visible>
+                <control type="image"><left>680</left><top>450</top><width>560</width><height>180</height><texture border="32" colordiffuse="F207090B">dlg_panel.png</texture></control>
+                <control type="image"><left>680</left><top>450</top><width>560</width><height>180</height><texture border="32" colordiffuse="24EDEDED">dlg_stroke.png</texture></control>
+    
+                <control type="label" id="30320">
+                    <left>680</left><top>486</top><width>560</width><height>40</height>
+                    <font>font32</font><textcolor>FFEDEDED</textcolor>
+                    <align>center</align>
+                    <label></label>
+                </control>
+    
+                <control type="label" id="30321">
+                    <left>680</left><top>536</top><width>560</width><height>32</height>
+                    <font>font12</font><textcolor>B3EDEDED</textcolor>
+                    <align>center</align>
+                    <label></label>
+                    <visible>!String.IsEmpty(Control.GetLabel(30321))</visible>
+                </control>
+    
+                <!-- Marching-squares activity cue: default (indeterminate)
+                     state. Each square carries its own gate - hidden the
+                     instant 30322 below actually shows a real percent - and
+                     a staggered Conditional fade so the row reads as a wave
+                     travelling left to right rather than five static dots. -->
+                <control type="image">
+                    <left>896</left><top>576</top><width>16</width><height>16</height>
+                    <texture colordiffuse="FFEDEDED">pill_fill.png</texture>
+                    <visible>!Control.IsVisible(30322)</visible>
+                    <animation effect="fade" start="100" end="40" time="700" delay="0" pulse="true" condition="!Control.IsVisible(30322)">Conditional</animation>
+                </control>
+                <control type="image">
+                    <left>924</left><top>576</top><width>16</width><height>16</height>
+                    <texture colordiffuse="B3EDEDED">pill_fill.png</texture>
+                    <visible>!Control.IsVisible(30322)</visible>
+                    <animation effect="fade" start="100" end="40" time="700" delay="120" pulse="true" condition="!Control.IsVisible(30322)">Conditional</animation>
+                </control>
+                <control type="image">
+                    <left>952</left><top>576</top><width>16</width><height>16</height>
+                    <texture colordiffuse="73EDEDED">pill_fill.png</texture>
+                    <visible>!Control.IsVisible(30322)</visible>
+                    <animation effect="fade" start="100" end="40" time="700" delay="240" pulse="true" condition="!Control.IsVisible(30322)">Conditional</animation>
+                </control>
+                <control type="image">
+                    <left>980</left><top>576</top><width>16</width><height>16</height>
+                    <texture colordiffuse="40EDEDED">pill_fill.png</texture>
+                    <visible>!Control.IsVisible(30322)</visible>
+                    <animation effect="fade" start="100" end="40" time="700" delay="360" pulse="true" condition="!Control.IsVisible(30322)">Conditional</animation>
+                </control>
+                <control type="image">
+                    <left>1008</left><top>576</top><width>16</width><height>16</height>
+                    <texture colordiffuse="1FEDEDED">pill_fill.png</texture>
+                    <visible>!Control.IsVisible(30322)</visible>
+                    <animation effect="fade" start="100" end="40" time="700" delay="480" pulse="true" condition="!Control.IsVisible(30322)">Conditional</animation>
+                </control>
+    
+                <!-- Determinate state: no <visible> tag on purpose - mirrors
+                     infowindow.py's LOADING (id 30001) control, the one other
+                     place in this skin where Python owns a control's
+                     visibility outright via setVisible(). A static
+                     <visible>false</visible> here would fight Kodi's own
+                     condition evaluator every frame and setVisible(True)
+                     from RivuletBusy.update() would never stick. The caller
+                     (lib/ui/dialogs.py) is responsible for calling
+                     getControl(30322).setVisible(False) as part of create()
+                     so it starts hidden as specified. -->
+                <control type="progress" id="30322">
+                    <left>728</left><top>576</top><width>464</width><height>12</height>
+                    <texturebg colordiffuse="24EDEDED">white.png</texturebg>
+                    <midtexture colordiffuse="FFEDEDED">white.png</midtexture>
+                </control>
             </control>
         </control>
     </controls>

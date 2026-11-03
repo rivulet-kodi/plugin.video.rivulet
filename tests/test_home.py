@@ -1208,6 +1208,11 @@ def test_continue_cards_are_wide_art_with_the_show_and_episode(load_homewindow):
     assert movie.getProperty('card_code') == ''
     assert movie.getProperty('card_show') == 'Dune'
 
+    # A local progress record has a poster and no backdrop: an imdb id
+    # still gets a wide picture before any meta fetch, Cinemeta's own.
+    recorded = ctx.homewindow._continue_item({'id': 'tt12300742', 'type': 'movie', 'name': 'Bugonia', 'poster': 'p.jpg'})
+    assert recorded.getProperty('land') == 'https://images.metahub.space/background/medium/tt12300742/img'
+
     bare = ctx.homewindow._continue_item({
         'id': 'kitsu:1', 'type': 'series', 'name': 'Show', 'poster': 'p.jpg', 'video_id': 'kitsu:1:4',
     })

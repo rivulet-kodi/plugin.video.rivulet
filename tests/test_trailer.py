@@ -106,7 +106,7 @@ def _routes(trailer, monkeypatch, outcomes):
     tried = []
     watched = []
     queue = list(outcomes)
-    monkeypatch.setattr(trailer.trailer, '_start', lambda url, item, heading: tried.append(url) or queue.pop(0))
+    monkeypatch.setattr(trailer.trailer, '_start', lambda url, item, dialog: tried.append(url) or queue.pop(0))
     monkeypatch.setattr(trailer.trailer, '_watch', lambda: watched.append(True))
     return tried, watched
 
@@ -185,6 +185,11 @@ def test_the_start_wait_runs_on_the_monotonic_clock(trailer, monkeypatch):
     assert trailer.trailer._wait_rolling(player, _Monitor(), timeout=5, tick=0) == 'stalled'
 
 
+class _Dialog:
+    def iscanceled(self):
+        return False
+
+
 def test_a_stalled_start_stops_the_player(trailer, monkeypatch):
     import xbmc
 
@@ -193,7 +198,7 @@ def test_a_stalled_start_stops_the_player(trailer, monkeypatch):
     played = []
     player.play = lambda url, item: played.append(url)
     monkeypatch.setattr(trailer.trailer, '_wait_rolling', lambda player, monitor: 'stalled')
-    assert trailer.trailer._start('http://x/yt/abc', object(), 'Trailer') == 'stalled'
+    assert trailer.trailer._start('http://x/yt/abc', object(), _Dialog()) == 'stalled'
     assert played == ['http://x/yt/abc']
     assert player.stopped is True
 
@@ -439,14 +444,34 @@ def test_kodi_quitting_mid_start_stops_trying(trailer, monkeypatch):
 
 
 def test_the_spinner_heading_names_the_title(trailer, monkeypatch):
+    import lib.ui.uicommon as uicommon
+
     headings = []
-    _routes(trailer, monkeypatch, [])
-    monkeypatch.setattr(trailer.trailer, '_start', lambda url, item, heading: headings.append(heading) or 'rolling')
+    _routes(trailer, monkeypatch, ['rolling', 'rolling'])
+    busy = _Busy()
+    monkeypatch.setattr(uicommon, 'busy_dialog', lambda heading, message='': headings.append(heading) or busy)
+    monkeypatch.setattr(uicommon, 'deliver_queued_input', lambda: False)
+    busy.iscanceled = lambda: False
     assert trailer.trailer.play_trailer(_META) is True
     assert headings == ['Dune – STR30499']
     headings[:] = []
     trailer.trailer.play_trailer({'trailers': [{'source': 'abcdefghijk'}]})
     assert headings == ['STR30499']
+
+
+def test_the_probe_and_every_route_share_one_spinner(trailer, monkeypatch):
+    """A spinner per step closed and reopened: the screen flashed undimmed."""
+    import lib.ui.uicommon as uicommon
+
+    tried, watched = _routes(trailer, monkeypatch, ['stalled', 'rolling'])
+    busy = _Busy()
+    busy.iscanceled = lambda: False
+    monkeypatch.setattr(uicommon, 'busy_dialog', lambda heading, message='': busy)
+    monkeypatch.setattr(uicommon, 'deliver_queued_input', lambda: False)
+    assert trailer.trailer.play_trailer(_META) is True
+    assert len(tried) == 2
+    assert busy.entered == 1
+    assert watched == [True]
 
 
 def test_a_meta_that_is_not_a_dict_has_no_trailer(trailer, monkeypatch):
@@ -503,29 +528,28 @@ def _starting(trailer, monkeypatch, result, abort=False, play_fails=False):
 
 def test_a_route_that_rolls_is_left_playing(trailer, monkeypatch):
     player, played, busy = _starting(trailer, monkeypatch, 'rolling')
-    assert trailer.trailer._start('http://x/yt/abc', object(), 'Dune') == 'rolling'
+    assert trailer.trailer._start('http://x/yt/abc', object(), busy) == 'rolling'
     assert played == ['http://x/yt/abc']
-    assert busy.entered == 1
     assert player.stopped is False
 
 
 def test_back_on_the_start_spinner_stops_the_player(trailer, monkeypatch):
     player, _, _ = _starting(trailer, monkeypatch, 'cancelled')
-    assert trailer.trailer._start('http://x/yt/abc', object(), 'Dune') == 'cancelled'
+    assert trailer.trailer._start('http://x/yt/abc', object(), _Busy()) == 'cancelled'
     assert player.stopped is True
 
 
 def test_kodi_quitting_on_the_start_spinner_is_an_abort(trailer, monkeypatch):
     player, _, _ = _starting(trailer, monkeypatch, 'cancelled', abort=True)
-    assert trailer.trailer._start('http://x/yt/abc', object(), 'Dune') == 'abort'
+    assert trailer.trailer._start('http://x/yt/abc', object(), _Busy()) == 'abort'
     player2, _, _ = _starting(trailer, monkeypatch, 'abort', abort=True)
-    assert trailer.trailer._start('http://x/yt/abc', object(), 'Dune') == 'abort'
+    assert trailer.trailer._start('http://x/yt/abc', object(), _Busy()) == 'abort'
 
 
 def test_a_player_that_refuses_the_url_is_a_stall(trailer, monkeypatch):
     _, played, busy = _starting(trailer, monkeypatch, 'rolling', play_fails=True)
-    assert trailer.trailer._start('http://x/yt/abc', object(), 'Dune') == 'stalled'
-    assert busy.entered == 0
+    assert trailer.trailer._start('http://x/yt/abc', object(), busy) == 'stalled'
+    assert played == []
 
 
 def test_the_start_wait_ends_on_kodi_quitting(trailer):
