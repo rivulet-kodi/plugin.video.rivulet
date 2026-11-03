@@ -178,28 +178,28 @@ def test_platform_key_macos_arm64_is_not_mistaken_for_apple_mobile(monkeypatch):
 
 # --- PINNED_SHA256 / select_asset -------------------------------------------
 
-# Exact digests reviewed against the v0.30.1 GitHub release: computed
+# Exact digests reviewed against the v0.30.2 GitHub release: computed
 # locally from the downloaded assets and cross-checked against that
 # release's checksums.txt. Any drift here (wrong tag, tampered digest,
 # added/removed platform) must be a deliberate, reviewed edit to
 # lib/serverbin.py.
 EXPECTED_PINNED_SHA256 = {
-    ("Android", "arm64"): "ca8236d1284f8b8b83eb99e91628bc18806dd0b004aef4917df6e3f51d8c761b",
-    ("Android", "armv7"): "7ceba7a538525ffedaa46e787ff6fa15d6c1fa33255ef5a0e01711c6e101bfd4",
-    ("Android", "i386"): "a32b1aaf9bdc9092019aeb5d000c4e6e44e8ce09ae10edbcaf41a9bac4ed1436",
-    ("Android", "x86_64"): "b67214358f4fbec584a8cb26cb1791f246b4f4cb5342250eacedd8a8f6e77ee6",
-    ("Darwin", "arm64"): "caa756d2341631d62644c18a2ed082db3e578bf5a3216979117cc148b9df751e",
-    ("Darwin", "x86_64"): "d899138b3c03948c24ceb2b8d59fb3a57022f38bee27605bb48bf8f9844f065b",
-    ("Linux", "arm64"): "181df93ea6d0e9d2d593c83032f473c4bf987ff3e9a00ea6f0f6fb55c34d5310",
-    ("Linux", "armv7"): "f5231abe65795875f5854140c70062b80bc01c7a2f2af92f7f3ab672d0881bc1",
-    ("Linux", "x86_64"): "af41e0aa46892c254db16ca0a0e649bc8f0b4c5dd0167e22f08d5ae9d3eb53d0",
-    ("Windows", "arm64"): "f3bb8ad400c1ddbfcc7b2170e242ce731fa0f4f0c3a0b0312fdccd15fb42d46d",
-    ("Windows", "x86_64"): "6e2306d8892ee365dcde171b8a98bce07248945eac34c770bdcfd7d20b1a9d74",
+    ("Android", "arm64"): "7353609f95c538f352eebcb6a7f7358f90afab70a590a63aa32c46b26ca19f33",
+    ("Android", "armv7"): "6915ab7f5f73475c63feefaba9364c7b542c9f814e7402cd22df5d21fda0cf6c",
+    ("Android", "i386"): "3355684594e441beb0e7f7d8037836fe27938d645c6f40491e34c0dc7cb0bbd8",
+    ("Android", "x86_64"): "bbd6b69f73b0fcf0ab9d760009ad60cbce6c42c624220000b53bff5eac61bc1c",
+    ("Darwin", "arm64"): "808f8354a0f84967ed4f2900c50bdce22e20f994f5242e189ae0e67352754843",
+    ("Darwin", "x86_64"): "0284637adb3ee9acb003800e4e96fa21eceddece6ff8e2637b6aed2a56c6e566",
+    ("Linux", "arm64"): "af5efa982a33d17fc6b371b6adc4fbab573f9b7767a4fece866f0a816ef6b7ad",
+    ("Linux", "armv7"): "265f29b52fc1f1abbc4e6e5547777bcb2cef7968e1d345472a3cfeb165aa8600",
+    ("Linux", "x86_64"): "a0587ddc53b907350578a1e051ebbc712dd3c77515ba4713f154bcc557a18da1",
+    ("Windows", "arm64"): "7698bf96dcdc9f62dff2f11d9a1568f7f44f5b49388642a73d92942fc55d23c0",
+    ("Windows", "x86_64"): "d8fa7d9b43565260fe7cc3184dc892f3c41efd8bd3a26c95b8ba89e5472facbd",
 }
 
 
 def test_server_tag_is_pinned():
-    assert SERVER_TAG == "v0.30.1"
+    assert SERVER_TAG == "v0.30.2"
 
 
 def test_pinned_sha256_table_matches_reviewed_digests_exactly():
@@ -223,7 +223,7 @@ def test_select_asset_returns_deterministic_name_url_and_pinned_digest(
     assert asset is not None
     assert asset["name"] == expected_name
     assert asset["url"] == (
-        "https://github.com/%s/releases/download/v0.30.1/%s" % (GITHUB_REPO, expected_name))
+        "https://github.com/%s/releases/download/v0.30.2/%s" % (GITHUB_REPO, expected_name))
     assert asset["sha256"] == EXPECTED_PINNED_SHA256[(os_name, arch)]
 
 
@@ -322,7 +322,7 @@ def test_install_binary_downloads_verifies_pinned_checksum_and_installs(
     assert progress_calls[-1][1] == len(archive_bytes)
     assert len(fake_requests.calls) == 1
     assert fake_requests.calls[0]["url"] == (
-        "https://github.com/%s/releases/download/v0.30.1/rivulet-engine_Linux_x86_64.tar.gz"
+        "https://github.com/%s/releases/download/v0.30.2/rivulet-engine_Linux_x86_64.tar.gz"
         % GITHUB_REPO)
     assert not (tmp_path / ".stremio-server.part").exists()
     assert not os.path.exists(result_path + ".part")
