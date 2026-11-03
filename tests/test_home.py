@@ -3,7 +3,7 @@
 
 """Drive the single Home's callbacks against isolated Kodi stubs.
 
-The fake validates control ids against NewHomeWindow.xml. Child-window,
+The fake validates control ids against HomeWindow.xml. Child-window,
 store and shared-helper modules reload together so no later test sees
 modules bound to a previous test's fakes. Actual Kodi rendering remains
 a device check; these tests verify rows, focus, properties and handoffs.
@@ -24,11 +24,11 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 _RELOAD_MODULE_NAMES = (
     'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.router', 'lib.ui.homewindow',
-    'lib.ui.catalogpicker', 'lib.ui.searchwindow', 'lib.ui.newsearch', 'lib.ui.mystuff', 'lib.ui.addonswindow',
-    'lib.ui.detailwindow', 'lib.ui.newlook', 'lib.ui.newhome',
+    'lib.ui.catalogpicker', 'lib.ui.searchwindow', 'lib.ui.search', 'lib.ui.mystuff', 'lib.ui.addonswindow',
+    'lib.ui.detailwindow', 'lib.ui.look', 'lib.ui.home',
     'lib.ui.dialogs', 'lib.ui.dependencies', 'lib.ui.libraryaction', 'lib.ui.homelists',
     'lib.ui.player', 'lib.ui.streamswindow', 'lib.ui.views',
-    'lib.ui.catalogpages', 'lib.ui.newsearch',
+    'lib.ui.catalogpages', 'lib.ui.search',
 )
 
 
@@ -100,8 +100,8 @@ def load_homewindow():
     """Factory fixture: `load_homewindow(addon_info=None, localized=None)`
     installs fresh stubs (via tests.kodistubs.install_kodi_stubs) reloading
     lib.ui.compat/lib.ui.uicommon/lib.ui.router/lib.ui.homewindow/
-    lib.ui.catalogpicker/lib.ui.newsearch, and returns a namespace with
-    `.homewindow`, `.compat`, `.router`, `.catalogpicker`, `.newsearch`,
+    lib.ui.catalogpicker/lib.ui.search, and returns a namespace with
+    `.homewindow`, `.compat`, `.router`, `.catalogpicker`, `.search`,
     and `.env`. `localized` overrides FakeAddon's default 'STR<id>' string
     marker - needed for string id 30022 ("Logged in as %s"), which
     HomeWindow's status label formats with `%`, the same shared string
@@ -116,15 +116,15 @@ def load_homewindow():
                 localized=localized,
                 settings=settings,
             ))
-            ctx.homewindow = ctx.newhome
+            ctx.homewindow = ctx.home
             windows = weakref.WeakSet()
-            home_stop = ctx.newhome._home_stop
+            home_stop = ctx.home._home_stop
 
             def track(window):
                 windows.add(window)
                 return home_stop(window)
 
-            ctx.newhome._home_stop = track
+            ctx.home._home_stop = track
 
             def close_sessions():
                 for window in list(windows):
@@ -145,7 +145,7 @@ def _window_with_focused_action(homewindow_mod, action, control_id=None):
     carrying `action` as its 'action' Property - the shape onClick() reads,
     without needing a real onInit()/Store round-trip."""
     import xbmcgui
-    win = homewindow_mod.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = homewindow_mod.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     item = xbmcgui.ListItem('label')
     item.setProperty('action', action)
     control_id = homewindow_mod.BROWSE_LIST if control_id is None else control_id
@@ -253,7 +253,7 @@ def test_library_focus_fetches_meta_and_paints_the_backdrop(load_homewindow, mon
 
     monkeypatch.setattr(ctx.homewindow, '_fetch_library_meta', _meta)
     monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(auth={'authKey': 'x'}))
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     opened = time.time()
     win.onInit()
@@ -303,7 +303,7 @@ def test_library_focus_keeps_a_full_bleed_poster_when_meta_has_no_backdrop(load_
 
     monkeypatch.setattr(ctx.homewindow, '_fetch_library_meta', _counting)
     monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(auth={'authKey': 'x'}))
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     win.onInit()
     ctx.homewindow._switch_tab(win, 'mystuff')
     ctx.homewindow._focus_first(win)
@@ -321,7 +321,7 @@ def test_library_focus_keeps_a_full_bleed_poster_when_meta_has_no_backdrop(load_
 def test_oninit_hides_library_row_when_not_authenticated(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(auth=None))
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onInit()
 
@@ -336,7 +336,7 @@ def test_oninit_status_label_says_signed_in(load_homewindow, monkeypatch):
     auth = {'authKey': 'x', 'user': {'email': 'me@example.com', 'name': 'Me'}}
     _patch_library(monkeypatch, ctx)
     monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(auth=auth))
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onInit()
 
@@ -348,7 +348,7 @@ def test_oninit_status_label_says_signed_in_with_only_a_name(load_homewindow, mo
     auth = {'authKey': 'x', 'user': {'name': 'Me'}}
     _patch_library(monkeypatch, ctx)
     monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(auth=auth))
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onInit()
 
@@ -367,7 +367,7 @@ def test_oninit_omits_type_row_supplied_only_by_a_disabled_addon(load_homewindow
          'manifest': {'catalogs': [{'type': 'anime', 'id': 'a'}]}},
     ]
     monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(addons=addons))
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onInit()
 
@@ -389,7 +389,7 @@ def test_oninit_omits_type_row_supplied_only_by_a_disabled_addon(load_homewindow
 def test_onaction_non_back_action_does_not_close(load_homewindow):
     ctx = load_homewindow()
     import xbmcgui
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onAction(xbmcgui.Action(1))
 
@@ -403,7 +403,7 @@ def test_onaction_non_back_action_does_not_close(load_homewindow):
 
 def test_onclick_ignores_control_ids_other_than_list(load_homewindow):
     ctx = load_homewindow()
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onClick(9999)
 
@@ -412,7 +412,7 @@ def test_onclick_ignores_control_ids_other_than_list(load_homewindow):
 
 def test_onclick_list_with_no_focused_item_does_not_crash(load_homewindow):
     ctx = load_homewindow()
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onClick(ctx.homewindow.BROWSE_LIST)
 
@@ -441,8 +441,8 @@ def test_onclick_list_with_no_focused_item_does_not_crash(load_homewindow):
 
 def test_onclick_search_button_opens_search(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    monkeypatch.setattr(ctx.newsearch, 'open_search', lambda: True)
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    monkeypatch.setattr(ctx.search, 'open_search', lambda: True)
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onClick(ctx.homewindow.BTN_SEARCH)
 
@@ -515,7 +515,7 @@ def test_continue_row_includes_in_progress_library_state(load_homewindow, monkey
     monkeypatch.setattr(
         ctx.homewindow, 'get_store', lambda: _FakeStore(auth={'authKey': 'k'}),
     )
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onInit()
 
@@ -535,7 +535,7 @@ def test_onclick_continue_poster_opens_detail(load_homewindow, monkeypatch):
         lambda ctype, sid: opened.append((ctype, sid)) or True,
     )
     import xbmcgui
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     item = xbmcgui.ListItem('Dune')
     item.setProperty('sid', 'tt1')
     item.setProperty('stype', 'movie')
@@ -575,7 +575,7 @@ def test_onclick_library_signin_poster_opens_login(load_homewindow, monkeypatch)
     # Home never ends a plugin handle (#22): login() would.
     monkeypatch.setattr(views, 'login', lambda: calls.append('handle'))
     import xbmcgui
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     item = xbmcgui.ListItem('Sign in')
     item.setProperty('action', 'signin')
     win.getControl(ctx.homewindow.LIBRARY_SHELF).addItems([item])
@@ -593,7 +593,7 @@ def test_onaction_paints_the_hero_from_the_focused_poster(load_homewindow, monke
     ctx = load_homewindow()
     monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(auth=None))
     import xbmcgui
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     item = xbmcgui.ListItem('Dune')
     item.setProperties({
         'hero_title': 'Dune',
@@ -619,7 +619,7 @@ def _hero_with_facts(ctx, facts, meta='2021'):
     import json
 
     import xbmcgui
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     item = xbmcgui.ListItem('Shawshank')
     item.setProperties({
         'hero_title': 'Shawshank',
@@ -714,7 +714,7 @@ def test_a_blank_focused_item_does_not_clear_the_hero(load_homewindow, monkeypat
     ctx = load_homewindow()
     monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(auth=None))
     import xbmcgui
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     item = xbmcgui.ListItem('Dune')
     item.setProperties({
         'hero_title': 'Dune',
@@ -813,7 +813,7 @@ def _click_continue(ctx, choice=None, stream=None, started=True, store_error=Fal
 def test_continue_series_back_closes_the_dialog_and_opens_nothing(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     captured = _arm_continue(ctx, monkeypatch, choice=None)
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     win.getControl(ctx.homewindow.CONTINUE_SHELF).addItems([_series_resume_item()])
 
     win.onClick(ctx.homewindow.CONTINUE_SHELF)
@@ -862,7 +862,7 @@ def _series_resume_item():
 def test_continue_series_episode_list_opens_detail_and_does_not_play(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     captured = _arm_continue(ctx, monkeypatch, choice=1)
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     win.getControl(ctx.homewindow.CONTINUE_SHELF).addItems([_series_resume_item()])
 
     win.onClick(ctx.homewindow.CONTINUE_SHELF)
@@ -879,7 +879,7 @@ def test_continue_resume_opens_the_stream_picker_for_the_episode(load_homewindow
     position itself. Playback starting closes Home behind it."""
     ctx = load_homewindow()
     captured = _arm_continue(ctx, monkeypatch, choice=0, started=True)
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     win.getControl(ctx.homewindow.CONTINUE_SHELF).addItems([_series_resume_item()])
 
     win.onClick(ctx.homewindow.CONTINUE_SHELF)
@@ -901,7 +901,7 @@ def test_continue_resume_backed_out_of_the_picker_keeps_home(load_homewindow, mo
     ctx = load_homewindow()
     captured = _arm_continue(ctx, monkeypatch, choice=0, started=False)
     monkeypatch.setattr(ctx.homewindow, '_after_child', lambda window, played=False: None)
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     win.getControl(ctx.homewindow.CONTINUE_SHELF).addItems([_series_resume_item()])
 
     win.onClick(ctx.homewindow.CONTINUE_SHELF)
@@ -914,7 +914,7 @@ def test_continue_resume_stops_when_the_title_fetch_is_cancelled(load_homewindow
     ctx = load_homewindow()
     captured = _arm_continue(ctx, monkeypatch, choice=0, stream={'url': 'https://cdn.example/ep.mp4'})
     monkeypatch.setattr(ctx.uicommon, 'run_cancellable', lambda *_a, **_k: ctx.uicommon.CANCELLED)
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     win.getControl(ctx.homewindow.CONTINUE_SHELF).addItems([_series_resume_item()])
 
     win.onClick(ctx.homewindow.CONTINUE_SHELF)
@@ -930,7 +930,7 @@ def test_continue_resume_stops_when_the_title_fetch_is_cancelled(load_homewindow
 def test_continue_movie_offers_resume_or_details(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     captured = _arm_continue(ctx, monkeypatch, choice=1)
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     item = _resume_poster(
         'Dune', sid='tt1', stype='movie', band='resume',
         position_ms='50000', duration_ms='100000', hero_title='Dune',
@@ -948,7 +948,7 @@ def test_continue_next_up_still_opens_the_episode_list(load_homewindow, monkeypa
     """Finished episodes sit on the same row. They are not a resume."""
     ctx = load_homewindow()
     captured = _arm_continue(ctx, monkeypatch, choice=0)
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     item = _resume_poster(
         'Show', sid='tt1', stype='series', band='next_up', video_id='tt1:1:3',
         position_ms='3500000', duration_ms='3600000',
@@ -965,7 +965,7 @@ def test_continue_next_up_still_opens_the_episode_list(load_homewindow, monkeypa
 def test_library_poster_does_not_ask_to_resume(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     captured = _arm_continue(ctx, monkeypatch, choice=0)
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     item = _resume_poster(
         'Dune', sid='tt1', stype='movie', band='resume',
         position_ms='50000', duration_ms='100000',
@@ -992,7 +992,7 @@ def test_continue_row_carries_the_episode_and_the_offset(load_homewindow, monkey
     monkeypatch.setattr(
         ctx.mystuff, '_enrich', lambda items, **kw: [item.update(name='Show', poster='p') for item in items],
     )
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
     win.onInit()
 
@@ -1015,7 +1015,7 @@ def _built_home(ctx, monkeypatch, library, auth=None, progress=None):
     monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: store)
     monkeypatch.setattr(ctx.homewindow, '_one_catalog_page', lambda *args: [])
     _patch_library(monkeypatch, ctx, library)
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     win.onInit()
     ctx.homewindow._switch_tab(win, 'mystuff')
     ctx.homewindow._focus_first(win)
@@ -1110,7 +1110,7 @@ def test_tmdb_original_art_is_asked_for_at_the_drawn_size(load_homewindow):
 
 def _hero_with_logo(ctx, logo, next_logo=''):
     import xbmcgui
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     items = []
     for name, sid, art in (('Dune', 'tt1', logo), ('Arrival', 'tt2', next_logo)):
         item = xbmcgui.ListItem(name)
@@ -1174,7 +1174,7 @@ def test_a_card_without_art_shows_its_title_on_the_plate():
     import xml.etree.ElementTree as ET
 
     skin = os.path.join(_REPO_ROOT, 'resources', 'skins', 'Default', '1080i')
-    home = ET.parse(os.path.join(skin, 'NewHomeWindow.xml')).getroot()
+    home = ET.parse(os.path.join(skin, 'HomeWindow.xml')).getroot()
     for panel_id in ('30040', '30041', '30042', '30043', '30044', '30045'):
         panel = home.find(".//control[@id='%s']" % panel_id)
         for layout in ('itemlayout', 'focusedlayout'):
@@ -1220,7 +1220,7 @@ def test_continue_card_skin_layers_the_poster_under_the_wide_art():
     import os
     import xml.etree.ElementTree as ET
 
-    path = os.path.join(_REPO_ROOT, 'resources', 'skins', 'Default', '1080i', 'NewHomeWindow.xml')
+    path = os.path.join(_REPO_ROOT, 'resources', 'skins', 'Default', '1080i', 'HomeWindow.xml')
     panel = ET.parse(path).getroot().find(".//control[@id='30040']")
     for layout in ('itemlayout', 'focusedlayout'):
         controls = panel.find(layout).findall('control')
@@ -1244,7 +1244,7 @@ def test_any_poster_only_title_fills_the_hero(load_homewindow):
     import xbmcgui
     item = ctx.homewindow._poster_item({'id': 'tt5', 'type': 'movie', 'name': 'Five', 'poster': 'p5.jpg'})
     assert item.getProperty('hero_fill') == '1'
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     win.getControl(30042).addItems([item])
     win.setFocusId(30042)
     win.onAction(xbmcgui.Action(1))
@@ -1262,12 +1262,12 @@ def test_an_unchanged_hero_is_not_repainted_and_applied_ratings_stay_on_the_card
     ctx = load_homewindow()
     import xbmcgui
 
-    import lib.ui.newlook as newlook
+    import lib.ui.look as look
     import lib.ui.ratingsched as ratingsched
 
     placed = []
-    real_paint = newlook.paint_hero
-    monkeypatch.setattr(newlook, 'paint_hero', lambda *a, **k: placed.append('home') or real_paint(*a, **k))
+    real_paint = look.paint_hero
+    monkeypatch.setattr(look, 'paint_hero', lambda *a, **k: placed.append('home') or real_paint(*a, **k))
     overlays = []
 
     def _overlay(facts, fallback, upcoming=None):
@@ -1307,7 +1307,7 @@ def test_library_meta_worker_keeps_only_the_latest_focus(load_homewindow, monkey
     ctx = load_homewindow()
     hw = ctx.homewindow
 
-    win = hw.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = hw.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     items = [hw._poster_item({'id': 'tt%d' % i, 'type': 'movie', 'name': str(i)},
                              sparse=True) for i in range(40)]
     shelf = win.getControl(hw.LIBRARY_SHELF)
@@ -1376,7 +1376,7 @@ def test_catalog_errors_never_log_credentials(load_homewindow, monkeypatch):
 def test_library_worker_retires_when_idle_without_retaining_the_window(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     hw = ctx.homewindow
-    win = hw.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = hw.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     monkeypatch.setattr(hw, '_fetch_library_meta', lambda stype, sid, stop=None: {'id': sid, 'description': sid})
     workers = []
     for i in range(30):
@@ -1404,7 +1404,7 @@ def test_a_stale_library_result_does_not_leave_its_poster_loading(load_homewindo
     ctx = load_homewindow()
     hw = ctx.homewindow
     item = hw._poster_item({'id': 'tt1', 'type': 'movie'}, sparse=True)
-    win = hw.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = hw.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     win.getControl(hw.LIBRARY_SHELF).addItems([item])
     monkeypatch.setattr(hw, '_fetch_library_meta', lambda *args: {'description': 'loaded'})
     hw._schedule_library_meta(win, item)
@@ -1427,7 +1427,7 @@ def test_signin_button_opens_sign_in_without_settings_or_a_plugin_handle(load_ho
     monkeypatch.setattr(ctx.homewindow, 'get_store', lambda: _FakeStore(auth=None))
     monkeypatch.setattr(views, 'sign_in', lambda: calls.append('sign_in'))
     monkeypatch.setattr(views, 'login', lambda: calls.append('plugin_handle'))
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     win.setProperty('HomeSignedOut', '1')
     win.onClick(ctx.homewindow.BTN_SIGNIN)
     assert calls == ['sign_in']
@@ -1506,7 +1506,7 @@ def test_repaint_watched_flips_cards_in_place_and_leaves_the_rest(load_homewindo
     from lib.ui import watchmarks
 
     ctx = load_homewindow()
-    win = ctx.homewindow.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.homewindow.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     watchmarks.refresh(_FakeStore())
     cards = [ctx.homewindow._poster_item({'id': 'tt%d' % n, 'type': 'movie'}) for n in (1, 2)]
     show = ctx.homewindow._poster_item({'id': 'tt3', 'type': 'series'})

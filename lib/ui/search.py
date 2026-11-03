@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 M0Rf30
 # SPDX-License-Identifier: MIT
-"""Search in the new look: a search bar, letters, and a row of results.
+"""Search: a search bar, letters, and a row of results.
 
 The classic search is a list (New search, phone, history) that opens the
 keyboard and then a coverflow. This screen is one page, after the
@@ -57,7 +57,7 @@ _BACK_ACTIONS = frozenset((9, 10, 92))
 _BAR_OPEN_ACTIONS = frozenset((7, 100))
 
 
-class NewSearchWindow(BaseWindow):
+class SearchWindow(BaseWindow):
     """See module docstring. Built/run via `open_search()`."""
 
     def __init__(self, *args, **kwargs):
@@ -113,25 +113,25 @@ class NewSearchWindow(BaseWindow):
         self.getControl(QUERY).setText(self.query)
 
     def _welcome(self):
-        from lib.ui import newhome, newlook
+        from lib.ui import home, look
         from lib.ui.compat import L
 
         self.setProperty('HeroLogo', '')
         self.setProperty('HeroFill', '')
         self.setProperty('SearchHasRow', '')
-        call = newlook._hero_call
-        call(self, newhome.HERO_LOGO, 'setImage', '')
-        call(self, newhome.HERO_TITLE, 'setLabel', '[B]%s[/B]' % L(30508))
-        call(self, newhome.HERO_META, 'setText', '')
-        call(self, newhome.HERO_PLOT, 'setText', L(30509))
-        call(self, BACKGROUND, 'setImage', newlook.fanart())
-        newhome._set_fill_image(self, '')
-        newlook.paint_hero(self, L(30509), '', '', SEARCH_STACK)
+        call = look._hero_call
+        call(self, home.HERO_LOGO, 'setImage', '')
+        call(self, home.HERO_TITLE, 'setLabel', '[B]%s[/B]' % L(30508))
+        call(self, home.HERO_META, 'setText', '')
+        call(self, home.HERO_PLOT, 'setText', L(30509))
+        call(self, BACKGROUND, 'setImage', look.fanart())
+        home._set_fill_image(self, '')
+        look.paint_hero(self, L(30509), '', '', SEARCH_STACK)
         self._hero_painted = None
 
     def _show(self, metas, results):
         from lib.ui.compat import L
-        from lib.ui.newhome import _poster_item
+        from lib.ui.home import _poster_item
 
         row = self.getControl(ROW)
         row.reset()
@@ -250,7 +250,7 @@ class NewSearchWindow(BaseWindow):
 
             from lib.ui.compat import log
 
-            log('newsearch: search failed: %s' % type(exc).__name__, xbmc.LOGWARNING)
+            log('search: search failed: %s' % type(exc).__name__, xbmc.LOGWARNING)
             metas = []
         finally:
             self._searching = False
@@ -346,7 +346,7 @@ def _paint_hero(window, item):
     """
     if item is None:
         return
-    from lib.ui import newhome, newlook
+    from lib.ui import home, look
 
     title = item.getProperty('hero_title') or item.getLabel() or ''
     if not title and not item.getProperty('sid') and not item.getProperty('hero_logo'):
@@ -354,10 +354,10 @@ def _paint_hero(window, item):
     meta = item.getProperty('hero_meta') or ''
     facts_raw = item.getProperty('hero_facts') or ''
     if facts_raw and item.getProperty('facts_done') != '1':
-        meta = newhome._overlay_hero_facts(window, item, meta, facts_raw)
+        meta = home._overlay_hero_facts(window, item, meta, facts_raw)
     plot = item.getProperty('hero_plot') or item.getProperty('subtitle') or ''
     fanart = item.getProperty('fanart') or ''
-    logo = newhome._hero_logo(window, item)
+    logo = home._hero_logo(window, item)
     fill = item.getProperty('hero_fill') == '1' and bool(fanart)
     runtime = item.getProperty('hero_runtime') or ''
     painted = (title, meta, plot, fanart, fill, logo, runtime)
@@ -366,14 +366,14 @@ def _paint_hero(window, item):
     window._hero_painted = painted
     window.setProperty('HeroLogo', logo)
     window.setProperty('HeroFill', '1' if fill else '')
-    call = newlook._hero_call
-    call(window, newhome.HERO_LOGO, 'setImage', logo)
-    call(window, newhome.HERO_TITLE, 'setLabel', newhome._fit_hero_title(title))
-    call(window, newhome.HERO_META, 'setText', meta)
-    call(window, newhome.HERO_PLOT, 'setText', plot)
-    call(window, BACKGROUND, 'setImage', fanart or newlook.fanart())
-    newhome._set_fill_image(window, fanart if fill else '')
-    newlook.paint_hero(window, plot, meta, runtime, SEARCH_STACK)
+    call = look._hero_call
+    call(window, home.HERO_LOGO, 'setImage', logo)
+    call(window, home.HERO_TITLE, 'setLabel', home._fit_hero_title(title))
+    call(window, home.HERO_META, 'setText', meta)
+    call(window, home.HERO_PLOT, 'setText', plot)
+    call(window, BACKGROUND, 'setImage', fanart or look.fanart())
+    home._set_fill_image(window, fanart if fill else '')
+    look.paint_hero(window, plot, meta, runtime, SEARCH_STACK)
 
 
 def _with_query(text, query):
@@ -387,7 +387,7 @@ def discover_metas():
     from lib.stremio.addons import _base_type, iter_catalogs
     from lib.ui.catalogpicker import _classify_catalog, _reachable_catalogs
     from lib.ui.dependencies import get_store
-    from lib.ui.newhome import CatalogUnavailable, _one_catalog_page
+    from lib.ui.home import CatalogUnavailable, _one_catalog_page
 
     try:
         addons = get_store().get_enabled_addons() or []
@@ -411,20 +411,20 @@ def discover_metas():
 
 
 def open_search():
-    """Open the new-look search. True when playback started (close the caller)."""
+    """Open the search. True when playback started (close the caller)."""
     import xbmc
 
     from lib.ui.compat import L, log, notify
 
-    log('newsearch: opening', xbmc.LOGINFO)
+    log('search: opening', xbmc.LOGINFO)
     window = None
     try:
-        window = open_window(NewSearchWindow, 'NewSearchWindow.xml')
+        window = open_window(SearchWindow, 'SearchWindow.xml')
         return window.start()
     except Exception as exc:  # a skin failure must surface, not vanish
         from lib.stremio.addons import addon_error_detail
 
-        log('newsearch: window failed: %s' % addon_error_detail(exc), xbmc.LOGERROR)
+        log('search: window failed: %s' % addon_error_detail(exc), xbmc.LOGERROR)
         notify(L(30032))
         return False
     finally:

@@ -12,7 +12,7 @@ from lib.ui.playbackmeta import (
     episode_label_from_id,
     format_resume_clock,
     hero_panel_text,
-    new_look_hero_parts,
+    look_hero_parts,
 )
 
 NOW = datetime.datetime(2020, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
@@ -65,7 +65,7 @@ def test_passed_in_runtime_wins_over_the_raw_field():
 
 
 def test_hero_parts_round_trip_the_panel():
-    stars, facts, scores = new_look_hero_parts(hero_panel_text({
+    stars, facts, scores = look_hero_parts(hero_panel_text({
         'imdbRating': '7.4', 'rottenTomatoes': '88%', 'releaseInfo': '2025', 'runtime': '112 min',
     }))
     assert stars == 7

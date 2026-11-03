@@ -72,7 +72,7 @@ def push_write(auth, payload):
     (`detailwindow._toggle_library`/`_toggle_watched`) both come through
     it. A landed write is remembered (`note_library_write`) because the
     account's next read can still predate it, and Home is marked to
-    re-read its library (`newhome.mark_library_dirty`). A caller that put
+    re-read its library (`home.mark_library_dirty`). A caller that put
     the record but skipped those two left Home showing the old library
     membership and check (the PR #87 review), which is why they are not
     the caller's job.
@@ -101,7 +101,7 @@ def push_write(auth, payload):
         log('libraryaction: write failed: %s' % addon_error_detail(exc), xbmc.LOGWARNING)
         notify(L(30301))
         return False
-    from lib.ui.newhome import mark_library_dirty
+    from lib.ui.home import mark_library_dirty
 
     note_library_write(payload)
     mark_library_dirty()

@@ -4,8 +4,8 @@ import copy
 import pytest
 
 from lib import homelayout as h
-from tests.test_newhome import load_homewindow as load_homewindow
-from tests.test_newhome_tabs import addons
+from tests.test_home import load_homewindow as load_homewindow
+from tests.test_home_tabs import addons
 
 
 class Store:

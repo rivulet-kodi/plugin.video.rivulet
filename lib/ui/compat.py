@@ -60,7 +60,7 @@ def log(msg, level=xbmc.LOGDEBUG):
 def notify(msg, heading=None, icon=None, time_ms=4000, sound=True):
     """Toast `msg`. `sound=False` drops Kodi's notification chime.
 
-    The new-look screens pass it for toasts that only describe what is
+    The screens pass it for toasts that only describe what is
     on screen (cached data cleared); every existing caller keeps the
     chime, and keeps the exact call it made before.
     """

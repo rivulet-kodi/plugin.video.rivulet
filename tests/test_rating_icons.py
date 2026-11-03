@@ -15,14 +15,14 @@ from lib.stremio.ratings import (
     parse_mdblist,
     parse_omdb,
 )
-from lib.ui.newlook import score_icon
-from lib.ui.playbackmeta import hero_panel_text, new_look_hero_parts
-from tests.test_newlook import load_homewindow as load_homewindow
+from lib.ui.look import score_icon
+from lib.ui.playbackmeta import hero_panel_text, look_hero_parts
+from tests.test_look import load_homewindow as load_homewindow
 from tests.test_ratings import _get, _Response
 
 ROOT = Path(__file__).resolve().parents[1]
 MEDIA = ROOT / 'resources/skins/Default/media'
-SKIN = ROOT / 'resources/skins/Default/1080i/NewHomeWindow.xml'
+SKIN = ROOT / 'resources/skins/Default/1080i/HomeWindow.xml'
 ICONS = (
     'rating_rt_fresh.png', 'rating_rt_rotten.png',
     'rating_rt_audience_up.png', 'rating_rt_audience_spilled.png',
@@ -99,19 +99,19 @@ def test_cache_schema_refetches_old_entries_and_round_trips_audience(tmp_path, k
 def test_catalog_audience_keys_survive_panel_facts_and_do_not_become_rt(key):
     facts = panel_facts({'id': 'tt1234567', key: '97%'})
     assert facts[key] == '97%'
-    assert new_look_hero_parts(hero_panel_text(facts))[2] == [('RT Audience', '97%')]
+    assert look_hero_parts(hero_panel_text(facts))[2] == [('RT Audience', '97%')]
 
 
 def test_audience_label_is_matched_before_the_rt_prefix_in_display_order():
     panel = 'Rotten Tomatoes Audience 97%\nRotten Tomatoes 90%\nMetascore 66\nIMDb 8.0'
-    assert new_look_hero_parts(panel)[2] == [
+    assert look_hero_parts(panel)[2] == [
         ('IMDb', '8.0'), ('RT Audience', '97%'), ('RT', '90%'), ('MC', '66'),
     ]
     panel = hero_panel_text(SAMPLE)
-    assert new_look_hero_parts(panel)[2] == [
+    assert look_hero_parts(panel)[2] == [
         ('IMDb', '8'), ('RT Audience', '97'), ('RT', '90'), ('MC', '66'),
     ]
-    assert new_look_hero_parts(hero_panel_text({'ratings': [
+    assert look_hero_parts(hero_panel_text({'ratings': [
         {'source': 'tomatoesaudience', 'value': 97},
     ]}))[2] == [('RT Audience', '97')]
 
@@ -131,8 +131,8 @@ def test_score_icon_bands(kind, value, texture):
 
 def test_paint_formats_values_and_removes_absent_pairs_and_their_icons(load_homewindow):
     ctx = load_homewindow()
-    look = ctx.newlook
-    win = ctx.newhome.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    look = ctx.look
+    win = ctx.home.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     panel = 'IMDb 8.3\nRotten Tomatoes Audience 92%\nRotten Tomatoes 98%\nMetascore 67'
     look.paint_hero(win, '', panel, '')
     assert win.getControl(30029).label == '[COLOR B3EDEDED]IMDb[/COLOR] 8.3'
@@ -160,8 +160,8 @@ def test_paint_formats_values_and_removes_absent_pairs_and_their_icons(load_home
 def test_non_numeric_scores_fall_back_to_text_with_no_dangling_colon(
         load_homewindow, panel, image_id, label_id, text):
     ctx = load_homewindow()
-    win = ctx.newhome.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
-    ctx.newlook.paint_hero(win, '', panel, '')
+    win = ctx.home.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
+    ctx.look.paint_hero(win, '', panel, '')
     assert win.getControl(image_id).visible is False
     assert win.getControl(label_id).label == text and win.getControl(label_id).visible
     assert win.getControl(30025).visible
@@ -175,7 +175,7 @@ def test_cached_audience_reaches_the_ratings_overlay(load_homewindow, tmp_path, 
     monkeypatch.setattr(sched, '_keys', lambda: ('', 'test-key'))
     monkeypatch.setattr(sched, '_get_cache', lambda *args: cache)
     panel = sched.overlay_text({'id': 'tt1234567', 'imdbRating': '8.3'}, '')
-    assert new_look_hero_parts(panel)[2] == [
+    assert look_hero_parts(panel)[2] == [
         ('IMDb', '8.3'), ('RT Audience', '92%'), ('RT', '98%'), ('MC', '67'),
     ]
     assert ctx.env.log_calls == []

@@ -109,7 +109,7 @@ def open_home():
     """Run the single Home under a heartbeat, closing it on every exit.
 
     On every exit it also releases the `ListItem`s Home built
-    (`newhome.release_items`) before the window is dropped.
+    (`home.release_items`) before the window is dropped.
 
     Only construction/open failures reach the recovery directory. Home
     handles build/row failures itself, leaving failed rows empty.
@@ -134,9 +134,9 @@ def open_home():
             log('homewindow: update-notification store unavailable: %s' %
                 addon_error_detail(exc), xbmc.LOGWARNING)
         try:
-            from lib.ui.newhome import NewHomeWindow
+            from lib.ui.home import HomeWindow
 
-            win = open_window(NewHomeWindow, 'NewHomeWindow.xml')
+            win = open_window(HomeWindow, 'HomeWindow.xml')
         except Exception as exc:
             raise HomeOpenError(addon_error_detail(exc)) from exc
         def shown():
@@ -153,7 +153,7 @@ def open_home():
             # exist: free the Home `ListItem`s now, not at interpreter
             # teardown (the Kodi segfault `release_items` documents).
             try:
-                from lib.ui.newhome import release_items
+                from lib.ui.home import release_items
 
                 release_items(win)
             except Exception as exc:

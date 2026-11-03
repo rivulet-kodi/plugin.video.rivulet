@@ -3,8 +3,8 @@
 
 """Shared data helpers and RunPlugin script actions for plugin.video.rivulet.
 
-The addon's real UI is the custom WindowXML dialog stack (NewHomeWindow,
-NewSearchWindow, infowindow.ShowcaseWindow, NewDetailWindow,
+The addon's real UI is the custom WindowXML dialog stack (HomeWindow,
+SearchWindow, infowindow.ShowcaseWindow, DetailWindow,
 StreamsWindow, AddonsWindow, AddonCatalogWindow) - this module no
 longer builds any of their directory listings. What remains here is:
 
@@ -17,7 +17,7 @@ longer builds any of their directory listings. What remains here is:
   `open_settings`) - side effects, not listings, so they finish with
   _finish_action() instead of xbmcplugin.endOfDirectory() on their own.
 - `home()`, the minimal recovery directory default.py falls back to when
-  constructing or opening NewHomeWindow fails.
+  constructing or opening HomeWindow fails.
 """
 import queue
 import threading
@@ -766,7 +766,7 @@ def _sync_addons_if_logged_in(store, notify_success=False, cancellable=False, re
     authKey itself was invalidated server-side, not a transient blip)
     additionally clears the stored auth via `store.set_auth(None)`, since
     retrying the same dead key can never succeed; the next user-facing
-    screen (NewHomeWindow, AddonsWindow, Settings > Account) then
+    screen (HomeWindow, AddonsWindow, Settings > Account) then
     correctly shows "not logged in" instead of repeating this failure
     forever.
 
@@ -908,8 +908,8 @@ def _refresh_addon_manifests(store, client):
 @_safe_listing
 def home():
     """Recovery directory - NOT Rivulet's home screen any more (that is
-    now the custom `NewHomeWindow`). This is what `default.py` falls back to
-    when constructing or opening `NewHomeWindow` fails. Data/row failures
+    now the custom `HomeWindow`). This is what `default.py` falls back to
+    when constructing or opening `HomeWindow` fails. Data/row failures
     are handled within Home and leave the affected row empty.
 
     It deliberately offers only Settings: every other screen is now a

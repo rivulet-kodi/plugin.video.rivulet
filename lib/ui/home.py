@@ -1,14 +1,14 @@
 # SPDX-FileCopyrightText: 2026 M0Rf30
 # SPDX-License-Identifier: MIT
 
-"""NewHomeWindow: Rivulet's Home, drawn by NewHomeWindow.xml.
+"""HomeWindow: Rivulet's Home, drawn by HomeWindow.xml.
 
 Opened by `homewindow.open_home()`.
 
 A full-bleed backdrop for the focused title, drawn whole rather than
 cropped, fading to black toward the left and the bottom. The clearlogo
 (or the name), one line of facts, three lines of plot and the scores sit
-on the left (`newlook.paint_hero`). One row is visible, pinned to the
+on the left (`look.paint_hero`). One row is visible, pinned to the
 bottom of the screen. Down moves to the next row and Up moves back; the
 hero follows the focused poster. The tabs (Home, My Stuff, Movies, Series, Anime) sit in a pill row under the clock, and Search, Add-ons and
 Settings are icon buttons in a right-aligned grouplist so they stay on
@@ -239,7 +239,7 @@ def _poster_item(meta, action='', sparse=False):
         'hero_meta': escape_label(_hero_meta_text(meta)),
         'hero_plot': escape_label(_truncate(meta.get('description') or '', 280)),
         'hero_facts': json.dumps(panel_facts(meta), ensure_ascii=False, separators=(',', ':')),
-        # Minutes, for the hero's "Ends at" (lib/ui/newlook.py).
+        # Minutes, for the hero's "Ends at" (lib/ui/look.py).
         'hero_runtime': _runtime_minutes(meta),
         # No backdrop: the poster fills the hero (scaled to cover) instead
         # of standing as a narrow pillarbox in the middle (#21). Library
@@ -529,7 +529,7 @@ def _set_shelf(window, list_id, label_id, prop, heading, items):
 
 
 #: Row panel -> its "row / rows" label at the right end of the heading
-#: (NewHomeWindow.xml). Only one row is on screen at a time, so the count is
+#: (HomeWindow.xml). Only one row is on screen at a time, so the count is
 #: the only cue to how far down the list you are (#20).
 _ROW_COUNTERS = ((CONTINUE_SHELF, 'shelf_continue', 30150),) + tuple(
     (panel, 'shelf_%s' % slot, 30151 + index if index < 5 else 30170 + index - 5)
@@ -2367,7 +2367,7 @@ def _set_fill_image(window, image):
 def _overlay_hero_facts(window, item, meta, facts_raw):
     """`meta` (the hero's catalog line) with the cached ratings for the
     poster's `hero_facts` merged in. Shared by `paint_hero` and the search
-    screen's hero (`lib.ui.newsearch._paint_hero`); each decides when to
+    screen's hero (`lib.ui.search._paint_hero`); each decides when to
     call it.
 
     A ratings key rebuilds the line from the cached scores. No key, or a
@@ -2395,7 +2395,7 @@ def _hero_logo(window, item):
     The text title stays up until Kodi has loaded the logo once (#10);
     meanwhile the wanted logo is warmed. The next titles' logos are
     warmed and checked ahead, so they are ready on arrival. Shared by
-    `paint_hero` and `lib.ui.newsearch._paint_hero`."""
+    `paint_hero` and `lib.ui.search._paint_hero`."""
     from lib.ui import logocheck
 
     wanted_logo = item.getProperty('hero_logo') or ''
@@ -2418,7 +2418,7 @@ def paint_hero(window, item=None):
     back a blank list item. Writing that blank is what cleared the title
     and the plot and left the row looking dead. Keep the previous hero.
     """
-    from lib.ui.newlook import fanart as addon_fanart
+    from lib.ui.look import fanart as addon_fanart
 
     if item is None:
         try:
@@ -2467,10 +2467,10 @@ def paint_hero(window, item=None):
         window.setProperty('HeroFill', '1' if fill else '')
         window.getControl(BACKGROUND).setImage(image)
         _set_fill_image(window, image if fill else '')
-        from lib.ui import newlook
+        from lib.ui import look
 
         # No bar: the facts and scores lines, stacked up from the row.
-        newlook.paint_hero(window, plot, meta, runtime)
+        look.paint_hero(window, plot, meta, runtime)
     except Exception as exc:
         if not getattr(window, '_hero_failure_logged', False):
             import xbmc
@@ -2485,7 +2485,7 @@ def paint_hero(window, item=None):
 def _stop_workers(window):
     """Tell every worker this Home started to stop; never blocks or frees.
 
-    Shared by `NewHomeWindow.close`, which also runs for the playback
+    Shared by `HomeWindow.close`, which also runs for the playback
     force-close (Home then reopens and needs its rows), and by
     `release_items`.
     """
@@ -2555,7 +2555,7 @@ def release_items(window):
     end, what it holds), drop every Python reference to a `ListItem`
     (rows, tab snapshots, the focused library item), reset the list
     controls so Kodi lets go of its copies too, then collect cycles now.
-    Not `NewHomeWindow.close`: that also runs when playback force-closes
+    Not `HomeWindow.close`: that also runs when playback force-closes
     Home, which reopens and still needs these rows.
     """
     _stop_workers(window)
@@ -2575,7 +2575,7 @@ def release_items(window):
     gc.collect()
 
 
-class NewHomeWindow(BaseWindow):
+class HomeWindow(BaseWindow):
     """See module docstring. Built/run by `homewindow.open_home()`."""
 
     def onInit(self):
@@ -2634,7 +2634,7 @@ class NewHomeWindow(BaseWindow):
     def _build_rows(self, place=None):
         from lib.homelayout import default_layout, installed_catalogs
         from lib.ui.compat import setting_bool
-        from lib.ui.newlook import fanart as addon_fanart
+        from lib.ui.look import fanart as addon_fanart
 
         store = get_store()
         auth = store.get_auth()
@@ -2998,7 +2998,7 @@ def _open_detail_for(item, land_on=None):
 
 
 def _open_search(window):
-    from lib.ui.newsearch import open_search
+    from lib.ui.search import open_search
     _open_child(window, open_search)
 
 

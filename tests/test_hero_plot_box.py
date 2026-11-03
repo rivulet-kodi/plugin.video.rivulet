@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_newlook import _newlook_hero
-from tests.test_newlook import load_homewindow as load_homewindow
+from tests.test_look import _look_hero
+from tests.test_look import load_homewindow as load_homewindow
 
-SKIN = Path(__file__).resolve().parents[1] / 'resources/skins/Default/1080i/NewHomeWindow.xml'
+SKIN = Path(__file__).resolve().parents[1] / 'resources/skins/Default/1080i/HomeWindow.xml'
 DEMON_PLOT = ('Tanjiro and the Demon Slayer Corps enter the Infinity Castle. '
               'The team faces another battle as they search for a way forward. ') * 5
 PLOTS = ['', 'One line.', 'First line.\nSecond line.\nThird line.',
@@ -23,8 +23,8 @@ OMDB_PANEL = 'IMDb 8.3\nRotten Tomatoes 98%\nMetascore 67\n2025\n156 min\nAnimat
 def test_fixed_boxes_do_not_overlap_at_any_plot_length(
         load_homewindow, plot, scores, stars, logo, facts):
     ctx = load_homewindow()
-    look = ctx.newlook
-    win = ctx.newhome.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    look = ctx.look
+    win = ctx.home.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     look.place_hero(win, plot, facts, scores, stars)
     widths = {30020: 1100, 30023: 1000, 30024: 1200, 30027: 150, 30022: 920, 30025: 1400}
     boxes = []
@@ -55,8 +55,8 @@ def test_fixed_boxes_do_not_overlap_at_any_plot_length(
 
 def test_full_omdb_hero_places_wrappable_plot_and_scores_on_real_kodi_rules(load_homewindow):
     ctx = load_homewindow()
-    win = _newlook_hero(ctx, OMDB_PANEL, plot=DEMON_PLOT, runtime='156')
-    ctx.newhome.paint_hero(win)
+    win = _look_hero(ctx, OMDB_PANEL, plot=DEMON_PLOT, runtime='156')
+    ctx.home.paint_hero(win)
     plot, scores = win.getControl(30022), win.getControl(30025)
     assert (plot.y, plot.height, scores.y, scores.height) == (427, 123, 550, 40)
     assert win.getControl(30024).y == 377 and win.getControl(30027).y == 383
@@ -69,7 +69,7 @@ def test_full_omdb_hero_places_wrappable_plot_and_scores_on_real_kodi_rules(load
 @pytest.mark.parametrize('cid', [30001, 30011])
 def test_fake_rejects_home_grouplists_that_kodi_cannot_wrap(load_homewindow, cid):
     ctx = load_homewindow()
-    win = ctx.newhome.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.home.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     with pytest.raises(RuntimeError, match='Unknown control type for python'):
         win.getControl(cid)
 
@@ -94,8 +94,8 @@ def test_fake_rejects_every_type_outside_the_native_wrapper_cases(
 def test_one_control_failure_still_paints_others_and_places_boxes_once_logged(
         load_homewindow, monkeypatch, failure):
     ctx = load_homewindow()
-    look = ctx.newlook
-    win = ctx.newhome.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    look = ctx.look
+    win = ctx.home.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     def fail(*args, **kwargs):
         raise RuntimeError('SECRET plot and key https://private.invalid/?key=SECRET')
     if failure == 'getter':
@@ -125,10 +125,10 @@ def test_one_control_failure_still_paints_others_and_places_boxes_once_logged(
 
 def test_an_unsupported_scores_group_cannot_skip_other_placement(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    win = ctx.newhome.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = ctx.home.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     monkeypatch.setattr(win, '_control_types', dict(win._control_types))
     win._control_types[30025] = 'grouplist'  # The device bug before the wrapper.
-    ctx.newlook.paint_hero(win, DEMON_PLOT, OMDB_PANEL, '156')
+    ctx.look.paint_hero(win, DEMON_PLOT, OMDB_PANEL, '156')
     assert (win.getControl(30022).y, win.getControl(30022).height) == (427, 123)
     assert win.getControl(30024).y == 377
     assert win.getControl(30035).label == ' : 67'

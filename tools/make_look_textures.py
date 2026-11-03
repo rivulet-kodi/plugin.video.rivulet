@@ -1,19 +1,19 @@
 # SPDX-FileCopyrightText: 2026 M0Rf30
 # SPDX-License-Identifier: MIT
-"""Draw the textures of the "New look" Home (NewHomeWindow.xml).
+"""Draw the textures of Home (HomeWindow.xml).
 
 Needs Pillow; run from the repository root and commit the PNGs. Nothing
 here runs on the box.
 
-* ``newlook_fade_left/bottom/top.png`` - black with a smoothstep alpha ramp,
+* ``look_fade_left/bottom/top.png`` - black with a smoothstep alpha ramp,
   drawn colour-true: dark under the hero text toward the left and solid
   under the poster rows at the bottom, a light shade behind the clock.
-* ``newlook_reflect_fade.png`` - over a card's mirror image under the row.
-* ``newlook_ring.png`` - the focus ring, 9-slice with border=24.
-* ``newlook_stars_00..10.png`` - the rating as five stars, in half stars.
-* ``newlook_icon_<search|addons|settings>[_focus].png`` - the top-bar icons.
+* ``look_reflect_fade.png`` - over a card's mirror image under the row.
+* ``look_ring.png`` - the focus ring, 9-slice with border=24.
+* ``look_stars_00..10.png`` - the rating as five stars, in half stars.
+* ``look_icon_<search|addons|settings>[_focus].png`` - the top-bar icons.
 * ``card_shade.png`` - the dark foot of a Continue card under its text.
-* ``newlook_panel.png`` / ``newlook_check.png`` - the episode row and watched tick.
+* ``look_panel.png`` / ``look_check.png`` - the episode row and watched tick.
 * ``pill_fill.png`` - the pill plate behind the type chips and buttons,
   9-slice with border=28.
 
@@ -22,7 +22,7 @@ rounded diffuse masks the poster and Continue cards are clipped to, are
 not drawn here: they are shipped as they are and only need to be a
 white rounded rectangle at twice the card's size.
 
-``python tools/make_new_look_textures.py --check`` redraws everything in
+``python tools/make_look_textures.py --check`` redraws everything in
 memory and compares it with the shipped files, pixel for pixel.
 """
 import os
@@ -134,12 +134,12 @@ def _fade(points, span, horizontal, thickness=8):
 
 #: Left fade: dark under the title and plot, clear past two thirds of
 #: the width, so the picture shows to the right of the text.
-NEWLOOK_FADE_LEFT = ((0.0, 235), (0.34, 168), (0.66, 0), (1.0, 0))
+LOOK_FADE_LEFT = ((0.0, 235), (0.34, 168), (0.66, 0), (1.0, 0))
 #: Bottom fade, top to bottom: clear through the picture, solid from the
 #: row band (y=630 of 1080, 0.583) down, so posters never sit on art.
-NEWLOOK_FADE_BOTTOM = ((0.0, 0), (0.36, 0), (0.52, 150), (0.583, 255), (1.0, 255))
+LOOK_FADE_BOTTOM = ((0.0, 0), (0.36, 0), (0.52, 150), (0.583, 255), (1.0, 255))
 #: A light shade behind the date and clock at the top edge.
-NEWLOOK_FADE_TOP = ((0.0, 140), (1.0, 0))
+LOOK_FADE_TOP = ((0.0, 140), (1.0, 0))
 
 
 def _star_points(cx, cy, outer, inner):
@@ -172,7 +172,7 @@ def _stars(half_stars, size=28, gap=5):
     return out.resize((width, size), Image.LANCZOS)
 
 
-def _newlook_icon(draw_fn, focused):
+def _look_icon(draw_fn, focused):
     """64px icon button face. Idle: a white glyph (the skin dims it).
     Focused: a white disc with the glyph cut out in near-black."""
     glyph = Image.new('RGBA', (64 * SS, 64 * SS), (0, 0, 0, 0))
@@ -190,7 +190,7 @@ def _newlook_icon(draw_fn, focused):
 #: edge, solid black by the middle, so the reflection fades into the
 #: black under the rows. A plain (unflipped) texture over the flipped
 #: art, so it does not depend on how Kodi orients a diffuse.
-NEWLOOK_REFLECT_FADE = ((0.0, 100), (0.45, 235), (0.65, 255), (1.0, 255))
+LOOK_REFLECT_FADE = ((0.0, 100), (0.45, 235), (0.65, 255), (1.0, 255))
 
 def _pill(size=72, radius=28):
     """A plain (not supersampled) rounded square, stretched 9-slice."""
@@ -202,23 +202,23 @@ def _pill(size=72, radius=28):
 def textures():
     """``{file name: PIL image}`` for every texture this script owns."""
     out = {
-        'newlook_fade_left.png': _fade(NEWLOOK_FADE_LEFT, 960, True),
-        'newlook_fade_bottom.png': _fade(NEWLOOK_FADE_BOTTOM, 540, False),
-        'newlook_fade_top.png': _fade(NEWLOOK_FADE_TOP, 64, False),
+        'look_fade_left.png': _fade(LOOK_FADE_LEFT, 960, True),
+        'look_fade_bottom.png': _fade(LOOK_FADE_BOTTOM, 540, False),
+        'look_fade_top.png': _fade(LOOK_FADE_TOP, 64, False),
         # Drawn 9-slice with border=24: radius 20 outside a 12px card
         # corner, 5px of white, so the ring is concentric with the art.
-        'newlook_ring.png': _rrect(64, 64, 20, stroke=5),
-        'newlook_reflect_fade.png': _fade(NEWLOOK_REFLECT_FADE, 256, False),
+        'look_ring.png': _rrect(64, 64, 20, stroke=5),
+        'look_reflect_fade.png': _fade(LOOK_REFLECT_FADE, 256, False),
         'card_shade.png': _card_shade(),
         'pill_fill.png': _pill(),
-        'newlook_panel.png': _rrect(96, 96, 32),
-        'newlook_check.png': _newlook_icon(_check, False),
+        'look_panel.png': _rrect(96, 96, 32),
+        'look_check.png': _look_icon(_check, False),
     }
     for half in range(11):
-        out['newlook_stars_%02d.png' % half] = _stars(half)
+        out['look_stars_%02d.png' % half] = _stars(half)
     for name, fn in (('search', _search), ('addons', _addons), ('settings', _settings)):
-        out['newlook_icon_%s.png' % name] = _newlook_icon(fn, False)
-        out['newlook_icon_%s_focus.png' % name] = _newlook_icon(fn, True)
+        out['look_icon_%s.png' % name] = _look_icon(fn, False)
+        out['look_icon_%s_focus.png' % name] = _look_icon(fn, True)
     return out
 
 

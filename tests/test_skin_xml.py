@@ -678,7 +678,7 @@ def test_window_close_animation_is_rejected_regression(tmp_path):
 
 def test_home_row_navigation_follows_the_entire_slot_chain():
     """A copied row must go Up to its predecessor, never to itself."""
-    root = ET.parse(os.path.join(_SKIN_DIR, 'NewHomeWindow.xml')).getroot()
+    root = ET.parse(os.path.join(_SKIN_DIR, 'HomeWindow.xml')).getroot()
     panels = {int(panel.get('id')): panel for panel in root.iter('control')
               if panel.get('type') == 'panel' and panel.get('id')}
     for panel_id in range(30040, 30053):

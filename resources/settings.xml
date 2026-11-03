@@ -3,7 +3,7 @@
     <section id="plugin.video.rivulet">
         <category id="home" label="30219">
             <group id="1">
-                <!-- Clears the new look's catalog, title and ratings caches
+                <!-- Clears the catalog, title and ratings caches
                      and the logo answers (lib/ui/cacherefresh.py). Home
                      reloads its rows when Settings closes; cache_generation
                      is how it knows. -->
@@ -57,7 +57,7 @@
                     <default>false</default>
                     <control type="toggle"/>
                 </setting>
-                <!-- Rotten Tomatoes / Metacritic scores for the new-look hero
+                <!-- Rotten Tomatoes / Metacritic scores for the hero
                      (lib/stremio/ratings.py). Keys last, and not a category
                      of their own: Kodi focuses a category's first setting,
                      and an edit control traps the arrows. The pair button is an

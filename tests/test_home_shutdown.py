@@ -6,8 +6,8 @@ import pytest
 from lib import homelayout
 from tests.homehooks import join_library_meta
 from tests.kodistubs import install_kodi_stubs
-from tests.test_newhome import _RELOAD_MODULE_NAMES, _FakeStore
-from tests.test_newhome_tabs import build, metas
+from tests.test_home import _RELOAD_MODULE_NAMES, _FakeStore
+from tests.test_home_tabs import build, metas
 
 
 @pytest.fixture
@@ -16,7 +16,7 @@ def session(monkeypatch):
     with install_kodi_stubs(reload=_RELOAD_MODULE_NAMES + shared) as ctx:
         monkeypatch.setattr(ctx.logocheck, 'fetch_is_image', lambda url: False)
         monkeypatch.setattr(ctx.logocheck, 'texture_cached', lambda url: False)
-        win = ctx.newhome.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+        win = ctx.home.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
         ctx.window = win
         before = set(threading.enumerate())
         yield ctx
@@ -40,7 +40,7 @@ def join_promptly(workers):
 @pytest.mark.parametrize('abort', [False, True])
 def test_all_idle_home_workers_stop_while_window_is_still_referenced(session, monkeypatch, tmp_path, abort):
     ctx, win = session, session.window
-    hw = ctx.newhome
+    hw = ctx.home
     monkeypatch.setattr(hw, '_fetch_library_meta', lambda *_: None)
     before = set(threading.enumerate())
     item = hw._poster_item({'id': 'tt1', 'type': 'movie'}, sparse=True)
@@ -82,7 +82,7 @@ def test_all_idle_home_workers_stop_while_window_is_still_referenced(session, mo
 @pytest.mark.parametrize('abort', [False, True])
 def test_close_drops_queued_and_late_meta_and_can_reopen_for_playback(session, monkeypatch, abort):
     ctx, win = session, session.window
-    hw = ctx.newhome
+    hw = ctx.home
     entered, release = threading.Event(), threading.Event()
     fetched = []
 
@@ -123,7 +123,7 @@ def test_close_drops_queued_and_late_meta_and_can_reopen_for_playback(session, m
 
 def test_playback_reopen_hands_pending_meta_to_a_new_session(session, monkeypatch):
     ctx, win = session, session.window
-    hw = ctx.newhome
+    hw = ctx.home
     entered, release = threading.Event(), threading.Event()
     fetched = []
 
@@ -154,7 +154,7 @@ def test_playback_reopen_hands_pending_meta_to_a_new_session(session, monkeypatc
 @pytest.mark.parametrize('abort', [False, True])
 def test_page_workers_stop_before_another_page_and_discard_late_results(session, monkeypatch, abort):
     ctx = session
-    hw = ctx.newhome
+    hw = ctx.home
     win, _, _ = build(ctx, monkeypatch)
     ctx.window.close()
     ctx.window = win
@@ -191,7 +191,7 @@ def test_page_workers_stop_before_another_page_and_discard_late_results(session,
 @pytest.mark.parametrize('mode', ['close', 'abort', 'cancel'])
 def test_first_load_collects_with_timed_waits_and_stops_queued_rows(session, monkeypatch, mode):
     ctx, win = session, session.window
-    hw = ctx.newhome
+    hw = ctx.home
     installed = [{'transportUrl': 't', 'manifest': {'catalogs': [
         {'type': 'movie', 'id': 'c%d' % n} for n in range(10)]}}]
     store = _FakeStore(addons=installed)
@@ -237,7 +237,7 @@ def test_first_load_collects_with_timed_waits_and_stops_queued_rows(session, mon
 
 def test_first_load_cannot_wait_forever_if_a_worker_exits_without_a_result(session, monkeypatch):
     ctx, win = session, session.window
-    hw = ctx.newhome
+    hw = ctx.home
     win._active_tab = 'home'
     win._layout = homelayout.default_layout()
     win._catalogs = homelayout.installed_catalogs([{'transportUrl': 't', 'manifest': {
@@ -284,12 +284,12 @@ def test_home_meta_wrapper_discards_running_fanout_and_skips_next_focus(session,
 
     monkeypatch.setattr(ctx.views, 'get_client', Client)
     before = set(threading.enumerate())
-    item = ctx.newhome._poster_item({'id': 'tt1', 'type': 'movie'}, sparse=True)
-    ctx.newhome._schedule_library_meta(win, item)
+    item = ctx.home._poster_item({'id': 'tt1', 'type': 'movie'}, sparse=True)
+    ctx.home._schedule_library_meta(win, item)
     entered.wait(5)
     worker = win._library_meta_thread
-    second = ctx.newhome._poster_item({'id': 'tt2', 'type': 'movie'}, sparse=True)
-    ctx.newhome._schedule_library_meta(win, second)
+    second = ctx.home._poster_item({'id': 'tt2', 'type': 'movie'}, sparse=True)
+    ctx.home._schedule_library_meta(win, second)
     win.close()
     # The already-running upstream lookup may finish. Its next focus job
     # must not run, and its result must not reach the closed Home window.
@@ -299,7 +299,7 @@ def test_home_meta_wrapper_discards_running_fanout_and_skips_next_focus(session,
     assert len(fetched) == 8
     assert all(sid == 'tt1' for _transport, sid in fetched)
     assert not win._library_meta_ready
-    assert ctx.newhome._fetch_library_meta('movie', 'tt1', win._home_stop) is None
+    assert ctx.home._fetch_library_meta('movie', 'tt1', win._home_stop) is None
     assert len(fetched) == 8
 
 
@@ -312,9 +312,9 @@ def test_close_during_first_page_prevents_filtered_followup_pages(session, monke
         win.close()
         return metas(stype='series')
 
-    monkeypatch.setattr(ctx.newhome, '_one_catalog_page', first)
-    monkeypatch.setattr(ctx.newhome, '_shelf_page_gen', lambda _: pytest.fail('fetch after close'))
-    state = ctx.newhome._open_shelf(dict(descriptor, _stop=ctx.newhome._home_stop(win)))
+    monkeypatch.setattr(ctx.home, '_one_catalog_page', first)
+    monkeypatch.setattr(ctx.home, '_shelf_page_gen', lambda _: pytest.fail('fetch after close'))
+    state = ctx.home._open_shelf(dict(descriptor, _stop=ctx.home._home_stop(win)))
     assert state['metas'] == []
 
 
@@ -338,7 +338,7 @@ def test_upstream_meta_retry_stops_on_home_close_or_abort(session, monkeypatch, 
     import xbmc
 
     monitor = xbmc.Monitor()
-    stop = ctx.newhome._home_stop(win)
+    stop = ctx.home._home_stop(win)
     wait = stop.wait
     waits = []
 
@@ -352,7 +352,7 @@ def test_upstream_meta_retry_stops_on_home_close_or_abort(session, monkeypatch, 
 
     stop.wait = stop_during_pause
     monkeypatch.setattr(xbmc, 'Monitor', lambda: monitor)
-    result = ctx.newhome._fetch_library_meta('movie', 'tt1', ctx.newhome._home_stop(win))
+    result = ctx.home._fetch_library_meta('movie', 'tt1', ctx.home._home_stop(win))
     assert result is None
     assert calls == [True]
     assert len(waits) == (0 if stop_at == 'failure' else 1)

@@ -203,7 +203,7 @@ def _episode_properties(video, fallback=''):
         'line2': escape_label(line1 or aired or ''),
         'code': _episode_code(video),
         'title': _episode_title(video),
-        # The new-look rows (NewDetailWindow.xml): "1x01. Title", the air
+        # The rows (DetailWindow.xml): "1x01. Title", the air
         # date (ISO here; _build_episode_items formats it), the whole
         # plot, and a runtime when the meta has one (TMDB-backed metas do).
         'ep_title': _episode_row_title(video),
@@ -263,7 +263,7 @@ def _short_date(iso_date):
 
 def _show_logo(window, logo_url):
     """Keep the text title until the existing logo cache knows the image."""
-    from lib.ui.newhome import _logo_known_good, _warm_logos
+    from lib.ui.home import _logo_known_good, _warm_logos
 
     wanted = logo_url or ''
     logo = wanted if _logo_known_good(wanted) else ''
@@ -1170,7 +1170,7 @@ def open_detail(stype, sid):
     log('detailwindow: opening DetailWindow for %s/%s' % (stype, sid), xbmc.LOGINFO)
     win = None
     try:
-        win = open_window(DetailWindow, 'NewDetailWindow.xml')
+        win = open_window(DetailWindow, 'DetailWindow.xml')
         return win.start(meta_obj, stype)
     except Exception as exc:  # a skin/UI failure must surface, not vanish
         log('detailwindow: window failed to open: %r' % (exc,), xbmc.LOGERROR)

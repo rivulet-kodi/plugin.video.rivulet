@@ -486,9 +486,9 @@ def hero_panel_text(meta, runtime_text='', now_word='', cinema_word=''):
     return '\n'.join(lines)
 
 
-#: The new-look hero prints the panel's scores on one line, short names
+#: The hero prints the panel's scores on one line, short names
 #: first.
-_NEW_LOOK_SCORE_NAMES = (
+_LOOK_SCORE_NAMES = (
     (_IMDB_LABEL, 'IMDb'),
     (_AUDIENCE_LABEL, 'RT Audience'),
     (_ROTTEN_LABEL, 'RT'),
@@ -496,8 +496,8 @@ _NEW_LOOK_SCORE_NAMES = (
 )
 
 
-def new_look_hero_parts(panel_text):
-    """``(stars, facts, scores)`` from the hero panel text, for the new look.
+def look_hero_parts(panel_text):
+    """``(stars, facts, scores)`` from the hero panel text, for the Home hero.
 
     `panel_text` is what `hero_panel_text()` (or the ratings overlay)
     wrote: one fact per line, scores first. `stars` is the IMDb score as
@@ -514,13 +514,13 @@ def new_look_hero_parts(panel_text):
         line = raw.strip()
         if not line:
             continue
-        for label, short in _NEW_LOOK_SCORE_NAMES:
+        for label, short in _LOOK_SCORE_NAMES:
             if line.startswith(label + ' '):
                 found[short] = line[len(label) + 1:].strip()
                 break
         else:
             facts.append(line)
-    scores = [(short, found[short]) for _label, short in _NEW_LOOK_SCORE_NAMES if found.get(short)]
+    scores = [(short, found[short]) for _label, short in _LOOK_SCORE_NAMES if found.get(short)]
     imdb = parse_rating(found.get('IMDb', '').split('/')[0]) if found.get('IMDb') else None
     if imdb is not None and 0 <= imdb <= 10:
         stars = int(imdb + 0.5)

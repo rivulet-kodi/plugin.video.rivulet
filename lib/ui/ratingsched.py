@@ -231,7 +231,7 @@ def overlay_text(meta, fallback, upcoming=None):
             _schedule(later[0][0], omdb_key, mdblist_key, cache, later[1:PREFETCH], stype=later[0][1])
         if not scores:
             return fallback
-        from lib.ui.newhome import _hero_meta_text
+        from lib.ui.home import _hero_meta_text
         from lib.ui.uicommon import escape_label
 
         return escape_label(_hero_meta_text(merge_scores(meta, scores)))

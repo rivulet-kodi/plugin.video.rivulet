@@ -6,7 +6,7 @@
 Ports the reference addon's `platformcode/xbmc_info_window.py::InfoWindow`
 (`resources/skins/Default/1080i/InfoWindow.xml`) to Rivulet/Stremio metas:
 a caller opens it via `open_showcase()` (below) with one already-fetched
-catalog page - `newsearch.NewSearchWindow`'s result list
+catalog page - `search.SearchWindow`'s result list
 and this module's own
 `open_credits_picker()` - the user scrolls a horizontal poster
 coverflow (the fanart background updates to match the focused item).

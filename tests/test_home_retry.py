@@ -3,8 +3,8 @@ import pytest
 
 from lib.stremio.addons import AddonError
 from tests.homehooks import join_shelf_extends
-from tests.test_newhome import load_homewindow as load_homewindow
-from tests.test_newhome_tabs import build, metas
+from tests.test_home import load_homewindow as load_homewindow
+from tests.test_home_tabs import build, metas
 
 
 def row(ctx, monkeypatch):
@@ -27,7 +27,7 @@ def prefetch(hw, win):
 def test_retry_same_skip_after_backoff_continues_without_duplicates(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     from lib.ui import views
-    hw = ctx.newhome
+    hw = ctx.home
     win, state = row(ctx, monkeypatch)
     state['list_id'] = 'cat:https://u:SECRET@addon/private?key=TOKEN|movie|movies'
     attempts = []
@@ -69,7 +69,7 @@ def test_retry_same_skip_after_backoff_continues_without_duplicates(load_homewin
 def test_three_consecutive_failures_end_the_row_once(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     from lib.ui import views
-    hw = ctx.newhome
+    hw = ctx.home
     win, state = row(ctx, monkeypatch)
     attempts = []
 
@@ -95,7 +95,7 @@ def test_three_consecutive_failures_end_the_row_once(load_homewindow, monkeypatc
 def test_true_ends_are_not_retried(load_homewindow, monkeypatch, reason):
     ctx = load_homewindow()
     from lib.ui import views
-    hw = ctx.newhome
+    hw = ctx.home
     win, state = row(ctx, monkeypatch)
     calls = []
     monkeypatch.setattr(views, '_fetch_catalog', lambda *args, **kwargs: calls.append(True) or (metas(0, 24) if reason == 'added nothing new' else []))
@@ -115,7 +115,7 @@ def test_true_ends_are_not_retried(load_homewindow, monkeypatch, reason):
 def test_successful_page_resets_the_consecutive_failure_count(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     from lib.ui import views
-    hw = ctx.newhome
+    hw = ctx.home
     _win, state = row(ctx, monkeypatch)
     state['failed'] = {'at': -1000, 'count': 2}
 
