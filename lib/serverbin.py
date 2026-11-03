@@ -39,7 +39,7 @@ except ImportError:  # pragma: no cover - exercised only without the dependency
 from lib import procflags
 
 GITHUB_REPO = "rivulet-kodi/rivulet-engine"
-SERVER_TAG = "v0.29.0"
+SERVER_TAG = "v0.30.0"
 USER_AGENT = "plugin.video.rivulet"
 
 BINARY_NAME = "rivulet-engine"
@@ -80,7 +80,7 @@ ATTEMPTED_STAMP_NAME = ".server-tag-attempted"
 #: never be slurped whole.
 TAG_STAMP_READ_LIMIT = 64
 # SHA-256 digests for every rivulet-engine SERVER_TAG release asset,
-# computed locally from the downloaded v0.29.0 assets on 2026-11-02 and
+# computed locally from the downloaded v0.30.0 assets on 2026-11-03 and
 # cross-checked against that release's checksums.txt (they agree), then
 # committed here instead of being re-fetched at runtime. Pinning matters
 # because:
@@ -95,7 +95,7 @@ TAG_STAMP_READ_LIMIT = 64
 #    server is a deliberate, auditable decision, not an unattended fetch.
 #
 # The Android arm64/armv7 rows arrived with v0.12.1, x86_64/i386 with
-# v0.19.0 (all re-verified for v0.29.0), and are what make an
+# v0.19.0 (all re-verified for v0.30.0), and are what make an
 # on-device server viable at all: unlike the Linux rows (pure-Go, static)
 # they are cgo builds linked against bionic, verified from the published
 # artifacts as `ELF pie executable ... dynamically linked` with NEEDED
@@ -109,17 +109,17 @@ TAG_STAMP_READ_LIMIT = 64
 # set) for library mode; the archive digest covers it. Re-check both
 # whenever SERVER_TAG moves.
 PINNED_SHA256 = {
-    ("Android", "arm64"): "9aaff4ceb40aa3c2974fd1a360a2caef18bbf66d36038b9873605ebfec6a932d",
-    ("Android", "armv7"): "71ca83bc5a30a63d85eab8784694229c86cdf8f9fe400e4b6d67b02787312494",
-    ("Android", "i386"): "53af8bfdb5ea14a37eb4ee741e299a96f6e7347e20534b98c4bc336cdf7be602",
-    ("Android", "x86_64"): "58caf0f3d6fe479052b9e873ce2947e97f6769da59f0732486bad8f5270c2ca6",
-    ("Darwin", "arm64"): "ddcc4835fb3f1f63a33fb45b23fd2e78de42722f3187c09abd04358e87c7fd76",
-    ("Darwin", "x86_64"): "b86bb4d2b82fd61a2bd1a6282edb3c1e4795dae2cd317fed8f7c98f4705f0373",
-    ("Linux", "arm64"): "449c5884abd206bb70627f9c71fcdcb883cd1c90af2f431a9e2c333a1e152d9f",
-    ("Linux", "armv7"): "c242d58807a8dbd7e14795d442b3a3159ad176ec4597610cd11fe54185c91fb2",
-    ("Linux", "x86_64"): "fb1989d09e3ce0d8612bc5cdabe8730e160dd79c84b53b6958d24b2d6cd1d3e7",
-    ("Windows", "arm64"): "68b3927461934e40b4a1ebe5ebbc025ef35f031b8e06cf26af1da85d6d51f279",
-    ("Windows", "x86_64"): "6f01a06923f245ac35efe4b72b4c71ddf3321bb86efae5da6596ff59bbe0869c",
+    ("Android", "arm64"): "1ae1ff23683438aa950dc21422aee40bcd7c66d55c89cea7f9657066a720e5a5",
+    ("Android", "armv7"): "60482c83081267fb3b174b09ae09b7a2b7fe723e684e0760faf323fd23665c98",
+    ("Android", "i386"): "d857042ddc15bbc3ad51287f7f0f08d217652dec4dd91fd6faf829cc29e1979f",
+    ("Android", "x86_64"): "bded16b2ec16f318d9f968e600cd81df318ea2bc5fb54c5cb1520ef52a2c1c90",
+    ("Darwin", "arm64"): "ecd4e15dae641aa579d4d3e5c5640678f809f238d27420c330b25e19e9666198",
+    ("Darwin", "x86_64"): "f3d92d38073f499fde246dffd8e8d543c0ca23992018c61425e14dcf72e7dce6",
+    ("Linux", "arm64"): "5fabd5425634b26a27556cec1d06014fe637337b80126661009c1f71f1120265",
+    ("Linux", "armv7"): "9f63cf09ead56d2889d3c3b04ea32c7f4e55b8214c6e93f0b44346ff969ebbc3",
+    ("Linux", "x86_64"): "bdda707dae6c846bd45f57ed67e7d922351d9de84ffc890a22216a46bae9d45f",
+    ("Windows", "arm64"): "a6f4cfed24fb3859cb4351a6876d935c50fa7395da95aa8983dc3d148daff3ba",
+    ("Windows", "x86_64"): "a322f6e763b32fc078c5841acec1c93f93304b34d6ee34e0b1109a849de797dc",
 }
 
 
