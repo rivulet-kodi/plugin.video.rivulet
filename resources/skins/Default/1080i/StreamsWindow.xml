@@ -27,20 +27,20 @@
             <control type="label" id="30005"><left>80</left><top>100</top><width>1100</width><height>80</height><font>font45</font><textcolor>FFEDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny><wrapmultiline>false</wrapmultiline><label></label></control>
 
             <!-- The section, bold with the underline of an active tab, and its three counts beside it. -->
-            <control type="label"><left>80</left><top>236</top><width>230</width><height>46</height><font>font13</font><textcolor>FFEDEDED</textcolor><aligny>center</aligny><label>[B]$ADDON[plugin.video.rivulet 30041][/B]</label></control>
-            <control type="image"><left>80</left><top>282</top><width>120</width><height>4</height><texture colordiffuse="FFEDEDED">white.png</texture></control>
+            <control type="label"><left>80</left><top>300</top><width>230</width><height>46</height><font>font13</font><textcolor>FFEDEDED</textcolor><aligny>center</aligny><label>[B]$ADDON[plugin.video.rivulet 30041][/B]</label></control>
+            <control type="image"><left>80</left><top>346</top><width>120</width><height>4</height><texture colordiffuse="FFEDEDED">white.png</texture></control>
             <control type="grouplist">
-                <left>330</left><top>236</top><width>1040</width><height>46</height>
+                <left>330</left><top>300</top><width>1040</width><height>46</height>
                 <orientation>horizontal</orientation><itemgap>32</itemgap>
                 <control type="label" id="30100"><width>auto</width><height>46</height><font>font12</font><textcolor>B3EDEDED</textcolor><aligny>center</aligny><label></label></control>
                 <control type="label" id="30101"><width>auto</width><height>46</height><font>font12</font><textcolor>B3EDEDED</textcolor><aligny>center</aligny><label></label></control>
                 <control type="label" id="30102"><width>auto</width><height>46</height><font>font12</font><textcolor>FF4ADE80</textcolor><aligny>center</aligny><label></label></control>
             </control>
-            <control type="image"><left>80</left><top>290</top><width>1290</width><height>2</height><texture colordiffuse="24EDEDED">white.png</texture></control>
+            <control type="image"><left>80</left><top>354</top><width>1290</width><height>2</height><texture colordiffuse="24EDEDED">white.png</texture></control>
 
             <!-- Genres, Cast, Directors, Writers as clickable chips (lib/ui/creditsrow.py), the same row as the series page. Hidden, so unfocusable, when the title has none; Up from the first source reaches them. -->
 <control type="list" id="30030">
-                <left>80</left><top>298</top><width>1290</width><height>84</height>
+                <left>80</left><top>196</top><width>1290</width><height>84</height>
                 <orientation>horizontal</orientation>
                 <onleft>30030</onleft><onright>30030</onright>
                 <onup>30030</onup><ondown>30002</ondown>
@@ -49,7 +49,7 @@
             </control>
 
             <control type="list" id="30002">
-                <left>60</left><top>396</top><width>1310</width><height>600</height>
+                <left>60</left><top>366</top><width>1310</width><height>600</height>
                 <onup>30030</onup>
                 <onleft>30002</onleft><onright>30002</onright>
                 <scrolltime tween="cubic" easing="out">200</scrolltime>

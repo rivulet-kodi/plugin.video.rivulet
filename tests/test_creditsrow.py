@@ -371,12 +371,15 @@ def _nav(xml_name):
     }
 
 
-def test_series_page_row_sits_between_the_season_bar_and_the_episodes():
+def test_series_page_row_sits_between_the_buttons_and_the_season_bar():
+    """Under the title, above the season bar: the bar stays the episodes'
+    own header."""
     nav = _nav('DetailWindow.xml')
 
-    assert nav[30002]['onup'] == CREDITS  # episodes: Up reaches the row
-    assert nav[CREDITS]['ondown'] == 30002 and nav[CREDITS]['onup'] == 30007
-    assert nav[30007]['ondown'] == CREDITS  # season bar: Down reaches the row
+    assert nav[30002]['onup'] == 30007 and nav[30007]['ondown'] == 30002
+    assert nav[30007]['onup'] == CREDITS and nav[CREDITS]['ondown'] == 30007
+    assert nav[CREDITS]['onup'] == 30009
+    assert nav[30009]['ondown'] == nav[30012]['ondown'] == CREDITS
     assert nav[CREDITS]['onleft'] == nav[CREDITS]['onright'] == CREDITS  # scrolls, never escapes sideways
 
 
