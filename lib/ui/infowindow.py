@@ -784,21 +784,11 @@ def open_credits_picker(store, client, meta):
     (name as the primary line, its category as the dim sublabel, in
     group order). A cancelled picker, or a meta
     with no usable links (the latter after `notify(L(30197))`), does
-    nothing. Otherwise dispatches the pick:
-      - search (a person): reruns `lib.ui.searchwindow.run_query()` and
-        opens the results the same way a coverflow selection normally
-        would (`_open_results()` below).
-      - discover (a genre): fetches that catalog and does the same -
-        but only once its transport_url is confirmed to name one of the
-        user's own installed addons - an addon-supplied URL must never
-        send Rivulet to an arbitrary host.
-      - detail: opens `lib.ui.detailwindow.open_detail()` directly.
+    nothing; a pick goes to `open_credit_link()`.
     """
-    import xbmc
-
     from lib.stremio import metalinks
     from lib.ui import dialogs
-    from lib.ui.compat import L, log, notify
+    from lib.ui.compat import L, notify
     from lib.ui.uicommon import escape_label
 
     groups = metalinks.iter_link_groups(meta)
@@ -816,7 +806,28 @@ def open_credits_picker(store, client, meta):
     choice = dialogs.choose(L(30196), rows)
     if choice < 0:
         return
-    parsed = links[choice]
+    open_credit_link(store, client, links[choice])
+
+
+def open_credit_link(store, client, parsed):
+    """Dispatch one parsed Meta Link (`lib.stremio.metalinks.parse_meta_link()`)
+    - the single place a cast/crew/genre pick turns into navigation, shared
+    by `open_credits_picker()`'s list and the clickable credit chips on
+    `lib.ui.detailwindow.DetailWindow` / `lib.ui.streamswindow.StreamsWindow`
+    (`lib.ui.creditsrow`), so all three behave identically:
+      - search (a person): reruns `lib.ui.searchwindow.run_query()` and
+        opens the results the same way a coverflow selection normally
+        would (`_open_results()` below).
+      - discover (a genre): fetches that catalog and does the same -
+        but only once its transport_url is confirmed to name one of the
+        user's own installed addons - an addon-supplied URL must never
+        send Rivulet to an arbitrary host.
+      - detail: opens `lib.ui.detailwindow.open_detail()` directly.
+    """
+    import xbmc
+
+    from lib.ui.compat import L, log, notify
+
     kind = parsed['kind']
 
     if kind == 'search':
