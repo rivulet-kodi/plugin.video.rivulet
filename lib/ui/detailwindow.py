@@ -23,6 +23,12 @@ kwargs (`heading='<Show> \u2013 S01E02 <Episode>'`,
 about to play without re-fetching the show's meta - the movie-skip path
 in `open_detail()` does the same with the movie's own title/art.
 
+Under the season bar a row of chips shows the title's Genres, Cast,
+Directors and Writers (`lib.ui.creditsrow`, control `CREDITS`); a click
+runs the same dispatch as the 'Cast & Crew' picker
+(`lib.ui.infowindow.open_credit_link()`). A series with no links hides
+the row.
+
 ACTION_CONTEXT_MENU opens `_open_context_menu()`'s combined actions
 menu for the whole title: 'Cast & Crew' plus the Stremio account
 library write actions this addon otherwise only READS from
@@ -42,6 +48,7 @@ import xbmcgui
 from lib.library import episode_ticked, item_watched
 from lib.stremio.addons import _base_type
 from lib.stremio.watchedbitfield import sorted_video_ids, watched_video_ids
+from lib.ui.creditsrow import CREDITS, fill_credits, open_credit
 from lib.ui.playbackmeta import episode_code as _pm_episode_code
 from lib.ui.playbackmeta import resolve_art
 from lib.ui.uicommon import (
@@ -430,6 +437,8 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         self._video_by_id = {}
         self.season_groups = []
         self.season_index = 0
+        #: The parsed links behind `CREDITS`' chips, by list position.
+        self._credit_links = []
         #: `(season_index, row)` of the episode the user last opened, so
         #: `onInit()` can put the cursor back there when Kodi re-runs it
         #: after a playback or trailer round trip.
@@ -632,6 +641,7 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         self.getControl(GENRES_LINE).setLabel(_genres_line(self.meta))
 
         self._build_season_bar()
+        self._credit_links = fill_credits(self, self.meta)
         select = 0
         if self._resume_position and self._resume_position[0] == self.season_index:
             select = self._resume_position[1]
@@ -961,6 +971,9 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
             return
         if control_id == TRAILER:
             self._play_trailer()
+            return
+        if control_id == CREDITS:
+            open_credit(self, self._credit_links)
             return
         if control_id == SEASON_BAR:
             self._sync_season_from_bar()

@@ -68,6 +68,11 @@ still only ever returns False. The picker reopens for the LAST episode the
 chain auto-played (with that episode's sources), not the one it started
 from.
 
+The header carries the same clickable Genres / Cast / Directors /
+Writers chips as the series page (`lib.ui.creditsrow`, control
+`CREDITS`), built from `meta`'s links - this is the only place a movie,
+which skips `DetailWindow`, shows them. No links hides the row.
+
 Every installed addon's own stream fetch runs CONCURRENTLY, not one at
 a time: real user logs showed the old serial `for` loop - each addon
 call bounded by `AddonClient`'s own 15s timeout - taking as long as
@@ -98,6 +103,7 @@ import xbmcgui
 
 from lib.stremio import streaminfo
 from lib.ui.binge import next_video, pick_binge_stream
+from lib.ui.creditsrow import CREDITS, fill_credits, open_credit
 from lib.ui.dependencies import get_client, get_store
 from lib.ui.playbackmeta import episode_code
 from lib.ui.uicommon import (
@@ -268,6 +274,8 @@ class StreamsWindow(BaseWindow):
         self.heading = ''
         self.art = None
         self.meta = None
+        #: The parsed links behind `CREDITS`' chips, by list position.
+        self._credit_links = []
         self.video_id = None
         self.played = False
         self.played_pair = None
@@ -760,6 +768,7 @@ class StreamsWindow(BaseWindow):
         self.getControl(HEADING).setLabel((escape_label(self.heading) or L(30041)).upper())
 
         self._rebuild_list()
+        self._credit_links = fill_credits(self, self.meta)
         self.setFocusId(LIST)
 
     @gated_input
@@ -779,7 +788,7 @@ class StreamsWindow(BaseWindow):
 
     @gated_input
     def onClick(self, control_id):
-        if control_id != LIST:
+        if control_id not in (LIST, CREDITS):
             return
         # Kodi queues a window's click callbacks and delivers them on this
         # script thread the next time it calls into Kodi - including from
@@ -798,7 +807,10 @@ class StreamsWindow(BaseWindow):
             return
         self._pick_in_progress = True
         try:
-            self._play_focused()
+            if control_id == CREDITS:
+                open_credit(self, self._credit_links)
+            else:
+                self._play_focused()
         finally:
             self._pick_in_progress = False
 

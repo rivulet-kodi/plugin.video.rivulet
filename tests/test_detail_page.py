@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from lib.ui.creditsrow import CREDITS
 from tests.kodistubs import install_kodi_stubs
 from tests.test_detailwindow import load_detailwindow as load_detailwindow
 from tests.test_home import _RELOAD_MODULE_NAMES
@@ -53,13 +54,13 @@ def test_static_control_contract_and_textures():
 def test_episode_page_geometry(logo):
     controls = ET.parse(XML).getroot().find('controls/control').findall('control')
     # Decorative background plates and hidden compatibility controls are intentionally layered.
-    selected = [c for c in controls if c.get('id') in {'30002', '30004', '30007', '30009', '30012', '30100'}]
+    selected = [c for c in controls if c.get('id') in {'30002', '30004', '30007', '30009', '30012', '30030', '30100'}]
     selected += [c for c in controls if c.get('id') == ('30023' if logo else '30005')]
     selected += [c for c in controls if not c.get('id') and _rect(c)[1] in {36, 290, 1000, 1044}]
     for a, b in itertools.combinations(selected, 2):
         assert _apart(_rect(a), _rect(b)), (_rect(a), _rect(b))
     episodes = next(c for c in controls if c.get('id') == '30002')
-    assert _rect(episodes) == (60, 300, 1310, 600)
+    assert _rect(episodes) == (60, 396, 1310, 600)
     for name in ('itemlayout', 'focusedlayout'):
         layout = episodes.find(name)
         assert int(layout.get('height')) == 200 and 600 // 200 == 3
@@ -82,10 +83,11 @@ def test_one_season_navigation_walks_hidden_tab(load_detailwindow):
     win.start({'id': 'tt1', 'videos': [{'id': 'v1', 'season': 1, 'episode': 1}]}, 'series')
     win.onInit()
     assert win.getControl(d.SEASON_BAR).visible is False
+    assert win.getControl(CREDITS).visible is False  # no links: unfocusable, so walked past
     controls = {int(c.get('id')): c for c in ET.parse(XML).iter('control') if c.get('id')}
     def follow(cid, direction):
         target = int(controls[cid].findtext(direction))
-        return follow(target, direction) if target == d.SEASON_BAR else target
+        return follow(target, direction) if target in (d.SEASON_BAR, CREDITS) else target
     assert follow(d.LIST, 'onup') == d.OPTIONS
     assert follow(d.OPTIONS, 'ondown') == follow(d.TRAILER, 'ondown') == d.LIST
     assert win.getFocusId() == d.LIST

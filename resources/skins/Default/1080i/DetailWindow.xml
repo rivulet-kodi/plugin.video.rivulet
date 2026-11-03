@@ -34,15 +34,24 @@
                 <left>80</left><top>236</top><width>1000</width><height>52</height>
                 <orientation>horizontal</orientation>
                 <onleft>30007</onleft><onright>30007</onright>
-                <onup>30009</onup><ondown>30002</ondown>
+                <onup>30009</onup><ondown>30030</ondown>
                 <itemlayout width="200" height="52"><control type="label"><left>0</left><top>0</top><width>190</width><height>46</height><font>font13</font><textcolor>8CEDEDED</textcolor><aligny>center</aligny><label>[B]$INFO[ListItem.Label][/B]</label></control></itemlayout>
                 <focusedlayout width="200" height="52"><control type="label"><left>0</left><top>0</top><width>190</width><height>46</height><font>font13</font><textcolor>FFEDEDED</textcolor><aligny>center</aligny><label>[B]$INFO[ListItem.Label][/B]</label></control><control type="image"><left>0</left><top>46</top><width>120</width><height>4</height><texture colordiffuse="FFEDEDED">white.png</texture><visible>Control.HasFocus(30007)</visible></control><control type="image"><left>0</left><top>46</top><width>120</width><height>2</height><texture colordiffuse="80EDEDED">white.png</texture><visible>!Control.HasFocus(30007)</visible></control></focusedlayout>
             </control>
 <control type="label" id="30100"><left>1100</left><top>236</top><width>270</width><height>46</height><font>font12</font><textcolor>B3EDEDED</textcolor><align>right</align><aligny>center</aligny><label></label><visible>!String.IsEmpty(Control.GetLabel(30100))</visible></control>
 <control type="image"><left>80</left><top>290</top><width>1290</width><height>2</height><texture colordiffuse="24EDEDED">white.png</texture></control>
+<!-- Genres, Cast, Directors, Writers as clickable chips (lib/ui/creditsrow.py). Hidden, so unfocusable, when the title has none. Each item is a dim category line over a pill with the name; the pill is a fixed width because Kodi parses it once, and the focused name scrolls. -->
+<control type="list" id="30030">
+                <left>80</left><top>298</top><width>1290</width><height>84</height>
+                <orientation>horizontal</orientation>
+                <onleft>30030</onleft><onright>30030</onright>
+                <onup>30007</onup><ondown>30002</ondown>
+                <itemlayout width="290" height="84"><control type="label"><left>8</left><top>0</top><width>262</width><height>26</height><font>font10</font><textcolor>80EDEDED</textcolor><aligny>center</aligny><label>$INFO[ListItem.Property(category)]</label></control><control type="image"><left>0</left><top>26</top><width>270</width><height>56</height><texture border="28" colordiffuse="24FFFFFF">pill_fill.png</texture></control><control type="label"><left>16</left><top>26</top><width>238</width><height>56</height><font>font12</font><textcolor>E6EDEDED</textcolor><align>center</align><aligny>center</aligny><label>$INFO[ListItem.Label]</label></control></itemlayout>
+                <focusedlayout width="290" height="84"><control type="label"><left>8</left><top>0</top><width>262</width><height>26</height><font>font10</font><textcolor>80EDEDED</textcolor><aligny>center</aligny><label>$INFO[ListItem.Property(category)]</label></control><control type="image"><left>0</left><top>26</top><width>270</width><height>56</height><texture border="28" colordiffuse="24FFFFFF">pill_fill.png</texture><visible>!Control.HasFocus(30030)</visible></control><control type="image"><left>0</left><top>26</top><width>270</width><height>56</height><texture border="28" colordiffuse="FFFFFFFF">pill_fill.png</texture><visible>Control.HasFocus(30030)</visible></control><control type="label"><left>16</left><top>26</top><width>238</width><height>56</height><font>font12</font><textcolor>E6EDEDED</textcolor><align>center</align><aligny>center</aligny><label>$INFO[ListItem.Label]</label><visible>!Control.HasFocus(30030)</visible></control><control type="label"><left>16</left><top>26</top><width>238</width><height>56</height><font>font12</font><textcolor>FF07090B</textcolor><align>center</align><aligny>center</aligny><scroll>true</scroll><label>$INFO[ListItem.Label]</label><visible>Control.HasFocus(30030)</visible></control></focusedlayout>
+            </control>
 <control type="list" id="30002">
-                <left>60</left><top>300</top><width>1310</width><height>600</height>
-                <onup>30007</onup>
+                <left>60</left><top>396</top><width>1310</width><height>600</height>
+                <onup>30030</onup>
                 <onleft>30002</onleft><onright>30002</onright>
                 <scrolltime tween="cubic" easing="out">200</scrolltime>
                 <pagecontrol>30006</pagecontrol>
