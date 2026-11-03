@@ -60,8 +60,8 @@ def load_default(monkeypatch):
     is `tests.kodistubs`' namespace (`.env`, `.router`, `.homewindow`, ...)
     plus `.run_calls`/`.open_home_calls`.
     """
-    def _load(argv, open_home=None, before=None):
-        with install_kodi_stubs(reload=_RELOAD_MODULE_NAMES) as ctx:
+    def _load(argv, open_home=None, before=None, **stubs):
+        with install_kodi_stubs(reload=_RELOAD_MODULE_NAMES, **stubs) as ctx:
             if before is not None:
                 before(ctx)
             ctx.run_calls = []
@@ -150,6 +150,55 @@ def test_home_action_opens_homewindow_on_success(load_default):
     _ns, ctx = load_default(['plugin://plugin.video.rivulet/', '5', '?action=home'])
     assert ctx.open_home_calls == [True]
     assert not any('Container.Update' in cmd for cmd in ctx.env.executed_builtins)
+
+
+# ---------------------------------------------------------------------------
+# action == 'home': leaving Home also leaves the launch directory (#103)
+# ---------------------------------------------------------------------------
+#
+# Kodi opens the launch in its Videos window on the plugin root; default.py
+# answers it empty and Home opens over it. Without a Back of its own, the
+# user's Back out of Home landed in that empty window.
+
+_ON_ROOT = {'Window.IsActive(videos)': True}
+
+
+@pytest.mark.parametrize('folder', [
+    'plugin://plugin.video.rivulet/', 'plugin://plugin.video.rivulet', 'plugin://plugin.video.rivulet/?action=home',
+])
+def test_backing_out_of_home_also_leaves_the_empty_launch_directory(load_default, folder):
+    _ns, ctx = load_default(
+        ['plugin://plugin.video.rivulet/', '5', ''],
+        info_labels={'Container.FolderPath': folder}, cond_visibility=_ON_ROOT,
+    )
+    assert ctx.open_home_calls == [True]
+    assert ctx.env.executed_builtins[-1] == 'Action(Back)'
+
+
+@pytest.mark.parametrize('folder, conditions', [
+    # Launched without a Videos window (RunPlugin, a script): nothing to leave.
+    ('plugin://plugin.video.rivulet/', {}),
+    # Home jumped into one of the addon's directories: the user is browsing it.
+    ('plugin://plugin.video.rivulet/?action=home_classical', _ON_ROOT),
+    ('plugin://plugin.video.other/', _ON_ROOT),
+    # A dialog is up: Back would close it instead.
+    ('plugin://plugin.video.rivulet/', dict(_ON_ROOT, **{'System.HasActiveModalDialog': True})),
+])
+def test_home_exit_stays_put_anywhere_but_the_bare_launch_directory(load_default, folder, conditions):
+    _ns, ctx = load_default(
+        ['plugin://plugin.video.rivulet/', '5', ''],
+        info_labels={'Container.FolderPath': folder}, cond_visibility=conditions,
+    )
+    assert ctx.open_home_calls == [True]
+    assert 'Action(Back)' not in ctx.env.executed_builtins
+
+
+def test_a_kodi_shutdown_during_home_sends_no_back(load_default):
+    _ns, ctx = load_default(
+        ['plugin://plugin.video.rivulet/', '5', ''], monitor_abort_requested=True,
+        info_labels={'Container.FolderPath': 'plugin://plugin.video.rivulet/'}, cond_visibility=_ON_ROOT,
+    )
+    assert 'Action(Back)' not in ctx.env.executed_builtins
 
 
 # ---------------------------------------------------------------------------

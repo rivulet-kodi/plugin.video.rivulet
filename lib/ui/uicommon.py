@@ -592,6 +592,38 @@ def launch_action():
     return LAUNCH_OPEN if playing else LAUNCH_IGNORE
 
 
+def leave_launch_directory():
+    """Back out of the empty Videos directory Kodi opened the launch in.
+
+    Launching the addon is `ActivateWindow(Videos, plugin://<id>/)`: Kodi
+    opens its Videos window (``MyVideoNav.xml``) on the plugin root, which
+    `default.py` answers with an empty listing before Home opens as a
+    modal over it. Backing out of Home left the user in that empty window
+    and a second Back was needed to leave (#103). Called once Home has
+    closed, this sends that second Back: the one press the user would,
+    so it returns to wherever they launched from (Kodi's home, the Add-ons
+    list). Only while the Videos window is still on the bare plugin root
+    with nothing over it: a launch from elsewhere (a `RunPlugin`), a jump
+    into another directory, a dialog or a Kodi shutdown is left alone.
+    """
+    from lib.ui.compat import ADDON_ID
+
+    try:
+        if xbmc.Monitor().abortRequested():
+            return False
+        if not xbmc.getCondVisibility('Window.IsActive(videos)'):
+            return False
+        if xbmc.getCondVisibility('System.HasActiveModalDialog'):
+            return False
+        path, _, query = xbmc.getInfoLabel('Container.FolderPath').partition('?')
+    except Exception:  # noqa: BLE001 - cannot tell: stay where we are
+        return False
+    if path.rstrip('/') != 'plugin://%s' % ADDON_ID or query not in ('', 'action=home'):
+        return False
+    xbmc.executebuiltin('Action(Back)')
+    return True
+
+
 def request_ui_show():
     """Ask the interpreter running the UI to bring its screens back while
     playback goes on - see `launch_action()`'s `LAUNCH_SHOW`."""
