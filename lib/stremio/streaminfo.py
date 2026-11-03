@@ -1054,8 +1054,8 @@ def format_label(info, include_addon=True):
 _QUALITY_COLOR_HEX = {
     'gold': 'FFFFD700',
     'lime': 'FF4ADE80',
-    'cyan': 'C7EEF3F6',
-    'white': 'C7EEF3F6',
+    'cyan': 'C7EDEDED',
+    'white': 'C7EDEDED',
 }
 
 
@@ -1102,12 +1102,12 @@ def stream_fields(info):
         # a blank cell, so the column stays visually aligned. Mono26
         # (NotoMono) carries U+2014 in its cmap, so this is safe to draw
         # in that font. `cache_state` is therefore NEVER ''.
-        cache_state, cache_color = '\u2014', '4DEEF3F6'
+        cache_state, cache_color = '\u2014', '4DEDEDED'
 
     resolution = info.get('resolution') or ''
     return {
         'quality': resolution,
-        'quality_color': _QUALITY_COLOR_HEX.get(_RESOLUTION_COLORS.get(resolution, 'white'), 'C7EEF3F6'),
+        'quality_color': _QUALITY_COLOR_HEX.get(_RESOLUTION_COLORS.get(resolution, 'white'), 'C7EDEDED'),
         'release': info.get('source') or '',
         'flags': ' \u00b7 '.join(flags_bits),
         'provider': info.get('addon') or '',

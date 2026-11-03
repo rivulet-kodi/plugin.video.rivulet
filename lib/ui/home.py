@@ -1694,7 +1694,7 @@ def _status_text(auth):
     from lib.ui.compat import L
 
     if not auth:
-        return '[COLOR 57EEF3F6]\u25cf[/COLOR] %s' % L(30190)
+        return '[COLOR 57EDEDED]\u25cf[/COLOR] %s' % L(30190)
     return '[COLOR FFD6D6D6]\u25cf[/COLOR] %s' % L(30488)
 
 

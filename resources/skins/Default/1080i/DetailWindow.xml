@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
-<!-- episode page, ported from RevRivulet 32503ae. -->
+<!-- Series page (lib/ui/detailwindow.py), in the look Home and Search define (tokens in lib/ui/look.py); StreamsWindow.xml is laid out the same way. -->
 <window>
     
     <depth>0.52</depth>
@@ -15,10 +15,10 @@
 <control type="image" id="30098"><left>0</left><top>0</top><width>1</width><height>1</height><texture background="true"></texture></control><control type="image" id="30099"><left>0</left><top>0</top><width>1</width><height>1</height><texture background="true"></texture></control>
 <control type="image"><left>0</left><top>0</top><width>1920</width><height>1080</height><texture colordiffuse="FF000000">white.png</texture></control>
 <control type="image" id="30000"><left>0</left><top>0</top><width>1920</width><height>1080</height><texture background="true" colordiffuse="FFFFFFFF"></texture><aspectratio align="center" aligny="center">scale</aspectratio></control>
-<!-- The list sits over most of the picture: a light dim everywhere, then the left and bottom fades. -->
+<!-- The list sits over most of the picture: a light dim everywhere, then the left and top fades. -->
 <control type="image"><left>0</left><top>0</top><width>1920</width><height>1080</height><texture colordiffuse="80000000">white.png</texture></control>
 <control type="image"><left>0</left><top>0</top><width>1920</width><height>1080</height><texture colordiffuse="FFFFFFFF">look_fade_left.png</texture><aspectratio>stretch</aspectratio></control>
-<control type="image"><left>0</left><top>0</top><width>1920</width><height>1080</height><texture colordiffuse="FFFFFFFF">look_fade_top.png</texture><aspectratio>stretch</aspectratio></control>
+<control type="image"><left>0</left><top>0</top><width>1920</width><height>220</height><texture colordiffuse="FFFFFFFF">look_fade_top.png</texture><aspectratio>stretch</aspectratio></control>
 <!-- The classic header lines and scrollbar: kept for the window code, never shown in this look. -->
 <control type="label" id="30101"><left>0</left><top>0</top><width>1</width><height>1</height><font>font12</font><textcolor>FFFFFFFF</textcolor><label></label><visible>false</visible></control>
 <control type="label" id="30102"><left>0</left><top>0</top><width>1</width><height>1</height><font>font12</font><textcolor>FFFFFFFF</textcolor><label></label><visible>false</visible></control>
@@ -28,8 +28,8 @@
 <control type="image" id="30023"><left>80</left><top>70</top><width>900</width><height>140</height><aspectratio align="left" aligny="center">keep</aspectratio><texture background="true"></texture><visible>!String.IsEmpty(Window.Property(HeroLogo))</visible></control>
 <control type="label" id="30005"><left>80</left><top>100</top><width>1100</width><height>80</height><font>font45</font><textcolor>FFEDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny><label></label><visible>String.IsEmpty(Window.Property(HeroLogo))</visible></control>
 <!-- Trailer and Options for remotes without a menu key (#15). -->
-<control type="button" id="30012"><left>1364</left><top>100</top><width>220</width><height>56</height><font>font13</font><textcolor>E6EDEDED</textcolor><focusedcolor>FF07090B</focusedcolor><align>center</align><aligny>center</aligny><texturefocus border="28" colordiffuse="FFFFFFFF">pill_fill.png</texturefocus><texturenofocus border="28" colordiffuse="24FFFFFF">pill_fill.png</texturenofocus><label>[B]$ADDON[plugin.video.rivulet 30499][/B]</label><onup>30012</onup><ondown>30007</ondown><onleft>30012</onleft><onright>30009</onright></control>
-<control type="button" id="30009"><left>1604</left><top>100</top><width>220</width><height>56</height><font>font13</font><textcolor>E6EDEDED</textcolor><focusedcolor>FF07090B</focusedcolor><align>center</align><aligny>center</aligny><texturefocus border="28" colordiffuse="FFFFFFFF">pill_fill.png</texturefocus><texturenofocus border="28" colordiffuse="24FFFFFF">pill_fill.png</texturenofocus><label>[B]$ADDON[plugin.video.rivulet 30492][/B]</label><onup>30009</onup><ondown>30007</ondown><onleft>30012</onleft><onright>30009</onright></control>
+<control type="button" id="30012"><left>1392</left><top>100</top><width>220</width><height>56</height><font>font13</font><textcolor>E6EDEDED</textcolor><focusedcolor>FF07090B</focusedcolor><align>center</align><aligny>center</aligny><texturefocus border="28" colordiffuse="FFFFFFFF">pill_fill.png</texturefocus><texturenofocus border="28" colordiffuse="24FFFFFF">pill_fill.png</texturenofocus><label>[B]$ADDON[plugin.video.rivulet 30499][/B]</label><onup>30012</onup><ondown>30007</ondown><onleft>30012</onleft><onright>30009</onright></control>
+<control type="button" id="30009"><left>1620</left><top>100</top><width>220</width><height>56</height><font>font13</font><textcolor>E6EDEDED</textcolor><focusedcolor>FF07090B</focusedcolor><align>center</align><aligny>center</aligny><texturefocus border="28" colordiffuse="FFFFFFFF">pill_fill.png</texturefocus><texturenofocus border="28" colordiffuse="24FFFFFF">pill_fill.png</texturenofocus><label>[B]$ADDON[plugin.video.rivulet 30492][/B]</label><onup>30009</onup><ondown>30007</ondown><onleft>30012</onleft><onright>30009</onright></control>
 <control type="list" id="30007">
                 <left>80</left><top>236</top><width>1000</width><height>52</height>
                 <orientation>horizontal</orientation>

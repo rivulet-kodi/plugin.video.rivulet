@@ -6,6 +6,25 @@ The backdrop fills the screen and fades to black toward the left and
 bottom. The clearlogo, facts, plot, scores and end time share the pinned
 RevRivulet layout. Textures are drawn by tools/make_look_textures.py;
 text uses the active Kodi skin's standard font names.
+
+Every other screen (Search, Showcase, Streams, Detail, Addons, Addon
+catalogs, the pair dialog and the Dark* dialogs) reuses the same tokens,
+so the addon reads as one app:
+
+- Ink: black base, the artwork under the left/bottom/top fades; text is
+  FFEDEDED, with E6/C7/B3/80 alphas of EDEDED for facts, plot, secondary
+  and dim text; hairlines are 2px 24EDEDED.
+- Header: a bold font13 label at 80,36 and the clock right-aligned to 1840.
+- Pills (56 high, pill_fill.png, border 28): focused FFFFFFFF with 07090B
+  text, unfocused 24FFFFFF with E6EDEDED text. Icon buttons are 56x56.
+- List rows: the focused row is look_panel.png (border 40) in white with
+  07090B text; the others sit on the backdrop in EDEDED.
+- Posters: mask_poster.png corners, FF16191C placeholder, look_ring.png
+  focus ring, look_check.png watched badge.
+- The only accent kept is the IN CINEMA strip (38BDF8) and data colours
+  (quality, cached).
+- Left margin 80, right edge 1840, WindowOpen is a plain 200ms fade and no
+  window has a WindowClose animation.
 """
 
 import math

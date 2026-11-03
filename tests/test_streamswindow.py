@@ -437,7 +437,7 @@ def test_oninit_background_uses_poster_or_falls_back_to_addon_fanart(load_stream
     assert win.getControl(ctx.streamswindow.BACKGROUND).image == expected
 
 
-def test_oninit_heading_defaults_to_generic_streams_title_uppercased_when_omitted(load_streamswindow):
+def test_oninit_heading_defaults_to_generic_streams_title_when_omitted(load_streamswindow):
     ctx = load_streamswindow()
     win = _make_window(ctx.streamswindow)
     win.pairs = []
@@ -445,13 +445,11 @@ def test_oninit_heading_defaults_to_generic_streams_title_uppercased_when_omitte
     win.onInit()
 
     # L(30041) isn't configured in the fake localized-string map, so it
-    # resolves to the deterministic 'STR30041' marker (see FakeAddon) -
-    # already all-uppercase, so .upper() is a no-op here, but this still
-    # exercises the exact code path a real 'Streams' string would.
+    # resolves to the deterministic 'STR30041' marker (see FakeAddon).
     assert win.getControl(ctx.streamswindow.HEADING).label == 'STR30041'
 
 
-def test_oninit_heading_uses_the_supplied_title_uppercased(load_streamswindow):
+def test_oninit_heading_uses_the_supplied_title_as_written(load_streamswindow):
     ctx = load_streamswindow()
     win = _make_window(ctx.streamswindow)
     win.pairs = []
@@ -459,7 +457,7 @@ def test_oninit_heading_uses_the_supplied_title_uppercased(load_streamswindow):
 
     win.onInit()
 
-    assert win.getControl(ctx.streamswindow.HEADING).label == 'BREAKING BAD \u2013 S01E01 PILOT'
+    assert win.getControl(ctx.streamswindow.HEADING).label == 'Breaking Bad \u2013 S01E01 Pilot'
 
 
 def test_oninit_art_fanart_drives_background_and_art_poster_drives_the_side_panel(load_streamswindow):

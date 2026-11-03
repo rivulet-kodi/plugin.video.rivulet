@@ -69,6 +69,7 @@ from lib.ui.uicommon import (
     take_pending_pages,
 )
 
+BACKGROUND = 30000
 LIST = 30360
 
 #: catalog entry state (lib.stremio.addoncatalogs.descriptor_state) ->
@@ -153,6 +154,9 @@ class AddonCatalogWindow(BaseWindow):
         self._paging_generation = 0
 
     def onInit(self):
+        from lib.ui.look import fanart
+
+        self.getControl(BACKGROUND).setImage(fanart())
         self._reload()
 
     def _reload(self):

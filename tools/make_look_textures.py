@@ -11,7 +11,7 @@ here runs on the box.
 * ``look_reflect_fade.png`` - over a card's mirror image under the row.
 * ``look_ring.png`` - the focus ring, 9-slice with border=24.
 * ``look_stars_00..10.png`` - the rating as five stars, in half stars.
-* ``look_icon_<search|addons|settings>[_focus].png`` - the top-bar icons.
+* ``look_icon_<search|addons|settings|close>[_focus].png`` - the top-bar icons.
 * ``card_shade.png`` - the dark foot of a Continue card under its text.
 * ``look_panel.png`` / ``look_check.png`` - the episode row and watched tick.
 * ``pill_fill.png`` - the pill plate behind the type chips and buttons,
@@ -78,6 +78,11 @@ def _search(draw, scale):
 def _check(draw, scale):
     draw.line((16 * scale, 34 * scale, 28 * scale, 46 * scale), fill=WHITE, width=4 * scale)
     draw.line((28 * scale, 46 * scale, 50 * scale, 18 * scale), fill=WHITE, width=4 * scale)
+
+
+def _close(draw, scale):
+    for (x0, y0), (x1, y1) in (((21, 21), (43, 43)), ((43, 21), (21, 43))):
+        draw.line((x0 * scale, y0 * scale, x1 * scale, y1 * scale), fill=WHITE, width=4 * scale)
 
 
 def _addons(draw, scale):
@@ -237,7 +242,7 @@ def textures():
     }
     for half in range(11):
         out['look_stars_%02d.png' % half] = _stars(half)
-    for name, fn in (('search', _search), ('addons', _addons), ('settings', _settings)):
+    for name, fn in (('search', _search), ('addons', _addons), ('settings', _settings), ('close', _close)):
         out['look_icon_%s.png' % name] = _look_icon(fn, False)
         out['look_icon_%s_focus.png' % name] = _look_icon(fn, True)
     return out

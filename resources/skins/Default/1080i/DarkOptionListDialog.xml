@@ -12,36 +12,36 @@
             <!-- No WindowClose animation on purpose: Kodi drops every action while the topmost modal plays one (test_skin_xml.py rule 9). -->
             <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="A6000000">white.png</texture></control>
 
-            <control type="image" id="30343"><left>580</left><top>140</top><width>760</width><height>730</height><texture border="32" colordiffuse="E60A0A0A">dlg_panel.png</texture></control>
-            <control type="image" id="30344"><left>580</left><top>140</top><width>760</width><height>730</height><texture border="32" colordiffuse="26FFFFFF">dlg_stroke.png</texture></control>
+            <control type="image" id="30343"><left>580</left><top>140</top><width>760</width><height>730</height><texture border="32" colordiffuse="F207090B">dlg_panel.png</texture></control>
+            <control type="image" id="30344"><left>580</left><top>140</top><width>760</width><height>730</height><texture border="32" colordiffuse="24EDEDED">dlg_stroke.png</texture></control>
 
             <control type="label" id="30340">
                 <left>628</left><top>178</top><width>664</width><height>44</height>
-                <font>font37</font><textcolor>FFFFFFFF</textcolor>
+                <font>font37</font><textcolor>FFEDEDED</textcolor>
                 <label></label>
             </control>
 
-            <control type="image" id="30345"><left>628</left><top>230</top><width>664</width><height>1</height><texture colordiffuse="1AFFFFFF">white.png</texture></control>
+            <control type="image" id="30345"><left>628</left><top>230</top><width>664</width><height>1</height><texture colordiffuse="24EDEDED">white.png</texture></control>
 
             <control type="list" id="30341">
                 <left>596</left><top>250</top><width>728</width><height>504</height>
                 <onleft>30341</onleft><onright>30341</onright>
                 <pagecontrol>30342</pagecontrol>
                 <itemlayout height="72">
-                    <control type="label"><left>32</left><top>14</top><width>664</width><height>34</height><font>font13</font><textcolor>D9FFFFFF</textcolor>
+                    <control type="label"><left>32</left><top>7</top><width>664</width><height>34</height><font>font13</font><aligny>center</aligny><textcolor>E6EDEDED</textcolor>
                         <label>$INFO[ListItem.Label]</label>
                     </control>
-                    <control type="label"><left>32</left><top>48</top><width>664</width><height>24</height><font>font12</font><textcolor>B3FFFFFF</textcolor>
+                    <control type="label"><left>32</left><top>40</top><width>664</width><height>28</height><font>font12</font><aligny>center</aligny><textcolor>B3EDEDED</textcolor>
                         <label>$INFO[ListItem.Label2]</label>
                         <visible>!String.IsEmpty(ListItem.Label2)</visible>
                     </control>
                 </itemlayout>
                 <focusedlayout height="72">
-                    <control type="image"><left>8</left><width>712</width><height>72</height><texture border="20" colordiffuse="FF2E2E2E">dlg_row.png</texture></control>
-                    <control type="label"><left>32</left><top>14</top><width>664</width><height>34</height><font>font13</font><textcolor>FFFFFFFF</textcolor>
+                    <control type="image"><left>8</left><width>712</width><height>72</height><texture border="28" colordiffuse="FFFFFFFF">pill_fill.png</texture></control>
+                    <control type="label"><left>32</left><top>7</top><width>664</width><height>34</height><font>font13</font><aligny>center</aligny><textcolor>FF07090B</textcolor>
                         <label>$INFO[ListItem.Label]</label>
                     </control>
-                    <control type="label"><left>32</left><top>48</top><width>664</width><height>24</height><font>font12</font><textcolor>D9FFFFFF</textcolor>
+                    <control type="label"><left>32</left><top>40</top><width>664</width><height>28</height><font>font12</font><aligny>center</aligny><textcolor>B307090B</textcolor>
                         <label>$INFO[ListItem.Label2]</label>
                         <visible>!String.IsEmpty(ListItem.Label2)</visible>
                     </control>
@@ -53,9 +53,9 @@
                 <left>1300</left><top>250</top>
             <control type="scrollbar" id="30342">
                 <left>0</left><top>0</top><width>6</width><height>504</height>
-                <texturesliderbar colordiffuse="1FFFFFFF">white.png</texturesliderbar>
-                <textureslidernib colordiffuse="FFD6D6D6">white.png</textureslidernib>
-                <textureslidernibfocus colordiffuse="FFD6D6D6">white.png</textureslidernibfocus>
+                <texturesliderbar colordiffuse="24EDEDED">white.png</texturesliderbar>
+                <textureslidernib colordiffuse="FFEDEDED">white.png</textureslidernib>
+                <textureslidernibfocus colordiffuse="FFEDEDED">white.png</textureslidernibfocus>
                 <showonepage>false</showonepage>
                 <orientation>vertical</orientation>
             </control>

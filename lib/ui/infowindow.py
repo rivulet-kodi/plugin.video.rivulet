@@ -234,27 +234,26 @@ def _item_properties(meta):
     return props
 
 
-#: The header wordmark's separator, at the design's rgba(238,243,246,.18) -
-#: not one of the addon's named text tints (those stop at .2/33), computed
-#: the same way here.
-_HEADER_SEPARATOR_COLOR = '2EEEF3F6'
-_HEADER_TITLE_COLOR = '9EEEF3F6'
+#: The breadcrumb's separator and catalog title, dimmed from the header's
+#: own FFEDEDED the way Home dims its counters (HomeWindow.xml, 80/B3).
+_HEADER_SEPARATOR_COLOR = '80EDEDED'
+_HEADER_TITLE_COLOR = 'B3EDEDED'
 
 
 def _header_label(catalog_title=None):
-    """Build the inline-markup ShowcaseWindow.xml's header wordmark label
-    renders: bare `RIVULET` when `catalog_title` is falsy (every caller
-    that predates `open_showcase(metas, catalog_title=...)`), or
+    """Build the inline-markup ShowcaseWindow.xml's header label
+    renders, bold like the date line on Home: bare `RIVULET` when
+    `catalog_title` is falsy (every caller that predates
+    `open_showcase(metas, catalog_title=...)`), or
     `RIVULET / <TITLE>` once a caller hands over its own catalog/section
     title - see `open_showcase()`.
 
     Pure helper - no xbmc - so it is trivially unit-testable on its own.
     """
     if not catalog_title:
-        return '[COLOR 57EEF3F6]RIVULET[/COLOR]'
-    return (
-        '[COLOR 57EEF3F6]RIVULET[/COLOR] [COLOR %s]/[/COLOR] [COLOR %s]%s[/COLOR]'
-        % (_HEADER_SEPARATOR_COLOR, _HEADER_TITLE_COLOR, catalog_title.upper())
+        return '[B]RIVULET[/B]'
+    return '[B]RIVULET [COLOR %s]/[/COLOR] [COLOR %s]%s[/COLOR][/B]' % (
+        _HEADER_SEPARATOR_COLOR, _HEADER_TITLE_COLOR, catalog_title.upper()
     )
 
 

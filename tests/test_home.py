@@ -216,7 +216,7 @@ def test_status_text_reports_not_logged_in_when_auth_is_none(load_homewindow):
 
     text = ctx.homewindow._status_text(None)
 
-    assert text == '[COLOR 57EEF3F6]\u25cf[/COLOR] STR30190'
+    assert text == '[COLOR 57EDEDED]\u25cf[/COLOR] STR30190'
     assert 'STR30190' in text
 
 
@@ -328,7 +328,7 @@ def test_oninit_hides_library_row_when_not_authenticated(load_homewindow, monkey
     assert win.getProperty('HomeSignedOut') == '1'
     actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.BROWSE_LIST).items]
     assert 'library' not in actions
-    assert win.getControl(ctx.homewindow.STATUS_LABEL).label == '[COLOR 57EEF3F6]\u25cf[/COLOR] STR30190'
+    assert win.getControl(ctx.homewindow.STATUS_LABEL).label == '[COLOR 57EDEDED]\u25cf[/COLOR] STR30190'
 
 
 def test_oninit_status_label_says_signed_in(load_homewindow, monkeypatch):

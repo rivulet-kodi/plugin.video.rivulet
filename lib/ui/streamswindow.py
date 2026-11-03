@@ -765,7 +765,7 @@ class StreamsWindow(BaseWindow):
         # catalog/meta name off an untrusted third-party addon) straight
         # into a rendered label - escape_label() neutralises any [B]/
         # $INFO[...]/... markup it might contain first.
-        self.getControl(HEADING).setLabel((escape_label(self.heading) or L(30041)).upper())
+        self.getControl(HEADING).setLabel(escape_label(self.heading) or L(30041))
 
         self._rebuild_list()
         self._credit_links = fill_credits(self, self.meta)

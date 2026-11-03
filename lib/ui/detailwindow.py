@@ -307,7 +307,7 @@ def _show_art(meta):
 
 
 def _metadata_line(meta, season_count):
-    """'2025 \u00b7 2 SEASONS \u00b7 [COLOR FF38BDF8]\u2605 7.6[/COLOR]'
+    """'2025 \u00b7 2 SEASONS \u00b7 [COLOR FFEDEDED]\u2605 7.6[/COLOR]'
     for the left column (METADATA_LINE/30101) - built from series-level
     meta only, never a per-episode video. Any segment whose source
     value is missing (no year, no real season yet, no rating) is
@@ -333,7 +333,7 @@ def _metadata_line(meta, season_count):
         segments.append(L(_SEASON_STRING_ID if season_count == 1 else _SEASONS_STRING_ID) % season_count)
     rating = meta.get('imdbRating')
     if rating:
-        segments.append('[COLOR FF38BDF8]\u2605 %s[/COLOR]' % escape_label(str(rating)))
+        segments.append('[COLOR FFEDEDED]\u2605 %s[/COLOR]' % escape_label(str(rating)))
     return ' \u00b7 '.join(segments)
 
 

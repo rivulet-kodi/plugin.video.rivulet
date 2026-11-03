@@ -888,9 +888,9 @@ def test_format_label_no_service_omits_cache_segment_entirely():
 @pytest.mark.parametrize("resolution,color", [
     ("2160p", "FFFFD700"),
     ("1080p", "FF4ADE80"),
-    ("720p", "C7EEF3F6"),
-    ("480p", "C7EEF3F6"),
-    ("", "C7EEF3F6"),
+    ("720p", "C7EDEDED"),
+    ("480p", "C7EDEDED"),
+    ("", "C7EDEDED"),
 ], ids=["2160p-gold", "1080p-green", "720p-dim", "480p-dim", "unknown-dim"])
 def test_stream_fields_quality_color_matches_the_palette(resolution, color):
     fields = stream_fields(_info(resolution=resolution))
@@ -950,7 +950,7 @@ def test_stream_fields_no_cache_info_is_dim_em_dash_not_fabricated():
     info = _info(service="", cached=None)
     fields = stream_fields(info)
     assert fields["cache_state"] == "\u2014"
-    assert fields["cache_color"] == "4DEEF3F6"
+    assert fields["cache_color"] == "4DEDEDED"
 
 
 def test_stream_fields_missing_size_and_seeders_are_empty_strings():
@@ -981,8 +981,8 @@ def test_stream_fields_none_info_cache_state_is_dim_em_dash():
     # never '' - see stream_fields()'s own docstring.
     fields = stream_fields(None)
     assert fields == {
-        "quality": "", "quality_color": "C7EEF3F6", "release": "", "flags": "",
-        "provider": "", "size": "", "seeders": "", "cache_state": "\u2014", "cache_color": "4DEEF3F6",
+        "quality": "", "quality_color": "C7EDEDED", "release": "", "flags": "",
+        "provider": "", "size": "", "seeders": "", "cache_state": "\u2014", "cache_color": "4DEDEDED",
     }
 
 

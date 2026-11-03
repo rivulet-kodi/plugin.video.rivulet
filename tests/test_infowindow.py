@@ -309,16 +309,16 @@ def test_item_properties_none_meta_is_treated_as_empty(load_infowindow):
 
 def test_header_label_with_no_title_is_bare_rivulet(load_infowindow):
     ctx = load_infowindow()
-    assert ctx.infowindow._header_label() == '[COLOR 57EEF3F6]RIVULET[/COLOR]'
-    assert ctx.infowindow._header_label(None) == '[COLOR 57EEF3F6]RIVULET[/COLOR]'
-    assert ctx.infowindow._header_label('') == '[COLOR 57EEF3F6]RIVULET[/COLOR]'
+    assert ctx.infowindow._header_label() == '[B]RIVULET[/B]'
+    assert ctx.infowindow._header_label(None) == '[B]RIVULET[/B]'
+    assert ctx.infowindow._header_label('') == '[B]RIVULET[/B]'
 
 
 def test_header_label_with_a_title_renders_uppercased_breadcrumb(load_infowindow):
     ctx = load_infowindow()
     assert ctx.infowindow._header_label('Cinemeta \u00b7 Popular Movies') == (
-        '[COLOR 57EEF3F6]RIVULET[/COLOR] [COLOR 2EEEF3F6]/[/COLOR] '
-        '[COLOR 9EEEF3F6]CINEMETA \u00b7 POPULAR MOVIES[/COLOR]'
+        '[B]RIVULET [COLOR 80EDEDED]/[/COLOR] '
+        '[COLOR B3EDEDED]CINEMETA \u00b7 POPULAR MOVIES[/COLOR][/B]'
     )
 
 
@@ -347,7 +347,7 @@ def test_oninit_builds_items_sets_background_hides_loading_and_focuses_select(lo
     assert win.getControl(infowindow.BACKGROUND).image == 'https://x/bg1.jpg'
     assert win.getControl(infowindow.LOADING).visible is False
     assert win.getFocusId() == infowindow.SELECT
-    assert win.getControl(infowindow.HEADER).label == '[COLOR 57EEF3F6]RIVULET[/COLOR]'
+    assert win.getControl(infowindow.HEADER).label == '[B]RIVULET[/B]'
 
 
 def test_oninit_sets_breadcrumb_header_when_catalog_title_is_set(load_infowindow):
@@ -360,8 +360,8 @@ def test_oninit_sets_breadcrumb_header_when_catalog_title_is_set(load_infowindow
     win.onInit()
 
     assert win.getControl(infowindow.HEADER).label == (
-        '[COLOR 57EEF3F6]RIVULET[/COLOR] [COLOR 2EEEF3F6]/[/COLOR] '
-        '[COLOR 9EEEF3F6]CINEMETA \u00b7 POPULAR MOVIES[/COLOR]'
+        '[B]RIVULET [COLOR 80EDEDED]/[/COLOR] '
+        '[COLOR B3EDEDED]CINEMETA \u00b7 POPULAR MOVIES[/COLOR][/B]'
     )
 
 

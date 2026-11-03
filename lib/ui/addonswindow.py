@@ -16,6 +16,7 @@ import xbmcgui
 from lib.ui.dependencies import get_client, get_store
 from lib.ui.uicommon import CANCELLED, BaseWindow, close_quietly, gated_input, open_window
 
+BACKGROUND = 30000
 LIST = 30002
 
 #: strings.po id for the removal refusal shown for protected/official
@@ -47,6 +48,9 @@ class AddonsWindow(BaseWindow):
         self.store = None
 
     def onInit(self):
+        from lib.ui.look import fanart
+
+        self.getControl(BACKGROUND).setImage(fanart())
         self._reload()
 
     def _reload(self, focus_transport_url=None):
