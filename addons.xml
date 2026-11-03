@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.40.0" provider-name="M0RF30">
+<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.41.0" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0" />
     <import addon="script.module.requests" version="2.22.0" />
@@ -12,7 +12,14 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse and search catalogs by type, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote rivulet-engine streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.40.0:
+    <news>v0.41.0:
+- New: every screen now has the same look as Home and Search: the series page, the source list, the coverflow, the add-on screens and the dialogs.
+- New: genres, cast, directors and writers on a title's page are buttons. A genre opens that genre's catalog; a person opens Search on their name.
+- Fix: an add-on's trailer in the source list plays as a trailer, so it no longer asks to resume or records progress against the title.
+- Fix: the cached-source count understands AIOStreams' small service tags, and is hidden when no source can be cached.
+- Fix: Continue cards show their backdrop straight away, and Home posters no longer show a plate around artwork that is not 2:3.
+- Fix: the settings icon on Home is a gear, not a sun.
+v0.40.0:
 - Fix: Continue watching now lists series you are following in another Stremio app. Finishing an episode there moves the series on to the next one, and Rivulet used to drop it from Continue at that point.
 - New: as in the Stremio apps, a series you have caught up on comes back to Continue, on the new episode, once one airs. Rivulet checks your library series for new episodes every 6 hours. Remove it from Continue to hide it until the next episode.
 - Fix: unusual data from your Stremio account, an add-on or a damaged settings file no longer makes Rivulet fail. Among others, "Mark as watched" now sticks on a title whose account record held a negative watch count.
