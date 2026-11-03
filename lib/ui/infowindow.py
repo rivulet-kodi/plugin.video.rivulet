@@ -24,8 +24,8 @@ Control ids mirror the reference addon's InfoWindow 1:1 (see
     SELECT     = 30002  horizontal fixedlist - the coverflow itself
     CLOSE      = 30003  close button
 HEADER = 30100 is a Rivulet-only addition (the reference addon has no
-breadcrumb) for the header wordmark label, so `onInit()` can set its
-`RIVULET [/ CATALOG]` text - see `_header_label()`.
+header) for the page title: the catalog's title, or `RIVULET` - see
+`_header_label()`.
 
 The coverflow's visual rendering (ShowcaseWindow.xml's fixedlist/
 focusedlayout, the background crossfade) is Kodi-skin-engine-only and
@@ -234,27 +234,18 @@ def _item_properties(meta):
     return props
 
 
-#: The breadcrumb's separator and catalog title, dimmed from the header's
-#: own FFEDEDED the way Home dims its counters (HomeWindow.xml, 80/B3).
-_HEADER_SEPARATOR_COLOR = '80EDEDED'
-_HEADER_TITLE_COLOR = 'B3EDEDED'
-
-
 def _header_label(catalog_title=None):
-    """Build the inline-markup ShowcaseWindow.xml's header label
-    renders, bold like the date line on Home: bare `RIVULET` when
-    `catalog_title` is falsy (every caller that predates
-    `open_showcase(metas, catalog_title=...)`), or
-    `RIVULET / <TITLE>` once a caller hands over its own catalog/section
-    title - see `open_showcase()`.
+    """The header text: the catalog's own title, bold and as written, like
+    Search's and Add-ons' plain page titles; bare `RIVULET` when a caller
+    has none. The catalog title is addon text, so it is escaped.
 
     Pure helper - no xbmc - so it is trivially unit-testable on its own.
     """
+    from lib.stremio.streaminfo import escape_label
+
     if not catalog_title:
         return '[B]RIVULET[/B]'
-    return '[B]RIVULET [COLOR %s]/[/COLOR] [COLOR %s]%s[/COLOR][/B]' % (
-        _HEADER_SEPARATOR_COLOR, _HEADER_TITLE_COLOR, catalog_title.upper()
-    )
+    return '[B]%s[/B]' % escape_label(catalog_title)
 
 
 class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
@@ -265,8 +256,8 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         super().__init__(*args, **kwargs)
         self.metas = []
         self.selected = None
-        #: catalog/section title for the header breadcrumb - None keeps
-        #: the header a bare "RIVULET", see `_header_label()`/`start()`.
+        #: catalog/section title for the header - None keeps it a bare
+        #: "RIVULET", see `_header_label()`/`start()`.
         self.catalog_title = None
         #: fanart last pushed to BACKGROUND - lets onAction() skip
         #: setImage() when a keypress doesn't actually change focus (e.g.
@@ -309,8 +300,7 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         window closed without a selection. An empty `metas` never opens
         the modal at all and returns None immediately.
 
-        `catalog_title`, if given, renders as a "RIVULET / <TITLE>"
-        breadcrumb in the header - see `_header_label()`. Left as None,
+        `catalog_title`, if given, is the header's page title - see `_header_label()`. Left as None,
         the header stays the bare "RIVULET" it always was.
 
         `more_pages`, if given, is an iterable of further meta pages
@@ -749,8 +739,7 @@ def open_showcase(metas, catalog_title=None, more_pages=None):
     the window is closed first (it may not have had a chance to self-close,
     e.g. if onInit() or a mid-modal callback raised).
 
-    `catalog_title`, if given, becomes the header's "RIVULET / <TITLE>"
-    breadcrumb - see `ShowcaseWindow.start()`. `more_pages` is the
+    `catalog_title`, if given, becomes the header's page title - see `ShowcaseWindow.start()`. `more_pages` is the
     catalog's remaining pages, appended to the strip as they arrive -
     see `ShowcaseWindow.start()` for why they are not waited on."""
     from lib.ui.compat import ADDON

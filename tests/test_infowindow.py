@@ -303,7 +303,7 @@ def test_item_properties_none_meta_is_treated_as_empty(load_infowindow):
 
 
 # ---------------------------------------------------------------------------
-# _header_label() - the header wordmark's breadcrumb markup
+# _header_label() - the header's page title
 # ---------------------------------------------------------------------------
 
 
@@ -314,12 +314,12 @@ def test_header_label_with_no_title_is_bare_rivulet(load_infowindow):
     assert ctx.infowindow._header_label('') == '[B]RIVULET[/B]'
 
 
-def test_header_label_with_a_title_renders_uppercased_breadcrumb(load_infowindow):
+def test_header_label_is_the_catalog_title_as_written_and_escaped(load_infowindow):
     ctx = load_infowindow()
     assert ctx.infowindow._header_label('Cinemeta \u00b7 Popular Movies') == (
-        '[B]RIVULET [COLOR 80EDEDED]/[/COLOR] '
-        '[COLOR B3EDEDED]CINEMETA \u00b7 POPULAR MOVIES[/COLOR][/B]'
+        '[B]Cinemeta \u00b7 Popular Movies[/B]'
     )
+    assert '[COLOR' not in ctx.infowindow._header_label('[COLOR red]x[/COLOR]')
 
 
 # ---------------------------------------------------------------------------
@@ -350,7 +350,7 @@ def test_oninit_builds_items_sets_background_hides_loading_and_focuses_select(lo
     assert win.getControl(infowindow.HEADER).label == '[B]RIVULET[/B]'
 
 
-def test_oninit_sets_breadcrumb_header_when_catalog_title_is_set(load_infowindow):
+def test_oninit_sets_the_catalog_title_as_the_header(load_infowindow):
     ctx = load_infowindow()
     infowindow = ctx.infowindow
     win = infowindow.ShowcaseWindow('ShowcaseWindow.xml', '/addon/path', 'Default', '1080i')
@@ -359,10 +359,7 @@ def test_oninit_sets_breadcrumb_header_when_catalog_title_is_set(load_infowindow
 
     win.onInit()
 
-    assert win.getControl(infowindow.HEADER).label == (
-        '[B]RIVULET [COLOR 80EDEDED]/[/COLOR] '
-        '[COLOR B3EDEDED]CINEMETA \u00b7 POPULAR MOVIES[/COLOR][/B]'
-    )
+    assert win.getControl(infowindow.HEADER).label == '[B]Cinemeta \u00b7 Popular Movies[/B]'
 
 
 def test_oninit_item_label_falls_back_to_id_then_placeholder(load_infowindow):

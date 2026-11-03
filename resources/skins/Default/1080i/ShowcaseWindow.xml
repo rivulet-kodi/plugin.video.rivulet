@@ -25,16 +25,14 @@
                 <animation effect="zoom" pulse="true" center="auto" start="0,100" end="100,100" time="1000" condition="Control.IsVisible(30001)">Conditional</animation>
             </control>
 
-            <!-- Header: ShowcaseWindow.py's onInit() sets this label with setLabel() (the
-                 breadcrumb is built with inline markup, not one property) to "RIVULET" alone,
-                 or "RIVULET / <CATALOG>" once open_showcase() is handed a catalog_title - see
-                 infowindow.py's `_header_label()`. -->
+            <!-- Header: the page title, set by infowindow.py's `_header_label()` (the catalog's
+                 title, or "RIVULET"), placed like Search's and Add-ons'. -->
             <control type="label" id="30100"><left>80</left><top>36</top><width>900</width><height>50</height><font>font13</font><textcolor>FFEDEDED</textcolor><aligny>center</aligny>
                 <label>[B]RIVULET[/B]</label>
             </control>
             <control type="label"><left>1040</left><top>36</top><width>800</width><height>50</height><font>font13</font><textcolor>FFEDEDED</textcolor><align>right</align><aligny>center</aligny><label>[B]$INFO[System.Time]$INFO[Weather.Temperature,  •  ,][/B]</label></control>
             <!-- Where the icon row sits on Home: the position, then close. -->
-            <control type="label"><left>1380</left><top>100</top><width>380</width><height>56</height><font>font12</font><textcolor>B3EDEDED</textcolor><align>right</align><aligny>center</aligny>
+            <control type="label"><left>1380</left><top>100</top><width>380</width><height>56</height><font>font12</font><textcolor>B3EDEDED</textcolor><shadowcolor>C8000000</shadowcolor><align>right</align><aligny>center</aligny>
                 <label>$INFO[Container(30002).CurrentItem] / $INFO[Container(30002).NumItems]</label>
             </control>
             <control type="button" id="30003">
@@ -62,11 +60,12 @@
                 <autoscroll delay="3000" time="4000" repeat="6000">true</autoscroll>
             </control>
 
-            <!-- The strip: one focused slot (336) and five unfocused (5x268) from x=64, so the
-                 focused poster starts at the same x=80 as the text. Posters are rounded and
+            <!-- The strip: one focused slot (336) and unfocused 268s from x=64 to the screen edge,
+                 cut there like Home's rows, so the focused poster starts at the same x=80 as
+                 the text. Posters are rounded and
                  the focused one has Home's white ring. -->
             <control type="fixedlist" id="30002">
-                <top>592</top><left>64</left><width>1676</width><height>458</height>
+                <top>592</top><left>64</left><width>1856</width><height>458</height>
                 <viewtype>wrap</viewtype><orientation>horizontal</orientation>
                 <scrolltime tween="cubic" easing="out">300</scrolltime>
                 <focusposition>0</focusposition>

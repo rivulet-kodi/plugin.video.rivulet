@@ -891,6 +891,7 @@ def parse_stream(stream, addon_name=''):
     display_title = _first_nonempty_line(title) or _first_nonempty_line(name) or addon
 
     tracker, group = _parse_tracker_group(pre_clean, filename, addon)
+    label = _stream_label(name, title, addon)
     service, cached = _parse_cache_state(raw, pre_clean, name)
 
     return {
@@ -923,7 +924,33 @@ def parse_stream(stream, addon_name=''):
         'service': service,
         'cached': cached,
         'release': _parse_release(raw),
+        'label': label,
     }
+
+
+#: Lines `_stream_label` keeps: enough to name a stream, short of a plot.
+_MAX_LABEL_LINES = 4
+_LEADING_MARKS_RE = re.compile(r'^[^\w\[(]+')
+
+
+def _stream_label(name, title, addon):
+    """The stream's own words, for a row with no resolution or source to
+    show (web hosts, trailers: ``🤌 VidXgo 🎯`` / ``🎬 Movie\\n🗣 [ITA]``).
+    Without it such a row showed only the addon name. ``name`` lines first,
+    as the Stremio apps print it above ``title``; the addon's own name and
+    repeats dropped, each line through `clean_text`."""
+    seen = {addon.casefold()} if addon else set()
+    lines = []
+    for line in (name + '\n' + title).split('\n'):
+        # Marker glyphs clean_text keeps (``▶ VidXgo``) would defeat the
+        # repeat check and print as bullets of their own.
+        cleaned = _LEADING_MARKS_RE.sub('', clean_text(line))
+        if cleaned and cleaned.casefold() not in seen:
+            seen.add(cleaned.casefold())
+            lines.append(cleaned)
+            if len(lines) == _MAX_LABEL_LINES:
+                break
+    return ' \u00b7 '.join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -1106,6 +1133,7 @@ def stream_fields(info):
 
     resolution = info.get('resolution') or ''
     return {
+        'title': '' if resolution or info.get('source') else (info.get('label') or ''),
         'quality': resolution,
         'quality_color': _QUALITY_COLOR_HEX.get(_RESOLUTION_COLORS.get(resolution, 'white'), 'C7EDEDED'),
         'release': info.get('source') or '',

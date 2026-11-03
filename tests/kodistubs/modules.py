@@ -146,7 +146,7 @@ def make_xbmc(env, info_labels=None, cond_visibility=None):
     #: strings.po - only the two ids `dialogs.confirm()` callers pass for
     #: default Yes/No buttons are faked; anything else falls back to the
     #: same 'STR<id>' marker `FakeAddon.getLocalizedString` uses.
-    _CORE_STRINGS = {106: 'No', 107: 'Yes'}
+    _CORE_STRINGS = {106: 'No', 107: 'Yes', 135: 'Genres', 206: 'Cast', 20339: 'Director', 20417: 'Writer'}
 
     def getLocalizedString(string_id):
         return _CORE_STRINGS.get(string_id, 'STR%d' % string_id)

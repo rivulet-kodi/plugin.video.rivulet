@@ -225,9 +225,25 @@ def test_streams_window_shows_the_chips_for_a_movie(ctx):
         type='movie',
     ))
 
-    assert _chip_labels(win) == [('Drama', 'Genres'), ('Director One', 'Directors')]
+    assert _chip_labels(win) == [('Drama', 'Genres'), ('Director One', 'Director')]
     assert win.getControl(CREDITS).visible is True
     assert win.getFocusId() == ctx.streamswindow.LIST
+
+
+def test_a_caption_heads_its_group_only_and_unknown_categories_keep_the_addons_word(ctx):
+    win = _streams_window(ctx, _meta(
+        _link('Drama', 'Genres', _GENRE_URL),
+        _link('Actor One', 'Cast', _search('Actor One')),
+        _link('Actor Two', 'cast', _search('Actor Two')),
+        _link('Saga', 'Collection', _search('Saga')),
+        _link('Saga Two', 'Collection', _search('Saga Two')),
+        type='movie',
+    ))
+
+    assert _chip_labels(win) == [
+        ('Drama', 'Genres'), ('Actor One', 'Cast'), ('Actor Two', ''),
+        ('Saga', 'Collection'), ('Saga Two', ''),
+    ]
 
 
 @pytest.mark.parametrize('meta', [None, {}, _meta()], ids=['no-meta', 'empty-meta', 'no-links'])

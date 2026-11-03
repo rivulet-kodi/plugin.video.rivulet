@@ -82,6 +82,7 @@ EXPECTED_INFO_KEYS = {
     "service",
     "cached",
     "release",
+    "label",
 }
 
 
@@ -981,9 +982,22 @@ def test_stream_fields_none_info_cache_state_is_dim_em_dash():
     # never '' - see stream_fields()'s own docstring.
     fields = stream_fields(None)
     assert fields == {
-        "quality": "", "quality_color": "C7EDEDED", "release": "", "flags": "",
+        "title": "", "quality": "", "quality_color": "C7EDEDED", "release": "", "flags": "",
         "provider": "", "size": "", "seeders": "", "cache_state": "\u2014", "cache_color": "4DEDEDED",
     }
+
+
+def test_a_stream_with_no_quality_or_source_is_titled_by_its_own_lines():
+    """Web hosts and trailers carry no resolution or source tag; their row
+    showed only the addon name (StreamViX, live)."""
+    web = parse_stream({"name": "\U0001f90c VidXgo \U0001f3af",
+                        "title": "\U0001f3ac Movie\n\U0001f5e3 [ITA]\n\u25b6\ufe0f VidXgo\n\U0001f310 Proxy (ON)"},
+                       addon_name="StreamViX")
+    assert stream_fields(web)["title"] == "VidXgo \u00b7 Movie \u00b7 [ITA] \u00b7 Proxy (ON)"
+    trailer = parse_stream({"name": "StreamViX\n\U0001f3ac Trailer", "title": "The Echo Chamber"}, addon_name="StreamViX")
+    assert stream_fields(trailer)["title"] == "Trailer \u00b7 The Echo Chamber"
+    # A row with a quality chip or source keeps its columns; no title line.
+    assert stream_fields(parse_stream(AIOSTREAMS_STREAM, addon_name="AIOStreams"))["title"] == ""
 
 
 def test_stream_fields_against_real_aiostreams_fixture():

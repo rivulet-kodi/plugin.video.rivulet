@@ -725,6 +725,7 @@ class StreamsWindow(BaseWindow):
             if entry is None:
                 line2 = escape_label(streaminfo.format_details(info)).replace('\r', ' ').replace('\n', ' ')
                 properties = streaminfo.stream_fields(info)
+                properties['title'] = escape_label(properties.get('title'))
                 properties['release'] = escape_label(properties.get('release'))
                 properties['flags'] = escape_label(properties.get('flags'))
                 properties['provider'] = escape_label(properties.get('provider'))
