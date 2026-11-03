@@ -12,58 +12,48 @@
             <!-- No WindowClose animation on purpose: Kodi drops every action while the topmost modal plays one (test_skin_xml.py rule 9). -->
             <control type="image"><width>1920</width><height>1080</height><texture colordiffuse="A6000000">white.png</texture></control>
 
-            <control type="image"><left>580</left><top>410</top><width>760</width><height>260</height><texture border="32" colordiffuse="E60A0A0A">dlg_panel.png</texture></control>
-            <control type="image"><left>580</left><top>410</top><width>760</width><height>260</height><texture border="32" colordiffuse="26FFFFFF">dlg_stroke.png</texture></control>
+            <control type="image"><left>580</left><top>410</top><width>760</width><height>260</height><texture border="32" colordiffuse="F207090B">dlg_panel.png</texture></control>
+            <control type="image"><left>580</left><top>410</top><width>760</width><height>260</height><texture border="32" colordiffuse="24EDEDED">dlg_stroke.png</texture></control>
 
             <control type="label" id="30330">
                 <left>628</left><top>452</top><width>664</width><height>44</height>
-                <font>font37</font><textcolor>FFFFFFFF</textcolor>
+                <font>font37</font><textcolor>FFEDEDED</textcolor>
                 <label></label>
             </control>
 
             <control type="label" id="30331">
                 <left>628</left><top>502</top><width>664</width><height>36</height>
-                <font>font27</font><textcolor>B3FFFFFF</textcolor>
+                <font>font27</font><textcolor>B3EDEDED</textcolor>
                 <label></label>
             </control>
 
-            <!-- Secondary (30332), fixed 400px - fits "Start from
-                 beginning" (the longest realistic label) with room to
-                 spare. Unfocused: a rounded hairline
-                 (dlg_row_stroke.png). Focused: palette's general focus fill
-                 (FF2E2E2E, not the accent) so it reads as focused
-                 without ever looking like the recommended action. -->
-            <control type="image"><left>628</left><top>560</top><width>400</width><height>64</height><texture border="20" colordiffuse="38FFFFFF">dlg_row_stroke.png</texture><visible>!Control.HasFocus(30332)</visible></control>
-            <control type="image"><left>628</left><top>560</top><width>400</width><height>64</height><texture border="20" colordiffuse="FF2E2E2E">dlg_row.png</texture><visible>Control.HasFocus(30332)</visible></control>
+            <!-- The buttons are Home's pills (pill_fill.png, 9-slice border 28): a faint plate
+                 and light text, white with dark text when focused. Secondary (30332) is a
+                 fixed 400px - it fits "Start from beginning" (the longest realistic label)
+                 with room to spare. Primary (30333) is a fixed 248px, right-flush against the
+                 same 1292 edge the heading/body use, so 400 + 16 gap + 248 lands exactly on
+                 their 664-wide column; its plate is a little stronger so it still reads as the
+                 recommended action before it has focus, and it takes focus on open via the
+                 window's <defaultcontrol>. -->
             <control type="button" id="30332">
-                <left>628</left><top>560</top><width>400</width><height>64</height>
+                <left>628</left><top>564</top><width>400</width><height>56</height>
                 <align>center</align><aligny>center</aligny>
                 <font>font13</font>
-                <texturefocus colordiffuse="00FFFFFF">white.png</texturefocus>
-                <texturenofocus colordiffuse="00FFFFFF">white.png</texturenofocus>
-                <textcolor>FFFFFFFF</textcolor>
-                <focusedcolor>FFFFFFFF</focusedcolor>
+                <texturefocus border="28" colordiffuse="FFFFFFFF">pill_fill.png</texturefocus>
+                <texturenofocus border="28" colordiffuse="24FFFFFF">pill_fill.png</texturenofocus>
+                <textcolor>E6EDEDED</textcolor>
+                <focusedcolor>FF07090B</focusedcolor>
                 <label></label>
                 <onright>30333</onright>
             </control>
-
-            <!-- Primary (30333), fixed 248px - right-flush against the
-                 same 1292 edge the heading/body use, so 400 + 16 gap +
-                 248 lands exactly on their 664-wide column. Unfocused:
-                 a light-grey rounded hairline so it still reads as the
-                 recommended action before it has focus. Focused: a
-                 light-grey rounded plate with dark text; takes focus on
-                 open via the window's <defaultcontrol>. -->
-            <control type="image"><left>1044</left><top>560</top><width>248</width><height>64</height><texture border="20" colordiffuse="80D6D6D6">dlg_row_stroke.png</texture><visible>!Control.HasFocus(30333)</visible></control>
-            <control type="image"><left>1044</left><top>560</top><width>248</width><height>64</height><texture border="20" colordiffuse="FFD6D6D6">dlg_row.png</texture><visible>Control.HasFocus(30333)</visible></control>
             <control type="button" id="30333">
-                <left>1044</left><top>560</top><width>248</width><height>64</height>
+                <left>1044</left><top>564</top><width>248</width><height>56</height>
                 <align>center</align><aligny>center</aligny>
                 <font>font13</font>
-                <texturefocus colordiffuse="00FFFFFF">white.png</texturefocus>
-                <texturenofocus colordiffuse="00FFFFFF">white.png</texturenofocus>
-                <textcolor>FFD6D6D6</textcolor>
-                <focusedcolor>FF0B0B0B</focusedcolor>
+                <texturefocus border="28" colordiffuse="FFFFFFFF">pill_fill.png</texturefocus>
+                <texturenofocus border="28" colordiffuse="3DFFFFFF">pill_fill.png</texturenofocus>
+                <textcolor>FFEDEDED</textcolor>
+                <focusedcolor>FF07090B</focusedcolor>
                 <label></label>
                 <onleft>30332</onleft>
             </control>

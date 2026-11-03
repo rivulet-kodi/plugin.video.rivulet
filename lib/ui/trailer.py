@@ -141,12 +141,8 @@ def play_trailer(meta, stype='', sid=''):
     the screens first, so a stalled trailer left Kodi's Videos window
     with a black player behind it.
     """
-    import xbmc
-    import xbmcgui
-
-    from lib.stremio.addons import safe_url_for_log
-    from lib.ui.compat import L, log, notify
-    from lib.ui.uicommon import CANCELLED, escape_label, run_cancellable
+    from lib.ui.compat import L, notify
+    from lib.ui.uicommon import CANCELLED
 
     full = _full_meta(meta if isinstance(meta, dict) else {}, stype, sid)
     if full is CANCELLED:
@@ -155,40 +151,88 @@ def play_trailer(meta, stype='', sid=''):
     if not yt:
         notify(L(30497))
         return False
+    return play_youtube(yt, (full or {}).get('name'))
+
+
+def stream_trailer_id(stream):
+    """The YouTube id of a stream that is only a ``ytId`` (an addon's
+    trailer row), or ``''``. Kodi-free."""
+    if not isinstance(stream, dict) or stream.get('url') or stream.get('infoHash') or stream.get('externalUrl'):
+        return ''
+    yt = str(stream.get('ytId') or '').strip()
+    return yt if _YT_ID.match(yt) else ''
+
+
+def play_youtube(yt, name=None):
+    """Play YouTube id `yt` as a trailer of the title called `name`,
+    blocking until it stops. True when one played. See `play_trailer()`."""
+    from lib.ui.compat import L, notify
+    from lib.ui.uicommon import escape_label
+
     # Addon-supplied: the label reaches the player OSD and the spinner.
-    name = (full or {}).get('name')
     name = escape_label(name) if isinstance(name, str) else ''
     label = ('%s – %s' % (name, L(30499))) if name else L(30499)
-    server = run_cancellable(lambda: _server_url(yt), label)
-    if server is CANCELLED:
-        return False
-    tried = 0
-    for url in trailer_urls(yt, server or ''):
-        tried += 1
-        item = xbmcgui.ListItem(label=label, path=url)
-        log('trailer: trying %s via %s' % (yt, safe_url_for_log(url)), xbmc.LOGINFO)
-        outcome = _start(url, item, label)
-        if outcome == 'rolling':
-            _watch()
-            return True
-        if outcome in ('cancelled', 'abort'):
-            return False
-        log('trailer: %s did not start via %s' % (yt, safe_url_for_log(url)), xbmc.LOGWARNING)
-    if not tried:
+    outcome = _try_routes(yt, label)
+    if outcome == 'rolling':
+        _watch()
+        return True
+    if outcome == 'none':
         _offer_youtube_addon(L, notify)
-    else:
+    elif outcome == 'stalled':
         notify(L(30510))
     return False
 
 
-def _start(url, item, heading):
-    """Start `url` and wait, under a spinner, for its clock to move.
+def _try_routes(yt, label):
+    """Probe the server and start each route in turn, under one spinner.
+
+    ``'rolling'``, ``'stalled'`` (every route tried), ``'none'`` (no
+    route at all), ``'cancelled'`` or ``'abort'``. One spinner for the
+    probe and every start: a spinner per step closed and reopened, and the
+    screen flashed undimmed in between.
+    """
+    import xbmc
+    import xbmcgui
+
+    from lib.stremio.addons import safe_url_for_log
+    from lib.ui.compat import log
+    from lib.ui.uicommon import (
+        CANCELLED,
+        busy_dialog,
+        deliver_queued_input,
+        drain_queued_input,
+        wait_cancellable,
+    )
+
+    with busy_dialog(label) as dialog:
+        aborted = deliver_queued_input()
+        if aborted or dialog.iscanceled():
+            if not aborted:
+                drain_queued_input()
+            return 'cancelled'
+        server = wait_cancellable(lambda: _server_url(yt), dialog)
+        if server is CANCELLED:
+            return 'cancelled'
+        tried = 0
+        for url in trailer_urls(yt, server or ''):
+            tried += 1
+            item = xbmcgui.ListItem(label=label, path=url)
+            log('trailer: trying %s via %s' % (yt, safe_url_for_log(url)), xbmc.LOGINFO)
+            outcome = _start(url, item, dialog)
+            if outcome != 'stalled':
+                return outcome
+            log('trailer: %s did not start via %s' % (yt, safe_url_for_log(url)), xbmc.LOGWARNING)
+        return 'stalled' if tried else 'none'
+
+
+def _start(url, item, dialog):
+    """Start `url` and wait, under `dialog`, for its clock to move.
 
     ``'rolling'``, ``'stalled'`` (stopped again), ``'cancelled'`` (Back
     on the spinner; stopped) or ``'abort'`` (Kodi is quitting)."""
     import xbmc
 
-    from lib.ui.uicommon import CANCELLED, busy_dialog, wait_cancellable
+    from lib.ui.uicommon import CANCELLED, wait_cancellable
 
     player = xbmc.Player()
     monitor = xbmc.Monitor()
@@ -196,8 +240,7 @@ def _start(url, item, heading):
         player.play(url, item)
     except Exception:
         return 'stalled'
-    with busy_dialog(heading) as dialog:
-        result = wait_cancellable(lambda: _wait_rolling(player, monitor), dialog, monitor)
+    result = wait_cancellable(lambda: _wait_rolling(player, monitor), dialog, monitor)
     if result == 'rolling':
         return 'rolling'
     _stop(player, monitor)

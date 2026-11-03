@@ -71,6 +71,8 @@ class SearchWindow(BaseWindow):
         self._lock = threading.Lock()
         self._ready = []
         self._hero_painted = None
+        #: Status line for results handed over by `open_search(query)`.
+        self._notice = ''
         #: The bar reported a change since the last action. Kodi queues
         #: the bar's click before the action that caused it, so a Select
         #: on the bar that arrives with this set followed a confirmed
@@ -101,12 +103,20 @@ class SearchWindow(BaseWindow):
         self._paint_query()
         if self._metas:
             self._show(self._metas, results=True)
+            if self._notice:
+                self._status(self._notice)
+            # Clearing the bar goes back to Discover, so load it as a
+            # search from the bar would have.
+            if not self._discover:
+                self._load_discover()
         elif self._discover:
             self._show(self._discover, results=False)
         else:
             self._welcome()
             self._load_discover()
-        self.setFocusId(QUERY)
+        # Opened on a name's results (`open_search(query)`): the posters
+        # are what the user came for.
+        self.setFocusId(ROW if self._metas and self.getControl(ROW).size() else QUERY)
 
     def _paint_query(self):
         # Edit text, not a label: Kodi draws the cursor while it has focus.
@@ -410,16 +420,52 @@ def discover_metas():
     return []
 
 
-def open_search():
-    """Open the search. True when playback started (close the caller)."""
+def open_search(query=None):
+    """Open the search. True when playback started (close the caller).
+
+    With `query` (a cast or crew name from a title page, as Stremio's
+    `stremio:///search?search=` link does) it is searched first, under the
+    spinner over the calling screen, and the screen opens on its results
+    with the name in the bar. Nothing found: the screen does not open and
+    the user is told, as the coverflow it replaces did. Back on the
+    spinner, or a name that is only blanks, stays where the user was.
+    """
     import xbmc
 
     from lib.ui.compat import L, log, notify
 
     log('search: opening', xbmc.LOGINFO)
+    metas = []
+    if query:
+        from lib.ui.dependencies import get_client, get_store
+        from lib.ui.searchwindow import SearchReport, _search_notice, run_query
+
+        query = query.strip()[:MAX_QUERY]
+        if not query:
+            return False
+        report = SearchReport()
+        try:
+            metas = list(run_query(get_store(), get_client(), query, report=report) or [])
+        except Exception as exc:
+            log('search: search failed: %s' % type(exc).__name__, xbmc.LOGWARNING)
+            notify(L(30032))
+            return False
+        if report.canceled:
+            return False
+        notice = _search_notice(report)
+        if not metas:
+            notify(notice or _with_query(L(30513), query))
+            return False
     window = None
     try:
         window = open_window(SearchWindow, 'SearchWindow.xml')
+        if metas:
+            window.query = query
+            window._metas = metas
+            window._results_query = query
+            # Some catalogs failed or were too slow: said on the status
+            # line, as a search from the bar does.
+            window._notice = notice or ''
         return window.start()
     except Exception as exc:  # a skin failure must surface, not vanish
         from lib.stremio.addons import addon_error_detail

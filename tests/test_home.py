@@ -216,7 +216,7 @@ def test_status_text_reports_not_logged_in_when_auth_is_none(load_homewindow):
 
     text = ctx.homewindow._status_text(None)
 
-    assert text == '[COLOR 57EEF3F6]\u25cf[/COLOR] STR30190'
+    assert text == '[COLOR 57EDEDED]\u25cf[/COLOR] STR30190'
     assert 'STR30190' in text
 
 
@@ -328,7 +328,7 @@ def test_oninit_hides_library_row_when_not_authenticated(load_homewindow, monkey
     assert win.getProperty('HomeSignedOut') == '1'
     actions = [item.getProperty('action') for item in win.getControl(ctx.homewindow.BROWSE_LIST).items]
     assert 'library' not in actions
-    assert win.getControl(ctx.homewindow.STATUS_LABEL).label == '[COLOR 57EEF3F6]\u25cf[/COLOR] STR30190'
+    assert win.getControl(ctx.homewindow.STATUS_LABEL).label == '[COLOR 57EDEDED]\u25cf[/COLOR] STR30190'
 
 
 def test_oninit_status_label_says_signed_in(load_homewindow, monkeypatch):
@@ -1207,6 +1207,16 @@ def test_continue_cards_are_wide_art_with_the_show_and_episode(load_homewindow):
     assert movie.getProperty('land') == 'https://image.tmdb.org/t/p/w1280/b.jpg'
     assert movie.getProperty('card_code') == ''
     assert movie.getProperty('card_show') == 'Dune'
+
+    # A local progress record has a poster and no backdrop: an imdb id
+    # still gets a wide picture before any meta fetch, Cinemeta's own.
+    recorded = ctx.homewindow._continue_item({'id': 'tt12300742', 'type': 'movie', 'name': 'Bugonia', 'poster': 'p.jpg'})
+    assert recorded.getProperty('land') == 'https://images.metahub.space/background/medium/tt12300742/img'
+    # The addon's own backdrop, once fetched, replaces the guess.
+    ctx.homewindow._fill_continue_card(recorded, {'background': 'https://img/real.jpg'})
+    assert recorded.getProperty('land') == 'https://img/real.jpg'
+    ctx.homewindow._fill_continue_card(recorded, {'background': 'https://img/other.jpg'})
+    assert recorded.getProperty('land') == 'https://img/real.jpg'
 
     bare = ctx.homewindow._continue_item({
         'id': 'kitsu:1', 'type': 'series', 'name': 'Show', 'poster': 'p.jpg', 'video_id': 'kitsu:1:4',

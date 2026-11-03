@@ -38,6 +38,12 @@ _CATEGORY_RANK = {
 }
 _OTHER_RANK = max(_CATEGORY_RANK.values()) + 1
 
+#: Kodi's own strings for the categories it has words for, so the caption
+#: follows the UI language; addons send them in English. Singular for
+#: directors and writers: Kodi has no plural. Any other category is
+#: shown as the addon wrote it.
+_CATEGORY_STRING = {0: 135, 1: 206, 2: 20339, 3: 20417}
+
 
 def credit_links(meta):
     """`[(name, category, parsed_link), ...]` for the chips, in display
@@ -68,10 +74,20 @@ def fill_credits(window, meta):
     if not credits:
         control.setVisible(False)
         return []
+    import xbmc
+
     items = []
+    previous = None
     for name, category, _parsed in credits:
         item = xbmcgui.ListItem(escape_label(name))
-        item.setProperty('category', escape_label(category))
+        # The caption heads its group only: over every chip it read as
+        # "Genres Genres Cast Cast Cast".
+        rank = _CATEGORY_RANK.get(category.casefold(), _OTHER_RANK)
+        key = rank if rank != _OTHER_RANK else category.casefold()
+        if key != previous:
+            string_id = _CATEGORY_STRING.get(rank)
+            item.setProperty('category', xbmc.getLocalizedString(string_id) if string_id else escape_label(category))
+        previous = key
         items.append(item)
     control.addItems(items)
     control.setVisible(True)
@@ -89,8 +105,16 @@ def open_credit(window, links):
     position = window.getControl(CREDITS).getSelectedPosition()
     if not 0 <= position < len(links):
         return
+    # A second OK queued while the search spinner pumps input would
+    # otherwise stack a second results screen over the first.
+    if getattr(window, '_credit_open', False):
+        return
     from lib.ui.dependencies import get_client, get_store
     from lib.ui.infowindow import open_credit_link
 
-    open_credit_link(get_store(), get_client(), links[position])
+    window._credit_open = True
+    try:
+        open_credit_link(get_store(), get_client(), links[position])
+    finally:
+        window._credit_open = False
     window.setFocusId(CREDITS)

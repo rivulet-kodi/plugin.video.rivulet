@@ -690,7 +690,11 @@ class StreamsWindow(BaseWindow):
         addon_count = provider_count
         self.getControl(SOURCES_COUNT).setLabel(L(_SOURCES_STRING_ID) % source_count)
         self.getControl(ADDONS_COUNT).setLabel(L(_ADDONS_STRING_ID) % addon_count)
-        self.getControl(CACHED_COUNT).setLabel(L(_CACHED_STRING_ID) % cached_count)
+        # Only debrid streams can be cached. A list of plain torrents and
+        # web hosts has nothing to count, and a green "CACHED: 0" over it
+        # read as a fault.
+        has_cache_state = any(info.get('cached') is not None for info, _stream in display_pairs)
+        self.getControl(CACHED_COUNT).setLabel(L(_CACHED_STRING_ID) % cached_count if has_cache_state else '')
 
     def _row_render(self, info, include_addon):
         """Cache `info`'s own (line1, line2, properties) row material by
@@ -725,6 +729,7 @@ class StreamsWindow(BaseWindow):
             if entry is None:
                 line2 = escape_label(streaminfo.format_details(info)).replace('\r', ' ').replace('\n', ' ')
                 properties = streaminfo.stream_fields(info)
+                properties['title'] = escape_label(properties.get('title'))
                 properties['release'] = escape_label(properties.get('release'))
                 properties['flags'] = escape_label(properties.get('flags'))
                 properties['provider'] = escape_label(properties.get('provider'))
@@ -765,7 +770,7 @@ class StreamsWindow(BaseWindow):
         # catalog/meta name off an untrusted third-party addon) straight
         # into a rendered label - escape_label() neutralises any [B]/
         # $INFO[...]/... markup it might contain first.
-        self.getControl(HEADING).setLabel((escape_label(self.heading) or L(30041)).upper())
+        self.getControl(HEADING).setLabel(escape_label(self.heading) or L(30041))
 
         self._rebuild_list()
         self._credit_links = fill_credits(self, self.meta)
@@ -819,6 +824,16 @@ class StreamsWindow(BaseWindow):
         if focused is None:
             return
         info, stream = self.pairs[int(focused.getProperty('position'))]
+
+        # An addon's trailer row: played like the Trailer button, under a
+        # spinner until it runs, with no resume prompt and no progress.
+        # Through play_direct() the screens closed while the engine was
+        # still fetching it, leaving nothing on screen for seconds.
+        from lib.ui.trailer import play_youtube, stream_trailer_id
+        yt = stream_trailer_id(stream)
+        if yt:
+            play_youtube(yt, self.heading or (self.meta or {}).get('name'))
+            return
 
         # item_meta carries the content title/art/meta this window
         # already has in hand (see the module docstring's heading/art/

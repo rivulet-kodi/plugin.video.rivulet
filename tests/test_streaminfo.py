@@ -82,6 +82,7 @@ EXPECTED_INFO_KEYS = {
     "service",
     "cached",
     "release",
+    "label",
 }
 
 
@@ -888,9 +889,9 @@ def test_format_label_no_service_omits_cache_segment_entirely():
 @pytest.mark.parametrize("resolution,color", [
     ("2160p", "FFFFD700"),
     ("1080p", "FF4ADE80"),
-    ("720p", "C7EEF3F6"),
-    ("480p", "C7EEF3F6"),
-    ("", "C7EEF3F6"),
+    ("720p", "C7EDEDED"),
+    ("480p", "C7EDEDED"),
+    ("", "C7EDEDED"),
 ], ids=["2160p-gold", "1080p-green", "720p-dim", "480p-dim", "unknown-dim"])
 def test_stream_fields_quality_color_matches_the_palette(resolution, color):
     fields = stream_fields(_info(resolution=resolution))
@@ -950,7 +951,7 @@ def test_stream_fields_no_cache_info_is_dim_em_dash_not_fabricated():
     info = _info(service="", cached=None)
     fields = stream_fields(info)
     assert fields["cache_state"] == "\u2014"
-    assert fields["cache_color"] == "4DEEF3F6"
+    assert fields["cache_color"] == "4DEDEDED"
 
 
 def test_stream_fields_missing_size_and_seeders_are_empty_strings():
@@ -981,9 +982,25 @@ def test_stream_fields_none_info_cache_state_is_dim_em_dash():
     # never '' - see stream_fields()'s own docstring.
     fields = stream_fields(None)
     assert fields == {
-        "quality": "", "quality_color": "C7EEF3F6", "release": "", "flags": "",
-        "provider": "", "size": "", "seeders": "", "cache_state": "\u2014", "cache_color": "4DEEF3F6",
+        "title": "", "quality": "", "quality_color": "C7EDEDED", "release": "", "flags": "",
+        "provider": "", "size": "", "seeders": "", "cache_state": "\u2014", "cache_color": "4DEDEDED",
     }
+
+
+def test_a_stream_with_no_quality_or_source_is_titled_by_its_own_lines():
+    """Web hosts and trailers carry no resolution or source tag; their row
+    showed only the addon name (StreamViX, live)."""
+    web = parse_stream({"name": "\U0001f90c VidXgo \U0001f3af",
+                        "title": "\U0001f3ac Movie\n\U0001f5e3 [ITA]\n\u25b6\ufe0f VidXgo\n\U0001f310 Proxy (ON)"},
+                       addon_name="StreamViX")
+    assert stream_fields(web)["title"] == "VidXgo \u00b7 Movie \u00b7 [ITA] \u00b7 Proxy (ON)"
+    trailer = parse_stream({"name": "StreamViX\n\U0001f3ac Trailer", "title": "The Echo Chamber"}, addon_name="StreamViX")
+    assert stream_fields(trailer)["title"] == "Trailer \u00b7 The Echo Chamber"
+    # `description` is Stremio's newer name for `title`.
+    described = parse_stream({"name": "StreamViX", "description": "Mixdrop\n[ITA]"}, addon_name="StreamViX")
+    assert stream_fields(described)["title"] == "Mixdrop \u00b7 [ITA]"
+    # A row with a quality chip or source keeps its columns; no title line.
+    assert stream_fields(parse_stream(AIOSTREAMS_STREAM, addon_name="AIOStreams"))["title"] == ""
 
 
 def test_stream_fields_against_real_aiostreams_fixture():
@@ -1447,3 +1464,13 @@ def test_parse_stream_caps_the_filename_before_the_release_group_regex():
 
 def test_escape_label_neutralises_escvar():
     assert "$ESCVAR[" not in escape_label("$ESCVAR[Foo]")
+
+
+@pytest.mark.parametrize(("name", "service", "cached"), [
+    ("4K \u207d\u1d3f\u1d30\u207e\u26a1", "RD", True),   # AIOStreams superscript, cached
+    ("4K \u207d\u1d3f\u1d30\u207e", "RD", False),         # same service, not cached
+    ("4K \u207d\u1d56\u00b2\u1d56\u207e", "", None),     # P2P: no debrid, no state
+])
+def test_superscript_service_codes_read_as_plain_ones(name, service, cached):
+    info = parse_stream({"name": name, "description": "x"}, addon_name="AIOStreams")
+    assert (info["service"], info["cached"]) == (service, cached)

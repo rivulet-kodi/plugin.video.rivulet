@@ -71,16 +71,10 @@ _BBCODE_RE = re.compile(r'\[/?(?:B|I|COLOR|UPPERCASE|LOWERCASE|CAPITALIZE|CR)[^\
 #: pairing; anything listed here has been checked by hand and must stay
 #: checked. Adding a `Mono26` control that Python populates without
 #: listing it fails `test_python_populated_mono_controls_are_declared`.
-_DECLARED_MONO_CONTROLS = {
-    30100: 'streamswindow SOURCES_COUNT - "SOURCES: %d", digits and ASCII only',
-    30101: 'streamswindow ADDONS_COUNT - "ADDONS: %d", digits and ASCII only',
-    30102: 'streamswindow CACHED_COUNT - "CACHED: %d", digits and ASCII only',
-    30303: 'dialogs PROGRESS_PERCENT - "%d%%", digits and ASCII only',
-    30306: 'dialogs PROGRESS_STATS - caller-supplied speed/peers text '
-           '(e.g. strings.po #30082 "%s/s \u2014 %d peers"), digits/ASCII plus '
-           'the em dash, which NotoMono has',
-    30313: 'dialogs COUNTDOWN_REMAINING - "%d s", digits and ASCII only',
-}
+#: Empty since the dialogs' readouts moved to NotoSans with the rest of
+#: the skin; the Streams rows' Mono26 columns are skin properties, not
+#: text Python writes.
+_DECLARED_MONO_CONTROLS = {}
 
 
 def _is_symbol(ch):

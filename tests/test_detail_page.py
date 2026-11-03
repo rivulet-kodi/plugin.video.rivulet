@@ -60,7 +60,7 @@ def test_episode_page_geometry(logo):
     for a, b in itertools.combinations(selected, 2):
         assert _apart(_rect(a), _rect(b)), (_rect(a), _rect(b))
     episodes = next(c for c in controls if c.get('id') == '30002')
-    assert _rect(episodes) == (60, 396, 1310, 600)
+    assert _rect(episodes) == (60, 366, 1310, 600)
     for name in ('itemlayout', 'focusedlayout'):
         layout = episodes.find(name)
         assert int(layout.get('height')) == 200 and 600 // 200 == 3

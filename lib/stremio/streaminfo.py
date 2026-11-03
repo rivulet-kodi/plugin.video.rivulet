@@ -36,6 +36,7 @@ derived from one is parsed from the pre-``clean_text()`` text, not
 ``raw``.
 """
 import re
+import unicodedata
 
 # ---------------------------------------------------------------------------
 # escape_label
@@ -773,7 +774,26 @@ _CACHE_BARE_PATTERNS = (
 )
 
 
+#: AIOStreams' superscript templates write the service the way they write
+#: ``⁽ᵖ²ᵖ⁾`` for a plain torrent: ``⁽ᴿᴰ⁾``, with ``⚡`` beside it once cached.
+#: NFKC folds those letters to ``(RD)``; this is the cached form.
+_CACHE_FOLDED_CACHED = (
+    # Parentheses as \x28/\x29: tests/test_glyph_coverage.py finds these
+    # patterns by balancing the call's own parentheses.
+    re.compile(r'\x28(%s)\x29\s*\u26a1' % _SERVICE_ALT),
+    re.compile(r'\u26a1\ufe0f?\s*\x28(%s)\x29' % _SERVICE_ALT),
+)
+
+
 def _parse_cache_state(raw, pre_clean, name):
+    # Superscript service codes (``⁽ᴿᴰ⁾``) read as plain ones.
+    folded = unicodedata.normalize('NFKC', name)
+    if folded != name:
+        for pattern in _CACHE_FOLDED_CACHED:
+            match = pattern.search(folded)
+            if match:
+                return match.group(1), True
+        name = folded
     for pattern, cached in _CACHE_TEXT_PATTERNS:
         match = pattern.search(raw)
         if match:
@@ -891,6 +911,7 @@ def parse_stream(stream, addon_name=''):
     display_title = _first_nonempty_line(title) or _first_nonempty_line(name) or addon
 
     tracker, group = _parse_tracker_group(pre_clean, filename, addon)
+    label = _stream_label(name, title or description, addon)
     service, cached = _parse_cache_state(raw, pre_clean, name)
 
     return {
@@ -923,7 +944,37 @@ def parse_stream(stream, addon_name=''):
         'service': service,
         'cached': cached,
         'release': _parse_release(raw),
+        'label': label,
     }
+
+
+#: Lines `_stream_label` keeps: enough to name a stream, short of a plot.
+_MAX_LABEL_LINES = 4
+_LEADING_MARKS_RE = re.compile(r'^[^\w\[(]+')
+
+
+def _stream_label(name, title, addon):
+    """The stream's own words, for a row with no resolution or source to
+    show (web hosts, trailers: ``🤌 VidXgo 🎯`` / ``🎬 Movie\\n🗣 [ITA]``).
+    `title` is the caller's ``title``, else its ``description`` (the
+    field Stremio replaced ``title`` with).
+    Without it such a row showed only the addon name. ``name`` lines first,
+    as the Stremio apps print it above ``title``; the addon's own name and
+    repeats dropped, each line through `clean_text`."""
+    seen = {addon.casefold()} if addon else set()
+    lines = []
+    # Capped like `pre_clean`: blank and repeated lines never count toward
+    # `_MAX_LABEL_LINES`, so an uncapped input walks every line.
+    for line in (name + '\n' + title)[:_MAX_TEXT_LEN].split('\n'):
+        # Marker glyphs clean_text keeps (``▶ VidXgo``) would defeat the
+        # repeat check and print as bullets of their own.
+        cleaned = _LEADING_MARKS_RE.sub('', clean_text(line))
+        if cleaned and cleaned.casefold() not in seen:
+            seen.add(cleaned.casefold())
+            lines.append(cleaned)
+            if len(lines) == _MAX_LABEL_LINES:
+                break
+    return ' \u00b7 '.join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -1054,8 +1105,8 @@ def format_label(info, include_addon=True):
 _QUALITY_COLOR_HEX = {
     'gold': 'FFFFD700',
     'lime': 'FF4ADE80',
-    'cyan': 'C7EEF3F6',
-    'white': 'C7EEF3F6',
+    'cyan': 'C7EDEDED',
+    'white': 'C7EDEDED',
 }
 
 
@@ -1102,12 +1153,13 @@ def stream_fields(info):
         # a blank cell, so the column stays visually aligned. Mono26
         # (NotoMono) carries U+2014 in its cmap, so this is safe to draw
         # in that font. `cache_state` is therefore NEVER ''.
-        cache_state, cache_color = '\u2014', '4DEEF3F6'
+        cache_state, cache_color = '\u2014', '4DEDEDED'
 
     resolution = info.get('resolution') or ''
     return {
+        'title': '' if resolution or info.get('source') else (info.get('label') or ''),
         'quality': resolution,
-        'quality_color': _QUALITY_COLOR_HEX.get(_RESOLUTION_COLORS.get(resolution, 'white'), 'C7EEF3F6'),
+        'quality_color': _QUALITY_COLOR_HEX.get(_RESOLUTION_COLORS.get(resolution, 'white'), 'C7EDEDED'),
         'release': info.get('source') or '',
         'flags': ' \u00b7 '.join(flags_bits),
         'provider': info.get('addon') or '',

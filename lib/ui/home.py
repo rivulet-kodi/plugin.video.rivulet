@@ -1694,7 +1694,7 @@ def _status_text(auth):
     from lib.ui.compat import L
 
     if not auth:
-        return '[COLOR 57EEF3F6]\u25cf[/COLOR] %s' % L(30190)
+        return '[COLOR 57EDEDED]\u25cf[/COLOR] %s' % L(30190)
     return '[COLOR FFD6D6D6]\u25cf[/COLOR] %s' % L(30488)
 
 
@@ -2233,14 +2233,16 @@ def _apply_library_meta(window):
 
 
 def _fill_continue_card(item, meta):
-    """A Continue card with no wide picture takes the fetched backdrop."""
-    if item.getProperty('land'):
+    """A Continue card with no wide picture, or only the metahub guess,
+    takes the fetched backdrop."""
+    if item.getProperty('land') and item.getProperty('land_guess') != '1':
         return
     background = meta.get('background') if isinstance(meta, dict) else ''
     if isinstance(background, str) and background:
         from lib.ui.urlutil import sized_image
 
         item.setProperty('land', sized_image(background, 'backdrop'))
+        item.setProperty('land_guess', '')
 
 
 def _upcoming_facts(window, count=2):
@@ -2730,10 +2732,13 @@ def _continue_card(entry):
     The card is 16:9; the poster scaled into it was a slice through the
     middle of the poster. An episode with a Cinemeta id uses that
     episode's still (the picture the New Episodes cards use), anything
-    else its backdrop. ``""`` when there is neither: the skin then shows
-    the poster whole on the plate.
+    else its backdrop. A local progress record carries only a name and a
+    poster, so an imdb id with no backdrop takes Cinemeta's metahub one:
+    without it the card showed the poster until a focus fetched the meta.
+    ``""`` when there is none of these: the skin then shows the poster
+    whole on the plate.
     """
-    from lib.newepisodes import episode_still_url
+    from lib.newepisodes import background_url, episode_still_url
     from lib.ui.urlutil import sized_image
 
     land = ''
@@ -2747,6 +2752,8 @@ def _continue_card(entry):
     if not land:
         background = entry.get('background') or ''
         land = sized_image(background, 'backdrop') if isinstance(background, str) else ''
+    if not land:
+        land = background_url(entry.get('id'))
     return land, code
 
 
@@ -2758,12 +2765,15 @@ def _continue_item(entry):
     The card itself is wide art with the show and the episode written
     bottom-left, the way the New Episodes cards read (#9).
     """
+    from lib.newepisodes import background_url
     from lib.ui.uicommon import escape_label
 
     item = _poster_item(entry)
     land, code = _continue_card(entry)
     props = {
         'land': land,
+        # Only a guess at Cinemeta's picture: a fetched backdrop wins.
+        'land_guess': '1' if land and land == background_url(entry.get('id')) else '',
         'card_show': escape_label(entry.get('name') or ''),
         'card_code': code,
     }

@@ -269,13 +269,14 @@ def test_continue_cards_fetch_their_meta_and_fill_the_hero(load_homewindow):
     hw = ctx.homewindow
     import xbmcgui
 
-    item = hw._continue_item({'id': 'tt1', 'type': 'movie', 'name': 'Dune', 'poster': 'p.jpg'})
+    # Not an imdb id: no metahub backdrop, so the fetched one fills the card.
+    item = hw._continue_item({'id': 'kitsu:1', 'type': 'movie', 'name': 'Dune', 'poster': 'p.jpg'})
     assert item.getProperty('needs_meta') == '1'
     win = hw.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     win.getControl(hw.CONTINUE_SHELF).addItems([item])
     win.getControl(hw.LIBRARY_SHELF).addItems([xbmcgui.ListItem('other')])
-    win._library_meta_ready = [('movie', 'tt1', {
-        'id': 'tt1', 'type': 'movie', 'name': 'Dune: Part One', 'description': 'A desert.',
+    win._library_meta_ready = [('movie', 'kitsu:1', {
+        'id': 'kitsu:1', 'type': 'movie', 'name': 'Dune: Part One', 'description': 'A desert.',
         'background': 'https://img/b.jpg',
     })]
 

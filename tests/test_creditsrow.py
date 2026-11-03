@@ -68,7 +68,7 @@ def _wire(monkeypatch, ctx, addons=()):
     monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: client)
     rec.store, rec.client = store, client
 
-    def _run_query(passed_store, passed_client, query):
+    def _run_query(passed_store, passed_client, query, report=None):
         rec.queries.append((passed_store, passed_client, query))
         return [{'id': 'tt2', 'name': 'Found', 'type': 'movie'}]
 
@@ -79,7 +79,27 @@ def _wire(monkeypatch, ctx, addons=()):
     monkeypatch.setattr(ctx.searchwindow, 'run_query', _run_query)
     monkeypatch.setattr(ctx.views, '_fetch_catalog', _fetch_catalog)
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: rec.opened.append(metas) or None)
+    # A person opens the Search screen on its results, the way Stremio's
+    # search link does; a genre still opens the coverflow.
+    _fake_search_window(monkeypatch, rec.opened)
     return rec
+
+
+def _fake_search_window(monkeypatch, opened):
+    import lib.ui.search as search
+
+    class _Search:
+        query = ''
+        _metas = ()
+
+        def start(self):
+            opened.append(list(self._metas))
+            return False
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(search, 'open_window', lambda cls, xml: _Search())
 
 
 def _detail_window(ctx, meta):
@@ -225,9 +245,25 @@ def test_streams_window_shows_the_chips_for_a_movie(ctx):
         type='movie',
     ))
 
-    assert _chip_labels(win) == [('Drama', 'Genres'), ('Director One', 'Directors')]
+    assert _chip_labels(win) == [('Drama', 'Genres'), ('Director One', 'Director')]
     assert win.getControl(CREDITS).visible is True
     assert win.getFocusId() == ctx.streamswindow.LIST
+
+
+def test_a_caption_heads_its_group_only_and_unknown_categories_keep_the_addons_word(ctx):
+    win = _streams_window(ctx, _meta(
+        _link('Drama', 'Genres', _GENRE_URL),
+        _link('Actor One', 'Cast', _search('Actor One')),
+        _link('Actor Two', 'cast', _search('Actor Two')),
+        _link('Saga', 'Collection', _search('Saga')),
+        _link('Saga Two', 'Collection', _search('Saga Two')),
+        type='movie',
+    ))
+
+    assert _chip_labels(win) == [
+        ('Drama', 'Genres'), ('Actor One', 'Cast'), ('Actor Two', ''),
+        ('Saga', 'Collection'), ('Saga Two', ''),
+    ]
 
 
 @pytest.mark.parametrize('meta', [None, {}, _meta()], ids=['no-meta', 'empty-meta', 'no-links'])
@@ -335,12 +371,15 @@ def _nav(xml_name):
     }
 
 
-def test_series_page_row_sits_between_the_season_bar_and_the_episodes():
+def test_series_page_row_sits_between_the_buttons_and_the_season_bar():
+    """Under the title, above the season bar: the bar stays the episodes'
+    own header."""
     nav = _nav('DetailWindow.xml')
 
-    assert nav[30002]['onup'] == CREDITS  # episodes: Up reaches the row
-    assert nav[CREDITS]['ondown'] == 30002 and nav[CREDITS]['onup'] == 30007
-    assert nav[30007]['ondown'] == CREDITS  # season bar: Down reaches the row
+    assert nav[30002]['onup'] == 30007 and nav[30007]['ondown'] == 30002
+    assert nav[30007]['onup'] == CREDITS and nav[CREDITS]['ondown'] == 30007
+    assert nav[CREDITS]['onup'] == 30009
+    assert nav[30009]['ondown'] == nav[30012]['ondown'] == CREDITS
     assert nav[CREDITS]['onleft'] == nav[CREDITS]['onright'] == CREDITS  # scrolls, never escapes sideways
 
 

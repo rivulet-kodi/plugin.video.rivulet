@@ -24,8 +24,8 @@ Control ids mirror the reference addon's InfoWindow 1:1 (see
     SELECT     = 30002  horizontal fixedlist - the coverflow itself
     CLOSE      = 30003  close button
 HEADER = 30100 is a Rivulet-only addition (the reference addon has no
-breadcrumb) for the header wordmark label, so `onInit()` can set its
-`RIVULET [/ CATALOG]` text - see `_header_label()`.
+header) for the page title: the catalog's title, or `RIVULET` - see
+`_header_label()`.
 
 The coverflow's visual rendering (ShowcaseWindow.xml's fixedlist/
 focusedlayout, the background crossfade) is Kodi-skin-engine-only and
@@ -234,28 +234,18 @@ def _item_properties(meta):
     return props
 
 
-#: The header wordmark's separator, at the design's rgba(238,243,246,.18) -
-#: not one of the addon's named text tints (those stop at .2/33), computed
-#: the same way here.
-_HEADER_SEPARATOR_COLOR = '2EEEF3F6'
-_HEADER_TITLE_COLOR = '9EEEF3F6'
-
-
 def _header_label(catalog_title=None):
-    """Build the inline-markup ShowcaseWindow.xml's header wordmark label
-    renders: bare `RIVULET` when `catalog_title` is falsy (every caller
-    that predates `open_showcase(metas, catalog_title=...)`), or
-    `RIVULET / <TITLE>` once a caller hands over its own catalog/section
-    title - see `open_showcase()`.
+    """The header text: the catalog's own title, bold and as written, like
+    Search's and Add-ons' plain page titles; bare `RIVULET` when a caller
+    has none. The catalog title is addon text, so it is escaped.
 
     Pure helper - no xbmc - so it is trivially unit-testable on its own.
     """
+    from lib.stremio.streaminfo import escape_label
+
     if not catalog_title:
-        return '[COLOR 57EEF3F6]RIVULET[/COLOR]'
-    return (
-        '[COLOR 57EEF3F6]RIVULET[/COLOR] [COLOR %s]/[/COLOR] [COLOR %s]%s[/COLOR]'
-        % (_HEADER_SEPARATOR_COLOR, _HEADER_TITLE_COLOR, catalog_title.upper())
-    )
+        return '[B]RIVULET[/B]'
+    return '[B]%s[/B]' % escape_label(catalog_title)
 
 
 class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
@@ -266,8 +256,8 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         super().__init__(*args, **kwargs)
         self.metas = []
         self.selected = None
-        #: catalog/section title for the header breadcrumb - None keeps
-        #: the header a bare "RIVULET", see `_header_label()`/`start()`.
+        #: catalog/section title for the header - None keeps it a bare
+        #: "RIVULET", see `_header_label()`/`start()`.
         self.catalog_title = None
         #: fanart last pushed to BACKGROUND - lets onAction() skip
         #: setImage() when a keypress doesn't actually change focus (e.g.
@@ -310,9 +300,9 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         window closed without a selection. An empty `metas` never opens
         the modal at all and returns None immediately.
 
-        `catalog_title`, if given, renders as a "RIVULET / <TITLE>"
-        breadcrumb in the header - see `_header_label()`. Left as None,
-        the header stays the bare "RIVULET" it always was.
+        `catalog_title`, if given, is the header's page title - see
+        `_header_label()`. Left as None, the header stays a bare
+        "RIVULET".
 
         `more_pages`, if given, is an iterable of further meta pages
         (`lib.ui.views.iter_catalog_pages` past its first page). It is
@@ -750,9 +740,8 @@ def open_showcase(metas, catalog_title=None, more_pages=None):
     the window is closed first (it may not have had a chance to self-close,
     e.g. if onInit() or a mid-modal callback raised).
 
-    `catalog_title`, if given, becomes the header's "RIVULET / <TITLE>"
-    breadcrumb - see `ShowcaseWindow.start()`. `more_pages` is the
-    catalog's remaining pages, appended to the strip as they arrive -
+    `catalog_title`, if given, becomes the header's page title - see
+    `ShowcaseWindow.start()`. `more_pages` is the catalog's remaining pages, appended to the strip as they arrive -
     see `ShowcaseWindow.start()` for why they are not waited on."""
     from lib.ui.compat import ADDON
     path = ADDON.getAddonInfo('path')
@@ -815,9 +804,8 @@ def open_credit_link(store, client, parsed):
     by `open_credits_picker()`'s list and the clickable credit chips on
     `lib.ui.detailwindow.DetailWindow` / `lib.ui.streamswindow.StreamsWindow`
     (`lib.ui.creditsrow`), so all three behave identically:
-      - search (a person): reruns `lib.ui.searchwindow.run_query()` and
-        opens the results the same way a coverflow selection normally
-        would (`_open_results()` below).
+      - search (a person): opens the Search screen on that name's
+        results (`lib.ui.search.open_search(query)`), as Stremio does.
       - discover (a genre): fetches that catalog and does the same -
         but only once its transport_url is confirmed to name one of the
         user's own installed addons - an addon-supplied URL must never
@@ -831,8 +819,8 @@ def open_credit_link(store, client, parsed):
     kind = parsed['kind']
 
     if kind == 'search':
-        from lib.ui.searchwindow import run_query
-        _open_results(run_query(store, client, parsed['query']))
+        from lib.ui.search import open_search
+        open_search(parsed['query'])
         return
 
     if kind == 'discover':

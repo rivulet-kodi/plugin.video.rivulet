@@ -303,23 +303,23 @@ def test_item_properties_none_meta_is_treated_as_empty(load_infowindow):
 
 
 # ---------------------------------------------------------------------------
-# _header_label() - the header wordmark's breadcrumb markup
+# _header_label() - the header's page title
 # ---------------------------------------------------------------------------
 
 
 def test_header_label_with_no_title_is_bare_rivulet(load_infowindow):
     ctx = load_infowindow()
-    assert ctx.infowindow._header_label() == '[COLOR 57EEF3F6]RIVULET[/COLOR]'
-    assert ctx.infowindow._header_label(None) == '[COLOR 57EEF3F6]RIVULET[/COLOR]'
-    assert ctx.infowindow._header_label('') == '[COLOR 57EEF3F6]RIVULET[/COLOR]'
+    assert ctx.infowindow._header_label() == '[B]RIVULET[/B]'
+    assert ctx.infowindow._header_label(None) == '[B]RIVULET[/B]'
+    assert ctx.infowindow._header_label('') == '[B]RIVULET[/B]'
 
 
-def test_header_label_with_a_title_renders_uppercased_breadcrumb(load_infowindow):
+def test_header_label_is_the_catalog_title_as_written_and_escaped(load_infowindow):
     ctx = load_infowindow()
     assert ctx.infowindow._header_label('Cinemeta \u00b7 Popular Movies') == (
-        '[COLOR 57EEF3F6]RIVULET[/COLOR] [COLOR 2EEEF3F6]/[/COLOR] '
-        '[COLOR 9EEEF3F6]CINEMETA \u00b7 POPULAR MOVIES[/COLOR]'
+        '[B]Cinemeta \u00b7 Popular Movies[/B]'
     )
+    assert '[COLOR' not in ctx.infowindow._header_label('[COLOR red]x[/COLOR]')
 
 
 # ---------------------------------------------------------------------------
@@ -347,10 +347,10 @@ def test_oninit_builds_items_sets_background_hides_loading_and_focuses_select(lo
     assert win.getControl(infowindow.BACKGROUND).image == 'https://x/bg1.jpg'
     assert win.getControl(infowindow.LOADING).visible is False
     assert win.getFocusId() == infowindow.SELECT
-    assert win.getControl(infowindow.HEADER).label == '[COLOR 57EEF3F6]RIVULET[/COLOR]'
+    assert win.getControl(infowindow.HEADER).label == '[B]RIVULET[/B]'
 
 
-def test_oninit_sets_breadcrumb_header_when_catalog_title_is_set(load_infowindow):
+def test_oninit_sets_the_catalog_title_as_the_header(load_infowindow):
     ctx = load_infowindow()
     infowindow = ctx.infowindow
     win = infowindow.ShowcaseWindow('ShowcaseWindow.xml', '/addon/path', 'Default', '1080i')
@@ -359,10 +359,7 @@ def test_oninit_sets_breadcrumb_header_when_catalog_title_is_set(load_infowindow
 
     win.onInit()
 
-    assert win.getControl(infowindow.HEADER).label == (
-        '[COLOR 57EEF3F6]RIVULET[/COLOR] [COLOR 2EEEF3F6]/[/COLOR] '
-        '[COLOR 9EEEF3F6]CINEMETA \u00b7 POPULAR MOVIES[/COLOR]'
-    )
+    assert win.getControl(infowindow.HEADER).label == '[B]Cinemeta \u00b7 Popular Movies[/B]'
 
 
 def test_oninit_item_label_falls_back_to_id_then_placeholder(load_infowindow):
@@ -1422,19 +1419,31 @@ def test_context_menu_person_entry_runs_run_query_and_opens_results(load_infowin
     run_query_calls = []
     person_metas = [{'id': 'tt2', 'name': 'One-Eyed Jacks', 'type': 'movie'}]
 
-    def _run_query(passed_store, passed_client, query):
+    def _run_query(passed_store, passed_client, query, report=None):
         run_query_calls.append((passed_store, passed_client, query))
         return person_metas
 
     monkeypatch.setattr(ctx.searchwindow, 'run_query', _run_query)
     opened = []
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas) or None)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(('showcase', metas)) or None)
+    import lib.ui.search as search
+
+    class _Search:
+        def start(self):
+            opened.append(('search', self.query, self._metas))
+            return False
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(search, 'open_window', lambda cls, xml: _Search())
     win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
 
     _fire_context_menu(win, ctx)
 
     assert run_query_calls == [(store, client, 'Brando')]
-    assert opened == [person_metas]
+    # The Search screen, on the name and its results - not a coverflow.
+    assert opened == [('search', 'Brando', person_metas)]
 
 
 def test_context_menu_person_entry_with_no_results_notifies(load_infowindow, monkeypatch):
@@ -1444,15 +1453,22 @@ def test_context_menu_person_entry_with_no_results_notifies(load_infowindow, mon
     monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: object())
     monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
     _stub_choose(monkeypatch, ctx, answers=[0])
-    monkeypatch.setattr(ctx.searchwindow, 'run_query', lambda store, client, query: [])
+    def _run_query(store, client, query, report=None):
+        report.total_catalogs = 1  # asked and answered, just nothing found
+        return []
+
+    monkeypatch.setattr(ctx.searchwindow, 'run_query', _run_query)
     opened = []
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas))
+    import lib.ui.search as search
+
+    monkeypatch.setattr(search, 'open_window', lambda cls, xml: opened.append(cls))
     win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
 
     _fire_context_menu(win, ctx)
 
     assert opened == []
-    assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
+    assert [body for _h, body, _i, _t in ctx.env.notifications] == ['No results for “Brando”']
 
 
 def test_context_menu_genre_entry_with_installed_transport_fetches_catalog_and_opens_results(

@@ -193,7 +193,7 @@ def test_metadata_line_joins_every_present_segment(load_detailwindow):
 
     line = ctx.detailwindow._metadata_line(meta, 2)
 
-    assert line == '2020-2024 \u00b7 2 SEASONS \u00b7 [COLOR FF38BDF8]\u2605 7.6[/COLOR]'
+    assert line == '2020-2024 \u00b7 2 SEASONS \u00b7 [COLOR FFEDEDED]\u2605 7.6[/COLOR]'
 
 
 def test_metadata_line_closes_a_running_series_range_with_now(load_detailwindow):
@@ -248,7 +248,7 @@ def test_metadata_line_skips_missing_segments_without_dangling_separators(load_d
 
     line = ctx.detailwindow._metadata_line({'imdbRating': '8.1'}, 0)
 
-    assert line == '[COLOR FF38BDF8]\u2605 8.1[/COLOR]'
+    assert line == '[COLOR FFEDEDED]\u2605 8.1[/COLOR]'
 
 
 def test_genres_line_joins_and_caps_at_three(load_detailwindow):
@@ -469,7 +469,7 @@ def test_oninit_sets_heading_bold_and_left_column_metadata(load_detailwindow):
 
     assert win.getControl(picker.HEADING).label == '[B]THE SHEEP DETECTIVES[/B]'
     assert win.getControl(picker.METADATA_LINE).label == (
-        '2023-2025 \u00b7 2 SEASONS \u00b7 [COLOR FF38BDF8]\u2605 7.6[/COLOR]'
+        '2023-2025 \u00b7 2 SEASONS \u00b7 [COLOR FFEDEDED]\u2605 7.6[/COLOR]'
     )
     assert win.getControl(picker.GENRES_LINE).label == 'Comedy \u00b7 Mystery \u00b7 Crime'
 

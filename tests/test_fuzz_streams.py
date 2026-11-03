@@ -14,7 +14,7 @@ from tests.fuzz_strategies import any_text, hostile_json, json_values, streams, 
 _INFO_KEYS = {
     'addon', 'title', 'resolution', 'source', 'codec', 'hdr', 'size_bytes', 'size_text', 'seeders',
     'is_torrent', 'filename', 'binge_group', 'raw', 'audio', 'channels', 'languages', 'bitrate',
-    'group', 'tracker', 'service', 'cached', 'release',
+    'group', 'tracker', 'service', 'cached', 'release', 'label',
 }
 _LABEL_MARKUP = re.compile(r'\[/?(?:B|I|COLOR[^\]]*|CR|UPPERCASE|LOWERCASE|CAPITALIZE|LIGHT|TABS)\]', re.I)
 
