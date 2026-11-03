@@ -23,14 +23,14 @@ def test_refresh_deletes_the_cache_files_and_keeps_the_rest(tmp_path, monkeypatc
 
 
 def test_home_drops_its_memory_when_the_generation_changes(monkeypatch):
-    from tests.test_newhome import _RELOAD_MODULE_NAMES
+    from tests.test_home import _RELOAD_MODULE_NAMES
 
     with install_kodi_stubs(reload=_RELOAD_MODULE_NAMES + ('lib.ui.cacherefresh',)) as ctx:
-        hw = ctx.newhome
+        hw = ctx.home
         cleared = []
         import lib.ui.cacherefresh as cacherefresh
         monkeypatch.setattr(cacherefresh, 'clear_memory', lambda: cleared.append(True))
-        win = hw.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+        win = hw.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
 
         hw._drop_memory_if_refreshed(win)          # first build: just records
         assert cleared == []
@@ -107,7 +107,7 @@ def test_clear_files_counts_what_it_removed(refresh, monkeypatch, tmp_path):
 
 
 def test_clear_memory_drops_every_copy(refresh):
-    from tests.test_newhome import _RELOAD_MODULE_NAMES
+    from tests.test_home import _RELOAD_MODULE_NAMES
 
     with install_kodi_stubs(reload=_RELOAD_MODULE_NAMES + ('lib.ui.catalogpages', 'lib.ui.ratingsched',
                                                            'lib.ui.cacherefresh')) as ctx:
@@ -144,7 +144,7 @@ def test_clear_memory_carries_on_past_a_module_that_fails(refresh, monkeypatch):
 
     monkeypatch.setattr(catalogpages, '_caches_lock', _BadLock())
     # Refreshing logo answers must not need the Home module.
-    monkeypatch.setattr(lib.ui, 'newhome', object(), raising=False)
+    monkeypatch.setattr(lib.ui, 'home', object(), raising=False)
     logocheck.remember('https://img/a.png', True)
     ratingsched._cache = object()
     refresh.module.clear_memory()
@@ -189,7 +189,7 @@ def test_cache_refresh_never_imports_home(refresh, monkeypatch):
     imports = []
 
     def tracked(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == 'lib.ui.newhome' or (name == 'lib.ui' and 'newhome' in (fromlist or ())):
+        if name == 'lib.ui.home' or (name == 'lib.ui' and 'home' in (fromlist or ())):
             imports.append(name)
         return original(name, globals, locals, fromlist, level)
 

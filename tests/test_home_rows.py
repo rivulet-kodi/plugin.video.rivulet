@@ -1,4 +1,4 @@
-"""lib/ui/newhome.py: how the New look Home builds its rows.
+"""lib/ui/home.py: how Home builds its rows.
 
 The row helpers on their own, against the kodistubs fakes: what a row
 shows when the account or an addon fails, how a row grows past its
@@ -9,14 +9,14 @@ import contextlib
 import pytest
 
 from tests.kodistubs import install_kodi_stubs
-from tests.test_newhome import _RELOAD_MODULE_NAMES
+from tests.test_home import _RELOAD_MODULE_NAMES
 
 
 @pytest.fixture
 def home():
     with contextlib.ExitStack() as stack:
         ctx = stack.enter_context(install_kodi_stubs(reload=_RELOAD_MODULE_NAMES))
-        ctx.home = ctx.newhome
+        ctx.home = ctx.home
         yield ctx
 
 

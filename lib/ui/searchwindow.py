@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: 2026 M0Rf30
 # SPDX-License-Identifier: MIT
 
-"""Search engine behind the one-page search (`lib.ui.newsearch`) and the
+"""Search engine behind the one-page search (`lib.ui.search`) and the
 coverflow's person/discover links: `run_query()` fans a query across every
 searchable catalog on daemon threads, merges the answers in catalog order,
 ranks them (`_rank_by_title`, `_rank_by_credit`) and reports failures through
-`SearchReport`. No window lives here any more; the screen is `NewSearchWindow`.
+`SearchReport`. No window lives here any more; the screen is `SearchWindow`.
 """
 import queue
 import threading
@@ -522,7 +522,7 @@ def run_query(store, client, query, report=None):
     The fan-out (progress dialog via `busy_dialog`/L(30186), per-addon
     `AddonError` isolation and logging included) lives here so every
     window can run a search without opening one - callers are
-    `newsearch.NewSearchWindow` and
+    `search.SearchWindow` and
     `lib.ui.infowindow.open_credits_picker()`'s "person" dispatch.
     Writes no history, opens no coverflow - callers own
     both.
@@ -536,7 +536,7 @@ def run_query(store, client, query, report=None):
 
     Pass a `SearchReport` as `report` to learn how the fan-out went
     (nothing enabled can search / every catalog failed / some failed /
-    cancelled) and to own the user-facing message - `NewSearchWindow`
+    cancelled) and to own the user-facing message - `SearchWindow`
     does, so it can say "search failed" where it would
     otherwise say "no results". Without one, `run_query()` shows that
     notification itself (`_search_notice()`), so a caller that never

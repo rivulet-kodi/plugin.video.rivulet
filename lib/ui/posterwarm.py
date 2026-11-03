@@ -30,7 +30,7 @@ time; further requests add to that queue and Home's slots carry the rest.
 import threading
 import weakref
 
-#: Image controls in NewHomeWindow.xml. 1x1, visible,
+#: Image controls in HomeWindow.xml. 1x1, visible,
 #: drawn under the opaque backdrop plate.
 WARM_SLOTS = tuple(range(30090, 30098))
 
@@ -45,7 +45,7 @@ _queue = []
 # A weak reference: a module global that owned the window would keep Home,
 # and every `ListItem` it holds, alive past the end of `open_home`, so they
 # would be freed at interpreter shutdown, after Kodi has destroyed the
-# controls (see `newhome.release_items`).
+# controls (see `home.release_items`).
 _target = {'window': None}
 _running = False
 _thread = None
@@ -189,7 +189,7 @@ def join(window, timeout):
     """Wait, bounded, for the warm worker to let go of ``window`` after `stop`.
 
     The worker holds the window it is painting for as long as it runs.
-    `newhome.release_items` waits here so that reference is gone before
+    `home.release_items` waits here so that reference is gone before
     Home drops the window, and no thread frees it later. A worker serving
     another window, or none, holds nothing of this one: no wait.
     """

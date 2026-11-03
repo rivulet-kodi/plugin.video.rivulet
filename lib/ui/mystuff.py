@@ -12,7 +12,7 @@ title you are part-way through is usually also in your library). Showing
 them as separate destinations made the viewer guess which one held the
 thing they wanted. This module merges both sources on their common
 `(type, id)` key and tags each entry with its band for the Home rows
-(`lib.ui.newhome`) - see `merge_entries()` for the merge.
+(`lib.ui.home`) - see `merge_entries()` for the merge.
 
 Band ordering (the flat list is grouped, not sorted by one key):
 
@@ -28,7 +28,7 @@ entirely (its >=95% cutoff), exactly when the viewer most wants S1E3.
 Resolving which episode that is needs the series meta, so the band only
 says "this series is next-up": a Home paint does not fan out a meta fetch
 for every series just to name the episode (see
-`lib.ui.newhome._played_metas()`).
+`lib.ui.home._played_metas()`).
 
 The merge and band helpers are pure functions of their arguments, so
 tests/test_mystuff.py exercises every band with plain dicts. Account reads

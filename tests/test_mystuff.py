@@ -12,7 +12,7 @@ crossed 95%, which is exactly when the viewer wants the NEXT episode -
 see `test_finished_series_episode_lands_in_next_up_band` and the
 `lib.ui.mystuff` module docstring.
 
-The Home row orchestration is covered separately in test_newhome.py.
+The Home row orchestration is covered separately in test_home.py.
 """
 import contextlib
 

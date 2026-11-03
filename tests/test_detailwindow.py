@@ -18,7 +18,7 @@ monkeypatches `_fetch_meta`/`open_streams` on directly.
 DetailWindow.onInit()/onClick()/onAction()/start() are called directly
 here, never through a real modal event loop: the fake
 WindowXML.doModal() is a no-op counter, and getControl()/setFocusId()
-are plain in-memory fakes. NewDetailWindow.xml's actual skin rendering is
+are plain in-memory fakes. DetailWindow.xml's actual skin rendering is
 Kodi-skin-engine-only and is NOT, and cannot be, exercised by this suite.
 """
 import contextlib
@@ -60,7 +60,7 @@ def load_detailwindow():
 
 
 def _make_window(detailwindow_mod):
-    return detailwindow_mod.DetailWindow('NewDetailWindow.xml', '/addon/path', 'Default', '1080i')
+    return detailwindow_mod.DetailWindow('DetailWindow.xml', '/addon/path', 'Default', '1080i')
 
 
 def _window_with_focused_row(detailwindow_mod, meta, stype, row_id):
@@ -1560,7 +1560,7 @@ def test_open_detail_series_builds_window_against_skin_path_and_starts_with_the_
     result = ctx.detailwindow.open_detail('series', 'tt1')
 
     assert result is True
-    assert captured['init_args'] == ('NewDetailWindow.xml', '/addon/path', 'Default', '1080i')
+    assert captured['init_args'] == ('DetailWindow.xml', '/addon/path', 'Default', '1080i')
     assert captured['start_args'] == (meta, 'series')
 
 
@@ -1873,11 +1873,11 @@ def test_series_mark_watched_reaches_home_before_the_account_echoes_it(load_deta
     """The account's next read can still hold the old record. Home paints
     from the write this window remembered, so the series check shows."""
     ctx = load_detailwindow()
-    # Imported only once the stubs are in: `newhome` imports xbmcgui at
+    # Imported only once the stubs are in: `home` imports xbmcgui at
     # module level, so importing it first passes only when an earlier
     # test happened to leave it in sys.modules (random order, CI seed
     # 1095510647 on 3.11 did not).
-    from lib.ui import newhome, watchmarks
+    from lib.ui import home, watchmarks
 
     win = _make_window(ctx.detailwindow)
     win.meta = {'id': 'tt1', 'name': 'Breaking Bad', 'type': 'series'}
@@ -1888,7 +1888,7 @@ def test_series_mark_watched_reaches_home_before_the_account_echoes_it(load_deta
 
     win._open_context_menu()
 
-    assert newhome._library_dirty is True
+    assert home._library_dirty is True
 
     class _Store:
         def get_auth(self):
@@ -1907,7 +1907,7 @@ def test_series_mark_watched_reaches_home_before_the_account_echoes_it(load_deta
 
 def test_series_library_add_is_remembered_for_home(load_detailwindow, monkeypatch):
     ctx = load_detailwindow()
-    from lib.ui import libraryaction, newhome  # after the stubs; see above
+    from lib.ui import home, libraryaction  # after the stubs; see above
 
     win = _make_window(ctx.detailwindow)
     win.meta = {'id': 'tt1', 'name': 'Breaking Bad', 'type': 'series'}
@@ -1917,12 +1917,12 @@ def test_series_library_add_is_remembered_for_home(load_detailwindow, monkeypatc
     win._open_context_menu()
 
     assert [e['_id'] for e in libraryaction.apply_library_writes([])] == ['tt1']
-    assert newhome._library_dirty is True
+    assert home._library_dirty is True
 
 
 def test_a_failed_series_write_is_not_remembered_for_home(load_detailwindow, monkeypatch):
     ctx = load_detailwindow()
-    from lib.ui import libraryaction, newhome  # after the stubs; see above
+    from lib.ui import home, libraryaction  # after the stubs; see above
 
     win = _make_window(ctx.detailwindow)
     win.meta = {'id': 'tt1', 'name': 'Breaking Bad', 'type': 'series'}
@@ -1932,4 +1932,4 @@ def test_a_failed_series_write_is_not_remembered_for_home(load_detailwindow, mon
     win._open_context_menu()
 
     assert libraryaction.apply_library_writes([]) == []
-    assert newhome._library_dirty is False
+    assert home._library_dirty is False

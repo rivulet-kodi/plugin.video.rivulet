@@ -6,15 +6,15 @@ import pytest
 
 from tests.test_catalogpages import _cache, _Client
 from tests.test_catalogpages import pages as pages
-from tests.test_newhome import load_homewindow as load_homewindow
-from tests.test_newhome_tabs import build
+from tests.test_home import load_homewindow as load_homewindow
+from tests.test_home_tabs import build
 from tests.test_ratingsched import cache as cache
 from tests.test_ratingsched import sched as sched
 
 
 def test_failed_library_refetches_on_next_tab_and_keeps_last_good(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     win, store, _ = build(ctx, monkeypatch, auth={'authKey': 'fake'})
     # Start with no successful account read, then recover on the next tab.
     if hasattr(win, '_library_entries'):
@@ -47,9 +47,9 @@ def test_api_library_error_is_a_failed_read_and_nonlists_are_rejected(load_homew
         def datastore_get(self, *args, **kwargs):
             raise ApiError('unavailable')
     monkeypatch.setattr('lib.stremio.api.StremioAPI', API)
-    assert ctx.newhome._fetch_library(store, store.get_auth()) is None
+    assert ctx.home._fetch_library(store, store.get_auth()) is None
     monkeypatch.setattr(ctx.mystuff, '_read_library_entries', lambda store: {'bad': 'shape'})
-    assert ctx.newhome._fetch_library(store, store.get_auth()) is None
+    assert ctx.home._fetch_library(store, store.get_auth()) is None
 
 
 def test_adult_title_survives_raw_cache_when_hiding_is_disabled(pages, tmp_path, monkeypatch):
@@ -115,7 +115,7 @@ def test_failed_revalidation_waits_five_minutes(pages, monkeypatch):
 
 def test_shelf_worker_never_reads_controls_and_failure_releases_loading(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     win, _, _ = build(ctx, monkeypatch)
     gui = threading.current_thread()
     original = win.getControl
@@ -190,7 +190,7 @@ def test_poster_batches_only_touch_controls_on_gui_after_handoff(load_homewindow
 def test_deleted_cache_files_rebuild_home_once_without_a_generation_change(load_homewindow, monkeypatch, tmp_path):
     ctx = load_homewindow()
     from lib.ui import cacherefresh
-    hw = ctx.newhome
+    hw = ctx.home
     win, store, _ = build(ctx, monkeypatch)
     monkeypatch.setattr(cacherefresh, '_cache_dirs', lambda: [str(tmp_path)])
     cache_file = tmp_path / 'catalog_pages.json'
@@ -253,7 +253,7 @@ def test_page_and_wheel_actions_extend_near_end(load_homewindow, monkeypatch, ac
     row.selectItem(row.size() - 1)
     win.setFocusId(30041)
     scheduled = []
-    monkeypatch.setattr(ctx.newhome, '_schedule_shelf_extend', lambda *a: scheduled.append(a[1]))
+    monkeypatch.setattr(ctx.home, '_schedule_shelf_extend', lambda *a: scheduled.append(a[1]))
     import xbmcgui
     win.onAction(xbmcgui.Action(action))
     assert scheduled and set(scheduled) == {30041}
@@ -265,10 +265,10 @@ def test_repeated_hero_errors_log_once_per_session(load_homewindow, monkeypatch)
     win, _, _ = build(ctx, monkeypatch)
     def fail(*args):
         raise RuntimeError('https://user:private@host/?token=hidden')
-    monkeypatch.setattr(ctx.newlook, 'paint_hero', fail)
+    monkeypatch.setattr(ctx.look, 'paint_hero', fail)
     for title in ('First', 'Second'):
-        item = ctx.newhome._poster_item({'id': title, 'name': title})
-        ctx.newhome.paint_hero(win, item)
+        item = ctx.home._poster_item({'id': title, 'name': title})
+        ctx.home.paint_hero(win, item)
     lines = [(msg, level) for msg, level in ctx.env.log_calls if 'hero paint failed' in msg]
     assert len(lines) == 1 and lines[0][1] == 0
     assert 'private' not in lines[0][0] and 'hidden' not in lines[0][0]

@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: 2026 M0Rf30
 # SPDX-License-Identifier: MIT
 
-"""Wait for NewHomeWindow's background workers in tests.
+"""Wait for HomeWindow's background workers in tests.
 
 Production never waits for them: each worker posts Action(noop) and the
 window applies its result there. A test has no Kodi event loop to deliver
 that noop, so it joins the worker and then applies the result itself.
-Kept here rather than in lib.ui.newhome because only tests call them.
+Kept here rather than in lib.ui.home because only tests call them.
 """
 
 

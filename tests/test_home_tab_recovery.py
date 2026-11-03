@@ -2,14 +2,14 @@
 import pytest
 
 from lib import homelayout
-from tests.test_newhome import load_homewindow as load_homewindow
-from tests.test_newhome_tabs import build
+from tests.test_home import load_homewindow as load_homewindow
+from tests.test_home_tabs import build
 
 
 @pytest.mark.parametrize('result', ['cancelled', 'failed'])
 def test_cancelled_anime_toggle_home_is_never_cached_and_tab_return_reloads(load_homewindow, monkeypatch, result):
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     win, _, calls = build(ctx, monkeypatch)
     hw._switch_tab(win, 'anime')
     calls.clear()
@@ -34,7 +34,7 @@ def test_cancelled_anime_toggle_home_is_never_cached_and_tab_return_reloads(load
 
 def test_ok_on_cancelled_active_home_reloads_instead_of_only_refocusing(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     win, _, calls = build(ctx, monkeypatch)
     with monkeypatch.context() as patch:
         patch.setattr(ctx.uicommon, 'run_cancellable', lambda *_: ctx.uicommon.CANCELLED)
@@ -50,7 +50,7 @@ def test_ok_on_cancelled_active_home_reloads_instead_of_only_refocusing(load_hom
 
 def test_empty_complete_home_restores_without_refetch(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     layout = homelayout.default_layout()
     layout['tabs']['home'] = []
     win, _, _ = build(ctx, monkeypatch, layout=layout)
@@ -74,7 +74,7 @@ def test_empty_complete_home_restores_without_refetch(load_homewindow, monkeypat
 
 def test_build_exception_marks_tab_not_loaded_and_keeps_error_and_info_logs(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     win, _, _ = build(ctx, monkeypatch)
 
     def fail(*args):
@@ -94,9 +94,9 @@ def test_build_exception_marks_tab_not_loaded_and_keeps_error_and_info_logs(load
 def test_stopped_tab_load_is_incomplete_and_logs_stopped(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     win, store, calls = build(ctx, monkeypatch)
-    ctx.newhome._home_stop(win).set()
+    ctx.home._home_stop(win).set()
     calls.clear()
-    assert ctx.newhome._load_rows(win, store, None) == []
+    assert ctx.home._load_rows(win, store, None) == []
     assert win._tab_loaded['home'] is False and calls == []
     assert any('home: tab home load stopped' in line for line, _ in ctx.env.log_calls)
     win.close()

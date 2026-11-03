@@ -2,8 +2,8 @@
 import pytest
 
 from lib.stremio.addons import AddonError
-from tests.test_newhome import load_homewindow as load_homewindow
-from tests.test_newhome_tabs import build
+from tests.test_home import load_homewindow as load_homewindow
+from tests.test_home_tabs import build
 
 
 def test_split_anime_filters_first_and_later_pages_under_the_existing_spinner(load_homewindow, monkeypatch):
@@ -50,7 +50,7 @@ def test_home_keeps_open_with_existing_catalog_cancel_empty_and_error_behavior(l
     monkeypatch.setattr(picker, 'run_cancellable', lambda fn, heading: picker.CANCELLED if outcome == 'cancel' else fn())
     shown = []
     monkeypatch.setattr(infowindow, 'open_showcase', lambda *args, **kwargs: shown.append(True) or None)
-    ctx.newhome._browse_catalog(win, win._rows[30041])
+    ctx.home._browse_catalog(win, win._rows[30041])
     assert not win.closed
     messages = [message for _, message, _, _ in ctx.env.notifications]
     if outcome in ('empty', 'error'):

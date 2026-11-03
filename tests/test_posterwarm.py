@@ -123,7 +123,7 @@ def test_a_screen_without_slots_acknowledges_without_painting(load_warm):
     assert ticket['done'].is_set() and ticket['ok'] is False
 
 
-def test_new_home_declares_the_warm_slots():
+def test_home_declares_the_warm_slots():
     import os
     import xml.etree.ElementTree as ET
 
@@ -133,7 +133,7 @@ def test_new_home_declares_the_warm_slots():
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         'resources', 'skins', 'Default', '1080i',
     )
-    for name in ('NewHomeWindow.xml',):
+    for name in ('HomeWindow.xml',):
         root = ET.parse(os.path.join(skin, name)).getroot()
         for control_id in WARM_SLOTS:
             control = root.find(".//control[@id='%d']" % control_id)

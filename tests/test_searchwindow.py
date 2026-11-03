@@ -3,7 +3,7 @@
 
 """Tests for lib.ui.searchwindow: the search engine `run_query()` (fan-out
 across every searchable catalog, ranking, `SearchReport`, the user-facing
-notice) shared by the one-page search (`lib.ui.newsearch`) and the
+notice) shared by the one-page search (`lib.ui.search`) and the
 coverflow's person/discover links. Exercised against the shared fake
 xbmc/xbmcgui stubs in tests/kodistubs (no real Kodi runtime, no network).
 """
@@ -19,7 +19,7 @@ from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
     'lib.ui.compat', 'lib.ui.dependencies', 'lib.ui.uicommon', 'lib.ui.dialogs',
-    'lib.ui.infowindow', 'lib.ui.detailwindow', 'lib.ui.searchwindow', 'lib.ui.newsearch',
+    'lib.ui.infowindow', 'lib.ui.detailwindow', 'lib.ui.searchwindow', 'lib.ui.search',
 )
 
 

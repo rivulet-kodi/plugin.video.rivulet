@@ -7,7 +7,7 @@ import pytest
 
 from lib.stremio import ratings
 from tests.kodistubs import install_kodi_stubs
-from tests.test_newhome import _RELOAD_MODULE_NAMES
+from tests.test_home import _RELOAD_MODULE_NAMES
 from tests.test_ratings import _get, _Response
 from tests.test_ratingsched import _Thread
 from tests.test_ratingsched import cache as cache
@@ -277,26 +277,26 @@ def test_home_completed_card_guard_retries_partial_and_expired_scores(tmp_path, 
         monkeypatch.setattr(s, '_get_cache', lambda *args: cache)
         planned = []
         monkeypatch.setattr(s, '_schedule', lambda imdb_id, *args, **kw: planned.append(imdb_id))
-        monkeypatch.setattr(ctx.newhome, '_logo_known_good', lambda url: False)
+        monkeypatch.setattr(ctx.home, '_logo_known_good', lambda url: False)
         monkeypatch.setattr(ctx.logocheck, 'ask', lambda urls: None)
         meta = {'id': SID, 'type': 'movie', 'name': 'Title', 'imdbRating': '7.4', 'description': 'Plot.'}
-        item = ctx.newhome._poster_item(meta)
-        win = ctx.newhome.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+        item = ctx.home._poster_item(meta)
+        win = ctx.home.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
         cache.store(SID, {'imdbRating': '7.4', 'rottenTomatoes': '91%'}, ttl=600)
-        ctx.newhome.paint_hero(win, item)
+        ctx.home.paint_hero(win, item)
         assert item.getProperty('facts_done') == '1'
         assert s.needs_refresh(item.getProperty('hero_facts'))
         assert planned == []
         now[0] += 601
-        ctx.newhome.paint_hero(win, item)
+        ctx.home.paint_hero(win, item)
         assert planned == [SID]
         cache.store(SID, {'imdbRating': '7.4', 'rottenTomatoes': '91%', 'rtAudience': '94%'})
         assert not s.needs_refresh(item.getProperty('hero_facts'))
         planned.clear()
-        ctx.newhome.paint_hero(win, item)
+        ctx.home.paint_hero(win, item)
         assert planned == []
         now[0] += ratings.TTL_SECONDS + 1
-        ctx.newhome.paint_hero(win, item)
+        ctx.home.paint_hero(win, item)
         assert planned == [SID]
         win.close()
 

@@ -8,12 +8,12 @@ from pathlib import Path
 import pytest
 
 from tests.kodistubs import install_kodi_stubs
-from tests.test_newhome import _RELOAD_MODULE_NAMES
+from tests.test_home import _RELOAD_MODULE_NAMES
 from tests.test_searchwindow import _FakeStore
 
 ROOT = Path(__file__).resolve().parents[1]
 SKIN = ROOT / 'resources/skins/Default/1080i'
-XML = SKIN / 'NewSearchWindow.xml'
+XML = SKIN / 'SearchWindow.xml'
 PLOTS = ['', 'One line.', 'First.\nSecond.\nThird.', '\n'.join('Line %d' % n for n in range(12)), 'A long synthesized synopsis about a crew exploring the stars. ' * 35]
 OMDB = 'IMDb 8.3\nRotten Tomatoes 98%\nMetascore 67\n1979\n117 min\nScience Fiction, Horror'
 META = {'id': 'tt0078748', 'type': 'movie', 'name': 'Alien', 'description': 'A crew receives an unexpected signal from a distant world. ' * 5, 'poster': 'poster', 'background': 'backdrop', 'logo': 'logo', 'runtime': '117 min', 'year': '1979', 'imdbRating': '8.3'}
@@ -25,15 +25,15 @@ def load_search(monkeypatch):
         windows = []
         def load(**kwargs):
             ctx = stack.enter_context(install_kodi_stubs(
-                reload=_RELOAD_MODULE_NAMES + ('lib.ui.newsearch', 'lib.ui.ratingsched', 'lib.ui.logocheck', 'lib.ui.pairwindow'),
+                reload=_RELOAD_MODULE_NAMES + ('lib.ui.search', 'lib.ui.ratingsched', 'lib.ui.logocheck', 'lib.ui.pairwindow'),
                 **kwargs,
             ))
-            monkeypatch.setattr(ctx.newhome, '_logo_known_good', lambda url: False)
+            monkeypatch.setattr(ctx.home, '_logo_known_good', lambda url: False)
             monkeypatch.setattr(ctx.logocheck, 'ask', lambda urls: None)
             ctx.store = _FakeStore()
             monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: ctx.store)
             monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
-            win = ctx.newsearch.NewSearchWindow('NewSearchWindow.xml', '/addon/path', 'Default', '1080i')
+            win = ctx.search.SearchWindow('SearchWindow.xml', '/addon/path', 'Default', '1080i')
             windows.append(win)
             ctx.win = win
             return ctx
@@ -64,12 +64,12 @@ def _results(ctx, monkeypatch, metas=None, canceled=False, failure=False, notice
 def test_welcome_discover_letters_search_history_detail_flow(load_search, monkeypatch):
     ctx = load_search()
     win = _init(ctx, monkeypatch)
-    s = ctx.newsearch
+    s = ctx.search
     assert win.getFocusId() == s.QUERY
     assert not win.getProperty('SearchHasRow')
     assert win.getControl(30020).label == '[B]STR30508[/B]'
     assert win.getControl(30022).text == 'STR30509'
-    assert win.getControl(30000).image == ctx.newlook.fanart()
+    assert win.getControl(30000).image == ctx.look.fanart()
     assert win.getControl(30025).visible is False
     assert win.getControl(s.LETTERS).size() == 28
     assert [item.getProperty('key') for item in win.getControl(s.LETTERS).items] == list(s.KEYS)
@@ -116,19 +116,19 @@ def test_letters_spacing_casing_delete_limit_and_empty_discover(load_search, mon
     win.query = 'A' * 60
     win._key('B')
     win._key(' ')
-    assert len(win.query) == ctx.newsearch.MAX_QUERY == 60
+    assert len(win.query) == ctx.search.MAX_QUERY == 60
     win._discover = [META]
     win._metas = [dict(META, id='other')]
     win.query = 'A'
     win._key('<')
     assert win.query == '' and win._metas == []
-    assert win.getControl(ctx.newsearch.ROW_HEADING).label == '[B]STR30506[/B]'
+    assert win.getControl(ctx.search.ROW_HEADING).label == '[B]STR30506[/B]'
     win._discover = []
     win._key('<')
     assert not win.getProperty('SearchHasRow')
     assert win.getControl(30020).label == '[B]STR30508[/B]'
     calls = _results(ctx, monkeypatch)
-    win.onClick(ctx.newsearch.GO)
+    win.onClick(ctx.search.GO)
     assert calls == []
 
 
@@ -156,7 +156,7 @@ def test_no_results_or_all_catalog_failure_status(load_search, monkeypatch, fail
     _results(ctx, monkeypatch, metas=[], failure=failure)
     win._go()
     expected = 'STR30382' if failure else 'No results for “Alien”'
-    assert win.getControl(ctx.newsearch.STATUS).label == expected
+    assert win.getControl(ctx.search.STATUS).label == expected
     assert win._metas == [] and ctx.store.search_queries == []
 
 
@@ -165,11 +165,11 @@ def test_partial_notice_and_phone_search(load_search, monkeypatch):
     win = _init(ctx, monkeypatch)
     monkeypatch.setattr(ctx.pairwindow, 'phone_search', lambda: ' Alien ')
     calls = _results(ctx, monkeypatch, notice=True)
-    win.onClick(ctx.newsearch.PHONE)
+    win.onClick(ctx.search.PHONE)
     assert win.query == 'Alien' and calls[0][1] == 'Alien'
-    assert win.getFocusId() == ctx.newsearch.ROW
-    assert win.getControl(ctx.newsearch.STATUS).label
-    assert win.getControl(ctx.newsearch.QUERY).getText() == 'Alien'
+    assert win.getFocusId() == ctx.search.ROW
+    assert win.getControl(ctx.search.STATUS).label
+    assert win.getControl(ctx.search.QUERY).getText() == 'Alien'
     monkeypatch.setattr(ctx.pairwindow, 'phone_search', lambda: None)
     win._phone()
     assert len(calls) == 1
@@ -183,7 +183,7 @@ def test_discover_worker_is_daemon_and_only_ui_thread_applies(load_search, monke
         entered.set()
         assert release.wait(3)
         return [META]
-    monkeypatch.setattr(ctx.newsearch, 'discover_metas', discover)
+    monkeypatch.setattr(ctx.search, 'discover_metas', discover)
     before = threading.get_ident()
     threads = []
     real_thread = threading.Thread
@@ -191,7 +191,7 @@ def test_discover_worker_is_daemon_and_only_ui_thread_applies(load_search, monke
         t = real_thread(*args, **kwargs)
         threads.append(t)
         return t
-    monkeypatch.setattr(ctx.newsearch.threading, 'Thread', thread)
+    monkeypatch.setattr(ctx.search.threading, 'Thread', thread)
     win.onInit()
     assert entered.wait(3)
     assert threads[0].daemon and threads[0].name == 'rivulet-search-discover'
@@ -221,10 +221,10 @@ def test_discover_first_open_movie_else_series_and_limit(load_search, monkeypatc
     def page(url, manifest, catalog):
         calls.append(catalog['id'])
         if empty_movie and catalog['type'] == 'movie':
-            raise ctx.newhome.CatalogUnavailable('movie')
+            raise ctx.home.CatalogUnavailable('movie')
         return [dict(META, id='%s-%d' % (catalog['id'], n)) for n in range(45)]
-    monkeypatch.setattr(ctx.newhome, '_one_catalog_page', page)
-    metas = ctx.newsearch.discover_metas()
+    monkeypatch.setattr(ctx.home, '_one_catalog_page', page)
+    metas = ctx.search.discover_metas()
     assert len(metas) == (40 if expected else 0)
     if expected:
         assert metas[0]['id'] == expected + '-0'
@@ -234,29 +234,29 @@ def test_discover_first_open_movie_else_series_and_limit(load_search, monkeypatc
 def test_discover_skips_required_extras_and_handles_empty_disabled_addons(load_search, monkeypatch):
     ctx = load_search()
     calls = []
-    monkeypatch.setattr(ctx.newhome, '_one_catalog_page', lambda *args: calls.append(args) or [])
+    monkeypatch.setattr(ctx.home, '_one_catalog_page', lambda *args: calls.append(args) or [])
     ctx.store._addons = [{'transportUrl': 'https://example.invalid/manifest.json', 'manifest': {'catalogs': [
         {'type': 'movie', 'id': 'search', 'extra': [{'name': 'search', 'isRequired': True}]},
         {'type': 'movie', 'id': 'genre', 'extra': [{'name': 'genre', 'isRequired': True}]},
         {'type': 'movie', 'id': 'other', 'extra': [{'name': 'unsupported', 'isRequired': True}]},
     ]}}]
-    assert ctx.newsearch.discover_metas() == [] and calls == []
+    assert ctx.search.discover_metas() == [] and calls == []
     ctx.store._addons[0]['flags'] = {'disabled': True}
-    assert ctx.newsearch.discover_metas() == [] and calls == []
+    assert ctx.search.discover_metas() == [] and calls == []
 
 
 def test_search_omdb_overlay_moves_plot_and_scores_and_reuses_helpers(load_search, monkeypatch):
     ctx = load_search()
     win = _init(ctx, monkeypatch)
     win._show([META, dict(META, id='tt2', logo='later-logo')], True)
-    win.setFocusId(ctx.newsearch.ROW)
-    item = win.getControl(ctx.newsearch.ROW).getListItem(0)
+    win.setFocusId(ctx.search.ROW)
+    item = win.getControl(ctx.search.ROW).getListItem(0)
     overlaid = []
     monkeypatch.setattr(ctx.ratingsched, 'overlay_text', lambda facts, meta, upcoming: overlaid.append((facts, upcoming)) or OMDB)
-    monkeypatch.setattr(ctx.newhome, '_logo_known_good', lambda url: True)
+    monkeypatch.setattr(ctx.home, '_logo_known_good', lambda url: True)
     logos = []
     monkeypatch.setattr(ctx.logocheck, 'ask', lambda urls: logos.append(urls))
-    ctx.newsearch._paint_hero(win, item)
+    ctx.search._paint_hero(win, item)
     assert item.getProperty('facts_done') == '1' and item.getProperty('hero_meta') == OMDB
     assert overlaid[0][0]['id'] == META['id'] and len(overlaid[0][1]) == 1
     assert logos[-1] == ['later-logo']
@@ -270,8 +270,8 @@ def test_search_omdb_overlay_moves_plot_and_scores_and_reuses_helpers(load_searc
     assert win.getControl(30034).image == 'rating_mc_green.png' and win.getControl(30035).label == ' : 67'
     assert win.getControl(30036).label.startswith('Ends at ')
     paints = []
-    monkeypatch.setattr(ctx.newlook, 'paint_hero', lambda *args: paints.append(args))
-    ctx.newsearch._paint_hero(win, item)
+    monkeypatch.setattr(ctx.look, 'paint_hero', lambda *args: paints.append(args))
+    ctx.search._paint_hero(win, item)
     assert paints == [] and len(overlaid) == 1
 
 
@@ -279,13 +279,13 @@ def test_search_fallbacks_and_empty_item_leave_hero(load_search, monkeypatch):
     ctx = load_search()
     win = _init(ctx, monkeypatch)
     win._show([{'name': 'No artwork', 'id': 'tt1', 'type': 'movie'}], False)
-    item = win.getControl(ctx.newsearch.ROW).getListItem(0)
+    item = win.getControl(ctx.search.ROW).getListItem(0)
     assert not item.getProperty('thumbnail')
-    assert win.getControl(30000).image == ctx.newlook.fanart()
+    assert win.getControl(30000).image == ctx.look.fanart()
     assert not win.getProperty('HeroLogo') and not win.getControl(30025).visible
-    ctx.newsearch._paint_hero(win, None)
+    ctx.search._paint_hero(win, None)
     import xbmcgui
-    ctx.newsearch._paint_hero(win, xbmcgui.ListItem(''))
+    ctx.search._paint_hero(win, xbmcgui.ListItem(''))
     assert win.getControl(30020).label == 'No artwork'
     win._show([dict(META, background='')], False)
     assert win.getProperty('HeroFill') == '1' and win.getControl(30028).image == 'poster'
@@ -309,7 +309,7 @@ def _apart(a, b):
 def test_eighty_search_hero_combinations(load_search, plot, scores, stars, facts, logo):
     ctx = load_search()
     win = ctx.win
-    ctx.newlook.place_hero(win, plot, facts, scores, stars, ctx.newsearch.SEARCH_STACK)
+    ctx.look.place_hero(win, plot, facts, scores, stars, ctx.search.SEARCH_STACK)
     widths = {30020: 1100, 30023: 1000, 30024: 1200, 30027: 150, 30022: 920, 30025: 1400}
     boxes = []
     def box(cid):
@@ -395,8 +395,8 @@ def test_pending_discover_cannot_replace_search_results(load_search, monkeypatch
     import xbmcgui
     win.onAction(xbmcgui.Action(0))
     assert win._discover[0]['name'] == 'Discover title'
-    assert win.getControl(ctx.newsearch.ROW).getListItem(0).getLabel() == 'Alien'
-    assert win.getControl(ctx.newsearch.ROW_HEADING).label == '[B]STR30507[/B]'
+    assert win.getControl(ctx.search.ROW).getListItem(0).getLabel() == 'Alien'
+    assert win.getControl(ctx.search.ROW_HEADING).label == '[B]STR30507[/B]'
 
 
 def test_real_query_with_no_addons_keeps_welcome_and_explains(load_search, monkeypatch):
@@ -404,7 +404,7 @@ def test_real_query_with_no_addons_keeps_welcome_and_explains(load_search, monke
     win = _init(ctx, monkeypatch)
     win.query = 'Alien'
     win._go()
-    assert win.getControl(ctx.newsearch.STATUS).label == 'STR30381'
+    assert win.getControl(ctx.search.STATUS).label == 'STR30381'
     assert not win.getProperty('SearchHasRow') and win._metas == []
     assert win.getControl(30020).label == '[B]STR30508[/B]'
 
@@ -416,7 +416,7 @@ def test_open_discover_poster_does_not_record_query(load_search, monkeypatch):
     win._show(win._discover, False)
     opened = []
     monkeypatch.setattr(ctx.detailwindow, 'open_detail', lambda *args: opened.append(args) or False)
-    win.onClick(ctx.newsearch.ROW)
+    win.onClick(ctx.search.ROW)
     assert opened == [('movie', META['id'])]
     assert ctx.store.search_queries == [] and not win.should_close_caller
 
@@ -425,24 +425,24 @@ def test_open_failure_before_window_creation_notifies(load_search, monkeypatch):
     ctx = load_search()
     def fail(*args):
         raise RuntimeError('skin error')
-    monkeypatch.setattr(ctx.newsearch, 'open_window', fail)
-    assert ctx.newsearch.open_search() is False
+    monkeypatch.setattr(ctx.search, 'open_window', fail)
+    assert ctx.search.open_search() is False
     assert ctx.env.notifications == [('Rivulet', 'STR30032', 'info', 4000)]
 
 
 def test_malformed_facts_and_broken_control_do_not_skip_hero_geometry(load_search, monkeypatch):
     ctx = load_search()
     win = _init(ctx, monkeypatch)
-    item = ctx.newhome._poster_item(META)
+    item = ctx.home._poster_item(META)
     item.setProperty('hero_facts', 'not-json')
     item.setProperty('hero_meta', OMDB)
     def fail(*args):
         raise RuntimeError('unwrappable')
     monkeypatch.setattr(win.getControl(30023), 'setImage', fail)
-    ctx.newsearch._paint_hero(win, item)
+    ctx.search._paint_hero(win, item)
     assert win.getControl(30022).y == 468 and win.getControl(30025).y == 550
     assert win.getControl(30020).label == 'Alien'
-    assert any('newlook: hero control failed: RuntimeError' in message for message, _ in ctx.env.log_calls)
+    assert any('look: hero control failed: RuntimeError' in message for message, _ in ctx.env.log_calls)
 
 
 def test_phone_limit_and_query_markup_escaping(load_search, monkeypatch):
@@ -452,7 +452,7 @@ def test_phone_limit_and_query_markup_escaping(load_search, monkeypatch):
     calls = _results(ctx, monkeypatch)
     win._phone()
     assert len(win.query) == 60 and calls[0][1] == 'A' * 60
-    assert ctx.newsearch._with_query('No results %s', '[B]Title[/B]') == 'No results Title'
+    assert ctx.search._with_query('No results %s', '[B]Title[/B]') == 'No results Title'
 
 
 @pytest.mark.parametrize('results', [False, True], ids=['discover', 'results'])
@@ -461,8 +461,8 @@ def test_context_menu_uses_the_selected_poster_meta(load_search, monkeypatch, re
     win = _init(ctx, monkeypatch)
     selected = dict(META, id='tt0944947', type='series', name='Selected show')
     win._show([META, selected], results=results)
-    win.getControl(ctx.newsearch.ROW).selectItem(1)
-    win.setFocusId(ctx.newsearch.ROW)
+    win.getControl(ctx.search.ROW).selectItem(1)
+    win.setFocusId(ctx.search.ROW)
     from lib.ui import libraryaction
 
     offered = []
@@ -478,7 +478,7 @@ def test_context_menu_off_the_poster_row_does_nothing(load_search, monkeypatch, 
     ctx = load_search()
     win = _init(ctx, monkeypatch)
     win._show([META], results=True)
-    win.setFocusId(getattr(ctx.newsearch, control))
+    win.setFocusId(getattr(ctx.search, control))
     from lib.ui import libraryaction
 
     monkeypatch.setattr(libraryaction, 'poster_menu', lambda meta: pytest.fail('poster menu off row'))
@@ -490,7 +490,7 @@ def test_context_menu_off_the_poster_row_does_nothing(load_search, monkeypatch, 
 def test_context_menu_on_an_empty_poster_row_does_nothing(load_search, monkeypatch):
     ctx = load_search()
     win = _init(ctx, monkeypatch)
-    win.setFocusId(ctx.newsearch.ROW)
+    win.setFocusId(ctx.search.ROW)
     from lib.ui import libraryaction
 
     monkeypatch.setattr(libraryaction, 'poster_menu', lambda meta: pytest.fail('empty poster menu'))
@@ -506,7 +506,7 @@ def test_context_menu_add_writes_the_selected_title_to_the_library(load_search, 
     ctx = load_search()
     win = _init(ctx, monkeypatch)
     win._show([META], results=results)
-    win.setFocusId(ctx.newsearch.ROW)
+    win.setFocusId(ctx.search.ROW)
     api = _Api()
     _, menus = _wire(monkeypatch, api, pick=0)
     import xbmcgui
@@ -516,7 +516,7 @@ def test_context_menu_add_writes_the_selected_title_to_the_library(load_search, 
     payload = api.puts[0][1]
     assert payload['_id'] == META['id'] and payload['type'] == META['type']
     assert payload['removed'] is False
-    assert ctx.newhome._library_dirty
+    assert ctx.home._library_dirty
 
 
 def test_clicks_delivered_during_a_running_search_are_ignored(load_search, monkeypatch):
@@ -525,7 +525,7 @@ def test_clicks_delivered_during_a_running_search_are_ignored(load_search, monke
     ctx = load_search()
     win = _init(ctx, monkeypatch)
     win.query = 'Alien'
-    s = ctx.newsearch
+    s = ctx.search
     seen = []
 
     def query(store, client, text, report):
@@ -561,7 +561,7 @@ def _type(win, s, text):
 def test_physical_keyboard_types_into_the_bar_and_confirmed_enter_searches(load_search, monkeypatch):
     ctx = load_search()
     win = _init(ctx, monkeypatch)
-    s = ctx.newsearch
+    s = ctx.search
     assert win.getFocusId() == s.QUERY
     assert win.getControl(s.QUERY).input_type == (0, 'STR30001')
     calls = _results(ctx, monkeypatch)
@@ -579,7 +579,7 @@ def test_physical_keyboard_types_into_the_bar_and_confirmed_enter_searches(load_
 def test_cancelled_keyboard_on_the_bar_does_not_search(load_search, monkeypatch):
     ctx = load_search()
     win = _init(ctx, monkeypatch)
-    s = ctx.newsearch
+    s = ctx.search
     calls = _results(ctx, monkeypatch)
     _type(win, s, 'alien')
     import xbmcgui
@@ -590,7 +590,7 @@ def test_cancelled_keyboard_on_the_bar_does_not_search(load_search, monkeypatch)
 def test_bar_text_is_cut_to_the_limit_and_clearing_it_shows_discover(load_search, monkeypatch):
     ctx = load_search()
     win = _init(ctx, monkeypatch)
-    s = ctx.newsearch
+    s = ctx.search
     win.getControl(s.QUERY).setText('A' * 100)
     win.onClick(s.QUERY)
     assert win.query == 'A' * s.MAX_QUERY
@@ -606,7 +606,7 @@ def test_bar_text_is_cut_to_the_limit_and_clearing_it_shows_discover(load_search
 def test_picked_letters_show_in_the_bar_and_typing_continues_from_them(load_search, monkeypatch):
     ctx = load_search()
     win = _init(ctx, monkeypatch)
-    s = ctx.newsearch
+    s = ctx.search
     for letter in 'AL':
         win.getControl(s.LETTERS).selectItem(s.KEYS.index(letter))
         win.onClick(s.LETTERS)

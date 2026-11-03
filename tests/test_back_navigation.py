@@ -36,7 +36,7 @@ from tests.kodistubs import install_kodi_stubs
 
 _RELOAD_MODULE_NAMES = (
     'lib.ui.compat', 'lib.ui.router', 'lib.ui.uicommon', 'lib.ui.dialogs', 'lib.ui.dependencies',
-    'lib.ui.views', 'lib.ui.streamswindow', 'lib.ui.searchwindow', 'lib.ui.newsearch', 'lib.ui.infowindow',
+    'lib.ui.views', 'lib.ui.streamswindow', 'lib.ui.searchwindow', 'lib.ui.search', 'lib.ui.infowindow',
     'lib.ui.detailwindow', 'lib.ui.mystuff', 'lib.ui.catalogpicker',
     'lib.ui.addonswindow', 'lib.ui.addoncatalogwindow',
 )
@@ -540,7 +540,7 @@ def _screens(ctx):
         'showcase': showcase,
         'addons': make_window(ctx.addonswindow.AddonsWindow),
         'addoncatalog': make_window(ctx.addoncatalogwindow.AddonCatalogWindow),
-        'search': make_window(ctx.newsearch.NewSearchWindow),
+        'search': make_window(ctx.search.SearchWindow),
         'streams': make_window(ctx.streamswindow.StreamsWindow),
     }
     return screens

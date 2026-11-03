@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: 2026 M0Rf30
 # SPDX-License-Identifier: MIT
-"""Hero layout for Rivulet's Home, drawn by NewHomeWindow.xml.
+"""Hero layout for Rivulet's Home, drawn by HomeWindow.xml.
 
 The backdrop fills the screen and fades to black toward the left and
 bottom. The clearlogo, facts, plot, scores and end time share the pinned
-RevRivulet layout. Textures are drawn by tools/make_new_look_textures.py;
+RevRivulet layout. Textures are drawn by tools/make_look_textures.py;
 text uses the active Kodi skin's standard font names.
 """
 
@@ -12,14 +12,14 @@ import math
 import time
 
 #: The backdrop behind a screen with no title focused: the addon's
-#: artwork in greyscale, so the new look's black and white is not broken
+#: artwork in greyscale, so the black and white is not broken
 #: by the blue of the stock fanart. In resources/, beside fanart.jpg.
 FANART = 'fanart_grey.jpg'
 
-#: Hero controls only the new-look files have.
+#: Hero controls only the Home and Detail files have.
 HERO_FACTS = 30024   # label: year • runtime • genres
 HERO_SCORES = 30025  # Python-wrappable group around the horizontal grouplist
-HERO_STARS = 30027   # image: newlook_stars_00..10.png
+HERO_STARS = 30027   # image: look_stars_00..10.png
 HERO_IMDB = 30029
 HERO_AUDIENCE_ICON, HERO_AUDIENCE = 30030, 30031
 HERO_RT_ICON, HERO_RT = 30032, 30033
@@ -104,10 +104,10 @@ def hero_lines(panel_text, runtime_minutes=None, now=None):
     source. "Ends at" is included only when the runtime is known.
     """
     from lib.ui.compat import L
-    from lib.ui.playbackmeta import new_look_hero_parts
+    from lib.ui.playbackmeta import look_hero_parts
 
-    stars, facts, scores = new_look_hero_parts(panel_text)
-    texture = 'newlook_stars_%02d.png' % stars if stars is not None else ''
+    stars, facts, scores = look_hero_parts(panel_text)
+    texture = 'look_stars_%02d.png' % stars if stars is not None else ''
     facts_line = '  •  '.join(facts)
     parts = list(scores)
     end = ends_at(runtime_minutes, now)
@@ -187,7 +187,7 @@ def _hero_call(window, control_id, method, *args):
             window._hero_failed_types = logged
         if name not in logged:
             logged.add(name)
-            log('newlook: hero control failed: %s' % name, xbmc.LOGDEBUG)
+            log('look: hero control failed: %s' % name, xbmc.LOGDEBUG)
 
 
 def _move(window, control_id, x, y, height=None):
@@ -202,7 +202,7 @@ def place_hero(window, plot, has_facts, has_scores, has_stars, stack=None):
     The plot's fixed box ends exactly at the scores' top. Short plots
     retain the same box, and long plots scroll within it.
     """
-    from lib.ui.newhome import HERO_LOGO, HERO_PLOT, HERO_TITLE
+    from lib.ui.home import HERO_LOGO, HERO_PLOT, HERO_TITLE
 
     s = dict(_STACK, **(stack or {}))
     plot_h = _plot_height(plot, s)
@@ -228,7 +228,7 @@ def place_hero(window, plot, has_facts, has_scores, has_stars, stack=None):
 
 
 def paint_hero(window, plot, panel_text, runtime_minutes, stack=None):
-    """Write the new-look hero controls and place the stack."""
+    """Write the hero controls and place the stack."""
     stars, facts_line, scores = hero_lines(panel_text, runtime_minutes)
     _hero_call(window, HERO_STARS, 'setImage', stars)
     _hero_call(window, HERO_FACTS, 'setLabel', ('•  ' + facts_line) if (stars and facts_line) else facts_line)

@@ -336,7 +336,7 @@ def test_service_calls_service_runner_main_exactly_once(monkeypatch):
 
 @pytest.mark.parametrize('failure', ['construct', 'build', 'rows'])
 def test_home_recovery_is_limited_to_window_open_failures(monkeypatch, failure):
-    names = _RELOAD_MODULE_NAMES + ('lib.ui.newhome', 'lib.ui.newlook', 'lib.ui.dependencies')
+    names = _RELOAD_MODULE_NAMES + ('lib.ui.home', 'lib.ui.look', 'lib.ui.dependencies')
     with install_kodi_stubs(reload=names) as ctx:
         opened = []
         original = ctx.homewindow.open_window
@@ -350,13 +350,13 @@ def test_home_recovery_is_limited_to_window_open_failures(monkeypatch, failure):
             def get_enabled_addons(self):
                 return []
 
-        class Window(ctx.newhome.NewHomeWindow):
+        class Window(ctx.home.HomeWindow):
             def doModal(self):
                 self.onInit()
                 opened.append(self)
                 assert not self.closed
                 assert all(not self.getProperty(prop) for _lid, prop, _counter in
-                           ctx.newhome._ROW_COUNTERS)
+                           ctx.home._ROW_COUNTERS)
 
         def construct(cls, xml):
             if failure == 'construct':
@@ -366,9 +366,9 @@ def test_home_recovery_is_limited_to_window_open_failures(monkeypatch, failure):
         def broken_rows(*args):
             raise RuntimeError('https://user:secret@example.test/secret')
 
-        monkeypatch.setattr(ctx.newhome, 'NewHomeWindow', Window)
-        monkeypatch.setattr(ctx.newhome, 'get_store', Store)
-        monkeypatch.setattr(ctx.newhome, '_fill_shelves', broken_rows)
+        monkeypatch.setattr(ctx.home, 'HomeWindow', Window)
+        monkeypatch.setattr(ctx.home, 'get_store', Store)
+        monkeypatch.setattr(ctx.home, '_fill_shelves', broken_rows)
         monkeypatch.setattr(ctx.homewindow, 'open_window', construct)
         monkeypatch.setattr(sys, 'argv', ['plugin://plugin.video.rivulet/', '5', ''])
         runpy.run_path(DEFAULT_PY, run_name='__main__')

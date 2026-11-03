@@ -139,12 +139,12 @@ def test_a_miss_plans_a_fetch_and_paints_the_catalog_text_first(sched, monkeypat
 
 
 def test_a_hit_paints_the_cached_scores(sched, monkeypatch, cache):
-    import lib.ui.newhome as newhome
+    import lib.ui.home as home
 
     cache.store('tt0111161', {'rottenTomatoes': '91%'})
     planned = _overlay(sched, monkeypatch, cache)
     seen = []
-    monkeypatch.setattr(newhome, '_hero_meta_text', lambda meta: seen.append(meta) or '[B]RT 91%[/B] $INFO[System.ProfileName]')
+    monkeypatch.setattr(home, '_hero_meta_text', lambda meta: seen.append(meta) or '[B]RT 91%[/B] $INFO[System.ProfileName]')
     text = sched.module.overlay_text({'id': 'tt0111161', 'imdbRating': '9.3'}, 'catalog')
     assert seen[0]['rottenTomatoes'] == '91%' and seen[0]['imdbRating'] == '9.3'
     # Text from the services is shown plain: no Kodi markup or info labels.
@@ -154,11 +154,11 @@ def test_a_hit_paints_the_cached_scores(sched, monkeypatch, cache):
 
 
 def test_a_hit_still_plans_the_next_titles(sched, monkeypatch, cache):
-    import lib.ui.newhome as newhome
+    import lib.ui.home as home
 
     cache.store('tt0111161', {'rottenTomatoes': '91%'})
     planned = _overlay(sched, monkeypatch, cache)
-    monkeypatch.setattr(newhome, '_hero_meta_text', lambda meta: 'scores')
+    monkeypatch.setattr(home, '_hero_meta_text', lambda meta: 'scores')
     upcoming = [{'id': 'tt0000002', 'type': 'series'}, {'id': 'tt0000003'}, {'id': 'tt0000004'}]
     assert sched.module.overlay_text({'id': 'tt0111161'}, 'catalog', upcoming) == 'scores'
     assert planned == [('tt0000002', [('tt0000003', '')][:sched.module.PREFETCH - 1], 'series')]

@@ -8,15 +8,15 @@ import pytest
 
 from tests.kodistubs import install_kodi_stubs
 from tests.test_detailwindow import load_detailwindow as load_detailwindow
-from tests.test_newhome import _RELOAD_MODULE_NAMES
+from tests.test_home import _RELOAD_MODULE_NAMES
 
 ROOT = Path(__file__).resolve().parents[1]
 SKIN = ROOT / 'resources/skins/Default/1080i'
-XML = SKIN / 'NewDetailWindow.xml'
+XML = SKIN / 'DetailWindow.xml'
 
 
 @pytest.fixture
-def load_newdetail():
+def load_detail_page():
     with contextlib.ExitStack() as stack:
         def load():
             return stack.enter_context(install_kodi_stubs(
@@ -64,7 +64,7 @@ def test_episode_page_geometry(logo):
         layout = episodes.find(name)
         assert int(layout.get('height')) == 200 and 600 // 200 == 3
         children = [c for c in layout.findall('control') if c.findtext('label', '').find('Property(') >= 0]
-        children += [c for c in layout.findall('control') if c.findtext('texture') == 'newlook_check.png']
+        children += [c for c in layout.findall('control') if c.findtext('texture') == 'look_check.png']
         still = (16, 18, 294, 165)
         for c in children:
             x, y, w, h = _rect(c)
@@ -78,7 +78,7 @@ def test_episode_page_geometry(logo):
 def test_one_season_navigation_walks_hidden_tab(load_detailwindow):
     ctx = load_detailwindow()
     d = ctx.detailwindow
-    win = d.DetailWindow('NewDetailWindow.xml', '/addon/path', 'Default', '1080i')
+    win = d.DetailWindow('DetailWindow.xml', '/addon/path', 'Default', '1080i')
     win.start({'id': 'tt1', 'videos': [{'id': 'v1', 'season': 1, 'episode': 1}]}, 'series')
     win.onInit()
     assert win.getControl(d.SEASON_BAR).visible is False
@@ -95,17 +95,17 @@ def test_one_season_navigation_walks_hidden_tab(load_detailwindow):
 
 
 @pytest.mark.parametrize('known', [False, True])
-def test_full_episode_page_local_progress_logo_and_fallback(load_newdetail, monkeypatch, known):
-    ctx = load_newdetail()
+def test_full_episode_page_local_progress_logo_and_fallback(load_detail_page, monkeypatch, known):
+    ctx = load_detail_page()
     import xbmcgui
 
     d = ctx.detailwindow
-    monkeypatch.setattr(ctx.newhome, '_logo_known_good', lambda url: known)
-    monkeypatch.setattr(ctx.newhome, '_warm_logos', lambda win, urls: win.getControl(30098).setImage(urls[0]))
+    monkeypatch.setattr(ctx.home, '_logo_known_good', lambda url: known)
+    monkeypatch.setattr(ctx.home, '_warm_logos', lambda win, urls: win.getControl(30098).setImage(urls[0]))
     monkeypatch.setattr(d, '_prefetch_s4me_streams', lambda *args: None)
     monkeypatch.setattr(d.DetailWindow, '_episode_progress', staticmethod(lambda st, sid, vid: {'position_ms': 90000 if vid == 'v2' else 42000, 'duration_ms': 100000}))
     videos = [dict(id='v%d' % n, season=1 if n < 3 else 2, episode=n, title='Episode', released='2026-10-21T00:00:00Z', overview='Whole plot\nSecond line', runtime='71 min', thumbnail='still' if n == 1 else '') for n in range(1, 4)]
-    win = d.DetailWindow('NewDetailWindow.xml', '/addon/path', 'Default', '1080i')
+    win = d.DetailWindow('DetailWindow.xml', '/addon/path', 'Default', '1080i')
     win.start(dict(id='tt1', name='Show', poster='poster', logo='logo', videos=videos), 'series')
     win.onInit()
     rows = win.getControl(d.LIST)
@@ -151,7 +151,7 @@ def test_date_and_missing_fields(load_detailwindow, monkeypatch):
 def test_trailer_context_menu_last_and_dispatch(load_detailwindow, monkeypatch):
     ctx = load_detailwindow()
     d = ctx.detailwindow
-    win = d.DetailWindow('NewDetailWindow.xml', '/addon/path', 'Default', '1080i')
+    win = d.DetailWindow('DetailWindow.xml', '/addon/path', 'Default', '1080i')
     monkeypatch.setattr(win, '_current_library_state', lambda: (None, None, True))
     seen = []
     monkeypatch.setattr(win, '_play_trailer', lambda: seen.append('trailer'))
@@ -167,12 +167,12 @@ def test_trailer_context_menu_last_and_dispatch(load_detailwindow, monkeypatch):
 def test_episode_textures_match_generator():
     pytest.importorskip('PIL')
     import importlib.util
-    spec = importlib.util.spec_from_file_location('episode_textures', ROOT / 'tools/make_new_look_textures.py')
+    spec = importlib.util.spec_from_file_location('episode_textures', ROOT / 'tools/make_look_textures.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     from PIL import Image
     drawings = module.textures()
-    for name, size in [('newlook_panel.png', (96, 96)), ('newlook_check.png', (64, 64))]:
+    for name, size in [('look_panel.png', (96, 96)), ('look_check.png', (64, 64))]:
         path = ROOT / module.MEDIA / name
         with Image.open(path) as image:
             assert image.size == size

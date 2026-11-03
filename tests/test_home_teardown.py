@@ -19,9 +19,9 @@ import weakref
 import pytest
 
 from lib import homelayout
-from tests.test_newhome import _FakeStore
-from tests.test_newhome import load_homewindow as load_homewindow  # noqa: F401 - fixture
-from tests.test_newhome_tabs import addons, build, metas
+from tests.test_home import _FakeStore
+from tests.test_home import load_homewindow as load_homewindow  # noqa: F401 - fixture
+from tests.test_home_tabs import addons, build, metas
 
 _HOME_WORKERS = ('rivulet-library-meta', 'rivulet-home-page', 'rivulet-home-load', 'rivulet-poster-warm')
 
@@ -66,7 +66,7 @@ def _hold_requests_until_stopped(ctx, monkeypatch):
     Like the real HTTP calls, which poll their stop event. Returns the
     events that say each worker is inside its fetch.
     """
-    hw = ctx.newhome
+    hw = ctx.home
     in_meta, in_page = threading.Event(), threading.Event()
 
     def meta(_stype, _sid, stop=None):
@@ -86,7 +86,7 @@ def _hold_requests_until_stopped(ctx, monkeypatch):
 
 def _request_from_the_library_row(ctx, win):
     """What focusing a library poster does: a meta fetch and a next page."""
-    hw = ctx.newhome
+    hw = ctx.home
     hw._switch_tab(win, 'mystuff')
     item = win.getControl(hw.LIBRARY_SHELF).getListItem(0)
     hw._schedule_library_meta(win, item)
@@ -97,7 +97,7 @@ def test_open_home_frees_every_list_item_while_the_window_is_alive(load_homewind
     ctx = load_homewindow()
     from lib.ui import homewindow
 
-    hw = ctx.newhome
+    hw = ctx.home
     items = _Recorder(monkeypatch)
     store = _FakeStore(auth={'authKey': 'k'}, addons=addons(), progress_entries=_progress())
     store.get_home_layout = homelayout.default_layout
@@ -113,14 +113,14 @@ def test_open_home_frees_every_list_item_while_the_window_is_alive(load_homewind
     in_meta, in_page = _hold_requests_until_stopped(ctx, monkeypatch)
     kept = {}
 
-    class Modal(hw.NewHomeWindow):
+    class Modal(hw.HomeWindow):
         def doModal(self):
             kept['window'] = self  # Kodi holds the window too; it is not dropped first
             self.onInit()
             _request_from_the_library_row(ctx, self)
             assert in_meta.wait(2) and in_page.wait(2)
 
-    monkeypatch.setattr(hw, 'NewHomeWindow', Modal)
+    monkeypatch.setattr(hw, 'HomeWindow', Modal)
     before = set(threading.enumerate())
 
     homewindow.open_home()
@@ -140,18 +140,18 @@ def test_a_failure_in_release_items_does_not_stop_open_home(load_homewindow, mon
     ctx = load_homewindow()
     from lib.ui import homewindow
 
-    hw = ctx.newhome
+    hw = ctx.home
     monkeypatch.setattr(homewindow, '_notify_if_updated', lambda *_: None)
     monkeypatch.setattr(homewindow, '_migrate_home_layout', lambda: None)
 
-    class Modal(hw.NewHomeWindow):
+    class Modal(hw.HomeWindow):
         def doModal(self):
             pass
 
     def explode(_window):
         raise RuntimeError('controls already unloaded')
 
-    monkeypatch.setattr(hw, 'NewHomeWindow', Modal)
+    monkeypatch.setattr(hw, 'HomeWindow', Modal)
     monkeypatch.setattr(hw, 'release_items', explode)
 
     homewindow.open_home()
@@ -161,7 +161,7 @@ def test_a_failure_in_release_items_does_not_stop_open_home(load_homewindow, mon
 
 def test_release_items_tolerates_controls_kodi_already_unloaded(load_homewindow, monkeypatch):  # noqa: F811
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     items = _Recorder(monkeypatch)
     win, _, _ = build(ctx, monkeypatch, auth={'authKey': 'k'}, library=_entries())
 
@@ -180,7 +180,7 @@ def test_release_items_tolerates_controls_kodi_already_unloaded(load_homewindow,
 
 def test_workers_in_flight_hold_neither_the_window_nor_its_items(load_homewindow, monkeypatch):  # noqa: F811
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     items = _Recorder(monkeypatch)
     before = set(threading.enumerate())
     win, _, _ = build(ctx, monkeypatch, auth={'authKey': 'k'}, library=_entries(),
@@ -212,7 +212,7 @@ def test_row_items_are_built_on_the_calling_thread_never_by_a_loader(load_homewi
     thread that owns the window. Loaders return records; the GUI thread
     turns them into items, for first paint and for the personal refresh."""
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     items = _Recorder(monkeypatch)
     win, store, _ = build(ctx, monkeypatch, auth={'authKey': 'k'}, library=_entries(),
                           progress=_progress())
@@ -227,7 +227,7 @@ def test_row_items_are_built_on_the_calling_thread_never_by_a_loader(load_homewi
 
 def test_a_loaded_row_state_is_plain_data_until_the_gui_attaches_items(load_homewindow, monkeypatch):  # noqa: F811
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     items = _Recorder(monkeypatch)
     plan = [('cat:t|movie|top', 'catalog', {}, '', ('Top', 'Top'))]
 
@@ -242,7 +242,7 @@ def test_a_loaded_row_state_is_plain_data_until_the_gui_attaches_items(load_home
 @pytest.mark.parametrize('abort', [False, True])
 def test_release_items_stops_and_joins_the_workers_it_finds(load_homewindow, monkeypatch, abort):  # noqa: F811
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     win, _, _ = build(ctx, monkeypatch, auth={'authKey': 'k'}, library=_entries())
     in_meta, in_page = _hold_requests_until_stopped(ctx, monkeypatch)
     _request_from_the_library_row(ctx, win)

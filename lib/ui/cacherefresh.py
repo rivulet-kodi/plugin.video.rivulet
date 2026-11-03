@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 M0Rf30
 # SPDX-License-Identifier: MIT
-"""Settings > Refresh cached data: forget what the new-look
+"""Settings > Refresh cached data: forget what the
 screens have saved.
 
 Catalog first pages (a day old at most), title details (30 minutes),
@@ -12,7 +12,7 @@ interpreter from the Home window behind Settings, so deleting the files
 is not enough: Home also holds pages and logo answers in memory. The
 action bumps a hidden setting (`cache_generation`); Home sees it change
 when Settings closes, drops its memory copies and rebuilds its rows
-(`newhome._after_child`).
+(`home._after_child`).
 """
 
 import os

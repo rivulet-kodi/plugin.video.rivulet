@@ -4,11 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.test_home import load_homewindow as load_homewindow
 from tests.test_home_shutdown import join_promptly
 from tests.test_home_shutdown import session as session
 from tests.test_home_startup import prepare
-from tests.test_newhome import load_homewindow as load_homewindow
-from tests.test_newhome_tabs import metas
+from tests.test_home_tabs import metas
 
 
 def continue_plan(ctx, monkeypatch, count=3):
@@ -24,7 +24,7 @@ def continue_plan(ctx, monkeypatch, count=3):
 
 def test_three_ten_second_lookups_cannot_hold_startup_and_retry_next_load(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     win, store = continue_plan(ctx, monkeypatch)
     release = threading.Event()
     started = threading.Barrier(4)
@@ -90,11 +90,11 @@ def test_continue_lookup_starts_while_catalog_first_page_is_still_running(load_h
         fetched.append(sid)
         return {'id': sid, 'name': 'resolved', 'poster': 'p'}
 
-    monkeypatch.setattr(ctx.newhome, '_one_catalog_page', page)
+    monkeypatch.setattr(ctx.home, '_one_catalog_page', page)
     monkeypatch.setattr(ctx.views, '_fetch_meta_for_home', meta)
     win.onInit()
     assert fetched == ['tt0']
-    assert win.getControl(ctx.newhome.CONTINUE_SHELF).size() == 1
+    assert win.getControl(ctx.home.CONTINUE_SHELF).size() == 1
     win.close()
 
 
@@ -108,9 +108,9 @@ def test_missing_meta_is_not_retried_in_a_second_home_load(load_homewindow, monk
         return None
     monkeypatch.setattr(ctx.views, '_fetch_meta_for_home', missing)
     win.onInit()
-    ctx.newhome._load_rows(win, store, None)
+    ctx.home._load_rows(win, store, None)
     assert calls == [True]
-    assert ctx.newhome._continue_meta_misses == {('movie', 'tt0')}
+    assert ctx.home._continue_meta_misses == {('movie', 'tt0')}
     win.close()
 
 
@@ -129,22 +129,22 @@ def test_continue_budget_starts_after_twelve_slow_catalog_jobs(load_homewindow, 
     plan = [plan[0]] + [(30041 + i, *catalog[1:]) for i in range(12)]
     monkeypatch.setattr('lib.homelayout.resolve', lambda *args: plan)
     now, clock_lock = [0.0], threading.Lock()
-    monkeypatch.setattr(ctx.newhome, 'time', SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(ctx.home, 'time', SimpleNamespace(monotonic=lambda: now[0]))
     def page(*args):
         with clock_lock:
             now[0] += 0.7  # Simulate catalog time without sleeping.
         return metas(0, 20)
-    monkeypatch.setattr(ctx.newhome, '_one_catalog_page', page)
+    monkeypatch.setattr(ctx.home, '_one_catalog_page', page)
     calls = []
     def fetch(stype, sid, should_stop, **kw):
         calls.append(sid)
         assert not should_stop()
         return {'id': sid, 'name': 'resolved', 'poster': 'p'}
     monkeypatch.setattr(ctx.views, '_fetch_meta_for_home', fetch)
-    rows = ctx.newhome._load_rows(win, store, None)
+    rows = ctx.home._load_rows(win, store, None)
     assert catalog_id and calls == ['tt0']
     assert len(rows[0]['items']) == 1
-    assert not ctx.newhome._continue_meta_misses
+    assert not ctx.home._continue_meta_misses
     win.close()
 
 
@@ -159,7 +159,7 @@ def test_seventeen_lookups_use_eight_workers_and_cutoff_is_not_a_miss(load_homew
     before = set(threading.enumerate())
     now, finished, release = [0.0], [], threading.Event()
     wave = threading.Barrier(8)
-    monkeypatch.setattr(ctx.newhome, 'time', SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(ctx.home, 'time', SimpleNamespace(monotonic=lambda: now[0]))
     def fetch(stype, sid, should_stop, **kw):
         with lock:
             running[0] += 1
@@ -172,7 +172,7 @@ def test_seventeen_lookups_use_eight_workers_and_cutoff_is_not_a_miss(load_homew
         with lock:
             running[0] -= 1
         return None if should_stop() else {'id': sid, 'name': 'resolved', 'poster': 'p'}
-    collect = ctx.newhome._collect_home_rows
+    collect = ctx.home._collect_home_rows
     def cutoff(results, count, threads, stopped, deadline=None):
         if deadline is None:
             return collect(results, count, threads, stopped)
@@ -184,13 +184,13 @@ def test_seventeen_lookups_use_eight_workers_and_cutoff_is_not_a_miss(load_homew
         now[0] = deadline + 1
         release.set()
         return fetched
-    monkeypatch.setattr(ctx.newhome, '_collect_home_rows', cutoff)
+    monkeypatch.setattr(ctx.home, '_collect_home_rows', cutoff)
     monkeypatch.setattr(ctx.views, '_fetch_meta_for_home', fetch)
     try:
-        rows = ctx.newhome._load_rows(win, store, None)
+        rows = ctx.home._load_rows(win, store, None)
         assert running[1] == 8 and len(finished) == 16
-        assert len(rows[0]['items']) == min(16, ctx.newhome.SHELF_CAP)
-        assert not ctx.newhome._continue_meta_misses
+        assert len(rows[0]['items']) == min(16, ctx.home.SHELF_CAP)
+        assert not ctx.home._continue_meta_misses
     finally:
         for worker in set(threading.enumerate()) - before:
             worker.join(5)
@@ -204,7 +204,7 @@ def test_stopping_a_thousand_times_constructs_one_monitor(load_homewindow, monke
     calls = []
     monkeypatch.setattr(xbmc, 'Monitor', lambda: calls.append(True) or original())
     for _ in range(1000):
-        assert not ctx.newhome._stopping()
+        assert not ctx.home._stopping()
     assert calls == [True]
 
 
@@ -230,9 +230,9 @@ def test_idle_workers_request_one_second_waits_and_stop_on_close(session, monkey
 
     for module, attr in ((ctx.ratingsched, '_wake'), (ctx.logocheck, '_WAKE')):
         monkeypatch.setattr(module, attr, Event())
-    monkeypatch.setattr(ctx.newhome.threading, 'Event', Event)
-    monkeypatch.setattr(ctx.newhome, '_fetch_library_meta', lambda *_: None)
-    ctx.newhome._schedule_library_meta(win, ctx.newhome._poster_item({'id': 'tt1', 'type': 'movie'}, sparse=True))
+    monkeypatch.setattr(ctx.home.threading, 'Event', Event)
+    monkeypatch.setattr(ctx.home, '_fetch_library_meta', lambda *_: None)
+    ctx.home._schedule_library_meta(win, ctx.home._poster_item({'id': 'tt1', 'type': 'movie'}, sparse=True))
     from lib.stremio.ratings import RatingsCache
     monkeypatch.setattr(ctx.ratingsched, '_DWELL_SECONDS', 60)
     ctx.ratingsched._schedule('tt0000001', 'key', '', RatingsCache(str(tmp_path / 'ratings.json')))

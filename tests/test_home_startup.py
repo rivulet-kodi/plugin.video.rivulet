@@ -7,13 +7,13 @@ import pytest
 from lib import homelayout
 from lib.stremio.addons import AddonError
 from tests.homehooks import join_shelf_extends
-from tests.test_newhome import _FakeStore
-from tests.test_newhome import load_homewindow as load_homewindow
-from tests.test_newhome_tabs import metas
+from tests.test_home import _FakeStore
+from tests.test_home import load_homewindow as load_homewindow
+from tests.test_home_tabs import metas
 
 
 def prepare(ctx, monkeypatch, count=1, first=None):
-    hw = ctx.newhome
+    hw = ctx.home
     installed = [{'transportUrl': 'https://user:SECRET@addon.test/private?key=TOKEN', 'manifest': {'catalogs': [
         {'type': 'movie', 'id': 'top%d' % i, 'extra': [{'name': 'skip'}]} for i in range(count)]}}]
     store = _FakeStore(addons=installed)
@@ -24,14 +24,14 @@ def prepare(ctx, monkeypatch, count=1, first=None):
     monkeypatch.setattr(hw, '_fetch_library', lambda *_: [])
     monkeypatch.setattr(hw, '_one_catalog_page', first or (lambda *_: metas(0, 20)))
     monkeypatch.setattr(hw, '_warm_shelf_posters', lambda *_: None)
-    win = hw.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = hw.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     return win, store
 
 
 @pytest.mark.parametrize('leave', ['', 'tab', 'close'])
 def test_first_paint_ignores_a_thirteen_second_page_then_applies_only_current_result(load_homewindow, monkeypatch, leave):
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     entered, release = threading.Event(), threading.Event()
     calls = []
 
@@ -63,9 +63,9 @@ def test_first_paint_ignores_a_thirteen_second_page_then_applies_only_current_re
     win.close()
 
 
-def test_failed_page_is_shared_by_tab_return_rebuild_and_new_home_then_retried(load_homewindow, monkeypatch):
+def test_failed_page_is_shared_by_tab_return_rebuild_and_a_fresh_home_then_retried(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     calls = []
     healthy = [False]
 
@@ -111,7 +111,7 @@ def test_failed_page_is_shared_by_tab_return_rebuild_and_new_home_then_retried(l
 
 def test_a_remembered_failure_logs_one_info_without_a_generic_warning(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     win, store = prepare(ctx, monkeypatch)
     from lib.homelayout import installed_catalogs
     descriptor = installed_catalogs(store.get_enabled_addons())[0]
@@ -189,11 +189,11 @@ def test_home_entry_to_shown_timing_is_logged_once(load_homewindow, monkeypatch)
     ctx = load_homewindow()
     from lib.ui import homewindow
 
-    class Window(ctx.newhome.NewHomeWindow):
+    class Window(ctx.home.HomeWindow):
         def doModal(self):
             self._home_on_shown()
 
-    monkeypatch.setattr(ctx.newhome, 'NewHomeWindow', Window)
+    monkeypatch.setattr(ctx.home, 'HomeWindow', Window)
     monkeypatch.setattr(homewindow, '_notify_if_updated', lambda *_: None)
     homewindow.open_home()
     lines = [line for line, _ in ctx.env.log_calls if 'HomeWindow shown in ' in line]

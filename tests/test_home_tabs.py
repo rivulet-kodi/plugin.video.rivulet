@@ -7,8 +7,8 @@ import pytest
 
 from lib import homelayout
 from tests.homehooks import join_shelf_extends
-from tests.test_newhome import _FakeStore
-from tests.test_newhome import load_homewindow as load_homewindow
+from tests.test_home import _FakeStore
+from tests.test_home import load_homewindow as load_homewindow
 
 
 def metas(start=0, count=30, stype='movie'):
@@ -26,7 +26,7 @@ def addons():
 
 
 def build(ctx, monkeypatch, layout=None, installed=None, progress=None, library=None, auth=None, cache=None):
-    hw = ctx.newhome
+    hw = ctx.home
     store = _FakeStore(auth=auth, addons=addons() if installed is None else installed,
                        progress_entries=progress or [], library_cache=cache)
     store.get_home_layout = lambda: layout or homelayout.default_layout()
@@ -44,13 +44,13 @@ def build(ctx, monkeypatch, layout=None, installed=None, progress=None, library=
     monkeypatch.setattr(hw, '_fetch_library_meta', lambda *_: None)
     monkeypatch.setattr(ctx.mystuff, '_enrich', lambda items, **kw: [item.update(name='Played', poster='p') for item in items])
     monkeypatch.setattr(hw, '_warm_shelf_posters', lambda *_: None)
-    win = hw.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = hw.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     win.onInit()
     return win, store, calls
 
 
 def chip_actions(ctx, win):
-    return [item.getProperty('action') for item in win.getControl(ctx.newhome.BROWSE_LIST).items]
+    return [item.getProperty('action') for item in win.getControl(ctx.home.BROWSE_LIST).items]
 
 
 @pytest.mark.parametrize('ctype, expected', [
@@ -61,14 +61,14 @@ def chip_actions(ctx, win):
 def test_chip_order_visibility_and_unsupported_types(load_homewindow, ctype, expected):
     ctx = load_homewindow()
     installed = [{'transportUrl': 't', 'manifest': {'catalogs': [{'type': ctype, 'id': 'top'}]}}]
-    assert [i.getProperty('action') for i in ctx.newhome._menu_items(installed)] == expected
-    assert [i.getProperty('action') for i in ctx.newhome._menu_items([])] == ['home', 'mystuff']
+    assert [i.getProperty('action') for i in ctx.home._menu_items(installed)] == expected
+    assert [i.getProperty('action') for i in ctx.home._menu_items([])] == ['home', 'mystuff']
 
 
 def test_chip_hero_active_property_and_arrow_keys(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     import xbmcgui
-    hw = ctx.newhome
+    hw = ctx.home
     win, _, calls = build(ctx, monkeypatch)
     chips = win.getControl(hw.BROWSE_LIST)
     assert chip_actions(ctx, win) == ['home', 'mystuff', 'movies', 'series', 'anime']
@@ -99,7 +99,7 @@ def test_chip_hero_active_property_and_arrow_keys(load_homewindow, monkeypatch):
 ])
 def test_default_tabs_only_fetch_the_active_plan(load_homewindow, monkeypatch, tab, ids, fetched):
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     win, _, calls = build(ctx, monkeypatch)
     calls.clear()
     if tab != 'home':
@@ -146,9 +146,9 @@ def test_back_in_a_scrolled_row_resets_only_that_row(load_homewindow, monkeypatc
 def test_back_at_row_start_focuses_active_chip(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     win, _, _ = build(ctx, monkeypatch)
-    ctx.newhome._switch_tab(win, 'movies')
+    ctx.home._switch_tab(win, 'movies')
     win.setFocusId(30041)
-    ctx.newhome._back(win)
+    ctx.home._back(win)
     assert win.getFocusId() == 30010
     assert win.getControl(30010).getSelectedItem().getProperty('action') == 'movies'
     assert not win.closed
@@ -157,8 +157,8 @@ def test_back_at_row_start_focuses_active_chip(load_homewindow, monkeypatch):
 def test_back_from_nonhome_chip_switches_home(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     win, _, _ = build(ctx, monkeypatch)
-    ctx.newhome._switch_tab(win, 'mystuff')
-    ctx.newhome._back(win)
+    ctx.home._switch_tab(win, 'mystuff')
+    ctx.home._back(win)
     assert win._active_tab == 'home'
     assert win.getFocusId() == 30010
     assert win.getControl(30010).getSelectedPosition() == 0
@@ -168,14 +168,14 @@ def test_back_from_home_chip_closes(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     win, _, _ = build(ctx, monkeypatch)
     win.setFocusId(30010)
-    ctx.newhome._back(win)
+    ctx.home._back(win)
     assert win.closed
 
 
 def test_up_down_and_append_retain_native_position_without_reset(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     import xbmcgui
-    hw = ctx.newhome
+    hw = ctx.home
     win, _, _ = build(ctx, monkeypatch)
     row = win.getControl(30041)
     row.selectItem(8)
@@ -194,7 +194,7 @@ def test_up_down_and_append_retain_native_position_without_reset(load_homewindow
 
 def test_tab_snapshot_restores_all_loaded_posters_and_positions_without_http(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     win, _, calls = build(ctx, monkeypatch)
     hw._append_to_shelf(win, 30041, metas(30, 100))
     win.getControl(30041).selectItem(90)
@@ -220,7 +220,7 @@ def test_tab_snapshot_restores_all_loaded_posters_and_positions_without_http(loa
 def test_active_tab_survives_playback_and_settings_generation_clears_snapshots(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     win, _, _ = build(ctx, monkeypatch)
-    hw = ctx.newhome
+    hw = ctx.home
     hw._switch_tab(win, 'mystuff')
     win.onInit()
     assert win._active_tab == 'mystuff'
@@ -233,12 +233,12 @@ def test_active_tab_survives_playback_and_settings_generation_clears_snapshots(l
 def test_signed_out_signin_only_on_first_library_row_and_empty_notices(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     win, _, _ = build(ctx, monkeypatch)
-    ctx.newhome._switch_tab(win, 'mystuff')
+    ctx.home._switch_tab(win, 'mystuff')
     assert win.getControl(30041).items[0].getProperty('action') == 'signin'
     assert win.getControl(30042).size() == 0
     assert win.getProperty('shelf_slot1') == ''
     win, _, _ = build(ctx, monkeypatch, auth={'authKey': 'k'})
-    ctx.newhome._switch_tab(win, 'mystuff')
+    ctx.home._switch_tab(win, 'mystuff')
     assert win.getControl(30041).items[0].getLabel() == 'STR30426'
     assert win.getControl(30042).items[0].getLabel() == 'STR30426'
 
@@ -248,7 +248,7 @@ def test_library_split_keeps_newest_first_and_lazily_extends(load_homewindow, mo
     entries = [{'_id': 'tt%d' % i, 'name': 'T', 'type': 'movie', '_ctime': '%04d' % i}
                for i in range(60)] + [{'_id': 's', 'type': 'series', 'name': 'Show'}]
     win, _, _ = build(ctx, monkeypatch, auth={'authKey': 'k'}, library=entries)
-    hw = ctx.newhome
+    hw = ctx.home
     hw._switch_tab(win, 'mystuff')
     assert win.getControl(30041).size() == 24
     assert win.getControl(30041).items[0].getProperty('sid') == 'tt59'
@@ -265,7 +265,7 @@ def test_library_split_keeps_newest_first_and_lazily_extends(load_homewindow, mo
 def test_prefetch_threshold_is_exactly_five_and_append_keeps_the_selected_poster(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     win, _, _ = build(ctx, monkeypatch)
-    hw = ctx.newhome
+    hw = ctx.home
     win.setFocusId(30041)
     control = win.getControl(30041)
     control.selectItem(18)
@@ -288,7 +288,7 @@ def test_pages_dedupe_across_the_whole_row_and_stop_at_empty_or_all_seen(load_ho
     from lib.ui import catalogpages, views
     catalogpages.clear_later_pages()
     win, _, _ = build(ctx, monkeypatch)
-    hw = ctx.newhome
+    hw = ctx.home
     state = win._rows[30041]
     state['pending'] = []
     state['served'] = 24
@@ -315,7 +315,7 @@ def test_split_anime_pulls_at_most_five_pages_per_step(load_homewindow, monkeypa
     descriptor = homelayout.installed_catalogs(addons())[-2]
     descriptor['catalog']['extra'] = [{'name': 'skip'}]
     fetched = []
-    monkeypatch.setattr(ctx.newhome, '_one_catalog_page', lambda *_: metas(0, 1, 'anime'))
+    monkeypatch.setattr(ctx.home, '_one_catalog_page', lambda *_: metas(0, 1, 'anime'))
 
     def fetch(_t, _type, _id, extra=None):
         offset = dict(extra)['skip']
@@ -323,14 +323,14 @@ def test_split_anime_pulls_at_most_five_pages_per_step(load_homewindow, monkeypa
         return metas(offset, 1, 'anime' if offset < 6 else 'movie')
 
     monkeypatch.setattr(views, '_fetch_catalog', fetch)
-    state = ctx.newhome._open_shelf(descriptor)
+    state = ctx.home._open_shelf(descriptor)
     assert state['metas'] == []
     assert fetched == []  # First paint is only page one, even when filtered empty.
     assert not state['exhausted']
-    result = ctx.newhome._pull_more(state, 24)
+    result = ctx.home._pull_more(state, 24)
     assert fetched == [1, 2, 3, 4, 5]
     assert result == []
-    result = ctx.newhome._pull_more(state, 24)
+    result = ctx.home._pull_more(state, 24)
     assert len(fetched) == 10
     assert [m['id'] for m in result] == ['tt6', 'tt7', 'tt8', 'tt9', 'tt10']
 
@@ -355,7 +355,7 @@ def test_later_page_lru_is_reused_bounded_and_cleared(load_homewindow, monkeypat
 def test_page_safety_ceiling_stops_at_2000_and_logs(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     win, _, _ = build(ctx, monkeypatch)
-    hw = ctx.newhome
+    hw = ctx.home
     state = win._rows[30041]
     state['metas'] = metas(0, 1990)
     state['pending'] = metas(1990, 40)
@@ -373,7 +373,7 @@ def test_page_safety_ceiling_stops_at_2000_and_logs(load_homewindow, monkeypatch
 def test_tab_switch_discards_old_arrivals_and_already_ready_batches(load_homewindow, monkeypatch, ready_before_switch):
     ctx = load_homewindow()
     win, _, _ = build(ctx, monkeypatch)
-    hw = ctx.newhome
+    hw = ctx.home
     started, release = threading.Event(), threading.Event()
 
     def pull(state, room):
@@ -405,7 +405,7 @@ def test_page_worker_bound_one_per_row_two_overall_and_newest_queued_first(load_
     layout = homelayout.default_layout()
     layout['tabs']['home'] = ['new:movie', 'new:series', 'new:anime-movie', 'new:anime-series']
     win, _, _ = build(ctx, monkeypatch, layout=layout)
-    hw = ctx.newhome
+    hw = ctx.home
     started, release = threading.Event(), threading.Event()
     lock = threading.Lock()
     active, order = [], []
@@ -447,8 +447,8 @@ def test_append_warms_just_the_appended_batch(load_homewindow, monkeypatch):
     monkeypatch.setattr(posterwarm, 'request_warm', lambda w, urls: calls.append(urls))
     # Restore the real warming helper hidden by the build fixture.
     from importlib import reload
-    reload(ctx.newhome)
-    ctx.newhome._append_to_shelf(win, 30041, [{'id': 'new', 'type': 'movie', 'poster': 'https://image/poster.jpg'}])
+    reload(ctx.home)
+    ctx.home._append_to_shelf(win, 30041, [{'id': 'new', 'type': 'movie', 'poster': 'https://image/poster.jpg'}])
     assert calls == [['https://image/poster.jpg']]
 
 
@@ -457,7 +457,7 @@ def test_menu_browse_catalog_only_and_remove_continue_confirmation(load_homewind
     from lib.ui import dialogs, libraryaction
     progress = [{'type': 'movie', 'id': 'tt9', 'name': 'Nine', 'poster': 'p', 'position_ms': 20000, 'duration_ms': 100000}]
     win, store, _ = build(ctx, monkeypatch, progress=progress)
-    hw = ctx.newhome
+    hw = ctx.home
     menus = []
     monkeypatch.setattr(libraryaction, 'poster_menu', lambda meta, extra: menus.append(extra))
     hw._offer_library(win, win.getControl(30041).items[0], 30041)
@@ -484,17 +484,17 @@ def test_browse_full_catalog_passes_the_exact_row_descriptor_and_filter(load_hom
     monkeypatch.setattr(ctx.catalogpicker, 'open_single_catalog', lambda *args, **kw: calls.append((args, kw)) or True)
     for tab, variant in (('home', ''), ('anime', 'movie')):
         if tab != 'home':
-            ctx.newhome._switch_tab(win, tab)
+            ctx.home._switch_tab(win, tab)
         state = win._rows[30041]
         state['extra'] = [('genre', 'Drama')]
         descriptor = state['descriptor']
-        ctx.newhome._browse_catalog(win, state)
+        ctx.home._browse_catalog(win, state)
         assert calls[-1] == ((descriptor['transport'], descriptor['manifest'], descriptor['catalog']),
                              {'extra': [('genre', 'Drama')], 'meta_filter': variant})
         assert not win.closed
 
 def test_skin_slot_copies_and_active_pills_are_the_existing_primitives():
-    root = ET.parse(Path(__file__).parents[1] / 'resources/skins/Default/1080i/NewHomeWindow.xml').getroot()
+    root = ET.parse(Path(__file__).parents[1] / 'resources/skins/Default/1080i/HomeWindow.xml').getroot()
     controls = {int(c.attrib['id']): c for c in root.iter('control') if 'id' in c.attrib}
     chips = controls[30010]
     assert chips.findtext('left') == '80'
@@ -513,13 +513,13 @@ def test_skin_slot_copies_and_active_pills_are_the_existing_primitives():
 
 def test_first_load_is_bounded_to_four_workers_and_keeps_plan_order(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     layout = homelayout.default_layout()
     layout['tabs']['home'] = ['continue', 'rest:movie']
     installed = addons()
     installed[0]['manifest']['catalogs'] = [{'id': 'c%d' % i, 'type': 'movie'} for i in range(9)]
     store = _FakeStore(auth={'authKey': 'k'}, addons=installed)
-    win = hw.NewHomeWindow('NewHomeWindow.xml', '/addon/path', 'Default', '1080i')
+    win = hw.HomeWindow('HomeWindow.xml', '/addon/path', 'Default', '1080i')
     win._active_tab = 'home'
     win._layout = layout
     win._catalogs = homelayout.installed_catalogs(installed)
@@ -556,7 +556,7 @@ def test_first_load_is_bounded_to_four_workers_and_keeps_plan_order(load_homewin
 def test_catalog_worker_failure_and_cancelled_load_leave_home_available(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     win, store, _ = build(ctx, monkeypatch)
-    hw = ctx.newhome
+    hw = ctx.home
     from lib.ui import uicommon
 
     def fail(_descriptor):
@@ -585,15 +585,15 @@ def test_a_catalog_only_home_badges_from_the_service_cache_without_a_read(load_h
     assert items[1].getProperty('watched') == ''
 
     reads = []
-    monkeypatch.setattr(ctx.newhome, '_fetch_library', lambda *_: reads.append(True) or [])
+    monkeypatch.setattr(ctx.home, '_fetch_library', lambda *_: reads.append(True) or [])
     win._library_entries = None
-    ctx.newhome._load_rows(win, store, {'authKey': 'k'})
+    ctx.home._load_rows(win, store, {'authKey': 'k'})
     assert reads == []
 
 
 def test_personal_refresh_retains_catalog_snapshots_and_library_page_positions(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     entries = [{'_id': 'tt%d' % i, 'name': 'T', 'type': 'movie', '_ctime': '%04d' % i} for i in range(90)]
     win, store, calls = build(ctx, monkeypatch, auth={'authKey': 'k'}, library=entries)
     hw._switch_tab(win, 'mystuff')
@@ -616,7 +616,7 @@ def test_remove_continue_keeps_neighbour_and_failed_save_keeps_row(load_homewind
     progress = [{'type': 'movie', 'id': 'tt%d' % i, 'position_ms': 20, 'duration_ms': 100,
                  'updated_at': str(i)} for i in range(3)]
     win, store, _ = build(ctx, monkeypatch, progress=progress)
-    hw = ctx.newhome
+    hw = ctx.home
     monkeypatch.setattr(dialogs, 'confirm', lambda *_: True)
     control = win.getControl(30040)
     control.selectItem(1)
@@ -657,7 +657,7 @@ def test_remove_continue_never_writes_to_an_item_from_the_reset_shelf(load_homew
     win.setFocusId(30040)
     picked = win.getControl(30040).getSelectedItem()
     win._library_meta_latest = (FreedItem(), 'movie', picked.getProperty('sid'))
-    ctx.newhome._remove_continue(win, picked)
+    ctx.home._remove_continue(win, picked)
     assert win.getControl(30040).size() == 1
 
 
@@ -668,14 +668,14 @@ def test_cache_generation_clears_later_pages_before_rebuild(load_homewindow, mon
     win, _, _ = build(ctx, monkeypatch)
     catalogpages._later_pages['old'] = []
     ctx.compat.ADDON.setSetting('cache_generation', 'new')
-    ctx.newhome._after_child(win)
+    ctx.home._after_child(win)
     assert not catalogpages._later_pages
 
 
 def test_reopen_signed_out_keeps_only_one_library_signin_card(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     win, _, _ = build(ctx, monkeypatch)
-    ctx.newhome._switch_tab(win, 'mystuff')
+    ctx.home._switch_tab(win, 'mystuff')
     win.onInit()
     assert win.getControl(30041).size() == 1
     assert win.getControl(30041).items[0].getProperty('action') == 'signin'
@@ -686,7 +686,7 @@ def test_reopen_signed_out_keeps_only_one_library_signin_card(load_homewindow, m
 def test_removed_account_continue_stays_hidden_for_all_variants_until_a_fresh_window(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     from lib.ui import dialogs
-    hw = ctx.newhome
+    hw = ctx.home
     entries = [{'_id': 'tt9', 'name': 'Nine', 'type': 'movie', 'poster': 'p',
                 'state': {'timeOffset': 20000, 'duration': 100000}}]
     win, store, _ = build(ctx, monkeypatch, auth={'authKey': 'k'}, library=entries)
@@ -726,7 +726,7 @@ def test_addons_button_never_closes_home(load_homewindow, monkeypatch, child_res
     win, _, _ = build(ctx, monkeypatch)
     opened = []
     monkeypatch.setattr(ctx.addonswindow, 'open_addons', lambda: opened.append(True) or child_result)
-    win.onClick(ctx.newhome.BTN_ADDONS)
+    win.onClick(ctx.home.BTN_ADDONS)
     assert opened == [True]
     assert not win.closed
 
@@ -736,7 +736,7 @@ def test_context_key_dispatches_poster_menu_and_refreshes_after_a_library_write(
     import xbmcgui
 
     from lib.ui import libraryaction
-    hw = ctx.newhome
+    hw = ctx.home
     win, _, _ = build(ctx, monkeypatch, auth={'authKey': 'k'})
     menus, refreshes = [], []
     monkeypatch.setattr(libraryaction, 'poster_menu', lambda meta, extra: menus.append(meta['id']) or 'added')
@@ -755,7 +755,7 @@ def test_context_key_dispatches_poster_menu_and_refreshes_after_a_library_write(
 def test_disk_layout_change_rebuilds_active_and_later_tabs_with_unchanged_settings(load_homewindow, monkeypatch, tmp_path):
     ctx = load_homewindow()
     from lib.store import Store
-    hw = ctx.newhome
+    hw = ctx.home
     win, _, _ = build(ctx, monkeypatch)
     store = Store(str(tmp_path))
     store.get_enabled_addons = addons
@@ -792,7 +792,7 @@ def test_equivalent_disk_layout_keeps_snapshots_selection_and_focus(load_homewin
     import json
 
     from lib.store import Store
-    hw = ctx.newhome
+    hw = ctx.home
     win, _, _ = build(ctx, monkeypatch)
     store = Store(str(tmp_path))
     store.get_enabled_addons = addons
@@ -818,7 +818,7 @@ def test_equivalent_disk_layout_keeps_snapshots_selection_and_focus(load_homewin
 
 def test_explicit_series_alone_makes_anime_chip_and_toggle_rebuilds(load_homewindow, monkeypatch):
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     layout = homelayout.default_layout()
     layout['tabs']['anime'] = ['cat:https://addon/manifest.json|series|shows']
     win, _, calls = build(ctx, monkeypatch, layout=layout)
@@ -856,7 +856,7 @@ def test_anime_off_keeps_explicit_placement_and_continue_elsewhere(load_homewind
     assert calls == []
     assert 'anime' not in chip_actions(ctx, win)
     assert [row['kind'] for row in win._rows.values()] == ['continue']
-    ctx.newhome._switch_tab(win, 'series')
+    ctx.home._switch_tab(win, 'series')
     assert calls == ['cru']
     assert [row['kind'] for row in win._rows.values()] == ['continue', 'catalog']
 
@@ -865,7 +865,7 @@ def test_a_switch_requested_during_a_tab_load_is_dropped(load_homewindow, monkey
     """Queued input is delivered while the spinner is up; the nested switch
     must not paint, or mark loaded, a tab other than the one loading."""
     ctx = load_homewindow()
-    hw = ctx.newhome
+    hw = ctx.home
     win, _, calls = build(ctx, monkeypatch)
     calls.clear()
     real = hw._one_catalog_page
@@ -890,6 +890,6 @@ def test_a_switch_requested_during_a_tab_load_is_dropped(load_homewindow, monkey
 def test_row_headings_from_manifests_cannot_inject_skin_markup(load_homewindow):
     ctx = load_homewindow()
     plan = [('cat:t|movie|x', 'catalog', {}, '', ('[COLOR red]$INFO[System.ProfileName]', 'Name'))]
-    rows = ctx.newhome._make_row_states(None, None, [], plan, {})
+    rows = ctx.home._make_row_states(None, None, [], plan, {})
     assert '$INFO' not in rows[0]['heading'].upper() and '[COLOR' not in rows[0]['heading']
     assert rows[0]['heading'].endswith('NAME')

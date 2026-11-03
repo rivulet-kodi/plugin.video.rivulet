@@ -81,7 +81,7 @@ def _fresh_process_state():
       notes one, and a write left for `tt1` overrides the account record a
       later test reads through `apply_library_writes` (it failed CI only
       under the orders that ran a toggle test first).
-    * `lib.ui.newhome._library_dirty`: a landed write sets it, and a later
+    * `lib.ui.home._library_dirty`: a landed write sets it, and a later
       Home test would re-read its library on return.
     * `lib.stremio.addoncatalogs._catalog_cache`: whichever test first
       fetched a URL would decide every later test's hit or miss.
@@ -91,7 +91,7 @@ def _fresh_process_state():
       `_thread`, `_serving`): a URL one test queued is "already seen" in
       the next, and a warmer left marked running swallows its batches.
 
-    `newhome` imports Kodi, so it is never imported here: only a copy some
+    `home` imports Kodi, so it is never imported here: only a copy some
     test already loaded can hold the flag, and that is the copy reset.
     `posterwarm` is reset the same way, so its lazy Kodi imports never run
     here either. A
@@ -107,9 +107,9 @@ def _fresh_process_state():
         watchmarks.reset()
         libraryaction.clear_library_writes()
         addoncatalogs._catalog_cache.clear()
-        newhome = sys.modules.get('lib.ui.newhome')
-        if newhome is not None:
-            newhome._library_dirty = False
+        home = sys.modules.get('lib.ui.home')
+        if home is not None:
+            home._library_dirty = False
         posterwarm = sys.modules.get('lib.ui.posterwarm')
         if posterwarm is not None:
             posterwarm.reset_warmer()

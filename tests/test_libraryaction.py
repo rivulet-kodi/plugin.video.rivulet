@@ -126,7 +126,7 @@ def test_lookup_cancelled_is_not_ok(action, monkeypatch):
 def test_a_landed_write_is_remembered_and_dirties_home(action, monkeypatch):
     """`push_write` is the one write path: a write that landed shows on
     Home before the account echoes it, and Home re-reads its library."""
-    import lib.ui.newhome as newhome
+    import lib.ui.home as home
 
     api = _Api()
     spinners, _ = _wire(monkeypatch, api)
@@ -134,7 +134,7 @@ def test_a_landed_write_is_remembered_and_dirties_home(action, monkeypatch):
     assert action.libraryaction.push_write(_AUTH, payload) is True
     assert api.puts == [('key', payload)]
     assert spinners == ['STR30033']
-    assert newhome._library_dirty is True
+    assert home._library_dirty is True
     assert action.libraryaction.apply_library_writes([]) == [payload]
     # The success toast is the caller's: only it knows what landed.
     assert action.env.notifications == []
@@ -144,12 +144,12 @@ def test_a_landed_write_is_remembered_and_dirties_home(action, monkeypatch):
 def test_a_write_that_did_not_land_records_nothing(action, monkeypatch, cancel, toast):
     """Refused by the server (`#30301`) or Back on the spinner (silent):
     nothing remembered, Home left clean."""
-    import lib.ui.newhome as newhome
+    import lib.ui.home as home
 
     api = _Api(put_error=_api_error() if cancel is None else None)
     _wire(monkeypatch, api, cancel_on=cancel)
     assert action.libraryaction.push_write(_AUTH, {'_id': 'tt1'}) is False
-    assert newhome._library_dirty is False
+    assert home._library_dirty is False
     assert action.libraryaction.apply_library_writes([]) == []
     assert [text for _heading, text, *_rest in action.env.notifications] == ([toast] if toast else [])
 
@@ -166,7 +166,7 @@ def test_signed_out_menu_offers_only_the_trailer(action, monkeypatch):
 
 
 def test_menu_adds_a_title_not_in_the_library(action, monkeypatch):
-    import lib.ui.newhome as newhome
+    import lib.ui.home as home
 
     api = _Api(record=None)
     _, shown = _wire(monkeypatch, api)
@@ -176,7 +176,7 @@ def test_menu_adds_a_title_not_in_the_library(action, monkeypatch):
     assert payload['_id'] == 'tt1' and payload['removed'] is False
     assert action.env.notifications[-1][1] == 'STR30297'
     # Home re-reads its library and shows the add before the account echoes it.
-    assert newhome._library_dirty is True
+    assert home._library_dirty is True
     assert [row['_id'] for row in action.libraryaction.apply_library_writes([])] == ['tt1']
 
 
@@ -236,35 +236,35 @@ def test_a_remove_whose_record_vanished_writes_nothing(action, monkeypatch):
 
 
 def test_a_write_whose_fresh_lookup_fails_writes_nothing(action, monkeypatch):
-    import lib.ui.newhome as newhome
+    import lib.ui.home as home
 
     api = _Api(get_error=_api_error())
     _wire(monkeypatch, api)
     assert action.libraryaction._write(_AUTH, _META, False) is None
     assert action.env.notifications[-1][1] == 'STR30302'
-    assert newhome._library_dirty is False
+    assert home._library_dirty is False
 
 
 def test_a_write_cancelled_at_either_spinner_changes_nothing(action, monkeypatch):
-    import lib.ui.newhome as newhome
+    import lib.ui.home as home
 
     for spinner in (0, 1):
         api = _Api(record=None)
         _wire(monkeypatch, api, cancel_on=spinner)
         assert action.libraryaction._write(_AUTH, _META, False) is None
         assert api.puts == []
-        assert newhome._library_dirty is False
+        assert home._library_dirty is False
     assert action.libraryaction.apply_library_writes([]) == []
     assert action.env.notifications == []
 
 
 def test_a_write_the_server_refuses_is_not_shown_on_home(action, monkeypatch):
-    import lib.ui.newhome as newhome
+    import lib.ui.home as home
 
     _wire(monkeypatch, _Api(record=None, put_error=_api_error()))
     assert action.libraryaction._write(_AUTH, _META, False) is None
     assert action.env.notifications[-1][1] == 'STR30301'
-    assert newhome._library_dirty is False
+    assert home._library_dirty is False
     assert action.libraryaction.apply_library_writes([]) == []
 
 
@@ -382,11 +382,11 @@ def test_marking_a_new_title_watched_writes_the_implicit_record(action, monkeypa
 
 
 def test_a_landed_mark_shows_on_home_and_dirties_it(action, monkeypatch):
-    import lib.ui.newhome as newhome
+    import lib.ui.home as home
 
     _wire(monkeypatch, _Api(record=None), pick=1)
     action.libraryaction.poster_menu(_META)
-    assert newhome._library_dirty is True
+    assert home._library_dirty is True
     assert any(entry.get('_id') == 'tt1' for entry in action.libraryaction.apply_library_writes([]))
 
 

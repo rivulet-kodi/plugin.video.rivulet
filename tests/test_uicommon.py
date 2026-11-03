@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """Tests for lib.ui.uicommon: the shared helpers every custom
-`WindowXML` screen (`NewHomeWindow`, the coverflow,
+`WindowXML` screen (`HomeWindow`, the coverflow,
 ...) builds on - `BACK_ACTIONS`, `dismiss_busy_dialog()`, `addon_skin_path()`,
 `open_window()`, `BaseWindow`, `ModalStackWindow`, and
 `close_windows_for_playback()` - exercised against the shared fake
@@ -15,8 +15,8 @@ alongside lib.ui.compat (addon_skin_path()'s `ADDON`) and lib.ui.dialogs
 (busy_dialog()'s function-local `RivuletBusy` import - see that
 function's own comment for why it isn't a module-scope import).
 
-BaseWindow is also the shared base for NewHomeWindow/
-StreamsWindow/AddonsWindow/NewSearchWindow's back-navigation onAction() -
+BaseWindow is also the shared base for HomeWindow/
+StreamsWindow/AddonsWindow/SearchWindow's back-navigation onAction() -
 see each module's own docstring - but it is exercised directly here too,
 the same way tests/test_infowindow.py drives ShowcaseWindow.onInit()/
 onClick()/onAction() without a real modal loop.

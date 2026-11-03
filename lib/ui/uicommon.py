@@ -743,7 +743,7 @@ class ModalStackWindow:
     to make room for the player rather than the user genuinely backing
     out of it.
 
-    Mixed into `BaseWindow` (so `HomeWindow`/`NewSearchWindow`/
+    Mixed into `BaseWindow` (so `HomeWindow`/`SearchWindow`/
     `StreamsWindow`/every other screen built on it gets this for free)
     and directly onto `DetailWindow`/`ShowcaseWindow`, which subclass
     `xbmcgui.WindowXMLDialog` themselves with no shared base to route it
