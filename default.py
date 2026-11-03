@@ -57,6 +57,7 @@ if _action == 'home':
             LAUNCH_SHOW,
             dismiss_busy_dialog,
             launch_action,
+            leave_launch_directory,
             request_ui_show,
         )
     except Exception as exc:  # import failure: no Home can be constructed
@@ -96,6 +97,7 @@ if _action == 'home':
             else:
                 if verdict not in (LAUNCH_SHOW, LAUNCH_IGNORE):
                     open_home()
+                    leave_launch_directory()
         except HomeOpenError as exc:
             _recover_home(exc)
 else:
