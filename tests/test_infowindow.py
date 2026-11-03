@@ -1419,19 +1419,31 @@ def test_context_menu_person_entry_runs_run_query_and_opens_results(load_infowin
     run_query_calls = []
     person_metas = [{'id': 'tt2', 'name': 'One-Eyed Jacks', 'type': 'movie'}]
 
-    def _run_query(passed_store, passed_client, query):
+    def _run_query(passed_store, passed_client, query, report=None):
         run_query_calls.append((passed_store, passed_client, query))
         return person_metas
 
     monkeypatch.setattr(ctx.searchwindow, 'run_query', _run_query)
     opened = []
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas) or None)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(('showcase', metas)) or None)
+    import lib.ui.search as search
+
+    class _Search:
+        def start(self):
+            opened.append(('search', self.query, self._metas))
+            return False
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(search, 'open_window', lambda cls, xml: _Search())
     win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
 
     _fire_context_menu(win, ctx)
 
     assert run_query_calls == [(store, client, 'Brando')]
-    assert opened == [person_metas]
+    # The Search screen, on the name and its results - not a coverflow.
+    assert opened == [('search', 'Brando', person_metas)]
 
 
 def test_context_menu_person_entry_with_no_results_notifies(load_infowindow, monkeypatch):
@@ -1441,15 +1453,22 @@ def test_context_menu_person_entry_with_no_results_notifies(load_infowindow, mon
     monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: object())
     monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
     _stub_choose(monkeypatch, ctx, answers=[0])
-    monkeypatch.setattr(ctx.searchwindow, 'run_query', lambda store, client, query: [])
+    def _run_query(store, client, query, report=None):
+        report.total_catalogs = 1  # asked and answered, just nothing found
+        return []
+
+    monkeypatch.setattr(ctx.searchwindow, 'run_query', _run_query)
     opened = []
     monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas))
+    import lib.ui.search as search
+
+    monkeypatch.setattr(search, 'open_window', lambda cls, xml: opened.append(cls))
     win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
 
     _fire_context_menu(win, ctx)
 
     assert opened == []
-    assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
+    assert [body for _h, body, _i, _t in ctx.env.notifications] == ['No results for “Brando”']
 
 
 def test_context_menu_genre_entry_with_installed_transport_fetches_catalog_and_opens_results(

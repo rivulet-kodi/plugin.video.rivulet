@@ -803,9 +803,8 @@ def open_credit_link(store, client, parsed):
     by `open_credits_picker()`'s list and the clickable credit chips on
     `lib.ui.detailwindow.DetailWindow` / `lib.ui.streamswindow.StreamsWindow`
     (`lib.ui.creditsrow`), so all three behave identically:
-      - search (a person): reruns `lib.ui.searchwindow.run_query()` and
-        opens the results the same way a coverflow selection normally
-        would (`_open_results()` below).
+      - search (a person): opens the Search screen on that name's
+        results (`lib.ui.search.open_search(query)`), as Stremio does.
       - discover (a genre): fetches that catalog and does the same -
         but only once its transport_url is confirmed to name one of the
         user's own installed addons - an addon-supplied URL must never
@@ -819,8 +818,8 @@ def open_credit_link(store, client, parsed):
     kind = parsed['kind']
 
     if kind == 'search':
-        from lib.ui.searchwindow import run_query
-        _open_results(run_query(store, client, parsed['query']))
+        from lib.ui.search import open_search
+        open_search(parsed['query'])
         return
 
     if kind == 'discover':
