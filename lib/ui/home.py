@@ -962,8 +962,20 @@ def _collect_home_rows(results, count, threads, stopped, deadline=None):
     """Cancellation and a dead worker both end the first-paint collector."""
     fetched = {}
     while len(fetched) < count and not stopped():
-        if results.empty() and not any(thread.is_alive() for thread in threads):
-            break
+        # Liveness first, queue second. A worker's `put()` returns before
+        # it exits, so once none is alive the queue already holds every
+        # row that will ever arrive: drain it, then stop. Checking
+        # `results.empty()` first lost the row of a last worker that put
+        # and exited between the two reads, and the whole tab then painted
+        # nothing as "failed" (seen in CI as 0 of 6 rows). A worker dying
+        # outside Exception handling ends the loop the same way.
+        if not any(thread.is_alive() for thread in threads):
+            while True:
+                try:
+                    key, value = results.get_nowait()
+                except queue.Empty:
+                    return fetched
+                fetched[key] = value
         timeout = min(0.75, deadline - time.monotonic()) if deadline is not None else 0.75
         if timeout <= 0:
             break
@@ -971,9 +983,7 @@ def _collect_home_rows(results, count, threads, stopped, deadline=None):
             key, value = results.get(timeout=timeout)
             fetched[key] = value
         except queue.Empty:
-            # A worker dying outside Exception handling must not strand us.
-            if not any(thread.is_alive() for thread in threads):
-                break
+            pass
     return fetched
 
 
