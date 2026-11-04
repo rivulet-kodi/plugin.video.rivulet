@@ -257,8 +257,10 @@ def test_first_load_cannot_wait_forever_if_a_worker_exits_without_a_result(sessi
     monkeypatch.setattr(ctx.uicommon, 'run_cancellable', lambda load, _: load())
     import queue
     class NoBlockingGet(queue.Queue):
-        def get(self, *args, **kwargs):
-            pytest.fail('a dead worker must not leave the collector waiting')
+        def get(self, block=True, timeout=None):
+            if block:
+                pytest.fail('a dead worker must not leave the collector waiting')
+            return super().get(block=False)
     monkeypatch.setattr(hw.queue, 'Queue', NoBlockingGet)
     rows = hw._load_rows(win, _FakeStore(), None)
     assert rows == []

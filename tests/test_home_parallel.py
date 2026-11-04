@@ -250,3 +250,26 @@ def test_idle_workers_request_one_second_waits_and_stop_on_close(session, monkey
         release.set()
     join_promptly(workers)
     assert all(values and all(timeout == 1.0 for timeout in values) for values in waits.values()), waits
+
+
+def test_collector_keeps_a_row_put_by_the_last_worker_just_before_it_exits(load_homewindow):
+    """The last worker puts its row and exits while the collector is between
+    its queue read and its liveness read: that row must still be collected."""
+    import queue
+
+    hw = load_homewindow().home
+    results = queue.Queue()
+    results.put(('early', 'row'))
+
+    class LastWorker:
+        """Puts its row and exits the moment the collector looks at it."""
+        done = False
+
+        def is_alive(self):
+            if not self.done:
+                self.done = True
+                results.put(('late', 'row'))
+            return False
+
+    fetched = hw._collect_home_rows(results, 2, [LastWorker()], lambda: False)
+    assert fetched == {'early': 'row', 'late': 'row'}
