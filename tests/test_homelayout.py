@@ -72,6 +72,26 @@ def test_catalog_eligibility_and_anime_split():
     assert h.resolve({'version': 1, 'tabs': dict(empty()['tabs'], home=['new:movie'])}, 'home', unhidden) == []
 
 
+def test_live_catalogs_keep_their_type_and_tv_shows_stay_series():
+    cats = h.installed_catalogs([addon([
+        catalog('football', 'sport', 'Football'), catalog('now', 'sports', 'Live Now'),
+        catalog('ppv', 'events'), catalog('channels', 'tv', 'Live Channels'),
+        catalog('top', 'tv', 'Popular'), catalog('uploads', 'channel'),
+        catalog('today', 'sport', extraRequired=['genre']),
+    ])])
+    assert [(row['catalog']['id'], row['kind']) for row in cats] == [
+        ('football', 'live'), ('now', 'live'), ('ppv', 'live'), ('channels', 'live'), ('top', 'series')]
+    assert cats[0]['list_id'] == 'cat:a|sport|football'
+    live = [row[0] for row in h.resolve(h.DEFAULT, 'live', cats)]
+    assert live == ['cat:a|sport|football', 'cat:a|sports|now', 'cat:a|events|ppv', 'cat:a|tv|channels']
+    assert 'cat:a|tv|top' in [row[0] for row in h.resolve(h.DEFAULT, 'series', cats)]
+    assert not h.valid_id('new:live') and h.valid_id('rest:live')
+    # A user can still place any eligible catalog on Live by hand.
+    layout = empty()
+    layout['tabs']['live'] = ['cat:a|tv|top']
+    assert [row[0] for row in h.resolve(layout, 'live', cats)] == ['cat:a|tv|top']
+
+
 @pytest.mark.parametrize('ctype,sid,variant', [('movie','tt1','movie'), ('tv','tt2','series'),
     ('series','tt3','series'), ('anime.movie','a','anime'), ('movie','kitsu:1','anime')])
 def test_continue_anime_precedence(ctype, sid, variant):

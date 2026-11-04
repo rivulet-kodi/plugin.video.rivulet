@@ -56,7 +56,8 @@ def chip_actions(ctx, win):
 @pytest.mark.parametrize('ctype, expected', [
     ('movie', ['home', 'mystuff', 'movies']), ('TV', ['home', 'mystuff', 'series']),
     ('anime.movie', ['home', 'mystuff', 'anime']), ('anime.series', ['home', 'mystuff', 'anime']),
-    ('channel', ['home', 'mystuff']),
+    ('channel', ['home', 'mystuff']), ('sport', ['home', 'mystuff', 'live']),
+    ('Sports', ['home', 'mystuff', 'live']),
 ])
 def test_chip_order_visibility_and_unsupported_types(load_homewindow, ctype, expected):
     ctx = load_homewindow()

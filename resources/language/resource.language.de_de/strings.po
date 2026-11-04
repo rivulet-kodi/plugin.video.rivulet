@@ -1271,3 +1271,11 @@ msgstr "Wo heruntergeladene Torrent-Daten gespeichert werden, wenn der Speicher-
 msgctxt "#30551"
 msgid "Keep downloaded torrent data in RAM only, never on disk. Actual memory use can reach about twice this budget. 0 writes the data to disk."
 msgstr "Heruntergeladene Torrent-Daten nur im RAM halten, nie auf der Festplatte. Der tatsächliche Speicherverbrauch kann etwa das Doppelte dieses Budgets erreichen. 0 schreibt die Daten auf die Festplatte."
+
+msgctxt "#30552"
+msgid "Live"
+msgstr "Live"
+
+msgctxt "#30553"
+msgid "Live TV, sports and events from your addons"
+msgstr "Live-TV, Sport und Events aus deinen Addons"

@@ -293,7 +293,7 @@ list_ids = st.one_of(
     json_values,
 )
 
-_TABS = ['home', 'mystuff', 'movies', 'series', 'anime']
+_TABS = ['home', 'mystuff', 'movies', 'series', 'anime', 'live']
 
 #: A saved Home layout, or something the file might hold instead.
 home_layouts = hostile_json(st.fixed_dictionaries({

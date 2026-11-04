@@ -1271,3 +1271,11 @@ msgstr "مكان تخزين بيانات التورنت المنزّلة عند 
 msgctxt "#30551"
 msgid "Keep downloaded torrent data in RAM only, never on disk. Actual memory use can reach about twice this budget. 0 writes the data to disk."
 msgstr "الاحتفاظ ببيانات التورنت المنزّلة في الذاكرة RAM فقط وعدم كتابتها على القرص. قد يصل الاستخدام الفعلي للذاكرة إلى نحو ضعف هذه الميزانية. القيمة 0 تكتب البيانات على القرص."
+
+msgctxt "#30552"
+msgid "Live"
+msgstr "مباشر"
+
+msgctxt "#30553"
+msgid "Live TV, sports and events from your addons"
+msgstr "البث التلفزيوني والرياضة والأحداث المباشرة من إضافاتك"

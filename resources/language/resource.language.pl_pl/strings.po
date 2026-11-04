@@ -1271,3 +1271,11 @@ msgstr "Miejsce zapisu pobranych danych torrent, gdy pamięć podręczna w RAM j
 msgctxt "#30551"
 msgid "Keep downloaded torrent data in RAM only, never on disk. Actual memory use can reach about twice this budget. 0 writes the data to disk."
 msgstr "Przechowuj pobrane dane torrent wyłącznie w RAM, nigdy na dysku. Rzeczywiste zużycie pamięci może sięgnąć około dwukrotności tego limitu. 0 zapisuje dane na dysku."
+
+msgctxt "#30552"
+msgid "Live"
+msgstr "Na żywo"
+
+msgctxt "#30553"
+msgid "Live TV, sports and events from your addons"
+msgstr "Telewizja na żywo, sport i wydarzenia z dodatków"

@@ -138,7 +138,7 @@ def test_reset_uses_pure_defaults_and_existing_confirmation(load_homewindow, mon
     ctx = load_homewindow(settings={'home_show_mystuff': 'false'})
     layout = h.default_layout()
     layout['tabs']['home'] = []
-    mod, store, _ = setup(ctx, monkeypatch, [5, -1], layout, [confirm])
+    mod, store, _ = setup(ctx, monkeypatch, [len(h.TABS), -1], layout, [confirm])
     mod.open_configurator()
     assert store.layout == (h.default_layout() if confirm else layout)
     assert len(store.saved) == int(confirm)

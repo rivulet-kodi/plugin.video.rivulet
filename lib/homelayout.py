@@ -12,9 +12,20 @@ import re
 from lib.stremio.addons import _base_type, catalog_required_extra_names, iter_catalogs
 from lib.stremio.contentrating import is_adult_catalog
 
-TABS = ('home', 'mystuff', 'movies', 'series', 'anime')
-TAB_LABELS = dict(zip(TABS, (30495, 30516, 30213, 30214, 30215)))
-KINDS = ('movie', 'series', 'anime-movie', 'anime-series')
+TABS = ('home', 'mystuff', 'movies', 'series', 'anime', 'live')
+TAB_LABELS = dict(zip(TABS, (30495, 30516, 30213, 30214, 30215, 30552)))
+KINDS = ('movie', 'series', 'anime-movie', 'anime-series', 'live')
+#: Kinds a ``new:`` placeholder can name. Live has no "newest" catalog: its
+#: rows are time-sensitive already, so only ``rest:live`` exists.
+NEW_KINDS = KINDS[:4]
+#: Base types Home can show. ``sport``/``sports``/``events`` are what live
+#: addons declare (Sports Streams, Maximum Sports); ``channel`` stays out,
+#: Stremio uses it for YouTube-style uploaders, not broadcasts.
+LIVE_TYPES = ('sport', 'sports', 'event', 'events', 'live')
+HOME_TYPES = ('movie', 'series', 'tv', 'anime') + LIVE_TYPES
+#: Whole words that make a ``tv`` catalog live television. ``tv`` alone is
+#: not enough: plenty of addons publish TV *shows* under it.
+LIVE_WORDS = {'live', 'channel', 'channels', 'iptv', 'sport', 'sports', 'broadcast', 'broadcasts'}
 CONTINUE_IDS = ('continue', 'continue:movie', 'continue:series', 'continue:anime')
 LIBRARY_IDS = ('library', 'library:movie', 'library:series')
 MAX_POSTER_ROWS = 12
@@ -23,7 +34,7 @@ NEW_TOKENS = ('new', 'latest', 'recent', 'recently', 'release', 'releases',
               'theaters', 'theatres', 'now playing')
 ANIME_SOURCES = {'crunchyroll', 'hidive', 'funimation', 'kitsu', 'anilist', 'myanimelist', 'anidb'}
 _NEW_RE = re.compile(r'\b(?:%s)\b' % '|'.join(re.escape(token) for token in NEW_TOKENS))
-_NEW_LABELS = dict(zip(KINDS, (30529, 30530, 30531, 30532)))
+_NEW_LABELS = dict(zip(NEW_KINDS, (30529, 30530, 30531, 30532)))
 DEFAULT = {'version': 1, 'tabs': {
     'home': ['continue', 'new:movie', 'new:series'],
     'mystuff': ['library:movie', 'library:series'],
@@ -31,6 +42,7 @@ DEFAULT = {'version': 1, 'tabs': {
     'series': ['continue:series', 'new:series', 'rest:series'],
     'anime': ['continue:anime', 'new:anime-movie', 'new:anime-series',
               'rest:anime-movie', 'rest:anime-series'],
+    'live': ['rest:live'],
 }}
 
 
@@ -48,7 +60,7 @@ def parse_catalog_id(value):
     parts = value[4:].split('|')
     if len(parts) not in (3, 4) or not all(parts):
         return None
-    if _base_type(parts[1]) not in ('movie', 'series', 'tv', 'anime'):
+    if _base_type(parts[1]) not in HOME_TYPES:
         return None
     if len(parts) == 4 and (parts[1].lower() != 'anime' or parts[3] not in ('movie', 'series')):
         return None
@@ -60,7 +72,7 @@ def valid_id(value):
         return False
     if value in CONTINUE_IDS or value in LIBRARY_IDS:
         return True
-    if value in tuple('%s:%s' % (prefix, kind) for prefix in ('new', 'rest') for kind in KINDS):
+    if value in tuple('new:%s' % kind for kind in NEW_KINDS) + tuple('rest:%s' % kind for kind in KINDS):
         return True
     return parse_catalog_id(value) is not None
 
@@ -158,15 +170,26 @@ def is_anime_source(manifest, catalog):
     if base not in ('movie', 'series', 'tv'):
         return False
 
-    def words(value):
-        return set(re.findall(r'[^\W_]+', str(value or '').lower()))
-
-    if words(catalog.get('name')) & (ANIME_SOURCES | {'anime'}):
+    if _words(catalog.get('name')) & (ANIME_SOURCES | {'anime'}):
         return True
-    if any(words(value) & ANIME_SOURCES for value in (
+    if any(_words(value) & ANIME_SOURCES for value in (
             catalog.get('id'), manifest.get('id'), manifest.get('name'))):
         return True
     return manifest.get('id') == 'pw.ers.netflix-catalog' and catalog.get('id') == 'cru'
+
+
+def _words(value):
+    return set(re.findall(r'[^\W_]+', str(value or '').lower()))
+
+
+def is_live_catalog(catalog):
+    """A sport/event type, or a ``tv`` catalog whose own name or id says
+    live/channels. Only the catalog is read, never the addon: an addon may
+    serve live channels next to ordinary TV-show catalogs."""
+    base = _base_type(catalog.get('type'))
+    if base in LIVE_TYPES:
+        return True
+    return base == 'tv' and bool((_words(catalog.get('name')) | _words(catalog.get('id'))) & LIVE_WORDS)
 
 
 def installed_catalogs(addons, hide_adult=True):
@@ -182,7 +205,7 @@ def installed_catalogs(addons, hide_adult=True):
             continue
         ctype = str(catalog.get('type') or '').strip().lower()
         base = _base_type(ctype)
-        if base not in ('movie', 'series', 'tv', 'anime'):
+        if base not in HOME_TYPES:
             continue
         if catalog_required_extra_names(catalog) - {'skip'}:
             continue
@@ -193,7 +216,9 @@ def installed_catalogs(addons, hide_adult=True):
         if not isinstance(addon_id, str) or not isinstance(cid, str) or not cid:
             continue
         kind = 'movie' if base == 'movie' else 'series'
-        if base != 'anime' and is_anime_source(manifest, catalog):
+        if is_live_catalog(catalog):
+            kind = 'live'
+        elif base != 'anime' and is_anime_source(manifest, catalog):
             kind = 'anime-%s' % kind
         views = [(kind, '')]
         if base == 'anime':
@@ -230,7 +255,8 @@ def _expand(rows, catalogs):
         heading = None
         if list_id.startswith(('new:', 'rest:')):
             prefix, kind = list_id.split(':', 1)
-            chosen = _new_catalog(catalogs, kind)
+            # rest: leaves out what new: would show; a kind without new: keeps all.
+            chosen = _new_catalog(catalogs, kind) if kind in NEW_KINDS else None
             if prefix == 'new':
                 source = [chosen['list_id']] if chosen else []
                 heading = (_NEW_LABELS[kind],)

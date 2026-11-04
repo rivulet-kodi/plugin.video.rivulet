@@ -66,7 +66,8 @@ def _add_list(store, layout, tab, catalogs):
         catalog = by_id.get(list_id)
         subtitle = ''
         if catalog:
-            type_id = {'movie': 30213, 'series': 30214, 'anime-movie': 30535, 'anime-series': 30536}[catalog['kind']]
+            type_id = {'movie': 30213, 'series': 30214, 'anime-movie': 30535, 'anime-series': 30536,
+                       'live': 30552}[catalog['kind']]
             subtitle = '%s · %s' % (L(type_id), catalog['manifest'].get('name') or catalog['manifest'].get('id') or '')
         rows.append((_label(list_id, catalogs), subtitle))
     picked = dialogs.choose(L(30522), rows)

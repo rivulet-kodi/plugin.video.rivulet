@@ -101,8 +101,9 @@ _BUTTON_ACTIONS = {
 # Tabs have a fixed order. Eligibility is the same pure catalog rule used by
 # the configurator; unsupported base types never create a Home row or chip.
 _MENU = ((30495, 'home'), (30516, 'mystuff'), (30213, 'movies'),
-         (30214, 'series'), (30215, 'anime'))
-_SUBTITLES = {'mystuff': 30232, 'movies': 30216, 'series': 30217, 'anime': 30218}
+         (30214, 'series'), (30215, 'anime'), (30552, 'live'))
+_SUBTITLES = {'mystuff': 30232, 'movies': 30216, 'series': 30217, 'anime': 30218,
+              'live': 30553}
 L_FOR_ACTION = {action: string_id for string_id, action in _MENU}
 
 
