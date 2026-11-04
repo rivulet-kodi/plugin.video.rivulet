@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.43.0" provider-name="M0RF30">
+<addons><addon id="plugin.video.rivulet" name="Rivulet" version="0.44.0" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0" />
     <import addon="script.module.requests" version="2.22.0" />
@@ -12,7 +12,11 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse and search catalogs by type, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote rivulet-engine streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.43.0:
+    <news>v0.44.0:
+- Security: a video file that is really a playlist can no longer make the streaming server fetch addresses it should refuse, including its own control commands. Comes with rivulet-engine v0.31.0, installed automatically.
+- Fix: Home no longer opens with a tab left empty when its rows finished loading at the same moment.
+- Fix: on the series page, the underline under the selected season now spans the whole season name.
+v0.43.0:
 - Fix: with a memory cache size set, the streaming server downloads only what is coming up next (half the cache size ahead of playback) instead of the whole video, so it no longer fills the cache with parts it throws away and downloads again, which used to waste bandwidth and could stall playback. It also keeps the part you are watching right now and no longer logs a failed check each time it re-downloads a part. Closing a video while it waits for data no longer crashes the streaming server. Comes with rivulet-engine v0.30.2, installed automatically.
 v0.42.0:
 - Fix: with a memory cache size set, the streaming server no longer throws away the video just ahead of what you are watching when other people download from you, so it stops downloading those parts a second time. Comes with rivulet-engine v0.30.0, installed automatically.
