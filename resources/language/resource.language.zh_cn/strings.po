@@ -1271,3 +1271,11 @@ msgstr "内存缓存关闭时，已下载的种子数据保存的位置。指向
 msgctxt "#30551"
 msgid "Keep downloaded torrent data in RAM only, never on disk. Actual memory use can reach about twice this budget. 0 writes the data to disk."
 msgstr "已下载的种子数据只保存在内存中，从不写入磁盘。实际内存占用可能达到此上限的约两倍。0 表示将数据写入磁盘。"
+
+msgctxt "#30552"
+msgid "Live"
+msgstr "直播"
+
+msgctxt "#30553"
+msgid "Live TV, sports and events from your addons"
+msgstr "来自插件的直播电视、体育和赛事"

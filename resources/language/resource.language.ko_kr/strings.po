@@ -1271,3 +1271,11 @@ msgstr "메모리 캐시가 꺼져 있을 때 다운로드한 토렌트 데이�
 msgctxt "#30551"
 msgid "Keep downloaded torrent data in RAM only, never on disk. Actual memory use can reach about twice this budget. 0 writes the data to disk."
 msgstr "다운로드한 토렌트 데이터를 RAM에만 보관하고 디스크에는 쓰지 않습니다. 실제 메모리 사용량은 이 한도의 약 두 배에 이를 수 있습니다. 0이면 데이터를 디스크에 씁니다."
+
+msgctxt "#30552"
+msgid "Live"
+msgstr "라이브"
+
+msgctxt "#30553"
+msgid "Live TV, sports and events from your addons"
+msgstr "애드온의 라이브 TV, 스포츠, 이벤트"

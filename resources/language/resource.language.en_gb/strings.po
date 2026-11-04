@@ -1271,3 +1271,11 @@ msgstr ""
 msgctxt "#30551"
 msgid "Keep downloaded torrent data in RAM only, never on disk. Actual memory use can reach about twice this budget. 0 writes the data to disk."
 msgstr ""
+
+msgctxt "#30552"
+msgid "Live"
+msgstr ""
+
+msgctxt "#30553"
+msgid "Live TV, sports and events from your addons"
+msgstr ""
