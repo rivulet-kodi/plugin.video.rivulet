@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.rivulet" name="Rivulet" version="0.48.0" provider-name="M0RF30">
+<addon id="plugin.video.rivulet" name="Rivulet" version="0.48.1" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" version="2.22.0"/>
@@ -12,16 +12,9 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse and search catalogs by type, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote rivulet-engine streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.48.0:
-- New: live channels show what is on now and next, with times, progress and the programme description, on the Live tab, in lists and in search. Add a programme guide address in Settings, Server add-ons, Live TV, IPTV guide URLs.
-- New: selecting a channel plays it straight away; a channel with several sources opens the source list.
-- New: a Recent channels row at the top of the Live tab, with what is on now; remove a channel from it with the context menu.
-- Changed: channels show as square logo cards, and the logo no longer stretches across the background.
-- Changed: live channels no longer appear in Continue and are never marked watched, as in Stremio.
-- Changed: IPTV playlists are sorted by channel number and send the user agent and referrer the playlist asks for.
-- Fix: changing the IPTV playlist addresses reloads the Live tab without restarting Kodi.
-- Fix: searching as you type uses less memory and network on slow devices.
-- Comes with rivulet-engine v0.33.0, installed automatically.</news>
+    <news>v0.48.1:
+- Fix: a message now says no details were found for a title when no add-on has them, instead of &quot;No streams found&quot;.
+- Fix: with a programme guide that is not in time order, a channel no longer loses what is on now. Comes with rivulet-engine v0.33.1, installed automatically.</news>
     <platform>all</platform>
     <license>MIT AND GPL-3.0-only</license>
     <website>https://github.com/rivulet-kodi/plugin.video.rivulet</website>
