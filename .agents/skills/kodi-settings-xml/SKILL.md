@@ -77,9 +77,13 @@ Hard rules (each verified in source; details in the references):
 11. Stored values for ids not in the definition are kept as hidden Internal
     strings, returned by `getSetting`, and re-saved. Renames leave stale
     values unless `<updates><update type="rename">old</update></updates>` is used.
-12. A stored value flagged `default="true"` is reset to the CURRENT `<default>`
-    on load; changing a default in a release changes behaviour for every
-    user who never changed it.
+12. Stored values win over a changed `<default>` for add-ons:
+    `CAddonSettings::Load` re-applies every stored value with `FromString`
+    after `LoadValuesFromXml` (Matrix `AddonSettings.cpp:322`, Omega `:407`,
+    Piers same), which undoes the `Reset()` that `CSettingsManager::LoadSetting`
+    does for `default="true"` entries. Changing a `<default>` in a release
+    therefore only affects users who never saved settings; do not rely on it
+    to migrate anyone else (use code or `<updates>`).
 
 ## Per-version differences (19 / 20 / 21 / 22, plus 23 master)
 
@@ -230,7 +234,7 @@ Verified in the working tree (`/resources/settings.xml`, AGENTS.md, lib/, tests/
    write-then-cancel loss (Dialog trap) for state that must persist.
 10. Every label/help/heading/option id exists in all locale `strings.po`.
 11. Env-forwarded settings: `EXTRA_ENV_SETTINGS` row + typed default match.
-12. New/changed `<default>` considered for users with `default="true"` values.
+12. New/changed `<default>` only reaches users who never saved settings (stored values are re-applied on load).
 13. First setting of each category is not an `edit` (`tests/test_settings_xml.py`).
 14. Reads use the defensive wrapper; no new `getSettingBool` calls.
 

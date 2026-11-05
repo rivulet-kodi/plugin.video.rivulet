@@ -77,7 +77,7 @@ So `version="3.0.0"` installs on Kodi 19 through 22 (and master); `version="3.0.
 | `xbmc.addon.repository` | `name` | see "Repository add-ons" |
 | `xbmc.addon.metadata` | — | exactly one; `kodi.addon.metadata` accepted as alias |
 
-`start="startup"` on `xbmc.service` is **dead since Leia**: the wiki says the option was removed and `Service.cpp` (Matrix, Piers, master) never reads a `start` attribute. The generic parser stores it as extension info, nothing consumes it. Omit it. (checker schema `leia_service.xsd` also does not list `start`; whether the checker rejects it was not run.)
+`start="startup"` on `xbmc.service` is **dead since Leia**: the wiki says the option was removed and `Service.cpp` (Matrix, Piers, master) never reads a `start` attribute. The generic parser stores it as extension info, nothing consumes it. Omit it. The checker rejects it: `ERROR: Schema validation failed ... xbmc.service ... 'start' attribute not allowed for element` (`leia_service.xsd` lists only `point id name library`; verified by running `kodi-addon-checker`).
 
 ### Metadata block
 

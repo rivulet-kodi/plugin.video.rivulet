@@ -24,5 +24,5 @@
 - `<hashes>`: xsd accepts only `sha256 sha512 sha1 md5`; Kodi also accepts `true`/`false`.
 - `<info compressed>`: the xsd allows it, Kodi never reads it.
 - `<license>`: both accept free text; the wiki documents `|`, `&`, `,` separators, SPDX `AND`/`OR` are not mentioned.
-- `xbmc.service start="…"`: `leia_service.xsd` declares only `point id name library`; the attribute is not read by Kodi. Whether the checker rejects the extra attribute was not executed `[unverified]`.
+- `xbmc.service start="…"`: `leia_service.xsd` declares only `point id name library`; the attribute is not read by Kodi. The checker does reject it (`'start' attribute not allowed for element`), verified by running it.
 - Running the checker: `kodi-addon-checker --branch matrix <addon-dir>` (branches `gotham … matrix nexus omega piers`) `[unverified: not run here]`.

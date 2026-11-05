@@ -43,7 +43,7 @@ Combined (`and`/`or` nest; the default combination is AND):
     <condition setting="a">true</condition>
     <or>
       <condition setting="b" operator="lt">5</condition>
-      <condition on="property" name="InfoBool">System.HasAddon(plugin.foo)</condition>
+      <condition on="property" name="InfoBool">System.AddonIsEnabled(plugin.foo)</condition>
     </or>
   </and>
 </dependency>
@@ -59,6 +59,10 @@ Combined (`and`/`or` nest; the default combination is AND):
 
 Pitfalls verified in source:
 
+- `System.HasAddon(id)` is true for an add-on that is installed but DISABLED
+  (`AddonsGUIInfo.cpp`, via `IsAddonInstalled`), while `xbmcaddon.Addon(id)`
+  throws for a disabled one. Gate on `System.AddonIsEnabled(id)` in
+  `InfoBool` conditions (exists on Kodi 19+).
 - An empty `<and>`/`<or>` checks false for dependencies.
 - A condition on an unknown setting id logs a warning and evaluates false, so
   a typo silently hides/disables the setting.

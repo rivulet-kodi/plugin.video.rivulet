@@ -23,19 +23,24 @@ use them at all.
 |---|---|
 | `setSetting(id, str)` | if the add-on settings dialog of THIS add-on is open: the value is posted to the dialog (in-memory) and persisted only on OK; if the id is not defined in the dialog's definition the message is dropped silently. Otherwise: stored immediately (an undefined id creates a hidden string setting) and the file is saved. |
 | `setSettingBool/Int/Number/String` | same dialog-aware path; outside the dialog they throw `WrongTypeException` for an undefined id/type mismatch. |
-| `openSettings()` | opens the add-on dialog modally; Back/Escape = cancel; OK button = confirm. |
+| `openSettings()` | opens the add-on dialog modally; Back/Escape = cancel; OK button = confirm. A legacy `xbmcaddon.Addon()` is its own CAddon: see "first-match reload" below. |
 
 Dialog end:
 
 - OK: `OnOkay` sets confirmed, then `addon->SaveSettings()` writes the whole
   settings file (every non-action setting) from the dialog's in-memory state.
   Values written meanwhile by another interpreter are overwritten.
-- Back/Escape/Cancel: not confirmed, `addon->ReloadSettings()` re-reads the
-  file; everything `setSetting` posted into the open dialog is discarded.
+- Back/Escape/Cancel: not confirmed. From Kodi 20 (Nexus) `addon->ReloadSettings()`
+  re-reads the file and everything `setSetting` posted into the open dialog is
+  discarded. On Kodi 19 (Matrix) the cancelled edits stay in the add-on object's
+  memory (the floor of this repo: do not assume Back reverts).
 - `CAddonMgr::ReloadSettings(id)` reloads the FIRST live add-on object with
   that id in `m_updateableAddons` (`std::ranges::find_if`), not all of them.
-  Other `xbmcaddon.Addon()` objects keep their loaded values until they
-  re-read; create a fresh `xbmcaddon.Addon()` to see another process's save
+  Other `xbmcaddon.Addon()` objects (a long-lived one in another
+  interpreter, e.g. the window UI vs the service) keep their loaded values
+  until they re-read, and a later dialog OK from such an object saves its
+  whole stale state over the other process's write; create a fresh
+  `xbmcaddon.Addon()` to see another process's save
   `[INFERENCE for the consequence; the first-match behaviour is in
   AddonManager.cpp]`.
 
@@ -45,10 +50,13 @@ Dialog end:
   `<settings version="N"><setting id="x" [default="true"]>value</setting>...`.
   Actions are never stored.
 - `default="true"` marks a value the user never changed (value equals the
-  default). On load such a value is `Reset()` to the CURRENT `<default>` of
-  the definition, so changing a `<default>` in a release moves every user who
-  never touched it. A user who explicitly picks the default value also gets
-  the flag.
+  default). `CSettingsManager::LoadSetting` `Reset()`s such a value to the
+  CURRENT `<default>`, but `CAddonSettings::Load` then re-applies every stored
+  value with `FromString` (Matrix `AddonSettings.cpp:322`, Omega `:407`, Piers
+  same), undoing that reset. So for add-ons the stored value wins and a
+  changed `<default>` only affects users who never saved settings (no
+  `settings.xml` entry). A user who explicitly picks the default value also
+  gets the flag.
 - Stored ids with no definition load as hidden Internal-level strings
   (`AddSettingWithoutDefinition`), are returned by `getSetting`, and are
   re-saved forever. Renaming an id leaves a stale value; use
