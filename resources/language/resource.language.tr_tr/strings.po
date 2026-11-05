@@ -1583,3 +1583,27 @@ msgstr "advancedsettings.xml kuruldu - uygulamak için Kodi'yi yeniden başlatı
 msgctxt "#30650"
 msgid "Trailers play through Kodi's YouTube add-on, which is turned off. Turn it on now?"
 msgstr "Fragmanlar Kodi'nin YouTube eklentisiyle oynatılır, ancak eklenti kapalı. Şimdi açılsın mı?"
+
+msgctxt "#30651"
+msgid "IPTV guide URLs (XMLTV, comma-separated)"
+msgstr "IPTV rehber URL'leri (XMLTV, virgülle ayrılmış)"
+
+msgctxt "#30652"
+msgid "XMLTV programme guides (plain or .gz) for the playlist channels, shown as Now and Next. Separate several URLs with commas. Empty (the default) keeps the guide off. Only applies to the built-in server, which restarts when this changes."
+msgstr "Oynatma listesi kanalları için XMLTV program rehberleri (düz veya .gz); Şimdi ve Sonra olarak gösterilir. Birden çok URL'yi virgülle ayırın. Boş (varsayılan) rehberi kapalı tutar. Yalnızca yerleşik sunucuya uygulanır; değişince yeniden başlar."
+
+msgctxt "#30653"
+msgid "Now: %s"
+msgstr "Şimdi: %s"
+
+msgctxt "#30654"
+msgid "Next: %s"
+msgstr "Sonra: %s"
+
+msgctxt "#30670"
+msgid "Recent channels"
+msgstr "Son kanallar"
+
+msgctxt "#30671"
+msgid "Remove from recent channels"
+msgstr "Son kanallardan kaldır"

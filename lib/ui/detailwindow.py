@@ -45,6 +45,7 @@ import time
 
 import xbmcgui
 
+from lib import livetv
 from lib.library import episode_ticked, item_watched
 from lib.stremio.addons import _base_type
 from lib.stremio.watchedbitfield import sorted_video_ids, watched_video_ids
@@ -1152,6 +1153,19 @@ def open_detail(stype, sid):
     if not stype:
         # A catalog that left `type` off its previews.
         stype = preview.get('type') or 'movie'
+    channel = dict(preview, id=sid, type=stype)
+    if livetv.is_live(channel):
+        # A live channel has no page: its description is the programme
+        # now playing (the hero shows it) and the meta's `videos` are the
+        # schedule, not episodes. One click goes to its streams, as
+        # stremio-core's live items do. Every opener (Home, Search, the
+        # catalog and credit links) comes through here.
+        from lib.ui.streamswindow import open_live
+
+        return open_live(
+            stype, sid, poster=channel.get('poster') or channel.get('logo'),
+            heading=channel.get('name') or sid, art=_show_art(channel), meta=channel,
+        )
     resolved = _resolve_meta(stype, sid, preview)
     if resolved is CANCELLED:
         log('detailwindow: meta fetch for %s/%s cancelled by the user' % (stype, sid), xbmc.LOGINFO)

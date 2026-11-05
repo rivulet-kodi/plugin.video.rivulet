@@ -93,6 +93,9 @@ class SearchWindow(BaseWindow):
         self._lock = threading.Lock()
         self._ready = []
         self._hero_painted = None
+        #: now/next worker for a focused live channel (`lib.ui.livenow`),
+        #: started on the first live card focused and stopped on `close()`.
+        self._now_feed = None
         #: monotonic time of the last edit typed into the bar, and the
         #: pending pause timer (`_schedule_typed_search()`).
         # When the pending pause started; None when no typed search is
@@ -117,6 +120,8 @@ class SearchWindow(BaseWindow):
         timer, self._type_timer = self._type_timer, None
         if timer is not None:
             timer.cancel()
+        if self._now_feed is not None:
+            self._now_feed.stop()
         super().close()
 
     def start(self):
@@ -172,7 +177,6 @@ class SearchWindow(BaseWindow):
         self._hero_painted = None
 
     def _show(self, metas, results):
-        from lib.ui import look
         from lib.ui.compat import L
         from lib.ui.home import _poster_item
 
@@ -187,7 +191,7 @@ class SearchWindow(BaseWindow):
         self.getControl(ROW_HEADING).setLabel('[B]%s[/B]' % L(30507 if results else 30506))
         self.setProperty('SearchHasRow', '1' if items else '')
         if items:
-            look.paint_poster_hero(self, items[0], SEARCH_STACK)
+            self._paint_hero(items[0])
         else:
             self._welcome()
 
@@ -217,9 +221,19 @@ class SearchWindow(BaseWindow):
             return
         self._apply_ready()
         if self.getFocusId() == ROW:
-            from lib.ui import look
+            self._paint_hero(self.getControl(ROW).getSelectedItem())
 
-            look.paint_poster_hero(self, self.getControl(ROW).getSelectedItem(), SEARCH_STACK)
+    def _paint_hero(self, item):
+        """The shared poster hero for `item`, after a live channel's
+        now/next is put on it (`livenow.track_item`). The feed's wake is an
+        `Action(noop)`, which lands in `onAction` and so repaints here when
+        the schedule arrives or a programme changes."""
+        from lib.ui import livenow, look
+
+        if item is not None:
+            self._now_feed = livenow.ensure_feed(self._now_feed)
+            livenow.track_item(self._now_feed, item)
+        look.paint_poster_hero(self, item, SEARCH_STACK)
 
     @gated_input
     def onClick(self, control_id):

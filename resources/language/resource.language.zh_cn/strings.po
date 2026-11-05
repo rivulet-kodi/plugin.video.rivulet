@@ -1583,3 +1583,27 @@ msgstr "已安装 advancedsettings.xml - 重启 Kodi 后生效。请在 设置 >
 msgctxt "#30650"
 msgid "Trailers play through Kodi's YouTube add-on, which is turned off. Turn it on now?"
 msgstr "预告片通过 Kodi 的 YouTube 插件播放,但该插件已被禁用。现在启用吗?"
+
+msgctxt "#30651"
+msgid "IPTV guide URLs (XMLTV, comma-separated)"
+msgstr "IPTV 节目指南网址（XMLTV，逗号分隔）"
+
+msgctxt "#30652"
+msgid "XMLTV programme guides (plain or .gz) for the playlist channels, shown as Now and Next. Separate several URLs with commas. Empty (the default) keeps the guide off. Only applies to the built-in server, which restarts when this changes."
+msgstr "播放列表频道的 XMLTV 节目指南（纯文本或 .gz），显示为“正在播放”和“接下来”。多个网址用逗号分隔。留空（默认）则关闭指南。仅适用于内置服务器，更改后会重启。"
+
+msgctxt "#30653"
+msgid "Now: %s"
+msgstr "正在播放：%s"
+
+msgctxt "#30654"
+msgid "Next: %s"
+msgstr "接下来：%s"
+
+msgctxt "#30670"
+msgid "Recent channels"
+msgstr "最近的频道"
+
+msgctxt "#30671"
+msgid "Remove from recent channels"
+msgstr "从最近的频道中移除"

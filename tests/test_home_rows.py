@@ -141,6 +141,15 @@ def _entry(**overrides):
     return entry
 
 
+def test_live_channels_with_an_offset_on_the_account_are_never_continued(home):
+    metas = home.home._library_continue_metas([
+        _entry(_id='ch1', type='tv'),
+        _entry(_id='ch2', behaviorHints={'isLive': True}),
+        _entry(_id='tt1'),
+    ])
+    assert [meta['id'] for meta in metas] == ['tt1']
+
+
 def test_titles_part_way_through_on_the_account_are_continued(home):
     metas = home.home._library_continue_metas([
         _entry(),

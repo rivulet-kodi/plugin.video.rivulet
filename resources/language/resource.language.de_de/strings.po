@@ -1583,3 +1583,27 @@ msgstr "advancedsettings.xml installiert - starten Sie Kodi neu, um sie anzuwend
 msgctxt "#30650"
 msgid "Trailers play through Kodi's YouTube add-on, which is turned off. Turn it on now?"
 msgstr "Trailer werden über Kodis YouTube-Addon abgespielt, das ausgeschaltet ist. Jetzt einschalten?"
+
+msgctxt "#30651"
+msgid "IPTV guide URLs (XMLTV, comma-separated)"
+msgstr "IPTV-Programmführer-URLs (XMLTV, durch Kommas getrennt)"
+
+msgctxt "#30652"
+msgid "XMLTV programme guides (plain or .gz) for the playlist channels, shown as Now and Next. Separate several URLs with commas. Empty (the default) keeps the guide off. Only applies to the built-in server, which restarts when this changes."
+msgstr "XMLTV-Programmführer (normal oder .gz) für die Playlist-Sender, angezeigt als Jetzt und Danach. Mehrere URLs mit Kommas trennen. Leer (Standard) lässt den Programmführer aus. Gilt nur für den integrierten Server, der bei einer Änderung neu startet."
+
+msgctxt "#30653"
+msgid "Now: %s"
+msgstr "Jetzt: %s"
+
+msgctxt "#30654"
+msgid "Next: %s"
+msgstr "Danach: %s"
+
+msgctxt "#30670"
+msgid "Recent channels"
+msgstr "Zuletzt gesehene Sender"
+
+msgctxt "#30671"
+msgid "Remove from recent channels"
+msgstr "Aus zuletzt gesehenen Sendern entfernen"

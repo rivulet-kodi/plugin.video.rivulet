@@ -93,6 +93,17 @@ def test_a_late_republish_rebuilds_home_keeping_the_place(load_homewindow, monke
     assert len(builds) == 1
 
 
+def test_a_guide_change_alone_is_waited_for(load_homewindow, monkeypatch):
+    ctx = load_homewindow()
+    win, store = _home(ctx, monkeypatch, NEW)  # published with the guide-less stamp
+    ctx.compat.ADDON.setSetting('iptv_playlists', NEW)
+    ctx.compat.ADDON.setSetting('iptv_epg', 'http://guide/xmltv.xml')
+    ctx.home._watch_iptv_playlists(win)
+    assert win._iptv_thread.is_alive()
+    win._iptv_stop.set()
+    win._iptv_thread.join(5.0)
+
+
 def test_no_wait_when_the_entry_already_matches_or_the_setting_is_off(load_homewindow, monkeypatch):
     ctx = load_homewindow()
     win, store = _home(ctx, monkeypatch, NEW)

@@ -16,6 +16,7 @@ import xbmc
 import xbmcgui
 import xbmcplugin
 
+from lib import livetv
 from lib.library import iso8601_utc
 from lib.stremio.server import (
     UNKNOWN_FILE_IDX,
@@ -52,6 +53,7 @@ from lib.ui.playbackmeta import (
     format_hms,
     human_size,
     is_adaptive_stream,
+    live_programme_lines,
     mime_for,
     parse_duration_seconds,
     parse_rating,
@@ -280,9 +282,33 @@ def _content_id(sid, item_meta):
     return ((item_meta or {}).get('meta') or {}).get('id') or sid
 
 
+def _is_live_item(stype, item_meta):
+    """Whether what is being played is a live channel: `stype` ``tv`` (the
+    legacy channel type) or a meta that `lib.livetv.is_live` accepts
+    (`behaviorHints.isLive`). stremio-core's player treats such an item as
+    having no timeline: offset 0, never watched (src/models/player.rs)."""
+    return stype == 'tv' or livetv.is_live((item_meta or {}).get('meta'))
+
+
+def _live_plot_lines(meta):
+    """The localized "Now: ..."/"Next: ..." lines of live channel `meta`'s
+    schedule at this moment (`[]` with no schedule)."""
+    try:
+        region = xbmc.getRegion('time')
+    except Exception:  # noqa: BLE001 - a missing region only costs the 24-hour default
+        region = ''
+    return live_programme_lines(
+        livetv.now_next((meta or {}).get('videos'), time.time()),
+        lambda text: _lfmt(30653, text),
+        lambda text: _lfmt(30654, text),
+        region,
+    )
+
+
 def _ask_resume_offset(stype, sid, video_id, item_meta):
     """Prompt to resume from local progress and return the chosen offset
-    in ms, or `None` (nothing cached, out of band, declined, setting off).
+    in ms, or `None` (nothing cached, out of band, declined, setting off,
+    or a live channel, which has nothing to resume).
 
     Asked BEFORE the "Preparing stream" dialog and the torrent pre-buffer
     start: the keep-alive pin's 60 s clock begins when pre-buffer ends, so
@@ -290,6 +316,8 @@ def _ask_resume_offset(stype, sid, video_id, item_meta):
     engine without piece priority right before `Player().play()`.
 
     Never raises: a broken store must never block playback."""
+    if _is_live_item(stype, item_meta):
+        return None
     try:
         return _maybe_resume_offset_ms(get_store(), stype, _content_id(sid, item_meta), video_id)
     except Exception as exc:  # noqa: BLE001 - a broken store must never block playback
@@ -315,14 +343,22 @@ def _record_now_playing(stype, sid, video_id, item_meta, resume_offset_ms):
         store = get_store()
         meta = (item_meta or {}).get('meta') or {}
         art = (item_meta or {}).get('art') or {}
-        store.set_now_playing({
+        context = {
             'type': stype,
             'id': _content_id(sid, item_meta),
             'video_id': video_id,
             'name': (item_meta or {}).get('label') or meta.get('name') or '',
             'poster': art.get('poster') or meta.get('poster'),
             'started_at': iso8601_utc(),
-        })
+        }
+        if _is_live_item(stype, item_meta):
+            # The service then never writes local progress or sends watched
+            # for it, and records the channel as recently watched instead
+            # (`lib.service_runner._RivuletPlayer`). The channel's own
+            # artwork shape travels along for the Recent channels row.
+            context['live'] = True
+            context['posterShape'] = meta.get('posterShape')
+        store.set_now_playing(context)
         store.set_resume_offset_ms(resume_offset_ms)
     except Exception as exc:  # noqa: BLE001 - a broken store write must never block playback
         log('player: recording now-playing context failed for %s/%s: %r' % (stype, sid, exc), xbmc.LOGWARNING)
@@ -1274,6 +1310,13 @@ def _apply_item_metadata(list_item, stream, stype, item_meta, filename):
     # back to the stream's own parsed description (release name, size,
     # seeders, provider) - genuinely the most useful thing to show about
     # the file actually playing.
+    if _is_live_item(stype, item_meta):
+        # A channel: the OSD panel shows what is on now and next (the
+        # schedule is the meta's `videos`, `lib.livetv.now_next`), not the
+        # stream's release line. No schedule leaves the usual fallbacks.
+        lines = _live_plot_lines(meta)
+        if lines:
+            item_meta = dict(item_meta, plot='\n'.join(lines))
     plot = escape_label(item_meta.get('plot') or meta.get('description') or _stream_plot(stream))
     if plot:
         info['plot'] = plot

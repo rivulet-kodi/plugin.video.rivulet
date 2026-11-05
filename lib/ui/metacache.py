@@ -36,6 +36,12 @@ per-write cost grow with the cache - 64 series would mean rewriting
 ~2 MB to record one fetch, which is precisely the flash wear this was
 meant to avoid. The cap below is therefore a BYTE budget.
 
+A live channel's meta is never cached (`_is_live`): its `videos` are the
+programme schedule, which stremio-core refreshes every 15 minutes
+(`livetv.REFRESH_SECONDS`, 1 minute once the schedule ran out), so a 30
+minute TTL would serve a programme that ended. Live metas are not stored,
+and one already on disk (written before this rule) is treated as a miss.
+
 Every operation is best-effort: a missing/corrupt cache file, or a
 write that fails outright (read-only filesystem, permissions), must
 never break the caller's real fetch - it is treated as a cache miss.
@@ -45,6 +51,7 @@ import os
 import threading
 import time
 
+from lib import livetv
 from lib.stremio import jsonfile
 
 FILENAME = 'meta_cache.json'
@@ -137,6 +144,12 @@ def _atomic_write(path, data):
     jsonfile.write_json(path, data, '.tmp-')
 
 
+def _is_live(stype, meta):
+    """Whether (stype, meta) is a live channel: type ``tv`` (the cache key's
+    type too: a meta may omit its own) or ``behaviorHints.isLive``."""
+    return stype == 'tv' or livetv.is_live(meta)
+
+
 def load_cached_meta(data_dir, stype, sid):
     """Return the cached meta object for (stype, sid), or None on a miss
     (absent, expired, or any I/O/parse failure).
@@ -154,7 +167,8 @@ def load_cached_meta(data_dir, stype, sid):
             or time.time() - entry.get('ts', 0) > TTL_SECONDS
         ):
             return None
-        return entry.get('meta')
+        meta = entry.get('meta')
+        return None if _is_live(stype, meta) else meta
     except OSError:
         return None
 
@@ -179,7 +193,7 @@ def store_cached_metas(data_dir, entries):
     A batch that ends up with nothing usable is a no-op: no lock taken,
     no file touched.
     """
-    usable = [(stype, sid, meta) for stype, sid, meta in entries if meta]
+    usable = [(stype, sid, meta) for stype, sid, meta in entries if meta and not _is_live(stype, meta)]
     if not usable:
         return
     try:

@@ -11,7 +11,7 @@ import re
 from hypothesis import example, given
 from hypothesis import strategies as st
 
-from lib import library
+from lib import library, livetv
 from tests.fuzz_strategies import (
     hostile_json,
     json_values,
@@ -237,7 +237,8 @@ def test_add_and_remove_payloads_never_raise(meta, existing):
 def test_build_library_item_never_raises_on_a_hostile_meta(meta):
     for item in (library.build_library_item(meta, now=NOW), library.library_add_payload(meta, now=NOW)):
         assert item['_id'] == meta['id']
-        assert set(item['behaviorHints']) == {'defaultVideoId', 'featuredVideoId', 'hasScheduledVideos'}
+        wire = {'defaultVideoId', 'featuredVideoId', 'hasScheduledVideos'}
+        assert set(item['behaviorHints']) == (wire | {'isLive'} if livetv.is_live(meta) else wire)
         assert isinstance(item['behaviorHints']['hasScheduledVideos'], bool)
         json.dumps(item)
         # A freshly built record is a valid input for everything else.

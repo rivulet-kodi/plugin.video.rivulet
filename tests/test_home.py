@@ -47,11 +47,21 @@ class _FakeStore:
     rows. Tests supply the library read explicitly when signed in;
     `library_cache` stands in for the service's `library.json`."""
 
-    def __init__(self, auth=None, addons=None, progress_entries=None, library_cache=None):
+    def __init__(self, auth=None, addons=None, progress_entries=None, library_cache=None,
+                 recent_channels=None):
         self._auth = auth
         self._addons = _ALL_TYPE_ADDONS if addons is None else addons
         self._progress_entries = [] if progress_entries is None else progress_entries
         self._library_cache = [] if library_cache is None else library_cache
+        self._recent_channels = [] if recent_channels is None else recent_channels
+
+    def get_recent_channels(self):
+        return list(self._recent_channels)
+
+    def remove_recent_channel(self, channel_id):
+        before = len(self._recent_channels)
+        self._recent_channels = [c for c in self._recent_channels if c.get('id') != channel_id]
+        return len(self._recent_channels) != before
 
     def get_library_cache(self):
         return self._library_cache
@@ -1183,7 +1193,14 @@ def test_a_card_without_art_shows_its_title_on_the_plate():
                 if el.get('type') == 'textbox' and 'ListItem.Label' in (el.findtext('label') or '')
                 and any('String.IsEmpty(ListItem.Property(thumbnail))' in (v.text or '') for v in el.findall('visible'))
             ]
-            assert len(labels) == 1, (panel_id, layout)
+            if panel_id == '30040':  # the wide Continue row has no square card
+                assert len(labels) == 1, (panel_id, layout)
+                continue
+            # One per card shape: the 2:3 plate and its square twin.
+            shapes = sorted(
+                v.text for el in labels for v in el.findall('visible') if 'Property(shape)' in (v.text or ''))
+            assert shapes == ['!String.IsEmpty(ListItem.Property(shape))',
+                              'String.IsEmpty(ListItem.Property(shape))'], (panel_id, layout)
 
 
 def test_continue_cards_are_wide_art_with_the_show_and_episode(load_homewindow):

@@ -9,6 +9,10 @@ When the engine is started with `RIVULET_IPTV_PLAYLISTS` (the
 `<engine>/iptv/manifest.json`: M3U playlists as `tv` catalogs, with
 `stream` answers for each channel. Unset or empty, every `/iptv` route
 answers 404, as it does on an engine too old to know the add-on at all.
+`RIVULET_IPTV_EPG` (the `iptv_epg` setting: comma-separated XMLTV guide
+URLs) adds programme schedules to those channels; the engine then also
+declares `behaviorHints.epgProvider`. Both settings feed the published
+stamp (`playlists_stamp()`).
 
 This module keeps the matching protected builtin entry of `addons.json`
 (`Store.set_builtin_addon()`, the same mechanism `lib.s4me` uses for the
@@ -74,17 +78,30 @@ def parse_playlists(raw):
 STAMP_FIELD = "rivuletPlaylists"
 
 
-def playlists_stamp(raw):
+def playlists_stamp(raw, epg_raw=""):
     """A short stable hash of the playlist URLs in the raw setting, or `""`
     when it is off. Order matters (it is the catalog numbering), and the
     hash follows `parse_playlists()`, so whitespace and empty entries do
-    not change it."""
+    not change it.
+
+    `epg_raw` is the raw `iptv_epg` setting (XMLTV guide URLs, same comma
+    syntax): the guide changes what the add-on serves (`epgProvider`, guide
+    catalogs, programmes) under the very same catalog ids, so it belongs in
+    the stamp or Home's caches would keep the guide-less channels. With no
+    guide the hash is exactly the playlists-only one, so an existing
+    install's published stamp does not churn on upgrade. A guide without
+    playlists is nothing (the engine has no channels to join it to): `""`.
+    """
     import hashlib
 
     urls = parse_playlists(raw)
     if not urls:
         return ""
-    return hashlib.sha1("\n".join(urls).encode("utf-8")).hexdigest()[:12]
+    material = "\n".join(urls)
+    guides = parse_playlists(epg_raw)
+    if guides:
+        material += "\nepg\n" + "\n".join(guides)
+    return hashlib.sha1(material.encode("utf-8")).hexdigest()[:12]
 
 
 def manifest_stamp(manifest):
@@ -195,8 +212,10 @@ class IptvRegistrar:
     def __init__(self):
         self._state = None
 
-    def apply(self, playlists, server_url, serving, store, fetch_fn=fetch_manifest, log_fn=None):
-        """`playlists`: the raw setting value. `server_url`: the engine's
+    def apply(self, playlists, server_url, serving, store, fetch_fn=fetch_manifest, log_fn=None, epg=""):
+        """`playlists`: the raw setting value; `epg`: the raw `iptv_epg`
+        value the engine was started with (part of the published stamp, see
+        `playlists_stamp()`). `server_url`: the engine's
         base URL. `serving`: whether the engine this add-on talks to can
         carry our `RIVULET_IPTV_PLAYLISTS` (see this class's docstring).
         `fetch_fn(server_url)` returns `(manifest, reason)` like
@@ -230,5 +249,5 @@ class IptvRegistrar:
             if log_fn is not None:
                 log_fn("IPTV add-on registered (%s)" % MANIFEST_PATH)
         store.set_builtin_addon(
-            BUILTIN_ID, manifest_url(server_url), dict(manifest, **{STAMP_FIELD: playlists_stamp(playlists)})
+            BUILTIN_ID, manifest_url(server_url), dict(manifest, **{STAMP_FIELD: playlists_stamp(playlists, epg)})
         )
