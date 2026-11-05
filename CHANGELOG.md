@@ -4,6 +4,11 @@ Full release history of the Rivulet add-on. `addon.xml` `<news>` carries only th
 release (Kodi's checker caps it at 1500 characters and the whole add-on.xml is part of every
 repository index download). Newest first.
 
+## v0.48.1
+
+- Fix: a message now says no details were found for a title when no add-on has them, instead of "No streams found".
+- Fix: with a programme guide that is not in time order, a channel no longer loses what is on now. Comes with rivulet-engine v0.33.1, installed automatically.
+
 ## v0.48.0
 
 - New: live channels show what is on now and next, with times, progress and the programme description, on the Live tab, in lists and in search. Add a programme guide address in Settings, Server add-ons, Live TV, IPTV guide URLs.
