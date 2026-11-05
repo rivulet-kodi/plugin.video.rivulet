@@ -444,6 +444,10 @@ msgctxt "#30147"
 msgid "Stremio account auth key (HTTPS auto-cert)"
 msgstr "Stremio-accountauthenticatiesleutel (HTTPS auto-certificaat)"
 
+msgctxt "#30148"
+msgid "IPTV playlist URLs (comma-separated)"
+msgstr "IPTV-afspeellijst-URL's (kommagescheiden)"
+
 msgctxt "#30150"
 msgid "Your saved titles"
 msgstr "Je opgeslagen titels"
@@ -1279,3 +1283,7 @@ msgstr "Live"
 msgctxt "#30553"
 msgid "Live TV, sports and events from your addons"
 msgstr "Live-tv, sport en evenementen van je add-ons"
+
+msgctxt "#30554"
+msgid "Live TV channels from one or more M3U playlists, offered as an IPTV add-on. Separate several URLs with commas, e.g. https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. Empty (the default) keeps it off. Only applies to the built-in server, which restarts when this changes."
+msgstr "Live-tv-zenders uit een of meer M3U-afspeellijsten, aangeboden als IPTV-add-on. Scheid meerdere URL's met komma's, bijv. https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. Leeg (standaard) laat het uit. Geldt alleen voor de ingebouwde server, die opnieuw start als dit verandert."

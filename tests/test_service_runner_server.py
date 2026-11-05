@@ -399,7 +399,7 @@ def test_extra_env_from_settings_bool_always_forwarded_as_true_false_string(valu
 
 def test_extra_env_from_settings_combines_multiple_kinds_and_ignores_absent_rows():
     """Exercises several kinds in one call; every EXTRA_ENV_SETTINGS row
-    not present in `values` (i.e. every one of the 30 besides these four)
+    not present in `values` (i.e. every one of the 31 besides these four)
     contributes nothing."""
     values = {
         'bt_listen_port': 6900,
@@ -413,6 +413,14 @@ def test_extra_env_from_settings_combines_multiple_kinds_and_ignores_absent_rows
         'RIVULET_DISABLE_TRACKERS': 'true',
         'RIVULET_MEMORY_CACHE_SIZE': str(512 * 1024 * 1024),
     }
+
+
+def test_extra_env_from_settings_forwards_iptv_playlists_only_when_set():
+    urls = 'https://example.com/a.m3u,https://example.com/b.m3u8'
+    assert service_runner.extra_env_from_settings({'iptv_playlists': urls}) == {
+        'RIVULET_IPTV_PLAYLISTS': urls,
+    }
+    assert service_runner.extra_env_from_settings({'iptv_playlists': ''}) == {}
 
 
 def test_extra_env_from_settings_empty_values_dict_returns_empty_env():

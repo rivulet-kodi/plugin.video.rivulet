@@ -444,6 +444,10 @@ msgctxt "#30147"
 msgid "Stremio account auth key (HTTPS auto-cert)"
 msgstr "Stremio hesap yetkilendirme anahtarı (HTTPS otomatik sertifika)"
 
+msgctxt "#30148"
+msgid "IPTV playlist URLs (comma-separated)"
+msgstr "IPTV oynatma listesi URL'leri (virgülle ayrılmış)"
+
 msgctxt "#30150"
 msgid "Your saved titles"
 msgstr "Kaydettiğiniz içerikler"
@@ -1279,3 +1283,7 @@ msgstr "Canlı"
 msgctxt "#30553"
 msgid "Live TV, sports and events from your addons"
 msgstr "Eklentilerinizden canlı TV, spor ve etkinlikler"
+
+msgctxt "#30554"
+msgid "Live TV channels from one or more M3U playlists, offered as an IPTV add-on. Separate several URLs with commas, e.g. https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. Empty (the default) keeps it off. Only applies to the built-in server, which restarts when this changes."
+msgstr "Bir veya daha fazla M3U oynatma listesindeki canlı TV kanalları, IPTV eklentisi olarak sunulur. Birden çok URL'yi virgülle ayırın, örn. https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. Boş (varsayılan) kapalı demektir. Yalnızca yerleşik sunucu için geçerlidir; bu değişince sunucu yeniden başlar."

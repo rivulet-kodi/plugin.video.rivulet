@@ -444,6 +444,10 @@ msgctxt "#30147"
 msgid "Stremio account auth key (HTTPS auto-cert)"
 msgstr "Stremio 账户认证密钥（HTTPS 自动证书）"
 
+msgctxt "#30148"
+msgid "IPTV playlist URLs (comma-separated)"
+msgstr "IPTV 播放列表 URL（以逗号分隔）"
+
 msgctxt "#30150"
 msgid "Your saved titles"
 msgstr "你保存的内容"
@@ -1279,3 +1283,7 @@ msgstr "直播"
 msgctxt "#30553"
 msgid "Live TV, sports and events from your addons"
 msgstr "来自插件的直播电视、体育和赛事"
+
+msgctxt "#30554"
+msgid "Live TV channels from one or more M3U playlists, offered as an IPTV add-on. Separate several URLs with commas, e.g. https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. Empty (the default) keeps it off. Only applies to the built-in server, which restarts when this changes."
+msgstr "以 IPTV 插件形式提供一个或多个 M3U 播放列表中的直播电视频道。多个 URL 用逗号分隔，例如 https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8。留空（默认）表示关闭。仅适用于内置服务器，更改后服务器会重新启动。"

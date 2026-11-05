@@ -444,6 +444,10 @@ msgctxt "#30147"
 msgid "Stremio account auth key (HTTPS auto-cert)"
 msgstr "Stremioアカウント認証キー (HTTPS自動証明書)"
 
+msgctxt "#30148"
+msgid "IPTV playlist URLs (comma-separated)"
+msgstr "IPTV プレイリスト URL（カンマ区切り）"
+
 msgctxt "#30150"
 msgid "Your saved titles"
 msgstr "保存したタイトル一覧"
@@ -1279,3 +1283,7 @@ msgstr "ライブ"
 msgctxt "#30553"
 msgid "Live TV, sports and events from your addons"
 msgstr "アドオンのライブTV、スポーツ、イベント"
+
+msgctxt "#30554"
+msgid "Live TV channels from one or more M3U playlists, offered as an IPTV add-on. Separate several URLs with commas, e.g. https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. Empty (the default) keeps it off. Only applies to the built-in server, which restarts when this changes."
+msgstr "1 つ以上の M3U プレイリストのライブ TV チャンネルを IPTV アドオンとして提供します。複数の URL はカンマで区切ります（例: https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8）。空欄（既定）の場合は無効です。内蔵サーバーにのみ適用され、変更するとサーバーが再起動します。"

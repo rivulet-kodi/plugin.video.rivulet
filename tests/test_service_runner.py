@@ -94,9 +94,9 @@ def test_http_port_from_url_honors_explicit_port_zero():
 
 
 # Real Kodi defaults (per the shared settings contract) for every one of the
-# 30 EXTRA_ENV_SETTINGS keys. Tests that seed `env_box['env'].addon.settings`
+# 31 EXTRA_ENV_SETTINGS keys. Tests that seed `env_box['env'].addon.settings`
 # with these before flipping ONE key can trust that a resave changing
-# nothing among the 30 really means nothing changed -- FakeAddon otherwise
+# nothing among the 31 really means nothing changed -- FakeAddon otherwise
 # defaults an absent key to ''/False/0, which disagrees with several of
 # these real defaults (e.g. `disable_webtorrent`/`local_imdb` default True,
 # `https_port` defaults to 12470, not 0).
@@ -127,6 +127,7 @@ _EXTRA_ENV_DEFAULTS = {
     'bitmagnet_url': '',
     'torznab_url': '',
     'torznab_apikey': '',
+    'iptv_playlists': '',
     'web_ui_location': '',
     'https_port': 12470,
     'pprof_addr': '',
@@ -1572,7 +1573,7 @@ def test_main_settings_changed_with_no_running_server_resets_state_without_crash
 
 
 def test_main_onsettingschanged_extra_env_setting_change_triggers_restart(monkeypatch, tmp_path):
-    """Changing exactly one of the 30 new env-var-forwarding settings
+    """Changing exactly one of the 31 new env-var-forwarding settings
     (`disable_trackers`) must trigger a restart just like a `server_url`
     change already does, and the respawned process must carry the new
     value through `extra_env`."""
@@ -1606,7 +1607,7 @@ def test_main_onsettingschanged_extra_env_setting_change_triggers_restart(monkey
 
 
 def test_main_onsettingschanged_extra_env_resave_without_change_does_not_restart(monkeypatch, tmp_path):
-    """A resave that leaves every one of the 30 extra-env settings (seeded
+    """A resave that leaves every one of the 31 extra-env settings (seeded
     at their real Kodi defaults) unchanged must not restart an
     already-healthy server, exactly like the plain
     `test_main_onsettingschanged_with_no_actual_change_does_not_restart`

@@ -41,7 +41,7 @@ import threading
 import time
 from urllib.parse import urlparse
 
-from lib import library, procflags, s4me, serverenv
+from lib import iptv, library, procflags, s4me, serverenv
 from lib import settings as _settings
 from lib.store import Store
 from lib.stremio.api import StremioAPI
@@ -227,6 +227,10 @@ EXTRA_ENV_SETTINGS = (
     ("bitmagnet_url", "RIVULET_BITMAGNET_URL", "string"),
     ("torznab_url", "RIVULET_TORZNAB_URL", "string"),
     ("torznab_apikey", "RIVULET_TORZNAB_APIKEY", "string"),
+    # Comma-separated M3U URLs; the engine serves them as a Stremio add-on at
+    # /iptv/manifest.json, which lib.iptv registers as a builtin add-on.
+    # Unset/empty leaves every /iptv route answering 404.
+    ("iptv_playlists", "RIVULET_IPTV_PLAYLISTS", "string"),
     ("web_ui_location", "WEB_UI_LOCATION", "string"),
     ("https_port", "HTTPS_PORT", "int"),
     ("pprof_addr", "RIVULET_PPROF", "string"),
@@ -1379,6 +1383,9 @@ class Supervisor:
     - `sync_bridge_fn()`, `shutdown_bridge_fn()`: S4Me bridge hooks.
     - `autoload`: an `AutoloadTrigger`.
     - `clock`: monotonic time source.
+    - `sync_iptv_fn(playlists, server_url, serving)`: optional hook keeping
+      the engine's IPTV builtin add-on registered (`lib.iptv`), see
+      `_sync_iptv_addon()`.
 
     Process/binary collaborators (ServerProcess, resolve_binary,
     probe_listening, ...) are resolved from this module at call time.
@@ -1386,7 +1393,7 @@ class Supervisor:
 
     def __init__(
         self, monitor, profile_dir, log_fn, levels, notify_fn, progress_player,
-        sync_bridge_fn, shutdown_bridge_fn, autoload, clock=None,
+        sync_bridge_fn, shutdown_bridge_fn, autoload, clock=None, sync_iptv_fn=None,
     ):
         self.monitor = monitor
         self.profile_dir = profile_dir
@@ -1398,6 +1405,7 @@ class Supervisor:
         self.progress_player = progress_player
         self._sync_bridge = sync_bridge_fn
         self._shutdown_bridge = shutdown_bridge_fn
+        self._sync_iptv = sync_iptv_fn
         self.autoload = autoload
         self._clock = clock or (lambda: time.monotonic())
         self.state = LoopState()
@@ -1618,6 +1626,34 @@ class Supervisor:
             state.notified_missing = False
             state.unsupported_platform = False
             state.reset_download()
+
+    # -- IPTV add-on registration -----------------------------------------
+
+    def _sync_iptv_addon(self, state):
+        """Keep the engine's IPTV builtin add-on registered, once per tick
+        and AFTER `dispatch()`, so `state` already reflects what this tick
+        spawned or adopted.
+
+        `RIVULET_IPTV_PLAYLISTS` only reaches an engine this addon spawns,
+        so the add-on is only expected from one: `serving` is false while
+        the embedded server is disabled, or while a server this addon does
+        not own is the one answering (`server_mode == "external"` with
+        nothing of ours running -- `state.server_mode` lags one tick behind
+        a fresh spawn, hence the `state.proc` test). Everything in between
+        (engine restarting after a settings change, still starting, not
+        yet bound) is `lib.iptv`'s transient "offline", not a removal, so
+        the user's disabled choice survives a restart. The setting is read
+        from the monitor's snapshot, which `onSettingsChanged()` has
+        already refreshed by the time the restart it triggers is applied.
+        """
+        if self._sync_iptv is None:
+            return
+        monitor = self.monitor
+        serving = monitor.enabled and (state.proc is not None or state.server_mode != "external")
+        try:
+            self._sync_iptv(monitor.extra_settings.get("iptv_playlists", ""), monitor.server_url, serving)
+        except Exception as exc:  # noqa: BLE001 - an IPTV registration failure must never crash the service loop
+            self._warn("IPTV add-on sync failed: %r" % (exc,))
 
     # -- Phase C ----------------------------------------------------------
 
@@ -1860,6 +1896,7 @@ class Supervisor:
                 interval, should_break = self.dispatch(state)
                 if should_break:
                     break
+                self._sync_iptv_addon(self.state)
 
                 interval = self._autoload_interval(interval)
                 if monitor.waitForAbort(interval):
@@ -1995,6 +2032,17 @@ def main():
         if bridge_port is not None:
             s4me.shutdown_bridge(bridge_port)
 
+    # Engine IPTV add-on: Supervisor calls this once per tick with the
+    # monitor's snapshot of the setting; IptvRegistrar writes to the store
+    # and logs on state changes only.
+    iptv_registrar = iptv.IptvRegistrar()
+
+    def sync_iptv_addon(playlists, server_url, serving):
+        iptv_registrar.apply(
+            playlists, server_url, serving, store,
+            log_fn=lambda message: log(xbmc.LOGINFO, "iptv: %s" % message),
+        )
+
     # Mix the Kodi Monitor in here: xbmc cannot be imported at module scope.
     monitor_cls = type("KodiServiceMonitor", (ServiceMonitor, xbmc.Monitor), {})
     Supervisor(
@@ -2007,4 +2055,5 @@ def main():
         periodic_sync,
         shutdown_s4me_bridge,
         autoload,
+        sync_iptv_fn=sync_iptv_addon,
     ).run()
