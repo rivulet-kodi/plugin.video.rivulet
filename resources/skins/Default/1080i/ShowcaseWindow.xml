@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
-<!-- Coverflow (lib/ui/infowindow.py), in the look Home and Search define (tokens in
-     lib/ui/look.py): backdrop with the left/bottom/top fades, the bold date-line header
-     with the clock, the hero stacked above the strip, white ring on the focused poster. -->
+<!-- Coverflow (lib/ui/infowindow.py), the one screen for a list of titles outside Search:
+     a Home catalog's "see all", a genre and a person's titles. Tokens from lib/ui/look.py:
+     backdrop with the left/bottom/top fades, the bold page title with the clock, the hero
+     stacked above the strip, white ring on the focused poster. -->
 <window>
     <depth>0.52</depth>
     <coordinates><left>0</left><top>0</top></coordinates>

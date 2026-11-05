@@ -558,10 +558,115 @@ def _type(win, s, text):
         win.onAction(xbmcgui.Action(0xF200))
 
 
+def _pause_timers(ctx, monkeypatch):
+    """Capture the typing pause timers instead of running them; firing one
+    is what its worker does: post the wake-up, then Kodi's noop action."""
+    timers = []
+
+    class _Timer:
+        def __init__(self, callback):
+            self.callback, self.cancelled = callback, False
+
+        def cancel(self):
+            self.cancelled = True
+
+    def _start(delay, callback):
+        timers.append(_Timer(callback))
+        return timers[-1]
+
+    monkeypatch.setattr(ctx.search, '_start_pause_timer', _start)
+    return timers
+
+
+def _fire(win, timer):
+    import xbmcgui
+    win._typed_at = 0.0  # the pause has passed
+    timer.callback()
+    win.onAction(xbmcgui.Action(0))  # ACTION_NOOP, posted by `_post`
+
+
+def test_typing_searches_after_a_pause_and_keeps_the_bar_focused(load_search, monkeypatch):
+    ctx = load_search()
+    win = _init(ctx, monkeypatch)
+    s = ctx.search
+    timers = _pause_timers(ctx, monkeypatch)
+    calls = []
+
+    def query(store, client, text, report, progress=None):
+        calls.append(text)
+        assert progress is not None  # no modal spinner over the bar
+        report.total_catalogs = report.queried = 1
+        return [META]
+
+    monkeypatch.setattr(ctx.searchwindow, 'run_query', query)
+    _type(win, s, 'alien')
+    assert calls == []
+    # Each key restarted the pause; only the last timer is live.
+    assert len(timers) == 5 and all(t.cancelled for t in timers[:-1]) and not timers[-1].cancelled
+    _fire(win, timers[-1])
+    assert calls == ['alien']
+    assert win._metas == [META] and win.getFocusId() == s.QUERY
+    assert win.getControl(s.ROW_HEADING).label == '[B]STR30507[/B]'
+    # The same text after another pause is not searched twice.
+    _fire(win, timers[-1])
+    assert calls == ['alien']
+
+
+def test_typing_on_during_a_typed_search_cancels_it_and_keeps_the_new_text(load_search, monkeypatch):
+    ctx = load_search()
+    win = _init(ctx, monkeypatch)
+    s = ctx.search
+    timers = _pause_timers(ctx, monkeypatch)
+    seen = []
+
+    def query(store, client, text, report, progress=None):
+        seen.append((text, progress.iscanceled()))
+        # A key arrives while the catalogs answer (the poll pumps input).
+        win.getControl(s.QUERY).setText('aliens')
+        win.onClick(s.QUERY)
+        seen.append((text, progress.iscanceled()))
+        report.canceled = progress.iscanceled()
+        return [META]
+
+    monkeypatch.setattr(ctx.searchwindow, 'run_query', query)
+    _type(win, s, 'alien')
+    _fire(win, timers[-1])
+    assert seen == [('alien', False), ('alien', True)]
+    # Nothing painted for the stale text; the new text has its own pause.
+    assert win._metas == [] and win.query == 'aliens' and not timers[-1].cancelled
+
+
+def test_a_pause_with_an_empty_bar_does_not_search(load_search, monkeypatch):
+    ctx = load_search()
+    win = _init(ctx, monkeypatch)
+    s = ctx.search
+    timers = _pause_timers(ctx, monkeypatch)
+    calls = _results(ctx, monkeypatch)
+    _type(win, s, 'a')
+    win.getControl(s.QUERY).setText('  ')
+    win.onClick(s.QUERY)
+    assert timers[0].cancelled and len(timers) == 1
+    win._typed_at = 0.0
+    timers[0].callback()
+    import xbmcgui
+    win.onAction(xbmcgui.Action(0))
+    assert calls == []
+
+
+def test_closing_the_screen_cancels_a_pending_pause(load_search, monkeypatch):
+    ctx = load_search()
+    win = _init(ctx, monkeypatch)
+    timers = _pause_timers(ctx, monkeypatch)
+    _type(win, ctx.search, 'al')
+    win.close()
+    assert timers[-1].cancelled
+
+
 def test_physical_keyboard_types_into_the_bar_and_confirmed_enter_searches(load_search, monkeypatch):
     ctx = load_search()
     win = _init(ctx, monkeypatch)
     s = ctx.search
+    _pause_timers(ctx, monkeypatch)
     assert win.getFocusId() == s.QUERY
     assert win.getControl(s.QUERY).input_type == (0, 'STR30001')
     calls = _results(ctx, monkeypatch)

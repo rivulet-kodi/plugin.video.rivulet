@@ -68,7 +68,7 @@ def _wire(monkeypatch, ctx, addons=()):
     monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: client)
     rec.store, rec.client = store, client
 
-    def _run_query(passed_store, passed_client, query, report=None):
+    def _run_query(passed_store, passed_client, query, report=None, progress=None):
         rec.queries.append((passed_store, passed_client, query))
         return [{'id': 'tt2', 'name': 'Found', 'type': 'movie'}]
 
@@ -78,28 +78,16 @@ def _wire(monkeypatch, ctx, addons=()):
 
     monkeypatch.setattr(ctx.searchwindow, 'run_query', _run_query)
     monkeypatch.setattr(ctx.views, '_fetch_catalog', _fetch_catalog)
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: rec.opened.append(metas) or None)
-    # A person opens the Search screen on its results, the way Stremio's
-    # search link does; a genre still opens the coverflow.
-    _fake_search_window(monkeypatch, rec.opened)
+    rec.titles = []
+
+    def _open_showcase(metas, catalog_title=None):
+        rec.opened.append(metas)
+        rec.titles.append(catalog_title)
+
+    # Every credit - person or genre - opens the coverflow, headed by the
+    # link's name, like a Home catalog's "see all".
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', _open_showcase)
     return rec
-
-
-def _fake_search_window(monkeypatch, opened):
-    import lib.ui.search as search
-
-    class _Search:
-        query = ''
-        _metas = ()
-
-        def start(self):
-            opened.append(list(self._metas))
-            return False
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr(search, 'open_window', lambda cls, xml: _Search())
 
 
 def _detail_window(ctx, meta):
@@ -202,6 +190,7 @@ def test_detail_window_clicking_a_person_chip_searches_that_name(ctx, monkeypatc
 
     assert rec.queries == [(rec.store, rec.client, 'Actor One')]
     assert rec.opened == [[{'id': 'tt2', 'name': 'Found', 'type': 'movie'}]]
+    assert rec.titles == ['Actor One']
 
 
 def test_detail_window_clicking_a_genre_chip_fetches_that_catalog_for_an_installed_addon(ctx, monkeypatch):
@@ -212,6 +201,7 @@ def test_detail_window_clicking_a_genre_chip_fetches_that_catalog_for_an_install
 
     assert rec.fetches == [(_TRANSPORT, 'movie', 'top', [('genre', 'Drama')])]
     assert rec.opened == [[{'id': 'tt9', 'name': 'Drama', 'type': 'movie'}]]
+    assert rec.titles == ['Drama']
 
 
 def test_detail_window_clicking_a_genre_chip_of_an_uninstalled_addon_fetches_nothing(ctx, monkeypatch):
@@ -321,7 +311,7 @@ def test_streams_window_chip_click_releases_the_pick_guard(ctx, monkeypatch):
 
 def test_picker_routes_the_chosen_link_through_open_credit_link(ctx, monkeypatch):
     dispatched = []
-    monkeypatch.setattr(ctx.infowindow, 'open_credit_link', lambda store, client, parsed: dispatched.append((store, client, parsed)))
+    monkeypatch.setattr(ctx.infowindow, 'open_credit_link', lambda store, client, parsed, title='': dispatched.append((store, client, parsed, title)))
     stub_choose(monkeypatch, ctx, [1])
     store, client = object(), object()
 
@@ -330,7 +320,7 @@ def test_picker_routes_the_chosen_link_through_open_credit_link(ctx, monkeypatch
         _link('Actor Two', 'Cast', _search('Actor Two')),
     ))
 
-    assert dispatched == [(store, client, {'kind': 'search', 'query': 'Actor Two'})]
+    assert dispatched == [(store, client, {'kind': 'search', 'query': 'Actor Two'}, 'Actor Two')]
 
 
 def test_picker_search_pick_still_searches_and_opens_results(ctx, monkeypatch):

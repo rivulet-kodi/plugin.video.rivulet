@@ -15,15 +15,27 @@ when the screen opens: Kodi hands raw key presses only to a focused edit
 control, and everywhere else runs them through the keymap, where most
 letters are commands ("s" opens the shutdown menu, "x" stops, "c" opens
 the context menu). With a label for a bar, a laptop keyboard could not
-type at all. Each change in the bar reaches `onClick(QUERY)`; Enter or OK
-on the bar opens Kodi's own keyboard (core edit-control behaviour, which
-an add-on cannot intercept) and confirming it runs the search. It runs the way the classic search does, on the screen's
-own thread under the Rivulet spinner (`searchwindow.run_query`): Back on
-the spinner cancels, and the results replace Discover with the focus on
-them. rev18/rev19 searched on a worker as letters were picked and applied
-the answer on a posted noop; on the TV that search never came back
-("Searching for ..." forever), while the classic path works, so this
-screen now uses that path. An empty answer, or one where every catalog
+type at all. Each change in the bar reaches `onClick(QUERY)`.
+
+Typing searches by itself: `_TYPE_PAUSE_SECONDS` after the last key the
+search runs, still on the screen's own thread, with no spinner - its
+progress goes to the status line and the focus stays in the bar, so the
+user can keep typing; a key pressed mid-search cancels it and the pause
+starts again. Enter is not needed, which matters because Kodi's keymap
+turns Enter into Select on an edit control, and Select always opens Kodi's
+own keyboard dialog (`CGUIEditControl` -> `CGUIButtonControl::OnAction`
+-> `OnClick`) before an add-on sees the action: the add-on cannot stop
+that dialog, only make it unnecessary. OK on the bar with a remote still
+opens it, which is how a remote types; confirming it, the Search pill or
+OK from the phone run the search the classic way, under the Rivulet
+spinner (`searchwindow.run_query`), with the focus moved to the results.
+
+Only the pause timer runs on a worker; the search itself never does.
+rev18/rev19 searched on a worker as letters were picked and applied the
+answer on a posted noop; on the TV that search never came back
+("Searching for ..." forever). The timer posts the same noop, so on a
+device where it is lost typing simply does not search by itself and Enter
+or the pill still do. An empty answer, or one where every catalog
 failed, is said on the line under the pills. OK on a poster opens the
 title the way the coverflow does; the query then goes into the search
 history.
@@ -55,6 +67,10 @@ _BACK_ACTIONS = frozenset((9, 10, 92))
 #: ACTION_SELECT_ITEM and ACTION_MOUSE_LEFT_CLICK: on the bar, Kodi opens
 #: its keyboard for these before Python sees them.
 _BAR_OPEN_ACTIONS = frozenset((7, 100))
+#: Quiet time after the last typed key before the bar searches by itself:
+#: long enough not to search every half-word at normal typing speed, short
+#: enough to feel live.
+_TYPE_PAUSE_SECONDS = 0.7
 
 
 class SearchWindow(BaseWindow):
@@ -71,13 +87,25 @@ class SearchWindow(BaseWindow):
         self._lock = threading.Lock()
         self._ready = []
         self._hero_painted = None
-        #: Status line for results handed over by `open_search(query)`.
-        self._notice = ''
+        #: monotonic time of the last edit typed into the bar, and the
+        #: pending pause timer (`_schedule_typed_search()`).
+        self._typed_at = 0.0
+        self._type_timer = None
+        #: A search started by typing is running (no spinner, bar focused).
+        self._typing_search = False
         #: The bar reported a change since the last action. Kodi queues
         #: the bar's click before the action that caused it, so a Select
         #: on the bar that arrives with this set followed a confirmed
         #: keyboard dialog, and one without it a cancelled dialog.
         self._bar_changed = False
+
+    def close(self):
+        # A pause timer left running would post into a closed window (and,
+        # under test, into restored modules).
+        timer, self._type_timer = self._type_timer, None
+        if timer is not None:
+            timer.cancel()
+        super().close()
 
     def start(self):
         self.should_close_caller = False
@@ -103,20 +131,12 @@ class SearchWindow(BaseWindow):
         self._paint_query()
         if self._metas:
             self._show(self._metas, results=True)
-            if self._notice:
-                self._status(self._notice)
-            # Clearing the bar goes back to Discover, so load it as a
-            # search from the bar would have.
-            if not self._discover:
-                self._load_discover()
         elif self._discover:
             self._show(self._discover, results=False)
         else:
             self._welcome()
             self._load_discover()
-        # Opened on a name's results (`open_search(query)`): the posters
-        # are what the user came for.
-        self.setFocusId(ROW if self._metas and self.getControl(ROW).size() else QUERY)
+        self.setFocusId(QUERY)
 
     def _paint_query(self):
         # Edit text, not a label: Kodi draws the cursor while it has focus.
@@ -188,6 +208,11 @@ class SearchWindow(BaseWindow):
 
     @gated_input
     def onClick(self, control_id):
+        if control_id == QUERY and self._typing_search:
+            # Typing on during a search started by typing: take the new
+            # text; the running search sees the bar change and stops.
+            self._bar_edited()
+            return
         if self._searching:
             # `run_cancellable` delivers queued clicks while its spinner is
             # up. Acting on them would edit or start a search under the one
@@ -233,6 +258,68 @@ class SearchWindow(BaseWindow):
         self.query = text
         self._bar_changed = True
         self._query_changed()
+        self._schedule_typed_search()
+
+    def _schedule_typed_search(self):
+        """(Re)start the pause timer. Its worker only posts a wake-up; the
+        search runs on this window's thread in `_apply_ready()`."""
+        import time
+
+        self._typed_at = time.monotonic()
+        timer = self._type_timer
+        if timer is not None:
+            timer.cancel()
+        if not self.query.strip():
+            self._type_timer = None
+            return
+        self._type_timer = _start_pause_timer(_TYPE_PAUSE_SECONDS, lambda: self._post(('typed', '', None)))
+
+    def _typed_search_due(self):
+        import time
+
+        query = self.query.strip()
+        return (
+            bool(query)
+            and query != self._results_query
+            and not self._searching
+            and time.monotonic() - self._typed_at >= _TYPE_PAUSE_SECONDS * 0.9
+        )
+
+    def _search_typed(self):
+        """Search what was typed without leaving the bar: no spinner, the
+        progress on the status line, cancelled as soon as the bar changes
+        (`_BarProgress`). Results replace the row; the focus stays put."""
+        from lib.ui.compat import L
+        from lib.ui.dependencies import get_client, get_store
+        from lib.ui.searchwindow import SearchReport, _search_notice, run_query
+
+        query = self.query.strip()
+        report = SearchReport()
+        self._searching = self._typing_search = True
+        self._status(L(30033))
+        try:
+            metas = run_query(get_store(), get_client(), query, report=report,
+                              progress=_BarProgress(self, query))
+        except Exception as exc:
+            import xbmc
+
+            from lib.ui.compat import log
+
+            log('search: search failed: %s' % type(exc).__name__, xbmc.LOGWARNING)
+            metas = []
+        finally:
+            self._searching = self._typing_search = False
+        if report.canceled or self.query.strip() != query:
+            # Superseded by more typing: that edit already restarted the
+            # pause, and its search will paint.
+            return
+        self._metas = list(metas or [])
+        self._results_query = query
+        if self._metas:
+            self._show(self._metas, results=True)
+            self._status(_search_notice(report) or '')
+            return
+        self._status(_search_notice(report) or _with_query(L(30513), query))
 
     def _query_changed(self):
         if not self.query.strip():
@@ -315,11 +402,16 @@ class SearchWindow(BaseWindow):
         """Discover's first page, from its worker, on the UI thread."""
         with self._lock:
             ready, self._ready = self._ready, []
+        typed = False
         for kind, _query, metas in ready:
-            if kind == 'discover':
+            if kind == 'typed':
+                typed = True
+            elif kind == 'discover':
                 self._discover = list(metas or [])
                 if not self._metas and self._discover:
                     self._show(self._discover, results=False)
+        if typed and self._typed_search_due():
+            self._search_typed()
 
     def _open_focused(self):
         item = self.getControl(ROW).getSelectedItem()
@@ -420,52 +512,19 @@ def discover_metas():
     return []
 
 
-def open_search(query=None):
+def open_search():
     """Open the search. True when playback started (close the caller).
 
-    With `query` (a cast or crew name from a title page, as Stremio's
-    `stremio:///search?search=` link does) it is searched first, under the
-    spinner over the calling screen, and the screen opens on its results
-    with the name in the bar. Nothing found: the screen does not open and
-    the user is told, as the coverflow it replaces did. Back on the
-    spinner, or a name that is only blanks, stays where the user was.
-    """
+    A person's credits no longer come here: they open the coverflow like
+    every other list of titles (`lib.ui.infowindow.open_credit_link`)."""
     import xbmc
 
     from lib.ui.compat import L, log, notify
 
     log('search: opening', xbmc.LOGINFO)
-    metas = []
-    if query:
-        from lib.ui.dependencies import get_client, get_store
-        from lib.ui.searchwindow import SearchReport, _search_notice, run_query
-
-        query = query.strip()[:MAX_QUERY]
-        if not query:
-            return False
-        report = SearchReport()
-        try:
-            metas = list(run_query(get_store(), get_client(), query, report=report) or [])
-        except Exception as exc:
-            log('search: search failed: %s' % type(exc).__name__, xbmc.LOGWARNING)
-            notify(L(30032))
-            return False
-        if report.canceled:
-            return False
-        notice = _search_notice(report)
-        if not metas:
-            notify(notice or _with_query(L(30513), query))
-            return False
     window = None
     try:
         window = open_window(SearchWindow, 'SearchWindow.xml')
-        if metas:
-            window.query = query
-            window._metas = metas
-            window._results_query = query
-            # Some catalogs failed or were too slow: said on the status
-            # line, as a search from the bar does.
-            window._notice = notice or ''
         return window.start()
     except Exception as exc:  # a skin failure must surface, not vanish
         from lib.stremio.addons import addon_error_detail
@@ -479,3 +538,37 @@ def open_search(query=None):
                 window.close()
             except Exception:
                 pass
+
+
+def _start_pause_timer(delay, callback):
+    """A started daemon `threading.Timer`; its own function so tests can
+    fire the pause without waiting for it."""
+    timer = threading.Timer(delay, callback)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
+class _BarProgress:
+    """`run_query()`'s progress sink for a search started by typing: the
+    messages go to the status line, and it reports cancelled once the bar
+    no longer holds the query (the user typed on) or Kodi is stopping."""
+
+    def __init__(self, window, query):
+        self._window = window
+        self._query = query
+
+    def iscanceled(self):
+        import xbmc
+
+        if xbmc.Monitor().abortRequested():
+            return True
+        try:
+            text = self._window.getControl(QUERY).getText() or ''
+        except Exception:
+            text = self._window.query
+        return text.strip()[:MAX_QUERY] != self._query
+
+    def update(self, _percent, message=''):
+        if message:
+            self._window._status(message)

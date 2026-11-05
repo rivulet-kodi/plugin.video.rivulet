@@ -54,7 +54,7 @@ def test_home_keeps_open_with_existing_catalog_cancel_empty_and_error_behavior(l
     assert not win.closed
     messages = [message for _, message, _, _ in ctx.env.notifications]
     if outcome in ('empty', 'error'):
-        assert ('STR30030' if outcome == 'empty' else 'STR30032') in messages
+        assert ('No results for “New movies”' if outcome == 'empty' else 'STR30032') in messages
     else:
         assert messages == []
     assert shown == ([True] if outcome == 'back' else [])

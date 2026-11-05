@@ -124,7 +124,10 @@ def open_single_catalog(transport_url, manifest, catalog, extra=None, meta_filte
         return False
     if not metas:
         log('catalogpicker: %s (%s) returned no results' % (catalog_name, ctype), xbmc.LOGINFO)
-        notify(L(30030))
+        # "No results for <catalog>", as a genre or a person with no titles
+        # says - not the stream picker's "No streams found".
+        from lib.ui.search import _with_query
+        notify(_with_query(L(30513), catalog.get('name') or catalog.get('id') or ''))
         return False
 
     log('catalogpicker: opening coverflow (%d results, paging in background)' % len(metas), xbmc.LOGINFO)

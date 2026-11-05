@@ -61,7 +61,8 @@ def credit_links(meta):
 
 def fill_credits(window, meta):
     """Populate `window`'s `CREDITS` list from `meta` and return the
-    parsed links by list position (what `open_credit()` takes). Hides the
+    `(name, parsed_link)` pairs by list position (what `open_credit()`
+    takes; the name heads the results coverflow). Hides the
     control when there are none."""
     # Imported here, not at module scope, so the module holds no xbmcgui
     # binding of its own: the windows importing it are what the test
@@ -91,7 +92,7 @@ def fill_credits(window, meta):
         items.append(item)
     control.addItems(items)
     control.setVisible(True)
-    return [parsed for _name, _category, parsed in credits]
+    return [(name, parsed) for name, _category, parsed in credits]
 
 
 def open_credit(window, links):
@@ -114,7 +115,8 @@ def open_credit(window, links):
 
     window._credit_open = True
     try:
-        open_credit_link(get_store(), get_client(), links[position])
+        name, parsed = links[position]
+        open_credit_link(get_store(), get_client(), parsed, name)
     finally:
         window._credit_open = False
     window.setFocusId(CREDITS)

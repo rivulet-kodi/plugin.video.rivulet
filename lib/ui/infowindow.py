@@ -6,9 +6,9 @@
 Ports the reference addon's `platformcode/xbmc_info_window.py::InfoWindow`
 (`resources/skins/Default/1080i/InfoWindow.xml`) to Rivulet/Stremio metas:
 a caller opens it via `open_showcase()` (below) with one already-fetched
-catalog page - `search.SearchWindow`'s result list
-and this module's own
-`open_credits_picker()` - the user scrolls a horizontal poster
+catalog page - a Home catalog's "see all" (`catalogpicker`) and every
+credit link (`open_credit_link()`: a person's titles, a genre) - so every
+list of titles outside Search looks the same; the user scrolls a horizontal poster
 coverflow (the fanart background updates to match the focused item).
 Picking a movie poster jumps straight to
 `lib.ui.streamswindow.open_streams()` (a movie has nothing
@@ -738,8 +738,8 @@ def open_showcase(metas, catalog_title=None, more_pages=None):
     """Build and run a ShowcaseWindow over `metas`; returns the selected
     meta dict, or None if the user closed the overlay without picking one
     (or `metas` was empty). Every caller already wraps this call in its own
-    try/except (catalogpicker._open_catalog, searchwindow._run_search,
-    ) and logs+notifies on failure, so an
+    try/except (catalogpicker.open_single_catalog, the credit links'
+    callers) and logs+notifies on failure, so an
     exception from .start() keeps propagating unchanged here - this
     only guarantees
     the window is closed first (it may not have had a chance to self-close,
@@ -795,26 +795,33 @@ def open_credits_picker(store, client, meta):
     for category, members in groups:
         for name, parsed in members:
             rows.append((escape_label(name), escape_label(category)))
-            links.append(parsed)
+            links.append((name, parsed))
 
     choice = dialogs.choose(L(30196), rows)
     if choice < 0:
         return
-    open_credit_link(store, client, links[choice])
+    name, parsed = links[choice]
+    open_credit_link(store, client, parsed, name)
 
 
-def open_credit_link(store, client, parsed):
+def open_credit_link(store, client, parsed, title=''):
     """Dispatch one parsed Meta Link (`lib.stremio.metalinks.parse_meta_link()`)
     - the single place a cast/crew/genre pick turns into navigation, shared
     by `open_credits_picker()`'s list and the clickable credit chips on
     `lib.ui.detailwindow.DetailWindow` / `lib.ui.streamswindow.StreamsWindow`
-    (`lib.ui.creditsrow`), so all three behave identically:
-      - search (a person): opens the Search screen on that name's
-        results (`lib.ui.search.open_search(query)`), as Stremio does.
-      - discover (a genre): fetches that catalog and does the same -
-        but only once its transport_url is confirmed to name one of the
-        user's own installed addons - an addon-supplied URL must never
-        send Rivulet to an arbitrary host.
+    (`lib.ui.creditsrow`), so all three behave identically. `title` is the
+    link's own name (the chip or picker row), used as the coverflow heading.
+
+    Every list of titles a link leads to is the same coverflow a Home
+    catalog's "see all" opens (`open_showcase()`): a person's filmography
+    and a genre used to land on two different-looking screens (a person on
+    the Search screen's row, a genre here), which read as two products.
+      - search (a person): `searchwindow.run_query()` on the name, as
+        Stremio's `stremio:///search` link does.
+      - discover (a genre): fetches that catalog - but only once its
+        transport_url is confirmed to name one of the user's own installed
+        addons; an addon-supplied URL must never send Rivulet to an
+        arbitrary host.
       - detail: opens `lib.ui.detailwindow.open_detail()` directly.
     """
     import xbmc
@@ -824,8 +831,7 @@ def open_credit_link(store, client, parsed):
     kind = parsed['kind']
 
     if kind == 'search':
-        from lib.ui.search import open_search
-        open_search(parsed['query'])
+        _open_person(store, client, parsed['query'], title)
         return
 
     if kind == 'discover':
@@ -852,7 +858,7 @@ def open_credit_link(store, client, parsed):
         # adult, else filter adult metas from what it returns.
         hide_adult = _adult_filtering_enabled()
         if hide_adult and is_adult_catalog({'id': parsed['catalog_id'], 'type': parsed['type']}):
-            _open_results([])
+            _open_results([], title)
             return
         from lib.ui.uicommon import CANCELLED, run_cancellable
 
@@ -871,7 +877,7 @@ def open_credit_link(store, client, parsed):
             return
         if hide_adult:
             metas = filter_metas(metas)
-        _open_results(metas)
+        _open_results(metas, title)
         return
 
     if kind == 'detail':
@@ -879,19 +885,51 @@ def open_credit_link(store, client, parsed):
         open_detail(parsed['type'], parsed['id'])
 
 
-def _open_results(metas):
-    """The tail every `open_showcase()` caller already runs on a fresh
-    result set (searchwindow._run_search, catalogpicker._open_catalog):
-    notify if empty, else open a coverflow and, if the user picks a
-    series there, follow through to `detailwindow.open_detail()` - same
-    as those callers, so a pick made from this nested picker is never a
-    dead end."""
+def _open_person(store, client, query, title):
+    """A person's credit: search their name across every search-capable
+    catalog and show the titles in the coverflow. Back on the spinner, a
+    name that is only blanks, or a search that failed outright stays where
+    the user was; some catalogs failing is said in a toast over the
+    results (the coverflow has no status line)."""
+    import xbmc
+
+    from lib.ui.compat import L, log, notify
+    from lib.ui.search import MAX_QUERY
+    from lib.ui.searchwindow import SearchReport, _search_notice, run_query
+
+    query = (query or '').strip()[:MAX_QUERY]
+    if not query:
+        return
+    report = SearchReport()
+    try:
+        metas = list(run_query(store, client, query, report=report) or [])
+    except Exception as exc:
+        log('infowindow: person search failed: %s' % type(exc).__name__, xbmc.LOGWARNING)
+        notify(L(30032))
+        return
+    if report.canceled:
+        return
+    notice = _search_notice(report)
+    if metas and notice:
+        notify(notice)
+    _open_results(metas, title or query, empty_notice=notice)
+
+
+def _open_results(metas, title='', empty_notice=None):
+    """Show a credit link's titles in the coverflow, headed by the link's
+    name, and follow a pick through to `detailwindow.open_detail()` the
+    way every other coverflow caller does, so a pick made from this nested
+    picker is never a dead end. Nothing to show says so with the name -
+    "No results for ..." - rather than the stream picker's "No streams
+    found", which is what a genre with no titles used to say."""
     from lib.ui.compat import L, notify
 
     if not metas:
-        notify(L(30030))
+        from lib.ui.search import _with_query
+        # Every caller passes the link's name (chip label, picker row).
+        notify(empty_notice or _with_query(L(30513), title))
         return
-    selected = open_showcase(metas)
+    selected = open_showcase(metas, catalog_title=title or None)
     if not selected:
         return
     from lib.ui.detailwindow import open_detail

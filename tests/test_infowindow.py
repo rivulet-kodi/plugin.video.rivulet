@@ -1421,7 +1421,9 @@ def test_context_menu_fetches_full_meta_and_opens_select_with_category_name_labe
     assert captured == [('STR30196', [('Francis Ford Coppola', 'Directors'), ('Marlon Brando', 'Cast')])]
 
 
-def test_context_menu_person_entry_runs_run_query_and_opens_results(load_infowindow, monkeypatch):
+def test_context_menu_person_entry_runs_run_query_and_opens_the_coverflow(load_infowindow, monkeypatch):
+    """A person's titles open the same coverflow as a genre or a Home
+    catalog, headed by the name - not the Search screen's row."""
     ctx = load_infowindow()
     full_meta = {'id': 'tt1', 'type': 'movie', 'links': [_link('Marlon Brando', 'Cast', 'stremio:///search?search=Brando')]}
     monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: full_meta)
@@ -1432,31 +1434,22 @@ def test_context_menu_person_entry_runs_run_query_and_opens_results(load_infowin
     run_query_calls = []
     person_metas = [{'id': 'tt2', 'name': 'One-Eyed Jacks', 'type': 'movie'}]
 
-    def _run_query(passed_store, passed_client, query, report=None):
+    def _run_query(passed_store, passed_client, query, report=None, progress=None):
         run_query_calls.append((passed_store, passed_client, query))
         return person_metas
 
     monkeypatch.setattr(ctx.searchwindow, 'run_query', _run_query)
     opened = []
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(('showcase', metas)) or None)
-    import lib.ui.search as search
-
-    class _Search:
-        def start(self):
-            opened.append(('search', self.query, self._metas))
-            return False
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr(search, 'open_window', lambda cls, xml: _Search())
+    monkeypatch.setattr(
+        ctx.infowindow, 'open_showcase',
+        lambda metas, catalog_title=None: opened.append((catalog_title, metas)) or None,
+    )
     win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
 
     _fire_context_menu(win, ctx)
 
     assert run_query_calls == [(store, client, 'Brando')]
-    # The Search screen, on the name and its results - not a coverflow.
-    assert opened == [('search', 'Brando', person_metas)]
+    assert opened == [('Marlon Brando', person_metas)]
 
 
 def test_context_menu_person_entry_with_no_results_notifies(load_infowindow, monkeypatch):
@@ -1466,22 +1459,20 @@ def test_context_menu_person_entry_with_no_results_notifies(load_infowindow, mon
     monkeypatch.setattr(ctx.dependencies, 'get_store', lambda: object())
     monkeypatch.setattr(ctx.dependencies, 'get_client', lambda: object())
     _stub_choose(monkeypatch, ctx, answers=[0])
-    def _run_query(store, client, query, report=None):
+
+    def _run_query(store, client, query, report=None, progress=None):
         report.total_catalogs = 1  # asked and answered, just nothing found
         return []
 
     monkeypatch.setattr(ctx.searchwindow, 'run_query', _run_query)
     opened = []
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas))
-    import lib.ui.search as search
-
-    monkeypatch.setattr(search, 'open_window', lambda cls, xml: opened.append(cls))
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas, catalog_title=None: opened.append(metas))
     win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
 
     _fire_context_menu(win, ctx)
 
     assert opened == []
-    assert [body for _h, body, _i, _t in ctx.env.notifications] == ['No results for “Brando”']
+    assert [body for _h, body, _i, _t in ctx.env.notifications] == ['No results for “Marlon Brando”']
 
 
 def test_context_menu_genre_entry_with_installed_transport_fetches_catalog_and_opens_results(
@@ -1506,7 +1497,7 @@ def test_context_menu_genre_entry_with_installed_transport_fetches_catalog_and_o
 
     monkeypatch.setattr(ctx.views, '_fetch_catalog', _fetch_catalog)
     opened = []
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas) or None)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas, catalog_title=None: opened.append(metas) or None)
     win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
 
     _fire_context_menu(win, ctx)
@@ -1535,14 +1526,15 @@ def test_context_menu_genre_entry_never_fetches_an_adult_catalog_by_default(
     fetch_calls = []
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda *a, **k: fetch_calls.append((a, k)) or [])
     opened = []
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas) or None)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas, catalog_title=None: opened.append(metas) or None)
     win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
 
     _fire_context_menu(win, ctx)
 
     assert fetch_calls == []
     assert opened == []
-    assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
+    # The genre's name, not the stream picker's "No streams found".
+    assert [body for _h, body, _i, _t in ctx.env.notifications] == ['No results for “Drama”']
 
 
 def test_context_menu_genre_entry_fetches_an_adult_catalog_when_setting_is_off(
@@ -1567,7 +1559,7 @@ def test_context_menu_genre_entry_fetches_an_adult_catalog_when_setting_is_off(
 
     monkeypatch.setattr(ctx.views, '_fetch_catalog', _fetch_catalog)
     opened = []
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas) or None)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas, catalog_title=None: opened.append(metas) or None)
     win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
 
     _fire_context_menu(win, ctx)
@@ -1597,7 +1589,7 @@ def test_context_menu_genre_entry_drops_adult_flagged_metas_from_an_ordinary_cat
     ]
     monkeypatch.setattr(ctx.views, '_fetch_catalog', lambda *a, **k: genre_metas)
     opened = []
-    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas: opened.append(metas) or None)
+    monkeypatch.setattr(ctx.infowindow, 'open_showcase', lambda metas, catalog_title=None: opened.append(metas) or None)
     win = _showcase_window(ctx, [_make_meta('tt1', 'The Godfather', mtype='movie')])
 
     _fire_context_menu(win, ctx)

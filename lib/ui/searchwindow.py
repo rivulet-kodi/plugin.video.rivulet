@@ -10,6 +10,7 @@ ranks them (`_rank_by_title`, `_rank_by_credit`) and reports failures through
 import queue
 import threading
 import time
+from contextlib import nullcontext
 
 import xbmc
 
@@ -515,17 +516,24 @@ class _FeedIndexLoader:
         return self.index if self._done.is_set() else None
 
 
-def run_query(store, client, query, report=None):
+def run_query(store, client, query, report=None, progress=None):
     """Fan `query` across every search-capable catalog
     (`iter_catalogs(..., extra_required='search')`) and return the
     collected metas, each with `type` defaulted from its catalog.
     The fan-out (progress dialog via `busy_dialog`/L(30186), per-addon
     `AddonError` isolation and logging included) lives here so every
     window can run a search without opening one - callers are
-    `search.SearchWindow` and
-    `lib.ui.infowindow.open_credits_picker()`'s "person" dispatch.
+    `search.SearchWindow` and the person branch of
+    `lib.ui.infowindow.open_credit_link()`.
     Writes no history, opens no coverflow - callers own
     both.
+
+    `progress` replaces the modal spinner: any object with
+    `iscanceled()` and `update(percent, message)`. The Search screen's
+    search-as-you-type passes one that reports on its status line and
+    cancels once the bar no longer holds `query`, because a modal spinner
+    would take the keyboard away from the bar mid-word (and every letter
+    then runs through Kodi's keymap, where "s" opens the shutdown menu).
 
     The catalogs are queried CONCURRENTLY (`_MAX_SEARCH_WORKERS`), not one
     after another, and answers are put back in catalog order before
@@ -540,7 +548,7 @@ def run_query(store, client, query, report=None):
     does, so it can say "search failed" where it would
     otherwise say "no results". Without one, `run_query()` shows that
     notification itself (`_search_notice()`), so a caller that never
-    heard of reports (`open_credits_picker()`) still stops presenting an
+    heard of reports still stops presenting an
     outage as an empty search. One INFO line per call records how many
     catalogs were asked, answered, failed and unanswered: a short or
     empty result used to leave nothing in the log at all.
@@ -560,13 +568,13 @@ def run_query(store, client, query, report=None):
     (`filter_metas()`) - the same two-layer policy `iter_catalog_pages()`
     applies, reused rather than reinvented. No separate "results
     exhausted by filtering" path is needed: an all-adult query already
-    falls out as an empty `metas` list, which `_run_search()`'s existing
+    falls out as an empty `metas` list, which each caller's existing
     no-results branch treats as an ordinary no-results search.
 
     The collected metas are deduplicated (`_dedupe()`) and then ordered
     by how well each title matches the query (`_rank_by_title()`), after
     the existing credit ranking. Both callers want that: a person
-    dispatch from `open_credits_picker()` fans out the same way and gets
+    link (`infowindow.open_credit_link()`) fans out the same way and gets
     the same duplicates back."""
     import xbmc
 
@@ -589,7 +597,7 @@ def run_query(store, client, query, report=None):
     feed_index = None
     answered = {}
     if jobs:
-        with busy_dialog(L(30033), query) as dialog:
+        with (nullcontext(progress) if progress is not None else busy_dialog(L(30033), query)) as dialog:
             started = time.monotonic()
             loader = _FeedIndexLoader(store, client)
             results = _start_search_workers(client, query, jobs)
