@@ -7,6 +7,7 @@ searchable catalog on daemon threads, merges the answers in catalog order,
 ranks them (`_rank_by_title`, `_rank_by_credit`) and reports failures through
 `SearchReport`. No window lives here any more; the screen is `SearchWindow`.
 """
+import os
 import queue
 import threading
 import time
@@ -348,7 +349,7 @@ def _pause_before_search_retry(seconds):
     return xbmc.Monitor().waitForAbort(seconds)
 
 
-def _query_catalog_retrying(client, transport_url, cat, query):
+def _query_catalog_retrying(client, transport_url, cat, query, stop=None):
     """`_query_catalog()` with silent retries on failure only. The
     collector still sees one answer per catalog, so the spinner stays
     up until the retries are done or the user backs out (the collector
@@ -358,12 +359,14 @@ def _query_catalog_retrying(client, transport_url, cat, query):
         metas, failure = _query_catalog(client, transport_url, cat, query)
         if failure is None or attempt + 1 >= _SEARCH_ATTEMPTS:
             return metas, failure
+        if stop is not None and stop.is_set():
+            return metas, failure
         if _pause_before_search_retry(_SEARCH_RETRY_BACKOFF_SECONDS[attempt]):
             return metas, failure
     return metas, failure
 
 
-def _start_search_workers(client, query, jobs):
+def _start_search_workers(client, query, jobs, stop=None):
     """Fan `_query_catalog()` out across a small, genuinely BOUNDED pool of
     raw daemon threads fed by a `queue.Queue`, and return the results
     `Queue` they fill with `(index, (metas, failure))` pairs in COMPLETION
@@ -377,7 +380,17 @@ def _start_search_workers(client, query, jobs):
     still inside its 15s timeout would block plugin-process exit - see
     `lib.ui.streamswindow._start_stream_fetch_workers()` for the
     measurement. A raw daemon thread is simply abandoned, which is also
-    what lets `run_query()` return before a straggler answers."""
+    what lets `run_query()` return before a straggler answers.
+
+    `stop` (a `threading.Event`) is set by `run_query()` once it stops
+    collecting - cancelled, the grace period or the deadline. An abandoned
+    worker used to keep draining `work`: every catalog still queued was
+    asked anyway, with its retries, for a search nobody would see. Search
+    as you type made that the normal case - each pause abandons the last
+    search - and on a box with eight search catalogs a few words typed
+    with pauses stacked several full fan-outs. Now a worker finishes the
+    request it is in (a `requests` call cannot be interrupted) and takes
+    no other."""
     work = queue.Queue()
     for index, (transport_url, _manifest, cat) in enumerate(jobs):
         work.put((index, transport_url, cat))
@@ -386,11 +399,13 @@ def _start_search_workers(client, query, jobs):
     def _worker():
         try:
             while True:
+                if stop is not None and stop.is_set():
+                    return
                 try:
                     index, transport_url, cat = work.get_nowait()
                 except queue.Empty:
                     return
-                results.put((index, _query_catalog_retrying(client, transport_url, cat, query)))
+                results.put((index, _query_catalog_retrying(client, transport_url, cat, query, stop)))
         finally:
             release = getattr(client, '_release_worker_session', None)
             if callable(release):
@@ -600,8 +615,12 @@ def run_query(store, client, query, report=None, progress=None):
         with (nullcontext(progress) if progress is not None else busy_dialog(L(30033), query)) as dialog:
             started = time.monotonic()
             loader = _FeedIndexLoader(store, client)
-            results = _start_search_workers(client, query, jobs)
-            answered = _collect_answers(dialog, results, jobs, report)
+            stop = threading.Event()
+            results = _start_search_workers(client, query, jobs, stop)
+            try:
+                answered = _collect_answers(dialog, results, jobs, report)
+            finally:
+                stop.set()  # whatever is still queued is not wanted any more
             if not report.canceled:
                 feed_index = loader.wait(dialog, timeout=_feed_wait_budget(started))
         for index, (_transport_url, manifest, _cat) in enumerate(jobs):
@@ -655,9 +674,45 @@ def _feed_index(store, client):
     session = getattr(client, 'session', None)
     if data_dir is None or session is None:
         return None
-    from lib.ui.searchfeed import build_index, load_records
+    from lib.ui import searchfeed
 
-    records = load_records(data_dir, session)
-    if not records:
+    # One loader at a time: a second search waits for the first one's
+    # load (or fetch) and then takes its memo instead of repeating it.
+    with _feed_lock:
+        stamp = _feed_file_stamp(searchfeed._path(data_dir))
+        if stamp is not None and _feed_memo.get('stamp') == stamp and \
+                time.time() - stamp[0] <= searchfeed.TTL_SECONDS:
+            return _feed_memo.get('index')
+        if stamp is None and time.monotonic() - _feed_memo.get('failed_at', -_FEED_RETRY_SECONDS) < _FEED_RETRY_SECONDS:
+            # The last fetch failed (offline, blocked host): ranking does
+            # without the feed rather than every typed pause queueing
+            # another 30s download attempt behind this lock.
+            return None
+        records = searchfeed.load_records(data_dir, session)
+        index = searchfeed.build_index(records) if records else None
+        _feed_memo.clear()
+        _feed_memo.update(stamp=_feed_file_stamp(searchfeed._path(data_dir)), index=index)
+        if index is None:
+            _feed_memo['failed_at'] = time.monotonic()
+        return index
+
+
+#: The built feed index, kept for the life of the plugin process and
+#: keyed on the cache file's `(mtime, size)`. Reading the ~3.7MB file
+#: back and indexing its ~20k records took a measurable bite out of
+#: every search; with search as you type that is every pause in the
+#: typing, so it is done once per file instead. Reset by tests through
+#: `tests/conftest.py`'s `_fresh_process_state`.
+_feed_memo = {}  # type: dict
+
+#: After a feed load that came back empty, how long searches skip it.
+_FEED_RETRY_SECONDS = 600.0
+_feed_lock = threading.Lock()
+
+
+def _feed_file_stamp(path):
+    try:
+        info = os.stat(path)
+    except OSError:
         return None
-    return build_index(records)
+    return (info.st_mtime, info.st_size)

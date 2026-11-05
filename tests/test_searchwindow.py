@@ -968,3 +968,68 @@ def test_a_cancelled_search_says_nothing_about_the_catalogs_still_out(load_searc
     assert sw._search_notice(report) is None
 
 
+
+
+# --- resource bounds (search as you type runs many searches) ---------------------
+
+
+def test_feed_index_is_built_once_per_cache_file(load_searchwindow, monkeypatch, tmp_path):
+    ctx = load_searchwindow()
+    sw = ctx.searchwindow
+    from lib.ui import searchfeed
+
+    loads = []
+
+    def _load(data_dir, session, timeout=30):
+        loads.append(1)
+        (tmp_path / 'search-feed.json').write_text('{}')
+        return [{'id': 'tt1', 'type': 'movie', 'imdbRating': '7'}]
+
+    monkeypatch.setattr(searchfeed, 'load_records', _load)
+    store, client = types.SimpleNamespace(data_dir=str(tmp_path)), types.SimpleNamespace(session=object())
+    first = sw._feed_index(store, client)
+    assert sw._feed_index(store, client) is first and loads == [1]
+    (tmp_path / 'search-feed.json').write_text('{"refreshed": 1}')  # a new download
+    sw._feed_index(store, client)
+    assert loads == [1, 1]
+
+
+def test_a_failed_feed_load_is_not_retried_by_every_search(load_searchwindow, monkeypatch, tmp_path):
+    ctx = load_searchwindow()
+    sw = ctx.searchwindow
+    from lib.ui import searchfeed
+
+    loads = []
+    monkeypatch.setattr(searchfeed, 'load_records', lambda data_dir, session, timeout=30: loads.append(1) or [])
+    store, client = types.SimpleNamespace(data_dir=str(tmp_path)), types.SimpleNamespace(session=object())
+    assert sw._feed_index(store, client) is None
+    assert sw._feed_index(store, client) is None
+    assert loads == [1]
+    sw._feed_memo['failed_at'] -= sw._FEED_RETRY_SECONDS + 1
+    sw._feed_index(store, client)
+    assert loads == [1, 1]
+
+
+def test_stopped_search_workers_take_no_queued_catalog(load_searchwindow, monkeypatch):
+    """An abandoned search (typed on, Back, grace, deadline) must not keep
+    asking the catalogs still queued."""
+    ctx = load_searchwindow()
+    sw = ctx.searchwindow
+    monkeypatch.setattr(sw, '_MAX_SEARCH_WORKERS', 1)
+    asked = []
+    gate = threading.Event()
+
+    def _query(client, transport_url, cat, query, stop=None):
+        asked.append(cat['id'])
+        gate.wait(2)
+        return [], None
+
+    monkeypatch.setattr(sw, '_query_catalog_retrying', _query)
+    stop = threading.Event()
+    jobs = [('https://a', {'name': 'A'}, {'id': str(n)}) for n in range(5)]
+    results = sw._start_search_workers(object(), 'x', jobs, stop)
+    stop.set()
+    gate.set()
+    results.get(timeout=2)
+    time.sleep(0.2)
+    assert asked == ['0']

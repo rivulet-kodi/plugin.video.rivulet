@@ -323,15 +323,17 @@ def _shelf_page_gen(state):
     A new iterator per step makes paging state snapshotable. No generator
     runs against a snapshot that another tab can restore underneath it.
     """
+    from lib.iptv import manifest_stamp
     from lib.ui.catalogpages import LaterPageFailure, cached_later_page
     from lib.ui.views import iter_catalog_pages_after
 
     if not state.get('catalog'):
         return iter(())
+    stamp = manifest_stamp(state.get('manifest'))
 
     def fetch(transport, ctype, cid, extra=None):
         try:
-            page = cached_later_page(transport, ctype, cid, extra)
+            page = cached_later_page(transport, ctype, cid, extra, stamp=stamp)
         except LaterPageFailure as exc:
             if exc.remembered:
                 raise _RememberedPageFailure(exc) from exc
@@ -399,12 +401,13 @@ def _log_skipped_page(state):
 
 
 def _remembered_row_failure(state):
+    from lib.iptv import manifest_stamp
     from lib.ui.catalogpages import later_page_failure
 
     catalog = state['catalog']
     failed = later_page_failure(state['transport'], catalog.get('type'), catalog.get('id'),
                                list(state.get('extra') or []) + [('skip', state['served'])],
-                               _ROW_RETRY_SECONDS)
+                               _ROW_RETRY_SECONDS, stamp=manifest_stamp(state.get('manifest')))
     if failed:
         state['failed'] = {key: failed[key] for key in ('at', 'count')}
         if failed['count'] >= _ROW_MAX_FAILURES:
@@ -1404,6 +1407,7 @@ _ROW_SETTINGS = ('home_hide_adult', 'cache_generation', 'home_layout_generation'
 
 def _home_signature(store):
     """What the rows were built from. Equal signature, same rows."""
+    from lib.iptv import manifest_stamp
     from lib.ui.compat import ADDON
 
     auth = store.get_auth() or {}
@@ -1412,7 +1416,11 @@ def _home_signature(store):
     for descriptor in addons:
         if isinstance(descriptor, dict):
             manifest = descriptor.get('manifest') or {}
-            ids.append(str(descriptor.get('transportUrl') or manifest.get('id') or ''))
+            # The IPTV add-on's playlist stamp: its catalog ids are
+            # positional (`iptv0`), so a changed playlist is otherwise the
+            # same row (`lib.iptv.STAMP_FIELD`). Empty for every other add-on.
+            ids.append(str(descriptor.get('transportUrl') or manifest.get('id') or '')
+                       + manifest_stamp(manifest))
     settings = []
     for key in _ROW_SETTINGS:
         try:
@@ -1557,6 +1565,88 @@ def _after_child(window, played=False):
     if played or _library_dirty or getattr(window, '_library_failed', False):
         _refresh_saved_rows(window, store)
     paint_hero(window)
+
+
+#: How often, and for how long, `_watch_iptv_playlists` re-reads the addon
+#: list for the republished IPTV entry. The engine restart a playlist change
+#: triggers takes seconds; a minute covers a slow box without leaving a
+#: thread behind for a setting that never takes effect.
+_IPTV_POLL_SECONDS = 1.5
+_IPTV_WAIT_SECONDS = 60.0
+
+
+def _watch_iptv_playlists(window):
+    """After Settings closes: rebuild Home once the IPTV entry catches up.
+
+    Changing `iptv_playlists` makes the service restart the engine, and
+    `lib.iptv.IptvRegistrar` republishes the add-on (now carrying the new
+    playlist stamp) only when the new engine answers, seconds AFTER
+    `_after_child` ran. Nothing else would tell an idle Home, so when the
+    setting's stamp differs from the published entry's (or the entry is
+    missing or offline) a daemon polls the addon list and, on a match,
+    wakes the GUI thread (`_apply_iptv_ready`, run from `onAction`), which
+    rebuilds the rows keeping the remote's place. The worker holds the
+    window by weakref and plain data only, never a `ListItem`. Off (setting
+    cleared) needs nothing: the entry's removal already changes the signature.
+    """
+    from lib.iptv import playlists_stamp, published_stamp
+    from lib.ui.compat import ADDON
+
+    previous = getattr(window, '_iptv_stop', None)
+    if previous is not None:
+        previous.set()
+    window._iptv_stop = None
+    try:
+        wanted = playlists_stamp(ADDON.getSetting('iptv_playlists'))
+        if not wanted or published_stamp(get_store().get_enabled_addons()) == wanted:
+            return
+    except Exception:
+        return
+    stop = threading.Event()
+    window._iptv_stop = stop
+    window._iptv_ready = False
+    window_ref = weakref.ref(window)
+    thread = threading.Thread(target=_iptv_worker, args=(window_ref, wanted, stop, _home_stop(window)),
+                              name='rivulet-iptv-wait', daemon=True)
+    window._iptv_thread = thread
+    thread.start()
+
+
+def _iptv_worker(window_ref, wanted, stop, home_stop):
+    from lib.iptv import published_stamp
+
+    deadline = time.monotonic() + _IPTV_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        if stop.wait(_IPTV_POLL_SECONDS) or _stopping(home_stop):
+            return
+        try:
+            landed = published_stamp(get_store().get_enabled_addons()) == wanted
+        except Exception:
+            continue
+        if not landed:
+            continue
+        window = window_ref()
+        if window is None:
+            return
+        window._iptv_ready = True
+        del window
+        try:
+            import xbmc
+            xbmc.executebuiltin('Action(noop)')
+        except Exception:
+            pass
+        return
+
+
+def _apply_iptv_ready(window):
+    """UI thread only: rebuild Home for the IPTV entry the worker saw land."""
+    if not getattr(window, '_iptv_ready', False):
+        return
+    window._iptv_ready = False
+    try:
+        _after_child(window)
+    except Exception:
+        pass
 
 
 def _open_child(window, opener):
@@ -2515,6 +2605,9 @@ def _stop_workers(window):
     `release_items`.
     """
     _home_stop(window).set()
+    iptv_stop = getattr(window, '_iptv_stop', None)
+    if iptv_stop is not None:
+        iptv_stop.set()
     for stop in getattr(window, '_home_load_stops', []):
         stop.set()
     _cancel_shelf_extends(window)
@@ -2549,6 +2642,9 @@ def _join_workers(window):
     meta = getattr(window, '_library_meta_thread', None)
     if meta is not None:
         threads.append(meta)
+    iptv = getattr(window, '_iptv_thread', None)
+    if iptv is not None:
+        threads.append(iptv)
     deadline = time.monotonic() + _WORKER_JOIN_SECONDS
     for thread in threads:
         if thread is threading.current_thread():
@@ -2588,6 +2684,7 @@ def release_items(window):
     window._rows = {}
     window._tab_snapshots = {}
     window._library_meta_thread = None
+    window._iptv_thread = None
     window._shelf_threads = []
     window._home_on_shown = None
     for list_id in _place_lists():
@@ -2703,6 +2800,7 @@ class HomeWindow(BaseWindow):
         apply_pending(self)
         _apply_library_meta(self)
         _apply_shelf_extends(self)
+        _apply_iptv_ready(self)
         action_id = action.getId()
         if action_id in BACK_ACTIONS:
             _back(self)
@@ -3059,6 +3157,7 @@ def _open_settings(window):
         _after_child(window)
     except Exception:
         pass
+    _watch_iptv_playlists(window)
 
 
 _ACTIONS = {

@@ -63,6 +63,47 @@ def parse_playlists(raw):
     return [part.strip() for part in raw.split(",") if part.strip()]
 
 
+#: Private manifest field `IptvRegistrar` adds before publishing: a short
+#: hash of the playlist URLs the engine was started with. The engine names
+#: playlist catalogs by POSITION (`iptv0`, `iptv1`, ...) at a fixed
+#: transport, so a changed URL in slot 0 keeps the same (transport, type,
+#: id) and every cache keyed on those (`lib.ui.catalogpages`, Home's row
+#: signature) would keep serving the old channels. The stamp is what tells
+#: them apart. Not part of the Stremio manifest schema; consumers ignore
+#: unknown fields.
+STAMP_FIELD = "rivuletPlaylists"
+
+
+def playlists_stamp(raw):
+    """A short stable hash of the playlist URLs in the raw setting, or `""`
+    when it is off. Order matters (it is the catalog numbering), and the
+    hash follows `parse_playlists()`, so whitespace and empty entries do
+    not change it."""
+    import hashlib
+
+    urls = parse_playlists(raw)
+    if not urls:
+        return ""
+    return hashlib.sha1("\n".join(urls).encode("utf-8")).hexdigest()[:12]
+
+
+def manifest_stamp(manifest):
+    """The `STAMP_FIELD` of a published manifest, `""` for any other add-on
+    (so a non-IPTV add-on's cache keys are unchanged)."""
+    value = manifest.get(STAMP_FIELD) if isinstance(manifest, dict) else None
+    return value if isinstance(value, str) else ""
+
+
+def published_stamp(addons):
+    """The stamp of the enabled `rivulet-iptv` entry in `addons` (the list
+    `Store.get_enabled_addons()` returns, which already leaves out an
+    offline or disabled entry), or `None` when there is none."""
+    for descriptor in addons or ():
+        if isinstance(descriptor, dict) and (descriptor.get("flags") or {}).get("builtin") == BUILTIN_ID:
+            return manifest_stamp(descriptor.get("manifest"))
+    return None
+
+
 def manifest_url(server_url):
     """The URL the engine at `server_url` serves the IPTV manifest at."""
     return server_url.rstrip("/") + MANIFEST_PATH
@@ -135,6 +176,9 @@ class IptvRegistrar:
         matches (`Store.update_addons` writes only a changed list), and it
         is what republishes a manifest that changed (the genre options
         follow the playlists) and repairs an entry something else touched.
+        The manifest carries `STAMP_FIELD`, the hash of the playlists, so a
+        changed playlist URL is a changed entry even though the engine's
+        catalog ids (`iptv0`, ...) stay the same.
       * playlists set but nothing usable answers (engine restarting after a
         settings change, still starting, or an older engine whose `/iptv`
         is a 404) -> `Store.set_builtin_addon_offline()`: the transient
@@ -185,4 +229,6 @@ class IptvRegistrar:
             self._state = _PUBLISHED
             if log_fn is not None:
                 log_fn("IPTV add-on registered (%s)" % MANIFEST_PATH)
-        store.set_builtin_addon(BUILTIN_ID, manifest_url(server_url), manifest)
+        store.set_builtin_addon(
+            BUILTIN_ID, manifest_url(server_url), dict(manifest, **{STAMP_FIELD: playlists_stamp(playlists)})
+        )

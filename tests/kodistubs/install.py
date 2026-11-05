@@ -40,7 +40,7 @@ _MISSING = object()
 #: `PytestUnhandledThreadExceptionWarning` in whichever test runs next.
 #: Not `rivulet-poster-warm`: it only ends when its window is stopped, so
 #: waiting for one a test never stopped would just burn the timeout.
-_HOME_WORKER_NAMES = ('rivulet-library-meta', 'rivulet-home-page', 'rivulet-home-load')
+_HOME_WORKER_NAMES = ('rivulet-library-meta', 'rivulet-home-page', 'rivulet-home-load', 'rivulet-iptv-wait')
 
 #: Seconds to wait for one such thread. They end within a poll; this only
 #: bounds a test that left one blocked, which must not hang the suite.

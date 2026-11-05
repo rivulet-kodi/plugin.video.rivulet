@@ -473,3 +473,25 @@ def test_monitor_translates_special_paths_for_binary_and_cache_dir():
     addon.settings["cache_dir"] = "/plain/dir"
     monitor.onSettingsChanged()
     assert monitor.extra_env["RIVULET_CACHE_ROOT"] == "/plain/dir"
+
+
+def test_iptv_hook_skips_a_tick_with_a_restart_pending(tmp_path):
+    """Settings changed after this tick's restart check: the engine still
+    answering serves the old playlists, which must not be published under
+    the new playlists' stamp."""
+    calls = []
+    sup = make(tmp_path, {"server_enable": True, "iptv_playlists": "http://x/new.m3u"},
+               sync_iptv_fn=lambda *args: calls.append(args))
+    sup.state.proc = Proc()
+    sup.monitor.restart_requested = True
+    sup._sync_iptv_addon(sup.state)
+    assert calls == []
+
+
+def test_iptv_hook_reports_what_our_engine_was_started_with(tmp_path):
+    def embedded(state):
+        state.proc = Proc()
+        state.proc.extra_env = {"RIVULET_IPTV_PLAYLISTS": "http://x/old.m3u"}
+
+    calls = _iptv_calls(tmp_path, {"server_enable": True, "iptv_playlists": "http://x/new.m3u"}, embedded)
+    assert calls[0][0] == "http://x/old.m3u"

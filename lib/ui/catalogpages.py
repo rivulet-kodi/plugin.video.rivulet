@@ -237,6 +237,24 @@ def stop():
         _revalidate_wake.set()
 
 
+def _stamped(extra, manifest):
+    """`extra` plus the manifest's playlist stamp, for the cache KEY only.
+
+    The engine's IPTV catalogs are numbered by position (`iptv0`) at one
+    transport, so changing the playlist in Settings leaves (transport,
+    type, id) untouched and the disk cache (fresh 15 min, servable 24 h)
+    would keep answering with the old channels. `lib.iptv` stamps the
+    published manifest with a hash of the playlists; folding it into the
+    key makes the new playlist a miss. A manifest without a stamp (every
+    other add-on) leaves the key, and so its cached pages, as it was. The
+    pair never reaches the add-on: the fetch uses the original `extra`.
+    """
+    from lib.iptv import manifest_stamp
+
+    stamp = manifest_stamp(manifest)
+    return list(extra or ()) + [('_stamp', stamp)] if stamp else extra
+
+
 def cached_first_page(transport, manifest, catalog, extra=None):
     """The first page, from the cache when it is fresh or still servable.
 
@@ -257,7 +275,7 @@ def cached_first_page(transport, manifest, catalog, extra=None):
     cache = get_page_cache()
     key = None
     if cache is not None and isinstance(catalog, dict):
-        key = cache_key(transport, catalog.get('type'), catalog.get('id'), extra)
+        key = cache_key(transport, catalog.get('type'), catalog.get('id'), _stamped(extra, manifest))
         state, metas = cache.lookup(key, allow_expired=True)
         if metas:
             # Pages cached before types were defaulted on the way in.
@@ -291,15 +309,16 @@ def clear_later_pages():
         _later_failures.clear()
 
 
-def _later_key(transport, ctype, cid, extra):
+def _later_key(transport, ctype, cid, extra, stamp=''):
     pairs = list(extra or ())
     return (transport, ctype, cid, tuple((k, v) for k, v in pairs if k != 'skip'),
-            next((v for k, v in pairs if k == 'skip'), 0))
+            next((v for k, v in pairs if k == 'skip'), 0), stamp)
 
 
-def later_page_failure(transport, ctype, cid, extra=None, cooldown=30.0):
+def later_page_failure(transport, ctype, cid, extra=None, cooldown=30.0, stamp=''):
+    """`stamp`: the manifest's `lib.iptv.manifest_stamp()`, see `_stamped`."""
     with _later_lock:
-        failed = _later_failures.get(_later_key(transport, ctype, cid, extra))
+        failed = _later_failures.get(_later_key(transport, ctype, cid, extra, stamp))
         return dict(failed) if failed and time.monotonic() - failed['at'] < cooldown else None
 
 
@@ -329,11 +348,13 @@ def _remember_later_failure(key, exc):
         return failed
 
 
-def cached_later_page(transport, ctype, cid, extra=None):
+def cached_later_page(transport, ctype, cid, extra=None, stamp=''):
+    """A later page, shared for this interpreter. `stamp` keeps a
+    republished catalog of the same id apart (see `_stamped`)."""
     from lib.ui.views import _fetch_catalog
 
-    key = _later_key(transport, ctype, cid, extra)
-    failed = later_page_failure(transport, ctype, cid, extra)
+    key = _later_key(transport, ctype, cid, extra, stamp)
+    failed = later_page_failure(transport, ctype, cid, extra, stamp=stamp)
     if failed:
         raise LaterPageFailure(failed, remembered=True)
     with _later_lock:

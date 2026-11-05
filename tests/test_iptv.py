@@ -205,7 +205,7 @@ def test_publishes_when_engine_serves_the_manifest():
     store, registrar, logs = _FakeStore(), iptv.IptvRegistrar(), []
     engine = _Engine(MANIFEST)
     _apply(registrar, store, engine, logs=logs)
-    assert store.set_calls == [("rivulet-iptv", URL, MANIFEST)]
+    assert store.set_calls == [("rivulet-iptv", URL, dict(MANIFEST, **{iptv.STAMP_FIELD: iptv.playlists_stamp(PLAYLISTS)}))]
     assert store.remove_calls == [] and store.offline_calls == []
     assert engine.urls == [SERVER]
     assert len(logs) == 1
@@ -229,7 +229,37 @@ def test_follows_a_changed_manifest():
     changed = dict(MANIFEST, catalogs=[{"type": "tv", "id": "iptv0", "extra": [{"name": "genre", "options": ["News"]}]}])
     engine.answer = changed
     _apply(registrar, store, engine)
-    assert store.set_calls[-1] == ("rivulet-iptv", URL, changed)
+    assert store.set_calls[-1] == ("rivulet-iptv", URL, dict(changed, **{iptv.STAMP_FIELD: iptv.playlists_stamp(PLAYLISTS)}))
+
+
+def test_stamp_follows_the_playlists_not_their_whitespace():
+    assert iptv.playlists_stamp("") == "" and iptv.playlists_stamp(" , ") == ""
+    assert iptv.playlists_stamp(" http://a/x.m3u ,http://b/y.m3u,") == iptv.playlists_stamp("http://a/x.m3u,http://b/y.m3u")
+    assert iptv.playlists_stamp("http://a/x.m3u") != iptv.playlists_stamp("http://b/y.m3u")
+    assert iptv.playlists_stamp("http://a,http://b") != iptv.playlists_stamp("http://b,http://a")
+    assert len(iptv.playlists_stamp("http://a")) == 12
+
+
+def test_changed_playlists_republish_with_a_new_stamp_on_the_same_catalog_ids():
+    store, registrar = _FakeStore(), iptv.IptvRegistrar()
+    engine = _Engine(MANIFEST)
+    _apply(registrar, store, engine, playlists="http://a/x.m3u")
+    _apply(registrar, store, engine, playlists="http://b/y.m3u")
+    first, second = (call[2] for call in store.set_calls)
+    assert first[iptv.STAMP_FIELD] != second[iptv.STAMP_FIELD]
+    assert {k: v for k, v in first.items() if k != iptv.STAMP_FIELD} == {
+        k: v for k, v in second.items() if k != iptv.STAMP_FIELD}
+    assert engine.answer == MANIFEST  # the fetched manifest is not mutated
+
+
+def test_manifest_and_published_stamps():
+    assert iptv.manifest_stamp({iptv.STAMP_FIELD: "abc"}) == "abc"
+    assert iptv.manifest_stamp({}) == "" and iptv.manifest_stamp(None) == ""
+    assert iptv.manifest_stamp({iptv.STAMP_FIELD: 3}) == ""
+    entry = {"flags": {"builtin": iptv.BUILTIN_ID}, "manifest": {iptv.STAMP_FIELD: "abc"}}
+    assert iptv.published_stamp([{"flags": {}}, "junk", entry]) == "abc"
+    assert iptv.published_stamp([{"flags": {}}]) is None
+    assert iptv.published_stamp(None) is None
 
 
 def test_empty_setting_removes_once_and_never_probes():

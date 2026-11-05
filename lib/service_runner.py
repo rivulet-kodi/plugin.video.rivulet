@@ -1740,9 +1740,23 @@ class Supervisor:
         if self._sync_iptv is None:
             return
         monitor = self.monitor
+        if monitor.restart_requested:
+            # `onSettingsChanged()` runs on Kodi's callback thread and can
+            # land between this tick's restart check and here: the engine
+            # still answering is the one about to be replaced, and its
+            # manifest would be published under the NEW playlists' stamp
+            # (`lib.iptv.playlists_stamp`), which Home then trusts. The
+            # next tick, after the restart, publishes the right one.
+            return
         serving = monitor.enabled and (state.proc is not None or state.server_mode != "external")
+        playlists = monitor.extra_settings.get("iptv_playlists", "")
+        proc_env = getattr(state.proc, "extra_env", None)
+        if isinstance(proc_env, dict):
+            # Our own engine serves what it was STARTED with, not what the
+            # setting says now.
+            playlists = proc_env.get("RIVULET_IPTV_PLAYLISTS", "")
         try:
-            self._sync_iptv(monitor.extra_settings.get("iptv_playlists", ""), monitor.server_url, serving)
+            self._sync_iptv(playlists, monitor.server_url, serving)
         except Exception as exc:  # noqa: BLE001 - an IPTV registration failure must never crash the service loop
             self._warn("IPTV add-on sync failed: %r" % (exc,))
 

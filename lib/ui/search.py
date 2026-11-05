@@ -73,6 +73,11 @@ _BAR_OPEN_ACTIONS = frozenset((7, 100))
 #: enough to feel live.
 _TYPE_PAUSE_SECONDS = 0.7
 
+#: Shortest bar text a pause searches. One letter matches nearly every
+#: title in every catalog: a full fan-out (and its posters) for a list
+#: nobody wants. The pill and Enter still search any length.
+_TYPE_MIN_CHARS = 2
+
 
 class SearchWindow(BaseWindow):
     """See module docstring. Built/run via `open_search()`."""
@@ -297,7 +302,7 @@ class SearchWindow(BaseWindow):
         query = self.query.strip()
         return (
             self._typed_at is not None
-            and bool(query)
+            and len(query) >= _TYPE_MIN_CHARS
             and query != self._results_query
             and not self._searching
             and self.getFocusId() == QUERY

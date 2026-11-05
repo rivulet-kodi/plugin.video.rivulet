@@ -113,6 +113,10 @@ def _fresh_process_state():
         posterwarm = sys.modules.get('lib.ui.posterwarm')
         if posterwarm is not None:
             posterwarm.reset_warmer()
+        # The ranking-feed memo; only a copy already imported (it imports Kodi).
+        searchwindow = sys.modules.get('lib.ui.searchwindow')
+        if searchwindow is not None:
+            searchwindow._feed_memo.clear()
 
     _clear()
     yield

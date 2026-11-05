@@ -356,3 +356,62 @@ def test_home_resume_can_page_past_twenty_and_short_pages(pages):
                 catalog=catalog, page_limit=None, fetch_page=fetch, stop_short=False))
     assert len(rows) == 16
     assert offsets == list(range(10, 27))
+
+
+def test_same_catalog_id_with_a_new_playlist_stamp_is_a_cache_miss(pages, tmp_path, monkeypatch):
+    module = pages.catalogpages
+    cache = _cache(tmp_path, {'now': 0.0})
+    monkeypatch.setattr(module, 'get_page_cache', lambda: cache)
+    fetched = []
+
+    def fetch(transport, manifest, catalog, extra):
+        fetched.append((manifest.get('rivuletPlaylists'), extra))
+        return [{'id': 'ch-%s' % manifest['rivuletPlaylists'], 'type': 'tv', 'name': 'x'}]
+
+    monkeypatch.setattr(module, '_fetch_first_page', fetch)
+    catalog = {'type': 'tv', 'id': 'iptv0'}
+    url = 'http://127.0.0.1:11470/iptv/manifest.json'
+
+    def shown(stamp):
+        return [m['id'] for m in module.cached_first_page(url, {'rivuletPlaylists': stamp}, catalog)]
+
+    assert shown('old') == ['ch-old']
+    assert shown('old') == ['ch-old'] and len(fetched) == 1
+    assert shown('new') == ['ch-new'] and len(fetched) == 2
+    assert fetched[-1][1] is None  # the stamp never reaches the add-on
+
+
+def test_unstamped_manifest_keeps_the_plain_cache_key(pages, tmp_path, monkeypatch):
+    from lib.stremio.pagecache import cache_key
+
+    module = pages.catalogpages
+    cache = _cache(tmp_path, {'now': 0.0})
+    monkeypatch.setattr(module, 'get_page_cache', lambda: cache)
+    monkeypatch.setattr(module, '_fetch_first_page', lambda *a: [{'id': 'tt1', 'type': 'movie', 'name': 'x'}])
+    module.cached_first_page('t', {}, {'type': 'movie', 'id': 'top'}, [('genre', 'Drama')])
+    state, metas = cache.lookup(cache_key('t', 'movie', 'top', [('genre', 'Drama')]), allow_expired=True)
+    assert state == 'fresh' and metas
+
+
+def test_later_pages_and_their_failures_are_keyed_by_the_stamp(pages, monkeypatch):
+    module = pages.catalogpages
+    module.clear_later_pages()
+    calls = []
+    monkeypatch.setattr(pages.views, '_fetch_catalog', lambda *a, **kw: calls.append(1) or [{'id': 'tt%d' % len(calls)}])
+    extra = [('skip', 24)]
+    assert module.cached_later_page('a', 'tv', 'iptv0', extra, stamp='old') == [{'id': 'tt1'}]
+    assert module.cached_later_page('a', 'tv', 'iptv0', extra, stamp='old') == [{'id': 'tt1'}]
+    assert module.cached_later_page('a', 'tv', 'iptv0', extra, stamp='new') == [{'id': 'tt2'}]
+    module.clear_later_pages()
+
+    def boom(*a, **kw):
+        raise module.AddonError('x', category='HTTP 503')
+
+    monkeypatch.setattr(pages.views, '_fetch_catalog', boom)
+    try:
+        module.cached_later_page('a', 'tv', 'iptv0', extra, stamp='old')
+    except module.LaterPageFailure:
+        pass
+    assert module.later_page_failure('a', 'tv', 'iptv0', extra, stamp='old')
+    assert module.later_page_failure('a', 'tv', 'iptv0', extra, stamp='new') is None
+    module.clear_later_pages()

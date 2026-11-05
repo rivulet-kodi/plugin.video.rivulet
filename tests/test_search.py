@@ -816,3 +816,13 @@ def test_picked_letters_show_in_the_bar_and_typing_continues_from_them(load_sear
     assert win.getControl(s.QUERY).getText() == 'Al'
     _type(win, s, 'Alien')
     assert win.query == 'Alien'
+
+
+def test_a_pause_after_one_letter_does_not_search(load_search, monkeypatch):
+    ctx = load_search()
+    win = _init(ctx, monkeypatch)
+    timers = _pause_timers(ctx, monkeypatch)
+    calls = _results(ctx, monkeypatch)
+    _type(win, ctx.search, 'a')
+    _fire(win, timers[-1])
+    assert calls == []
