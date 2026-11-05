@@ -17,8 +17,8 @@ letters are commands ("s" opens the shutdown menu, "x" stops, "c" opens
 the context menu). With a label for a bar, a laptop keyboard could not
 type at all. Each change in the bar reaches `onClick(QUERY)`.
 
-Typing searches by itself: `_TYPE_PAUSE_SECONDS` after the last key the
-search runs, still on the screen's own thread, with no spinner - its
+Typing in the bar searches by itself: `_TYPE_PAUSE_SECONDS` after the last
+key, if the focus is still in the bar, the search runs, still on the screen's own thread, with no spinner - its
 progress goes to the status line and the focus stays in the bar, so the
 user can keep typing; a key pressed mid-search cancels it and the pause
 starts again. Enter is not needed, which matters because Kodi's keymap
@@ -26,7 +26,8 @@ turns Enter into Select on an edit control, and Select always opens Kodi's
 own keyboard dialog (`CGUIEditControl` -> `CGUIButtonControl::OnAction`
 -> `OnClick`) before an add-on sees the action: the add-on cannot stop
 that dialog, only make it unnecessary. OK on the bar with a remote still
-opens it, which is how a remote types; confirming it, the Search pill or
+opens it, which is how a remote types; letters picked from the alphabet
+wait for the pill, as a remote user picks them slower than the pause; confirming it, the Search pill or
 OK from the phone run the search the classic way, under the Rivulet
 spinner (`searchwindow.run_query`), with the focus moved to the results.
 
@@ -89,7 +90,10 @@ class SearchWindow(BaseWindow):
         self._hero_painted = None
         #: monotonic time of the last edit typed into the bar, and the
         #: pending pause timer (`_schedule_typed_search()`).
-        self._typed_at = 0.0
+        # When the pending pause started; None when no typed search is
+        # pending (none typed yet, already run, or overtaken by the pill).
+        self._typed_at = None
+        self._closing = False
         self._type_timer = None
         #: A search started by typing is running (no spinner, bar focused).
         self._typing_search = False
@@ -100,8 +104,11 @@ class SearchWindow(BaseWindow):
         self._bar_changed = False
 
     def close(self):
-        # A pause timer left running would post into a closed window (and,
-        # under test, into restored modules).
+        # A typed search has no spinner to carry Back: `_BarProgress` stops
+        # it on this flag. A pause timer left running would post into a
+        # closed window (and, under test, into restored modules).
+        self._closing = True
+        self._typed_at = None
         timer, self._type_timer = self._type_timer, None
         if timer is not None:
             timer.cancel()
@@ -160,6 +167,7 @@ class SearchWindow(BaseWindow):
         self._hero_painted = None
 
     def _show(self, metas, results):
+        from lib.ui import look
         from lib.ui.compat import L
         from lib.ui.home import _poster_item
 
@@ -174,7 +182,7 @@ class SearchWindow(BaseWindow):
         self.getControl(ROW_HEADING).setLabel('[B]%s[/B]' % L(30507 if results else 30506))
         self.setProperty('SearchHasRow', '1' if items else '')
         if items:
-            _paint_hero(self, items[0])
+            look.paint_poster_hero(self, items[0], SEARCH_STACK)
         else:
             self._welcome()
 
@@ -204,7 +212,9 @@ class SearchWindow(BaseWindow):
             return
         self._apply_ready()
         if self.getFocusId() == ROW:
-            _paint_hero(self, self.getControl(ROW).getSelectedItem())
+            from lib.ui import look
+
+            look.paint_poster_hero(self, self.getControl(ROW).getSelectedItem(), SEARCH_STACK)
 
     @gated_input
     def onClick(self, control_id):
@@ -265,23 +275,32 @@ class SearchWindow(BaseWindow):
         search runs on this window's thread in `_apply_ready()`."""
         import time
 
-        self._typed_at = time.monotonic()
-        timer = self._type_timer
-        if timer is not None:
-            timer.cancel()
+        self._cancel_typed_search()
         if not self.query.strip():
-            self._type_timer = None
             return
+        self._typed_at = time.monotonic()
         self._type_timer = _start_pause_timer(_TYPE_PAUSE_SECONDS, lambda: self._post(('typed', '', None)))
 
+    def _cancel_typed_search(self):
+        """Forget the pending pause: its timer, and (via `_typed_at`) any
+        wake-up it already posted."""
+        self._typed_at = None
+        timer, self._type_timer = self._type_timer, None
+        if timer is not None:
+            timer.cancel()
+
     def _typed_search_due(self):
+        """Only from the bar: the user who has moved to the letters or the
+        row must not have it reset under the cursor."""
         import time
 
         query = self.query.strip()
         return (
-            bool(query)
+            self._typed_at is not None
+            and bool(query)
             and query != self._results_query
             and not self._searching
+            and self.getFocusId() == QUERY
             and time.monotonic() - self._typed_at >= _TYPE_PAUSE_SECONDS * 0.9
         )
 
@@ -295,6 +314,7 @@ class SearchWindow(BaseWindow):
 
         query = self.query.strip()
         report = SearchReport()
+        self._typed_at = None
         self._searching = self._typing_search = True
         self._status(L(30033))
         try:
@@ -319,12 +339,23 @@ class SearchWindow(BaseWindow):
             self._show(self._metas, results=True)
             self._status(_search_notice(report) or '')
             return
+        self._show_no_results(report, query)
+
+    def _show_no_results(self, report, query):
+        """Nothing found: take the previous results off the row (OK on one
+        would open the Discover title at its index) and say so."""
+        from lib.ui.compat import L
+        from lib.ui.searchwindow import _search_notice
+
+        self._show([], results=True)
         self._status(_search_notice(report) or _with_query(L(30513), query))
 
     def _query_changed(self):
         if not self.query.strip():
-            # An empty bar is Discover again.
+            # An empty bar is Discover again; typing the last query anew
+            # must search it again.
             self._metas = []
+            self._results_query = ''
             self._status('')
             self._show(self._discover, results=False)
 
@@ -334,11 +365,13 @@ class SearchWindow(BaseWindow):
         query = self.query.strip()
         if not query:
             return
-        from lib.ui.compat import L
         from lib.ui.dependencies import get_client, get_store
         from lib.ui.searchwindow import SearchReport, _search_notice, run_query
 
         report = SearchReport()
+        # The pill runs this search; a pause that ends under its spinner
+        # must not start it again once the user cancels it.
+        self._cancel_typed_search()
         self._searching = True
         try:
             metas = run_query(get_store(), get_client(), query, report=report)
@@ -361,7 +394,7 @@ class SearchWindow(BaseWindow):
             notice = _search_notice(report)
             self._status(notice or '')
             return
-        self._status(_search_notice(report) or _with_query(L(30513), query))
+        self._show_no_results(report, query)
 
     def _status(self, text):
         try:
@@ -437,45 +470,6 @@ class SearchWindow(BaseWindow):
         if open_detail(meta.get('type') or 'movie', meta.get('id')):
             self.should_close_caller = True
             self.close()
-
-
-def _paint_hero(window, item):
-    """Home's poster properties and cached ratings in the search-sized stack.
-
-    The Home painter also schedules library metadata and addresses Home
-    controls. Keep this window's painting local while reusing its existing
-    logo, fill and upcoming-poster helpers and the shared hero renderer.
-    """
-    if item is None:
-        return
-    from lib.ui import home, look
-
-    title = item.getProperty('hero_title') or item.getLabel() or ''
-    if not title and not item.getProperty('sid') and not item.getProperty('hero_logo'):
-        return
-    meta = item.getProperty('hero_meta') or ''
-    facts_raw = item.getProperty('hero_facts') or ''
-    if facts_raw and item.getProperty('facts_done') != '1':
-        meta = home._overlay_hero_facts(window, item, meta, facts_raw)
-    plot = item.getProperty('hero_plot') or item.getProperty('subtitle') or ''
-    fanart = item.getProperty('fanart') or ''
-    logo = home._hero_logo(window, item)
-    fill = item.getProperty('hero_fill') == '1' and bool(fanart)
-    runtime = item.getProperty('hero_runtime') or ''
-    painted = (title, meta, plot, fanart, fill, logo, runtime)
-    if painted == getattr(window, '_hero_painted', None):
-        return
-    window._hero_painted = painted
-    window.setProperty('HeroLogo', logo)
-    window.setProperty('HeroFill', '1' if fill else '')
-    call = look._hero_call
-    call(window, home.HERO_LOGO, 'setImage', logo)
-    call(window, home.HERO_TITLE, 'setLabel', home._fit_hero_title(title))
-    call(window, home.HERO_META, 'setText', meta)
-    call(window, home.HERO_PLOT, 'setText', plot)
-    call(window, BACKGROUND, 'setImage', fanart or look.fanart())
-    home._set_fill_image(window, fanart if fill else '')
-    look.paint_hero(window, plot, meta, runtime, SEARCH_STACK)
 
 
 def _with_query(text, query):
@@ -561,7 +555,7 @@ class _BarProgress:
     def iscanceled(self):
         import xbmc
 
-        if xbmc.Monitor().abortRequested():
+        if self._window._closing or xbmc.Monitor().abortRequested():
             return True
         try:
             text = self._window.getControl(QUERY).getText() or ''

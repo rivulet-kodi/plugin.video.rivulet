@@ -256,7 +256,7 @@ def test_search_omdb_overlay_moves_plot_and_scores_and_reuses_helpers(load_searc
     monkeypatch.setattr(ctx.home, '_logo_known_good', lambda url: True)
     logos = []
     monkeypatch.setattr(ctx.logocheck, 'ask', lambda urls: logos.append(urls))
-    ctx.search._paint_hero(win, item)
+    ctx.look.paint_poster_hero(win, item, ctx.search.SEARCH_STACK)
     assert item.getProperty('facts_done') == '1' and item.getProperty('hero_meta') == OMDB
     assert overlaid[0][0]['id'] == META['id'] and len(overlaid[0][1]) == 1
     assert logos[-1] == ['later-logo']
@@ -271,7 +271,7 @@ def test_search_omdb_overlay_moves_plot_and_scores_and_reuses_helpers(load_searc
     assert win.getControl(30036).label.startswith('Ends at ')
     paints = []
     monkeypatch.setattr(ctx.look, 'paint_hero', lambda *args: paints.append(args))
-    ctx.search._paint_hero(win, item)
+    ctx.look.paint_poster_hero(win, item, ctx.search.SEARCH_STACK)
     assert paints == [] and len(overlaid) == 1
 
 
@@ -283,9 +283,9 @@ def test_search_fallbacks_and_empty_item_leave_hero(load_search, monkeypatch):
     assert not item.getProperty('thumbnail')
     assert win.getControl(30000).image == ctx.look.fanart()
     assert not win.getProperty('HeroLogo') and not win.getControl(30025).visible
-    ctx.search._paint_hero(win, None)
+    ctx.look.paint_poster_hero(win, None, ctx.search.SEARCH_STACK)
     import xbmcgui
-    ctx.search._paint_hero(win, xbmcgui.ListItem(''))
+    ctx.look.paint_poster_hero(win, xbmcgui.ListItem(''), ctx.search.SEARCH_STACK)
     assert win.getControl(30020).label == 'No artwork'
     win._show([dict(META, background='')], False)
     assert win.getProperty('HeroFill') == '1' and win.getControl(30028).image == 'poster'
@@ -439,7 +439,7 @@ def test_malformed_facts_and_broken_control_do_not_skip_hero_geometry(load_searc
     def fail(*args):
         raise RuntimeError('unwrappable')
     monkeypatch.setattr(win.getControl(30023), 'setImage', fail)
-    ctx.search._paint_hero(win, item)
+    ctx.look.paint_poster_hero(win, item, ctx.search.SEARCH_STACK)
     assert win.getControl(30022).y == 468 and win.getControl(30025).y == 550
     assert win.getControl(30020).label == 'Alien'
     assert any('look: hero control failed: RuntimeError' in message for message, _ in ctx.env.log_calls)
@@ -660,6 +660,104 @@ def test_closing_the_screen_cancels_a_pending_pause(load_search, monkeypatch):
     _type(win, ctx.search, 'al')
     win.close()
     assert timers[-1].cancelled
+
+
+def _typed_results(ctx, monkeypatch, answers):
+    """run_query answering each call with the next list in `answers`."""
+    calls = []
+
+    def query(store, client, text, report, progress=None):
+        calls.append(text)
+        report.total_catalogs = report.queried = 1
+        return answers[len(calls) - 1]
+
+    monkeypatch.setattr(ctx.searchwindow, 'run_query', query)
+    return calls
+
+
+def test_a_typed_search_finding_nothing_takes_the_old_results_off_the_row(load_search, monkeypatch):
+    """Otherwise OK on a stale poster opens the Discover title at its index."""
+    ctx = load_search()
+    win = _init(ctx, monkeypatch)
+    s = ctx.search
+    win._discover = [dict(META, id='discover')]
+    timers = _pause_timers(ctx, monkeypatch)
+    _typed_results(ctx, monkeypatch, [[META], []])
+    _type(win, s, 'alien')
+    _fire(win, timers[-1])
+    assert win.getControl(s.ROW).size() == 1
+    _type(win, s, 'alienx')
+    _fire(win, timers[-1])
+    assert win.getControl(s.ROW).size() == 0 and not win.getProperty('SearchHasRow')
+    assert win.getControl(s.STATUS).label == 'No results for “alienx”'
+
+
+def test_back_during_a_typed_search_stops_it(load_search, monkeypatch):
+    ctx = load_search()
+    win = _init(ctx, monkeypatch)
+    s = ctx.search
+    timers = _pause_timers(ctx, monkeypatch)
+    seen = []
+
+    def query(store, client, text, report, progress=None):
+        seen.append(progress.iscanceled())
+        win.close()  # Back: no spinner carries it, so the window closes
+        seen.append(progress.iscanceled())
+        report.canceled = True
+        return []
+
+    monkeypatch.setattr(ctx.searchwindow, 'run_query', query)
+    _type(win, s, 'alien')
+    _fire(win, timers[-1])
+    assert seen == [False, True]
+
+
+def test_a_pause_ending_after_the_focus_left_the_bar_does_not_search(load_search, monkeypatch):
+    ctx = load_search()
+    win = _init(ctx, monkeypatch)
+    s = ctx.search
+    timers = _pause_timers(ctx, monkeypatch)
+    calls = _typed_results(ctx, monkeypatch, [[META]])
+    _type(win, s, 'alien')
+    win.setFocusId(s.LETTERS)
+    _fire(win, timers[-1])
+    assert calls == []
+
+
+def test_a_cancelled_pill_search_is_not_restarted_by_the_typing_pause(load_search, monkeypatch):
+    ctx = load_search()
+    win = _init(ctx, monkeypatch)
+    s = ctx.search
+    timers = _pause_timers(ctx, monkeypatch)
+    calls = []
+
+    def query(store, client, text, report, progress=None):
+        calls.append(text)
+        timers[-1].callback()  # the pause ends under the spinner
+        report.canceled = True  # then the user backs out of it
+        return []
+
+    monkeypatch.setattr(ctx.searchwindow, 'run_query', query)
+    _type(win, s, 'alien')
+    win._go()
+    import xbmcgui
+    win.onAction(xbmcgui.Action(0))
+    assert calls == ['alien'] and timers[-1].cancelled
+
+
+def test_retyping_the_last_query_after_clearing_the_bar_searches_again(load_search, monkeypatch):
+    ctx = load_search()
+    win = _init(ctx, monkeypatch)
+    s = ctx.search
+    timers = _pause_timers(ctx, monkeypatch)
+    calls = _typed_results(ctx, monkeypatch, [[META], [META]])
+    _type(win, s, 'alien')
+    _fire(win, timers[-1])
+    win.getControl(s.QUERY).setText('')
+    win.onClick(s.QUERY)
+    _type(win, s, 'alien')
+    _fire(win, timers[-1])
+    assert calls == ['alien', 'alien']
 
 
 def test_physical_keyboard_types_into_the_bar_and_confirmed_enter_searches(load_search, monkeypatch):

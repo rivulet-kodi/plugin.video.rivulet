@@ -210,18 +210,14 @@ def _runtime_minutes(meta):
     return str(int(seconds // 60)) if seconds else ''
 
 
-def _poster_item(meta, action='', sparse=False):
-    """One shelf cell. `action` set means the click opens that menu
-    action (Sign in) instead of the title's page.
+def _poster_properties(meta, action='', sparse=False):
+    """The string Properties of one shelf cell, as a dict.
 
-    `sparse` is a library record: a name and a poster, and sometimes a
-    backdrop, with no description. The hero for that cell is filled in
-    on focus (`_schedule_library_meta`). Until that answer arrives, a
-    poster with no backdrop is drawn full-bleed (`hero_fill`) instead
-    of letterboxed on the black plate.
+    Pure data (no `ListItem`), so a worker thread can compute a cell's
+    properties and queue them for the GUI thread, as the coverflow's
+    enrich worker does; `_poster_item` wraps them in the item.
     """
     from lib.stremio.ratings import panel_facts
-    from lib.ui import watchmarks
     from lib.ui.playbackmeta import in_cinema
     from lib.ui.uicommon import escape_label
     from lib.ui.urlutil import sized_image
@@ -229,11 +225,7 @@ def _poster_item(meta, action='', sparse=False):
     name = meta.get('name') or ''
     background = meta.get('background') or ''
     poster = meta.get('poster') or ''
-    from lib.ui import previews
-
-    previews.remember(meta)
-    item = xbmcgui.ListItem(escape_label(name))
-    item.setProperties({
+    return {
         # TMDB `original` art is megabytes for a 200px card (#18).
         'thumbnail': sized_image(poster, 'poster'),
         'fanart': sized_image(background, 'backdrop') if background else sized_image(poster, 'fill'),
@@ -255,7 +247,25 @@ def _poster_item(meta, action='', sparse=False):
         # Drawn by the skin as a strip over the poster. The word comes from
         # the skin's own `$ADDON` label; only the verdict is set here.
         'in_cinema': '1' if in_cinema(meta) else '',
-    })
+    }
+
+
+def _poster_item(meta, action='', sparse=False):
+    """One shelf cell. `action` set means the click opens that menu
+    action (Sign in) instead of the title's page.
+
+    `sparse` is a library record: a name and a poster, and sometimes a
+    backdrop, with no description. The hero for that cell is filled in
+    on focus (`_schedule_library_meta`). Until that answer arrives, a
+    poster with no backdrop is drawn full-bleed (`hero_fill`) instead
+    of letterboxed on the black plate.
+    """
+    from lib.ui import previews, watchmarks
+    from lib.ui.uicommon import escape_label
+
+    previews.remember(meta)
+    item = xbmcgui.ListItem(escape_label(meta.get('name') or ''))
+    item.setProperties(_poster_properties(meta, action, sparse))
     if watchmarks.is_watched(meta):
         _mark_watched_on(item, True)
     return item
@@ -2382,7 +2392,7 @@ def _set_fill_image(window, image):
 def _overlay_hero_facts(window, item, meta, facts_raw):
     """`meta` (the hero's catalog line) with the cached ratings for the
     poster's `hero_facts` merged in. Shared by `paint_hero` and the search
-    screen's hero (`lib.ui.search._paint_hero`); each decides when to
+    screen's hero (`look.paint_poster_hero`); each decides when to
     call it.
 
     A ratings key rebuilds the line from the cached scores. No key, or a
@@ -2410,7 +2420,7 @@ def _hero_logo(window, item):
     The text title stays up until Kodi has loaded the logo once (#10);
     meanwhile the wanted logo is warmed. The next titles' logos are
     warmed and checked ahead, so they are ready on arrival. Shared by
-    `paint_hero` and `lib.ui.search._paint_hero`."""
+    `paint_hero` and `look.paint_poster_hero`."""
     from lib.ui import logocheck
 
     wanted_logo = item.getProperty('hero_logo') or ''

@@ -260,3 +260,48 @@ def paint_hero(window, plot, panel_text, runtime_minutes, stack=None):
     has_scores = any(visible)
     _hero_call(window, HERO_SCORES, 'setVisible', has_scores)
     place_hero(window, plot, bool(facts_line), has_scores, bool(stars), stack)
+
+
+def paint_poster_hero(window, item, stack=None, background_id=30000):
+    """Paint the hero of a window with one poster row (Search, the coverflow).
+
+    Home's poster properties and cached ratings in `stack`. Home's own
+    painter also schedules library metadata and addresses Home controls,
+    so this one stays separate while reusing its logo, fill and
+    upcoming-poster helpers and the shared renderer (`paint_hero`). The
+    cached ratings come through `home._overlay_hero_facts`, which also
+    plans the OMDb/MDBList fetch for a miss; the window's own onAction
+    repaints when that worker's Action(noop) lands.
+
+    An unchanged hero is not painted twice: every action repaints, and a
+    paint is a dozen boundary crossings (#17).
+    """
+    if item is None:
+        return
+    from lib.ui import home
+
+    title = item.getProperty('hero_title') or item.getLabel() or ''
+    if not title and not item.getProperty('sid') and not item.getProperty('hero_logo'):
+        return
+    meta = item.getProperty('hero_meta') or ''
+    facts_raw = item.getProperty('hero_facts') or ''
+    if facts_raw and item.getProperty('facts_done') != '1':
+        meta = home._overlay_hero_facts(window, item, meta, facts_raw)
+    plot = item.getProperty('hero_plot') or item.getProperty('subtitle') or ''
+    backdrop = item.getProperty('fanart') or ''
+    logo = home._hero_logo(window, item)
+    fill = item.getProperty('hero_fill') == '1' and bool(backdrop)
+    runtime = item.getProperty('hero_runtime') or ''
+    painted = (title, meta, plot, backdrop, fill, logo, runtime)
+    if painted == getattr(window, '_hero_painted', None):
+        return
+    window._hero_painted = painted
+    window.setProperty('HeroLogo', logo)
+    window.setProperty('HeroFill', '1' if fill else '')
+    _hero_call(window, home.HERO_LOGO, 'setImage', logo)
+    _hero_call(window, home.HERO_TITLE, 'setLabel', home._fit_hero_title(title))
+    _hero_call(window, home.HERO_META, 'setText', meta)
+    _hero_call(window, home.HERO_PLOT, 'setText', plot)
+    _hero_call(window, background_id, 'setImage', backdrop or fanart())
+    home._set_fill_image(window, backdrop if fill else '')
+    paint_hero(window, plot, meta, runtime, stack)

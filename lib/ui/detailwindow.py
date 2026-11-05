@@ -319,9 +319,9 @@ def _metadata_line(meta, season_count):
 
     A still-running series' open-ended range is closed with the
     localized "now" rather than left as a dangling dash - see
-    `lib.ui.playbackmeta.year_range()`, which the coverflow hero
-    (`infowindow._year_text()`) and StreamsWindow print from too, so
-    the three screens agree on how a running series prints its years."""
+    `lib.ui.playbackmeta.year_range()`, which StreamsWindow prints
+    from too, so the screens agree on how a running series prints its
+    years."""
     from lib.ui.compat import L
     from lib.ui.playbackmeta import year_range
 

@@ -14,9 +14,11 @@
                 <effect type="fade" delay="0" end="100" time="200" />
             </animation>
             <!-- No WindowClose animation on purpose: Kodi drops every action while the topmost modal plays one (test_skin_xml.py rule 9). -->
+            <control type="image" id="30098"><left>0</left><top>0</top><width>1</width><height>1</height><texture background="true"></texture></control><control type="image" id="30099"><left>0</left><top>0</top><width>1</width><height>1</height><texture background="true"></texture></control>
             <control type="image"><left>0</left><top>0</top><width>1920</width><height>1080</height><texture colordiffuse="FF000000">white.png</texture></control>
-            <!-- The backdrop fills the screen; the fades carry the text. -->
-            <control type="image" id="30000"><left>0</left><top>0</top><width>1920</width><height>1080</height><texture background="true" colordiffuse="FFFFFFFF"></texture><aspectratio align="center" aligny="center">scale</aspectratio></control>
+            <!-- The backdrop fills the screen; HeroFill swaps in the scale plate for a title with no backdrop. -->
+            <control type="image" id="30000"><left>0</left><top>0</top><width>1920</width><height>1080</height><texture background="true" colordiffuse="FFFFFFFF"></texture><aspectratio align="center" aligny="center">scale</aspectratio><visible>String.IsEmpty(Window.Property(HeroFill))</visible></control>
+            <control type="image" id="30028"><left>0</left><top>0</top><width>1920</width><height>1080</height><texture background="true" colordiffuse="FFFFFFFF"></texture><aspectratio align="center" aligny="center">scale</aspectratio><visible>!String.IsEmpty(Window.Property(HeroFill))</visible></control>
             <!-- No bar: dark toward the left and the bottom, light at the top. -->
             <control type="image"><left>0</left><top>0</top><width>1920</width><height>1080</height><texture colordiffuse="FFFFFFFF">look_fade_left.png</texture><aspectratio>stretch</aspectratio></control>
             <control type="image"><left>0</left><top>0</top><width>1920</width><height>1080</height><texture colordiffuse="FFFFFFFF">look_fade_bottom.png</texture><aspectratio>stretch</aspectratio></control>
@@ -32,10 +34,7 @@
                 <label>[B]RIVULET[/B]</label>
             </control>
             <control type="label"><left>1040</left><top>36</top><width>800</width><height>50</height><font>font13</font><textcolor>FFEDEDED</textcolor><align>right</align><aligny>center</aligny><label>[B]$INFO[System.Time]$INFO[Weather.Temperature,  •  ,][/B]</label></control>
-            <!-- Where the icon row sits on Home: the position, then close. -->
-            <control type="label"><left>1380</left><top>100</top><width>380</width><height>56</height><font>font12</font><textcolor>B3EDEDED</textcolor><shadowcolor>C8000000</shadowcolor><align>right</align><aligny>center</aligny>
-                <label>$INFO[Container(30002).CurrentItem] / $INFO[Container(30002).NumItems]</label>
-            </control>
+            <!-- Where the icon row sits on Home: close. -->
             <control type="button" id="30003">
                 <left>1784</left><top>100</top><width>56</width><height>56</height>
                 <texturefocus colordiffuse="FFFFFFFF">look_icon_close_focus.png</texturefocus>
@@ -44,52 +43,75 @@
                 <ondown>30002</ondown>
             </control>
 
-            <!-- Hero, stacked above the strip like Home's: title, the metadata line
-                 (infowindow.py's `_meta_line()`: year, IMDb, runtime and genre as one flowing
-                 label, so a sparse item never shows a dangling separator), the plot (three
-                 lines, then it scrolls). One flowing label because Kodi parses a width once and
-                 cannot fit a box to its text (lib/ui/infowindow.py:141-145). -->
-            <control type="label"><left>80</left><top>296</top><width>1100</width><height>80</height><font>font45</font><textcolor>FFEDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny><wrapmultiline>false</wrapmultiline>
-                <label>$INFO[ListItem.Label]</label>
-            </control>
-            <control type="label"><left>80</left><top>384</top><width>1200</width><height>40</height><font>font13</font><textcolor>E6EDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny>
-                <label>$INFO[ListItem.Property(meta_line)]</label>
-                <visible>!String.IsEmpty(ListItem.Property(meta_line))</visible>
-            </control>
-            <control type="textbox"><left>80</left><top>432</top><width>920</width><height>123</height><font>font13</font><textcolor>C7EDEDED</textcolor><shadowcolor>C8000000</shadowcolor>
-                <label>$INFO[ListItem.Property(plot)]</label>
-                <autoscroll delay="3000" time="4000" repeat="6000">true</autoscroll>
+            <!-- Hero, the same controls and ids as Search's and Home's (lib/ui/look.py
+                 `paint_poster_hero`, which also moves them: Home's stack, ending at y=590 above
+                 the row's position line): the clearlogo or the bold title, the stars and facts
+                 line, the plot (three lines, then it scrolls), the score icons. 30021 is the
+                 hidden catalog line the shared painter writes. -->
+            <control type="image" id="30023"><left>80</left><top>231</top><width>1000</width><height>120</height><aspectratio align="left" aligny="bottom">keep</aspectratio><texture background="true"></texture><visible>!String.IsEmpty(Window.Property(HeroLogo))</visible></control>
+            <control type="label" id="30020"><left>80</left><top>271</top><width>1100</width><height>80</height><font>font45</font><textcolor>FFEDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny><wrapmultiline>false</wrapmultiline><label></label><visible>String.IsEmpty(Window.Property(HeroLogo))</visible></control>
+            <control type="image" id="30027"><left>80</left><top>373</top><width>150</width><height>28</height><aspectratio>keep</aspectratio><texture></texture></control>
+            <control type="label" id="30024"><left>246</left><top>367</top><width>1200</width><height>40</height><font>font13</font><textcolor>E6EDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny><label></label></control>
+            <control type="textbox" id="30021"><left>0</left><top>0</top><width>1</width><height>1</height><font>font12</font><textcolor>FFFFFFFF</textcolor><label></label><visible>false</visible></control>
+            <control type="textbox" id="30022"><left>80</left><top>417</top><width>920</width><height>123</height><font>font13</font><textcolor>C7EDEDED</textcolor><shadowcolor>C8000000</shadowcolor><autoscroll delay="3000" time="4000" repeat="6000">true</autoscroll><label></label></control>
+            <control type="group" id="30025">
+                <left>80</left><top>540</top><width>1400</width><height>40</height>
+                <control type="grouplist">
+                <left>0</left><top>0</top><width>1400</width><height>40</height>
+                <orientation>horizontal</orientation><itemgap>0</itemgap>
+                <control type="label" id="30029"><width>auto</width><height>40</height><font>font13</font><textcolor>E6EDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny><label></label></control>
+                <control type="image"><width>24</width><height>40</height><texture></texture><visible>!String.IsEmpty(Control.GetLabel(30031)) + !String.IsEmpty(Control.GetLabel(30029))</visible></control>
+                <control type="image" id="30030"><top>4</top><width>32</width><height>32</height><aspectratio>keep</aspectratio><texture></texture></control>
+                <control type="label" id="30031"><width>auto</width><height>40</height><font>font13</font><textcolor>E6EDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny><label></label></control>
+                <control type="image"><width>24</width><height>40</height><texture></texture><visible>!String.IsEmpty(Control.GetLabel(30033)) + [!String.IsEmpty(Control.GetLabel(30029)) | !String.IsEmpty(Control.GetLabel(30031))]</visible></control>
+                <control type="image" id="30032"><top>4</top><width>32</width><height>32</height><aspectratio>keep</aspectratio><texture></texture></control>
+                <control type="label" id="30033"><width>auto</width><height>40</height><font>font13</font><textcolor>E6EDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny><label></label></control>
+                <control type="image"><width>24</width><height>40</height><texture></texture><visible>!String.IsEmpty(Control.GetLabel(30035)) + [!String.IsEmpty(Control.GetLabel(30029)) | !String.IsEmpty(Control.GetLabel(30031)) | !String.IsEmpty(Control.GetLabel(30033))]</visible></control>
+                <control type="image" id="30034"><top>4</top><width>32</width><height>32</height><aspectratio>keep</aspectratio><texture></texture></control>
+                <control type="label" id="30035"><width>auto</width><height>40</height><font>font13</font><textcolor>E6EDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny><label></label></control>
+                <control type="image"><width>24</width><height>40</height><texture></texture><visible>!String.IsEmpty(Control.GetLabel(30036)) + [!String.IsEmpty(Control.GetLabel(30029)) | !String.IsEmpty(Control.GetLabel(30031)) | !String.IsEmpty(Control.GetLabel(30033)) | !String.IsEmpty(Control.GetLabel(30035))]</visible></control>
+                <control type="label" id="30036"><width>auto</width><height>40</height><font>font13</font><textcolor>E6EDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny><label></label></control>
+                </control>
             </control>
 
-            <!-- The strip: one focused slot (336) and unfocused 268s from x=64 to the screen edge,
-                 cut there like Home's rows, so the focused poster starts at the same x=80 as
-                 the text. Posters are rounded and
-                 the focused one has Home's white ring. -->
+            <!-- The row, drawn exactly like Search's results row: position and a faint line above,
+                 200x300 posters with their reflections, the white ring on the focused one. The
+                 reflections fill the dark lower band the bottom fade leaves under the posters.
+                 A fixedlist rather than Search's panel so focus stays at the left, under the
+                 hero's text. -->
+            <control type="label"><left>1504</left><top>630</top><width>360</width><height>44</height><font>font12</font><textcolor>B3EDEDED</textcolor><align>right</align><aligny>center</aligny><label>$INFO[Container(30002).CurrentItem] / $INFO[Container(30002).NumItems]</label></control>
+            <control type="image"><left>80</left><top>680</top><width>1784</width><height>2</height><texture colordiffuse="24EDEDED">white.png</texture></control>
             <control type="fixedlist" id="30002">
-                <top>592</top><left>64</left><width>1856</width><height>458</height>
+                <top>694</top><left>64</left><width>1856</width><height>386</height>
                 <viewtype>wrap</viewtype><orientation>horizontal</orientation>
-                <scrolltime tween="cubic" easing="out">300</scrolltime>
+                <scrolltime tween="cubic" easing="out">240</scrolltime>
+                <preloaditems>2</preloaditems>
                 <focusposition>0</focusposition>
                 <onup>30003</onup>
-                <itemlayout width="268" height="458">
-                    <control type="image"><left>16</left><top>88</top><width>240</width><height>360</height><texture colordiffuse="FF16191C">mask_poster.png</texture></control>
-                    <control type="image"><left>16</left><top>88</top><width>240</width><height>360</height><texture diffuse="mask_poster.png" background="true">$INFO[ListItem.Property(thumbnail)]</texture><aspectratio align="center" aligny="center">keep</aspectratio><visible>!String.IsEmpty(ListItem.Property(thumbnail))</visible></control>
-                    <control type="textbox"><left>28</left><top>88</top><width>216</width><height>360</height><font>font13</font><textcolor>E6EDEDED</textcolor><align>center</align><aligny>center</aligny><label>$INFO[ListItem.Label]</label><visible>String.IsEmpty(ListItem.Property(thumbnail))</visible></control>
+                <itemlayout width="232" height="386">
+                    <control type="image"><left>16</left><top>8</top><width>200</width><height>300</height><texture colordiffuse="FF16191C">mask_poster.png</texture></control>
+                    <control type="image"><left>16</left><top>8</top><width>200</width><height>300</height><texture diffuse="mask_poster.png" background="true">$INFO[ListItem.Property(thumbnail)]</texture><aspectratio align="center" aligny="center">keep</aspectratio><visible>!String.IsEmpty(ListItem.Property(thumbnail))</visible></control>
+                    <control type="image"><left>16</left><top>316</top><width>200</width><height>300</height><texture flipy="true" diffuse="mask_poster.png" colordiffuse="66FFFFFF" background="true">$INFO[ListItem.Property(thumbnail)]</texture><aspectratio align="center" aligny="center">keep</aspectratio><visible>!String.IsEmpty(ListItem.Property(thumbnail))</visible></control>
+                    <control type="image"><left>16</left><top>316</top><width>200</width><height>300</height><texture colordiffuse="FFFFFFFF">look_reflect_fade.png</texture><aspectratio>stretch</aspectratio><visible>!String.IsEmpty(ListItem.Property(thumbnail))</visible></control>
+                    <control type="textbox"><left>28</left><top>8</top><width>176</width><height>300</height><font>font13</font><textcolor>E6EDEDED</textcolor><align>center</align><aligny>center</aligny><label>$INFO[ListItem.Label]</label><visible>String.IsEmpty(ListItem.Property(thumbnail))</visible></control>
                     <!-- Watched check (#85) and IN CINEMA strip (#84), over the poster. -->
-                    <control type="image"><left>216</left><top>96</top><width>32</width><height>32</height><texture colordiffuse="B3000000">white.png</texture><visible>String.IsEqual(ListItem.Property(watched),1)</visible></control>
-                    <control type="image"><left>221</left><top>101</top><width>22</width><height>22</height><texture colordiffuse="FFEDEDED">look_check.png</texture><visible>String.IsEqual(ListItem.Property(watched),1)</visible></control>
-                    <control type="image"><left>24</left><top>412</top><width>224</width><height>30</height><texture colordiffuse="FF38BDF8">white.png</texture><visible>!String.IsEmpty(ListItem.Property(in_cinema))</visible></control>
-                    <control type="label"><left>24</left><top>408</top><width>224</width><height>38</height><font>font12</font><textcolor>FF07090B</textcolor><align>center</align><aligny>center</aligny><label>$ADDON[plugin.video.rivulet 30548]</label><visible>!String.IsEmpty(ListItem.Property(in_cinema))</visible></control>
+                    <control type="image"><left>176</left><top>16</top><width>32</width><height>32</height><texture colordiffuse="B3000000">white.png</texture><visible>String.IsEqual(ListItem.Property(watched),1)</visible></control>
+                    <control type="image"><left>181</left><top>21</top><width>22</width><height>22</height><texture colordiffuse="FFEDEDED">look_check.png</texture><visible>String.IsEqual(ListItem.Property(watched),1)</visible></control>
+                    <control type="image"><left>24</left><top>272</top><width>184</width><height>30</height><texture colordiffuse="FF38BDF8">white.png</texture><visible>!String.IsEmpty(ListItem.Property(in_cinema))</visible></control>
+                    <control type="label"><left>24</left><top>268</top><width>184</width><height>38</height><font>font12</font><textcolor>FF07090B</textcolor><align>center</align><aligny>center</aligny><label>$ADDON[plugin.video.rivulet 30548]</label><visible>!String.IsEmpty(ListItem.Property(in_cinema))</visible></control>
                 </itemlayout>
-                <focusedlayout width="336" height="458">
-                    <control type="image"><left>16</left><top>16</top><width>288</width><height>432</height><texture colordiffuse="FF16191C">mask_poster.png</texture></control>
-                    <control type="image"><left>16</left><top>16</top><width>288</width><height>432</height><texture diffuse="mask_poster.png" background="true">$INFO[ListItem.Property(thumbnail)]</texture><aspectratio align="center" aligny="center">keep</aspectratio><visible>!String.IsEmpty(ListItem.Property(thumbnail))</visible></control>
-                    <control type="textbox"><left>28</left><top>16</top><width>264</width><height>432</height><font>font13</font><textcolor>E6EDEDED</textcolor><align>center</align><aligny>center</aligny><label>$INFO[ListItem.Label]</label><visible>String.IsEmpty(ListItem.Property(thumbnail))</visible></control>
-                    <control type="image"><left>8</left><top>8</top><width>304</width><height>448</height><texture border="24" colordiffuse="FFFFFFFF">look_ring.png</texture><visible>Control.HasFocus(30002)</visible></control>
-                    <control type="image"><left>264</left><top>24</top><width>32</width><height>32</height><texture colordiffuse="B3000000">white.png</texture><visible>String.IsEqual(ListItem.Property(watched),1)</visible></control>
-                    <control type="image"><left>269</left><top>29</top><width>22</width><height>22</height><texture colordiffuse="FFEDEDED">look_check.png</texture><visible>String.IsEqual(ListItem.Property(watched),1)</visible></control>
-                    <control type="image"><left>24</left><top>412</top><width>272</width><height>30</height><texture colordiffuse="FF38BDF8">white.png</texture><visible>!String.IsEmpty(ListItem.Property(in_cinema))</visible></control>
-                    <control type="label"><left>24</left><top>408</top><width>272</width><height>38</height><font>font12</font><textcolor>FF07090B</textcolor><align>center</align><aligny>center</aligny><label>$ADDON[plugin.video.rivulet 30548]</label><visible>!String.IsEmpty(ListItem.Property(in_cinema))</visible></control>
+                <focusedlayout width="232" height="386">
+                    <control type="image"><left>16</left><top>8</top><width>200</width><height>300</height><texture colordiffuse="FF16191C">mask_poster.png</texture></control>
+                    <control type="image"><left>16</left><top>8</top><width>200</width><height>300</height><texture diffuse="mask_poster.png" background="true">$INFO[ListItem.Property(thumbnail)]</texture><aspectratio align="center" aligny="center">keep</aspectratio><visible>!String.IsEmpty(ListItem.Property(thumbnail))</visible></control>
+                    <control type="image"><left>16</left><top>316</top><width>200</width><height>300</height><texture flipy="true" diffuse="mask_poster.png" colordiffuse="66FFFFFF" background="true">$INFO[ListItem.Property(thumbnail)]</texture><aspectratio align="center" aligny="center">keep</aspectratio><visible>!String.IsEmpty(ListItem.Property(thumbnail))</visible></control>
+                    <control type="image"><left>16</left><top>316</top><width>200</width><height>300</height><texture colordiffuse="FFFFFFFF">look_reflect_fade.png</texture><aspectratio>stretch</aspectratio><visible>!String.IsEmpty(ListItem.Property(thumbnail))</visible></control>
+                    <control type="textbox"><left>28</left><top>8</top><width>176</width><height>300</height><font>font13</font><textcolor>E6EDEDED</textcolor><align>center</align><aligny>center</aligny><label>$INFO[ListItem.Label]</label><visible>String.IsEmpty(ListItem.Property(thumbnail))</visible></control>
+                    <!-- Watched check (#85) and IN CINEMA strip (#84), over the poster. -->
+                    <control type="image"><left>176</left><top>16</top><width>32</width><height>32</height><texture colordiffuse="B3000000">white.png</texture><visible>String.IsEqual(ListItem.Property(watched),1)</visible></control>
+                    <control type="image"><left>181</left><top>21</top><width>22</width><height>22</height><texture colordiffuse="FFEDEDED">look_check.png</texture><visible>String.IsEqual(ListItem.Property(watched),1)</visible></control>
+                    <control type="image"><left>24</left><top>272</top><width>184</width><height>30</height><texture colordiffuse="FF38BDF8">white.png</texture><visible>!String.IsEmpty(ListItem.Property(in_cinema))</visible></control>
+                    <control type="label"><left>24</left><top>268</top><width>184</width><height>38</height><font>font12</font><textcolor>FF07090B</textcolor><align>center</align><aligny>center</aligny><label>$ADDON[plugin.video.rivulet 30548]</label><visible>!String.IsEmpty(ListItem.Property(in_cinema))</visible></control>
+                    <control type="image"><left>8</left><top>0</top><width>216</width><height>316</height><texture border="24" colordiffuse="FFFFFFFF">look_ring.png</texture><visible>Control.HasFocus(30002)</visible></control>
                 </focusedlayout>
             </control>
         </control>

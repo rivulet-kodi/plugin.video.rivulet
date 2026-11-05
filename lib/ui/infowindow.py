@@ -36,7 +36,6 @@ import threading
 
 import xbmcgui
 
-from lib.ui.playbackmeta import resolve_art
 from lib.ui.uicommon import (
     ModalStackWindow,
     append_keeping_focus,
@@ -83,160 +82,24 @@ _INFO_ACTION = 11
 _CONTEXT_MENU_ACTION = 117
 
 
-#: Separator between the hero's metadata segments, matching the
-#: ' · '-joined lines `detailwindow._metadata_line()` and
-#: `streamswindow._rebuild_list()` already build. U+00B7 is in
-#: `_SAFE_ANYWHERE` (both Estuary faces have it), so the joined line
-#: renders whatever font the label ends up using.
-_META_SEPARATOR = ' · '
-
-#: strings.po id for the range terminator a still-running series gets
-#: in place of a bare dangling dash ("2022–now"). Translated in all 14
-#: locales. DetailWindow and StreamsWindow print the same range from
-#: the same id, so the three screens agree.
-_NOW_STRING_ID = 30234
-
-#: How the hero labels its IMDb rating. The bare number rendered as
-#: "9.0" in an accent-coloured box, which reads as a percentage, a
-#: season count or a price as easily as a rating - the scale it is on
-#: was carried entirely by the colour. Spelled out rather than drawn as
-#: a `★`: the star is in `_SANS_ONLY` (NotoMono has no glyph and
-#: renders tofu - the exact bug tests/test_glyph_coverage.py exists to
-#: catch), and "IMDb" additionally names *which* 10-point scale this is,
-#: which the star alone never did. Left untranslated, like the RIVULET
-#: wordmark, because it is a brand name - tests/test_skin_xml.py's
-#: `_ALLOWED_LITERAL_WORDS` carries the matching entry for the XML side.
-_RATING_LABEL = 'IMDb'
+#: The cell properties a fetched meta can change: everything the hero
+#: paints from, plus the IN CINEMA strip a release date feeds.
+_HERO_KEYS = (
+    'hero_meta', 'hero_plot', 'hero_facts', 'hero_runtime', 'hero_fill', 'in_cinema',
+)
 
 
-def _rating_segment(rating):
-    """`'IMDb 9.0'` for a hero metadata line, or `''` when the meta
-    carries no rating - never a dangling label with nothing after it.
+def _hero_properties(meta):
+    """`_HERO_KEYS` for `meta`, as a dict a worker may build off the GUI
+    thread (`home._poster_properties` never makes a `ListItem`). `facts_done`
+    is cleared so the next paint merges the cached ratings into the new
+    catalog line again."""
+    from lib.ui.home import _poster_properties
 
-    Pure helper - no xbmc - so it is trivially unit-testable on its own.
-    """
-    rating = str(rating or '').strip()
-    return '%s %s' % (_RATING_LABEL, rating) if rating else ''
-
-
-def _year_range(meta, now_word):
-    """The hero's release-year text: Stremio's `releaseInfo`, falling
-    back to the date part of `released`, rendered by
-    `playbackmeta.year_range()` (which is where the open-ended-range
-    handling and its reasoning live).
-
-    Pure helper - no xbmc - so it is trivially unit-testable on its own.
-    """
-    from lib.ui.playbackmeta import year_range
-
-    meta = meta or {}
-    released = meta.get('released')
-    date_only = released.split('T', 1)[0] if released else ''
-    return year_range(meta.get('releaseInfo') or date_only or '', now_word)
-
-
-def _year_text(meta):
-    """`_year_range()` with the localized "now" resolved - see there."""
-    from lib.ui.compat import L
-
-    return _year_range(meta, L(_NOW_STRING_ID))
-
-
-def _meta_line(props):
-    """Join the hero's year/rating/runtime/genre into the single line
-    ShowcaseWindow.xml renders, skipping whatever the meta does not
-    carry so a sparse item never shows a dangling separator.
-
-    Built here rather than laid out in the skin because Kodi sizes a
-    control from the XML at load time and cannot fit a box to its text:
-    the hero used three fixed 110px boxes, which is wide enough for a
-    bare `2019` but truncates a real series range (`2010-2017` needs
-    ~140px at Mono26 and rendered as `2010...`) and leaves under a pixel
-    either side of a `120 min` runtime. One flowing label has no width
-    to overflow, and is the same shape the other two screens that print
-    this metadata already use.
-
-    Genre rides on the end of this same line, where the chip layout
-    always put it. It is the one segment that used to need its own
-    control, because it had to be placed in whichever slot the chips
-    ahead of it left open; joined into the string there are no slots to
-    place it in, so the reflow matrix that placement needed is gone
-    with it.
-
-    The IN CINEMA tag (`props['cinema']`, already localized and escaped)
-    sits right after the year, where the release is read; it is empty for
-    anything `playbackmeta.in_cinema()` does not tag.
-
-    Pure helper - no xbmc - so it is trivially unit-testable on its own.
-    """
-    props = props or {}
-    segments = (
-        props.get('year') or '',
-        props.get('cinema') or '',
-        _rating_segment(props.get('rating')),
-        props.get('runtime') or '',
-        props.get('genre') or '',
-    )
-    return _META_SEPARATOR.join(segment for segment in segments if segment)
-
-
-def _item_properties(meta):
-    """Map one Stremio catalog meta to the string Properties
-    ShowcaseWindow.xml's coverflow reads via `$INFO[ListItem.Property(...)]`.
-
-    Every value is coerced to `str()` (`None` -> `''`): `setProperties()`
-    requires str values, but `imdbRating` and `runtime` are routinely
-    numeric in the wild (a JSON `9.0`/`120`, not `"9.0"`/`"120"`), which
-    used to reach Kodi untyped and raise inside the C++ boundary.
-
-    Pure helper - no xbmc - so it is trivially unit-testable on its own.
-    """
-    meta = meta or {}
-    from lib.ui import previews, watchmarks
-    from lib.ui.compat import L
-    from lib.ui.playbackmeta import in_cinema
-
-    previews.remember(meta)
-    poster = meta.get('poster')
-    logo = meta.get('logo')
-    # `resolve_art()` is the addon-wide poster/fanart fallback, but it
-    # only chains thumb<-poster and fanart<-background/logo - it never
-    # falls a *missing* poster back to the logo, nor a missing fanart
-    # back to the poster, both of which this coverflow wants (a
-    # logo-only meta still needs a thumbnail; a poster-only meta still
-    # needs a background). One-line overrides on top rather than
-    # duplicating resolve_art()'s own background/logo chain here.
-    art = resolve_art(None, meta)
-    rating = meta.get('imdbRating')
-    runtime = meta.get('runtime')
-    genres = meta.get('genres')
-    if not isinstance(genres, list):
-        genres = []
-    props = {
-        'thumbnail': sized_image(art.get('thumb') or logo, 'poster'),
-        'fanart': (
-            sized_image(art['fanart'], 'backdrop')
-            if art.get('fanart')
-            else sized_image(poster, 'fill')
-        ),
-        'genre': escape_label(', '.join(g for g in genres if isinstance(g, str))),
-        'rating': escape_label(str(rating)) if rating not in (None, '') else '',
-        'plot': escape_label(meta.get('description') or ''),
-        'year': escape_label(_year_text(meta)),
-        'runtime': escape_label(str(runtime)) if runtime not in (None, '') else '',
-        # The localized word for the hero line; the card's own strip is
-        # drawn by the skin from `in_cinema` (issue #84).
-        'cinema': escape_label(L(30548)) if in_cinema(meta) else '',
-        'in_cinema': '1' if in_cinema(meta) else '',
-        # Drives the check on the card (issue #85); see `watchmarks`.
-        'watched': '1' if watchmarks.is_watched(meta) else '',
-    }
-    # Precomposed for the skin: `meta_line` is what the hero actually
-    # renders, but `year`/`rating`/`runtime`/`genre` stay individually
-    # exposed - the enrich merge in `_enrich_fetch()` reads them back
-    # per field. Built last, so it sees the fields above it.
-    props['meta_line'] = _meta_line(props)
-    return props
+    props = _poster_properties(meta)
+    merged = {key: props[key] for key in _HERO_KEYS}
+    merged['facts_done'] = ''
+    return merged
 
 
 def _header_label(catalog_title=None):
@@ -264,11 +127,10 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         #: catalog/section title for the header - None keeps it a bare
         #: "RIVULET", see `_header_label()`/`start()`.
         self.catalog_title = None
-        #: fanart last pushed to BACKGROUND - lets onAction() skip
-        #: setImage() when a keypress doesn't actually change focus (e.g.
-        #: the enrich worker's Action(noop) wake-up), the per-keypress
-        #: cost the coverflow's scroll feel is most sensitive to.
-        self._last_background = None
+        #: What the hero last painted (`look.paint_poster_hero`), which
+        #: skips an unchanged hero - a keypress that does not change focus
+        #: (e.g. the enrich worker's Action(noop) wake-up) costs nothing.
+        self._hero_painted = None
         self._reset_enrich_state()
         self._reset_paging_state()
 
@@ -379,14 +241,18 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         if items:
             append_keeping_focus(self.getControl(SELECT), items)
 
-    def _make_item(self, index, meta, props=None):
-        item = xbmcgui.ListItem(escape_label(meta.get('name') or meta.get('id') or '?'))
-        properties = dict(props) if props is not None else _item_properties(meta)
-        properties['position'] = str(index)
-        # One setProperties() call instead of one setProperty() per key -
-        # each crosses the Python->C++ boundary, so this collapses what
-        # was 7 crossings per item into 1.
-        item.setProperties(properties)
+    def _make_item(self, index, meta):
+        """One cell, built like Search's: `home._poster_item` carries the
+        poster, the badges and every property the shared hero reads."""
+        from lib.ui.home import _poster_item
+
+        item = _poster_item(meta)
+        if not meta.get('name'):
+            item.setLabel(escape_label(meta.get('id') or '?'))
+        if not item.getProperty('thumbnail') and meta.get('logo'):
+            # A logo-only meta still needs a thumbnail; Home's cell has none.
+            item.setProperty('thumbnail', sized_image(meta['logo'], 'poster'))
+        item.setProperty('position', str(index))
         return item
 
     def onInit(self):
@@ -405,14 +271,7 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
             watchmarks.refresh(get_store())
         except Exception:
             pass
-        # Computed once per meta and reused for the background fallback
-        # below - _make_item() used to call _item_properties() again just
-        # for metas[0], recomputing what this loop already has in hand.
-        props_by_index = [_item_properties(meta) for meta in self.metas]
-        items = [
-            self._make_item(index, meta, props_by_index[index])
-            for index, meta in enumerate(self.metas)
-        ]
+        items = [self._make_item(index, meta) for index, meta in enumerate(self.metas)]
         control = self.getControl(SELECT)
         # reset() before addItems(): onInit() runs again when
         # uicommon.ModalStackWindow reopens a screen force-closed for
@@ -420,15 +279,17 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         # item.
         control.reset()
         control.addItems(items)
-        background = props_by_index[0].get('fanart', '')
-        self.getControl(BACKGROUND).setImage(background)
-        self._last_background = background
+        # A reopen rebuilds the window, so the last painted hero is stale.
+        self._hero_painted = None
         self.getControl(LOADING).setVisible(False)
         self.setFocusId(SELECT)
         # A rebuild discards the ListItems a pending merge was queued
         # against, so apply whatever landed while we were away onto the
         # fresh ones before enriching further.
         self._apply_enriched()
+        # Painted after the focus is set: the hero warms the logos of the
+        # posters after the focused one, which it finds through the focus.
+        self._paint_hero(items[0])
         # onAction() enriches on every focus change, but never fires for the
         # item that opens focused - enrich item 0 here so the window doesn't
         # open on a blank plot until the user scrolls off it and back.
@@ -444,20 +305,12 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         if self.getFocusId() == SELECT:
             focused = self.getControl(SELECT).getSelectedItem()
             if focused is not None:
-                fanart = focused.getProperty('fanart')
-                # Skip the setImage() boundary crossing when focus fired
-                # onAction() but the fanart didn't actually change - e.g.
-                # the enrich worker's Action(noop) wake-up below, or any
-                # other non-navigation key while the same item stays
-                # focused. This is the call scrolling feel is most
-                # sensitive to: it used to run unconditionally on every
-                # keypress.
-                if fanart != self._last_background:
-                    self.getControl(BACKGROUND).setImage(fanart)
-                    self._last_background = fanart
                 # Both on the UI thread: drain anything a worker finished
-                # since the last action, then arm a fetch for this item.
+                # since the last action, paint the hero from it (the
+                # ratings worker's wake-up lands here too), then arm a
+                # fetch for this item.
                 self._apply_enriched()
+                self._paint_hero(focused)
                 self._enrich_focused(focused)
         action_id = action.getId()
         if action_id == _INFO_ACTION:
@@ -468,12 +321,21 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         if action_id in _BACK_ACTIONS:
             self.close()
 
+    def _paint_hero(self, item):
+        """The shared poster hero (logo or title, stars and facts, scores,
+        plot, backdrop) for `item`, placed above the strip."""
+        from lib.ui import look
+
+        # Home's stack: the row sits where Search's does, its position
+        # line at y=630, so the hero ends at the same y=590.
+        look.paint_poster_hero(self, item, None, BACKGROUND)
+
     def _open_credits(self):
         """ACTION_CONTEXT_MENU on the coverflow: resolve the focused
         poster the exact same way onAction()'s own background swap does
         above (getFocusId()/getSelectedItem()/position -> self.metas) -
         no second "what's focused" mechanism - then fetch its full meta
-        (a catalog preview has no `links`, see `_item_properties()`) and
+        (a catalog preview has no `links`, see `_poster_item()`) and
         hand it to `open_credits_picker()`."""
         if self.getFocusId() != SELECT:
             return
@@ -640,7 +502,7 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         # the focused art flicker as the fetch lands.
         #
         # `full` is unvalidated third-party addon JSON, so check the shape
-        # each field is consumed as. _item_properties() joins `genres`, and
+        # each field is consumed as. `_hero_meta_text()` joins `genres`, and
         # a str is iterable - an addon sending "Drama" instead of ["Drama"]
         # would otherwise render as "D, r, a, m, a"; a list of anything but
         # strings is dropped to a blank label on purpose, for the same
@@ -648,7 +510,7 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         # numeric in the wild (streamswindow.py str()s the one,
         # playbackmeta.py float()s the other), so those are coerced rather
         # than rejected. `released` is merged as well as `releaseInfo`
-        # because _item_properties() derives `year` from either.
+        # because the hero's facts line derives the year from either.
         for key in ('description', 'genres', 'imdbRating', 'releaseInfo', 'released', 'dvdRelease'):
             value = full.get(key)
             if not value or meta.get(key):
@@ -661,18 +523,11 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
                     meta[key] = value
             elif isinstance(value, (str, int, float)):
                 meta[key] = str(value)
-        props = _item_properties(meta)
+        props = _hero_properties(meta)
         # Hand off to the UI thread rather than touching the ListItem here:
         # it is inside the ControlList the skin renders every frame.
         with self._enrich_lock:
-            # `meta_line` travels with them: it is what the hero renders,
-            # and a fetch that lands a rating or a release range would
-            # otherwise merge the field but leave the composed line as
-            # the sparse one built before the fetch.
-            self._enrich_pending[index] = {
-                key: props.get(key, '')
-                for key in ('genre', 'rating', 'plot', 'year', 'meta_line', 'cinema', 'in_cinema')
-            }
+            self._enrich_pending[index] = props
         # ...and wake it, or nothing would apply the queue until the user's
         # next keypress - by which time focus has usually left the item
         # that was fetched. executebuiltin() posts to Kodi's application

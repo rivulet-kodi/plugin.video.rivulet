@@ -7,7 +7,7 @@ exercised against the shared fake xbmc/xbmcgui stubs in tests/kodistubs
 (no real Kodi runtime, no network).
 
 lib.ui.infowindow imports xbmcgui at module scope (`class ShowcaseWindow
-(xbmcgui.WindowXML)`), so even `_item_properties()` - a pure
+(xbmcgui.WindowXML)`), so even `_hero_properties()` - a pure
 function that touches no xbmc API itself - needs the module imported
 fresh against the fake xbmcgui (via `load_infowindow`) before it is
 reachable at all. `ShowcaseWindow.onClick()` also lazily `from
@@ -33,10 +33,12 @@ be, exercised by this suite. Confirming it renders/scrolls/animates
 correctly requires manually opening the overlay on a real Kodi install.
 """
 import contextlib
+import json
 
 import pytest
 
 from tests.kodistubs import install_kodi_stubs
+from tests.test_home import _RELOAD_MODULE_NAMES as _HOME_RELOAD_MODULE_NAMES
 
 _RELOAD_MODULE_NAMES = (
     # lib.ui.views is reloaded alongside the rest because ShowcaseWindow's
@@ -52,6 +54,11 @@ _RELOAD_MODULE_NAMES = (
     'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.streamswindow', 'lib.ui.views', 'lib.ui.dialogs',
     'lib.ui.dependencies', 'lib.ui.searchwindow', 'lib.ui.detailwindow', 'lib.ui.infowindow',
 )
+# The hero is Home's: it reads `lib.ui.home`, `lib.ui.look` and the ratings
+# and logo workers, so they are reloaded against the same stubs.
+_RELOAD_MODULE_NAMES = tuple(dict.fromkeys(
+    _HOME_RELOAD_MODULE_NAMES + _RELOAD_MODULE_NAMES + ('lib.ui.ratingsched', 'lib.ui.logocheck'),
+))
 
 
 @pytest.fixture
@@ -79,6 +86,9 @@ def load_infowindow(monkeypatch):
                 addon_info=addon_info,
                 settings=settings,
             ))
+            # No texture-cache or HTTP probe for a logo: the title stays up.
+            monkeypatch.setattr(ctx.home, '_logo_known_good', lambda url: False)
+            monkeypatch.setattr(ctx.logocheck, 'ask', lambda urls: None)
             ctx.real_spawn_enrich = ctx.infowindow.ShowcaseWindow._spawn_enrich
             monkeypatch.setattr(
                 ctx.infowindow.ShowcaseWindow, '_spawn_enrich',
@@ -96,223 +106,96 @@ def _make_meta(mid, name, mtype='movie', **extra):
 
 
 # ---------------------------------------------------------------------------
-# _item_properties() - pure mapping, no window involved
+# The cells and the hero: Home's poster items, painted by the shared hero
 # ---------------------------------------------------------------------------
 
 
-def test_item_properties_full_meta_maps_every_field(load_infowindow):
+_FULL = {
+    'id': 'tt0078748', 'type': 'movie', 'name': 'Alien', 'poster': 'https://x/poster.jpg',
+    'logo': 'https://x/logo.png', 'background': 'https://x/bg.jpg',
+    'genres': ['Horror', 'Sci-Fi'], 'imdbRating': '8.4', 'description': 'A plot.',
+    'releaseInfo': '1979', 'runtime': '117 min',
+}
+
+
+def _opened(ctx, metas):
+    win = ctx.infowindow.ShowcaseWindow('ShowcaseWindow.xml', '/addon/path', 'Default', '1080i')
+    win.metas = list(metas)
+    win.onInit()
+    return win
+
+
+def test_cells_are_homes_poster_items_with_a_position(load_infowindow):
     ctx = load_infowindow()
-    meta = {
-        'poster': 'https://x/poster.jpg',
-        'logo': 'https://x/logo.png',
-        'background': 'https://x/bg.jpg',
-        'genres': ['Action', 'Sci-Fi'],
-        'imdbRating': '8.4',
-        'description': 'A plot.',
-        'releaseInfo': '2019',
-        'released': '2019-05-01T00:00:00.000Z',
-        'runtime': '132 min',
-    }
-    assert ctx.infowindow._item_properties(meta) == {
-        'thumbnail': 'https://x/poster.jpg',
-        'fanart': 'https://x/bg.jpg',
-        'genre': 'Action, Sci-Fi',
-        'rating': '8.4',
-        'plot': 'A plot.',
-        'year': '2019',
-        'runtime': '132 min',
-        'cinema': '',
-        'in_cinema': '',
-        'watched': '',
-        'meta_line': '2019 · IMDb 8.4 · 132 min · Action, Sci-Fi',
-    }
+    win = _opened(ctx, [_FULL])
+    item = win.getControl(ctx.infowindow.SELECT).items[0]
+    assert item.getProperty('position') == '0'
+    assert item.getProperty('thumbnail') == 'https://x/poster.jpg'
+    assert item.getProperty('fanart') == 'https://x/bg.jpg'
+    assert item.getProperty('hero_title') == 'Alien'
+    assert item.getProperty('hero_plot') == 'A plot.'
+    assert item.getProperty('hero_logo') == 'https://x/logo.png'
+    assert item.getProperty('sid') == 'tt0078748'
+    assert json.loads(item.getProperty('hero_facts'))['id'] == 'tt0078748'
 
 
-def test_item_properties_thumbnail_falls_back_to_logo_without_poster(load_infowindow):
+def test_a_logo_only_meta_still_gets_a_thumbnail(load_infowindow):
     ctx = load_infowindow()
-    props = ctx.infowindow._item_properties({'logo': 'https://x/logo.png'})
-    assert props['thumbnail'] == 'https://x/logo.png'
+    win = _opened(ctx, [{'id': 'tt1', 'type': 'movie', 'name': 'L', 'logo': 'https://x/logo.png'}])
+    item = win.getControl(ctx.infowindow.SELECT).items[0]
+    assert item.getProperty('thumbnail') == 'https://x/logo.png'
 
 
-def test_item_properties_route_tmdb_art_through_sized_image(load_infowindow):
-    """A TMDB `original` is a multi-MB download for a 200px card; the
-    coverflow must ask for the size the slot needs."""
+def test_oninit_paints_the_shared_hero_for_the_first_cell(load_infowindow):
     ctx = load_infowindow()
-    tmdb = 'https://image.tmdb.org/t/p/original/%s.jpg'
-    props = ctx.infowindow._item_properties({'poster': tmdb % 'p', 'background': tmdb % 'b'})
-    assert props['thumbnail'] == 'https://image.tmdb.org/t/p/w342/p.jpg'
-    assert props['fanart'] == 'https://image.tmdb.org/t/p/w1280/b.jpg'
-    # A poster standing in for a missing backdrop fills the screen: w780.
-    only_poster = ctx.infowindow._item_properties({'poster': tmdb % 'p'})
-    assert only_poster['fanart'] == 'https://image.tmdb.org/t/p/w780/p.jpg'
+    win = _opened(ctx, [_FULL])
+    assert win.getControl(ctx.infowindow.BACKGROUND).image == 'https://x/bg.jpg'
+    assert win.getControl(ctx.home.HERO_TITLE).label == ctx.home._fit_hero_title('Alien')
+    assert win.getControl(ctx.home.HERO_PLOT).text == 'A plot.'
+    assert win.getControl(ctx.look.HERO_STARS).image
+    assert '1979' in win.getControl(ctx.look.HERO_FACTS).label
+    assert '117 min' in win.getControl(ctx.look.HERO_FACTS).label
+    assert win.getControl(ctx.look.HERO_SCORES).visible
+    assert win.getControl(ctx.look.HERO_END).label.startswith('Ends at ')
+    # The stack ends above the focused poster's ring.
+    assert win.getControl(ctx.look.HERO_SCORES).y + 40 == ctx.look._STACK['bottom']
 
 
-def test_item_properties_fanart_falls_back_through_logo_then_poster(load_infowindow):
+def test_a_title_without_backdrop_fills_the_hero_with_its_poster(load_infowindow):
     ctx = load_infowindow()
-    _item_properties = ctx.infowindow._item_properties
-    assert _item_properties({'logo': 'https://x/logo.png'})['fanart'] == 'https://x/logo.png'
-    assert _item_properties({'poster': 'https://x/poster.jpg'})['fanart'] == 'https://x/poster.jpg'
-    # background always wins over both when present
-    full = {'background': 'https://x/bg.jpg', 'logo': 'https://x/logo.png', 'poster': 'https://x/poster.jpg'}
-    assert _item_properties(full)['fanart'] == 'https://x/bg.jpg'
+    win = _opened(ctx, [dict(_FULL, background='')])
+    assert win.getProperty('HeroFill') == '1'
+    assert win.getControl(ctx.home.HERO_FILL).image
 
 
-def test_item_properties_year_prefers_release_info_over_released_date(load_infowindow):
+def test_focus_change_repaints_the_hero_and_an_unchanged_hero_is_not_repainted(
+    load_infowindow, monkeypatch,
+):
     ctx = load_infowindow()
-    props = ctx.infowindow._item_properties({'releaseInfo': '2014-2020', 'released': '2019-05-01T00:00:00.000Z'})
-    assert props['year'] == '2014-2020'
+    import xbmcgui
+    win = _opened(ctx, [_FULL, dict(_FULL, id='tt2', name='Aliens', background='https://x/bg2.jpg')])
+    select = win.getControl(ctx.infowindow.SELECT)
+    painted = []
+    monkeypatch.setattr(ctx.look, 'paint_hero', lambda *args: painted.append(args))
+    win.setFocusId(ctx.infowindow.SELECT)
+    win.onAction(xbmcgui.Action(0))
+    assert painted == []
+    select.selected_index = 1
+    win.onAction(xbmcgui.Action(0))
+    assert len(painted) == 1
+    assert win.getControl(ctx.infowindow.BACKGROUND).image == 'https://x/bg2.jpg'
+    assert win.getControl(ctx.home.HERO_TITLE).label == ctx.home._fit_hero_title('Aliens')
 
 
-def test_item_properties_coerces_numeric_rating_and_runtime_to_str(load_infowindow):
-    """`setProperties()` requires str values, but `imdbRating`/`runtime`
-    are routinely numeric in the wild (a JSON `9.0`/`120`, not
-    `"9.0"`/`"120"`) - an untyped numeric used to reach the Kodi C++
-    boundary and raise."""
+def test_focus_hands_the_cell_to_the_ratings_scheduler(load_infowindow, monkeypatch):
     ctx = load_infowindow()
-    props = ctx.infowindow._item_properties({'imdbRating': 9.0, 'runtime': 120})
-    assert props['rating'] == '9.0'
-    assert props['runtime'] == '120'
-    assert props['meta_line'] == 'IMDb 9.0 · 120'
-
-
-def test_year_range_closes_open_ended_series_with_a_word(load_infowindow):
-    """A still-running series arrives open-ended (`2010-`). The full
-    matrix of range shapes is covered against
-    `playbackmeta.year_range()` in tests/test_streaminfo.py; this pins
-    that the hero routes through it at all."""
-    ctx = load_infowindow()
-    assert ctx.infowindow._year_range({'releaseInfo': '2010-'}, 'now') == '2010-now'
-    assert ctx.infowindow._year_range({'releaseInfo': '2022–'}, 'now') == '2022–now'
-    assert ctx.infowindow._year_range({'releaseInfo': '2010-2017'}, 'now') == '2010-2017'
-
-
-def test_year_range_never_mangles_the_released_date_fallback(load_infowindow):
-    """The `released` fallback is a full ISO date whose hyphens are
-    separators, not an open range - it must not gain a "now". This is
-    the hero's own fallback, not something the shared helper sees."""
-    ctx = load_infowindow()
-    got = ctx.infowindow._year_range({'released': '2021-07-04T00:00:00.000Z'}, 'now')
-    assert got == '2021-07-04'
-
-
-def test_year_range_localizes_the_now_word(load_infowindow):
-    """`_year_text()` resolves the word through the addon's own string
-    catalog, so all 14 locales get it translated rather than an English
-    literal baked into the range."""
-    ctx = load_infowindow()
-    year = ctx.infowindow._item_properties({'releaseInfo': '2022-'})['year']
-    # the kodistubs fake returns a 'STR<id>' marker for any string id
-    assert year == '2022-STR%d' % ctx.infowindow._NOW_STRING_ID
-
-
-# ---------------------------------------------------------------------------
-# _meta_line() - the hero's year/rating/runtime line
-# ---------------------------------------------------------------------------
-
-
-def test_meta_line_joins_year_rating_runtime_and_genre(load_infowindow):
-    ctx = load_infowindow()
-    line = ctx.infowindow._meta_line({
-        'year': '2005', 'rating': '2.5', 'runtime': '120 min',
-        'genre': 'Horror, Sci-Fi',
-    })
-    assert line == '2005 · IMDb 2.5 · 120 min · Horror, Sci-Fi'
-
-
-def test_meta_line_keeps_genre_last(load_infowindow):
-    """Genre trails the metadata, where the chip layout always put it."""
-    ctx = load_infowindow()
-    line = ctx.infowindow._meta_line({'year': '2005', 'genre': 'Horror'})
-    assert line == '2005 · Horror'
-    assert line.endswith('Horror')
-
-
-def test_meta_line_genre_alone_carries_no_separator(load_infowindow):
-    ctx = load_infowindow()
-    assert ctx.infowindow._meta_line({'genre': 'Drama'}) == 'Drama'
-
-
-def test_meta_line_full_series_range_is_never_truncated(load_infowindow):
-    """The reported Sherlock bug: the year rendered as `2010...` because
-    the chip it sat in was a fixed 110px box and a 9-character range
-    needs ~140px at Mono26. The composed line carries the range whole -
-    there is no fixed-width box left to clip it."""
-    ctx = load_infowindow()
-    props = ctx.infowindow._item_properties({
-        'releaseInfo': '2010-2017', 'imdbRating': '9.0',
-    })
-    assert props['year'] == '2010-2017'
-    assert props['meta_line'] == '2010-2017 · IMDb 9.0'
-    assert '...' not in props['meta_line']
-
-
-def test_meta_line_labels_the_rating_as_imdb(load_infowindow):
-    """The reported bug that a bare accent-coloured `9.0` never said what
-    scale it was on."""
-    ctx = load_infowindow()
-    assert ctx.infowindow._meta_line({'rating': '9.0'}) == 'IMDb 9.0'
-
-
-def test_meta_line_skips_missing_segments_without_dangling_separators(load_infowindow):
-    ctx = load_infowindow()
-    _meta_line = ctx.infowindow._meta_line
-    assert _meta_line({'year': '2019'}) == '2019'
-    assert _meta_line({'year': '2019', 'runtime': '98 min'}) == '2019 · 98 min'
-    assert _meta_line({'rating': '7.1', 'runtime': '98 min'}) == 'IMDb 7.1 · 98 min'
-    assert _meta_line({}) == ''
-    assert _meta_line(None) == ''
-
-
-def test_meta_line_omits_rating_label_when_there_is_no_rating(load_infowindow):
-    """A bare `IMDb` with no number after it would be worse than nothing."""
-    ctx = load_infowindow()
-    assert ctx.infowindow._rating_segment('') == ''
-    assert ctx.infowindow._rating_segment(None) == ''
-    assert 'IMDb' not in ctx.infowindow._meta_line({'year': '2019', 'runtime': '98 min'})
-
-
-def test_meta_line_uses_only_glyphs_both_estuary_faces_have(load_infowindow):
-    """The separator must stay renderable: U+00B7 is in NotoMono as well
-    as NotoSans, unlike the `★` that shipped tofu once already (see
-    tests/test_glyph_coverage.py)."""
-    ctx = load_infowindow()
-    line = ctx.infowindow._meta_line({'year': '2010-2017', 'rating': '9.0', 'runtime': '120 min'})
-    assert set(ch for ch in line if ord(ch) > 127) == {'·'}
-
-
-def test_item_properties_year_falls_back_to_date_only_released(load_infowindow):
-    ctx = load_infowindow()
-    props = ctx.infowindow._item_properties({'released': '2021-07-04T00:00:00.000Z'})
-    assert props['year'] == '2021-07-04'
-
-
-def test_item_properties_genres_join_with_comma_space(load_infowindow):
-    ctx = load_infowindow()
-    assert ctx.infowindow._item_properties({'genres': ['Drama']})['genre'] == 'Drama'
-    assert ctx.infowindow._item_properties({'genres': []})['genre'] == ''
-
-
-def test_item_properties_runtime_is_copied_verbatim_when_present(load_infowindow):
-    ctx = load_infowindow()
-    assert ctx.infowindow._item_properties({'runtime': '132 min'})['runtime'] == '132 min'
-
-
-def test_item_properties_runtime_is_empty_string_when_absent(load_infowindow):
-    ctx = load_infowindow()
-    assert ctx.infowindow._item_properties({})['runtime'] == ''
-
-
-def test_item_properties_missing_fields_are_empty_strings(load_infowindow):
-    ctx = load_infowindow()
-    assert ctx.infowindow._item_properties({}) == {
-        'thumbnail': '', 'fanart': '', 'genre': '', 'rating': '', 'plot': '', 'year': '',
-        'runtime': '', 'cinema': '', 'in_cinema': '', 'watched': '', 'meta_line': '',
-    }
-
-
-def test_item_properties_none_meta_is_treated_as_empty(load_infowindow):
-    ctx = load_infowindow()
-    assert ctx.infowindow._item_properties(None) == ctx.infowindow._item_properties({})
+    overlaid = []
+    monkeypatch.setattr(
+        ctx.ratingsched, 'overlay_text',
+        lambda facts, meta, upcoming: overlaid.append(facts['id']) or meta,
+    )
+    _opened(ctx, [_FULL])
+    assert overlaid == ['tt0078748']
 
 
 # ---------------------------------------------------------------------------
@@ -968,14 +851,18 @@ def test_enrich_worker_merges_into_metas_and_queues_props(load_infowindow, monke
     assert win.metas[0]['description'] == 'A full plot.'
     assert win.metas[0]['genres'] == ['Drama', 'Thriller']
     # ...and queued for the UI thread rather than written to a ListItem.
-    # `meta_line` rides along with the individual fields: it is what the
-    # hero renders, so a fetch that lands a rating must recompose it or
-    # the screen keeps the sparse line built before the fetch.
+    # The hero's catalog line and facts ride along with the plot: a fetch
+    # that lands a rating must recompose them (and clear `facts_done`, so
+    # the cached scores merge in again) or the screen keeps the sparse
+    # line built before the fetch.
     assert win._enrich_pending == {
         0: {
-            'genre': 'Drama, Thriller', 'rating': '7.9', 'plot': 'A full plot.',
-            'year': '2026', 'meta_line': '2026 · IMDb 7.9 · Drama, Thriller',
-            'cinema': '', 'in_cinema': '',
+            'hero_meta': 'IMDb 7.9\n2026\nDrama, Thriller', 'hero_plot': 'A full plot.',
+            'hero_facts': (
+                '{"id":"tt1","type":"movie","imdbRating":"7.9","releaseInfo":"2026",'
+                '"genres":["Drama","Thriller"]}'
+            ),
+            'hero_runtime': '', 'hero_fill': '', 'in_cinema': '', 'facts_done': '',
         },
     }
 
@@ -1011,7 +898,7 @@ def test_enrich_worker_coerces_a_string_genres_field(load_infowindow, monkeypatc
     win._enrich_worker(0, win.metas[0])
 
     assert 'genres' not in win.metas[0]
-    assert win._enrich_pending[0]['genre'] == ''
+    assert 'D' not in win._enrich_pending[0]['hero_meta']
 
 
 def test_enrich_worker_stringifies_a_numeric_rating(load_infowindow, monkeypatch):
@@ -1026,8 +913,7 @@ def test_enrich_worker_stringifies_a_numeric_rating(load_infowindow, monkeypatch
 
     win._enrich_worker(0, win.metas[0])
 
-    assert win._enrich_pending[0]['rating'] == '8.0'
-    assert win._enrich_pending[0]['year'] == '2026'
+    assert win._enrich_pending[0]['hero_meta'].splitlines()[:2] == ['IMDb 8.0', '2026']
 
 
 def test_enrich_worker_survives_a_fetch_that_raises(load_infowindow, monkeypatch):
@@ -1065,13 +951,13 @@ def test_apply_enriched_writes_queued_props_onto_the_live_listitem(load_infowind
     win._reset_enrich_state()
     _spawned(monkeypatch, ctx, win)  # onInit() must not spawn a real worker
     win.onInit()
-    win._enrich_pending = {0: {'genre': 'Drama', 'rating': '7.9', 'plot': 'Plot.', 'year': '2026'}}
+    win._enrich_pending = {0: {'hero_meta': 'IMDb 7.9', 'hero_plot': 'Plot.'}}
 
     win._apply_enriched()
 
     item = win.getControl(ctx.infowindow.SELECT).getListItem(0)
-    assert item.getProperty('plot') == 'Plot.'
-    assert item.getProperty('genre') == 'Drama'
+    assert item.getProperty('hero_plot') == 'Plot.'
+    assert item.getProperty('hero_meta') == 'IMDb 7.9'
     assert win._enrich_pending == {}
 
 
@@ -1082,7 +968,7 @@ def test_apply_enriched_drops_an_index_no_longer_in_the_list(load_infowindow, mo
     win._reset_enrich_state()
     _spawned(monkeypatch, ctx, win)  # onInit() must not spawn a real worker
     win.onInit()
-    win._enrich_pending = {5: {'plot': 'Stale.'}}
+    win._enrich_pending = {5: {'hero_plot': 'Stale.'}}
 
     win._apply_enriched()  # must not raise
 
@@ -1112,7 +998,7 @@ def test_enrichment_survives_a_reopen_for_playback(load_infowindow, monkeypatch)
 
     item = win.getControl(ctx.infowindow.SELECT).getListItem(0)
     # Rebuilt from self.metas, which the worker merged into.
-    assert item.getProperty('plot') == 'Landed late.'
+    assert item.getProperty('hero_plot') == 'Landed late.'
 
 
 def test_enrich_worker_gives_up_its_index_when_no_slot_is_free(load_infowindow, monkeypatch):
@@ -1142,7 +1028,7 @@ def test_start_clears_enrich_state_between_runs(load_infowindow):
     win.metas = [_sparse()]
     win._reset_enrich_state()
     win._enriched = {0, 1}
-    win._enrich_pending = {0: {'plot': 'Stale.'}}
+    win._enrich_pending = {0: {'hero_plot': 'Stale.'}}
 
     win.start([_sparse('tt9', 'Fresh')])
 
@@ -1185,7 +1071,7 @@ def test_enrich_worker_releases_its_slot_after_a_successful_fetch(load_infowindo
     for _ in range(ctx.infowindow._ENRICH_MAX_INFLIGHT + 1):
         win._enrich_worker(0, win.metas[0])
 
-    assert win._enrich_pending[0]['plot'] == 'Plot.'
+    assert win._enrich_pending[0]['hero_plot'] == 'Plot.'
 
 
 def test_enrich_retries_an_item_that_was_scrolled_past(load_infowindow, monkeypatch):
@@ -1234,7 +1120,7 @@ def test_enrich_worker_wakes_the_ui_thread_after_queueing(load_infowindow, monke
 
     win._enrich_worker(0, win.metas[0])
 
-    assert win._enrich_pending[0]['plot'] == 'Plot.'
+    assert win._enrich_pending[0]['hero_plot'] == 'Plot.'
     assert ctx.env.executed_builtins == ['Action(noop)']
 
 
@@ -1275,7 +1161,7 @@ def test_close_cancels_an_armed_settle_timer(load_infowindow, monkeypatch):
 
 
 def test_enrich_worker_merges_released_when_the_preview_has_no_year(load_infowindow, monkeypatch):
-    """_item_properties() derives `year` from releaseInfo *or* released, so
+    """The hero's facts derive `year` from releaseInfo *or* released, so
     a full meta that only dates itself with `released` must still fill the
     label."""
     ctx = load_infowindow()
@@ -1289,7 +1175,7 @@ def test_enrich_worker_merges_released_when_the_preview_has_no_year(load_infowin
 
     win._enrich_worker(0, win.metas[0])
 
-    assert win._enrich_pending[0]['year'] == '1999-03-31'
+    assert '1999-03-31' in win._enrich_pending[0]['hero_meta']
 
 
 def test_spawn_enrich_runs_the_worker_on_a_daemon_thread(load_infowindow, monkeypatch):
@@ -1316,7 +1202,7 @@ def test_spawn_enrich_runs_the_worker_on_a_daemon_thread(load_infowindow, monkey
     assert len(created) == 1
     assert created[0].daemon  # Kodi must never wait on an enrich fetch to exit
     created[0].join(timeout=5)
-    assert win._enrich_pending[0]['plot'] == 'Plot.'
+    assert win._enrich_pending[0]['hero_plot'] == 'Plot.'
 
 
 def test_enrich_worker_survives_a_guard_that_cannot_even_log(load_infowindow, monkeypatch):
@@ -1904,51 +1790,6 @@ def _recent_release(days=10):
     return (today - datetime.timedelta(days=days)).isoformat() + 'T00:00:00.000Z'
 
 
-def test_item_properties_tags_a_movie_still_in_cinema(load_infowindow):
-    ctx = load_infowindow()
-    props = ctx.infowindow._item_properties(
-        _make_meta('tt1', 'Dune', released=_recent_release(), releaseInfo='2026'),
-    )
-    assert props['in_cinema'] == '1'
-    assert props['cinema'] == 'STR30548'
-    assert props['meta_line'] == '2026 · STR30548'
-
-
-def test_item_properties_does_not_tag_once_a_home_release_exists(load_infowindow):
-    ctx = load_infowindow()
-    props = ctx.infowindow._item_properties(
-        _make_meta('tt1', 'Dune', released=_recent_release(), dvdRelease=_recent_release(2), releaseInfo='2026'),
-    )
-    assert props['in_cinema'] == '' and props['cinema'] == ''
-    assert props['meta_line'] == '2026'
-
-
-def test_item_properties_marks_a_watched_movie_and_series(load_infowindow):
-    from lib.ui import watchmarks
-
-    class _Store:
-        def get_auth(self):
-            return None
-
-        def get_progress_entries(self):
-            return [{'id': 'tt1', 'type': 'movie', 'video_id': None, 'position_ms': 90,
-                     'duration_ms': 100, 'updated_at': '2026-05-02T00:00:00Z'}]
-
-    ctx = load_infowindow()
-    watchmarks.refresh(_Store())
-    assert ctx.infowindow._item_properties(_make_meta('tt1', 'Dune'))['watched'] == '1'
-    assert ctx.infowindow._item_properties(_make_meta('tt2', 'Arrival'))['watched'] == ''
-    # Ids are unique across types, so a series card is looked up the same way.
-    assert ctx.infowindow._item_properties(_make_meta('tt1', 'Dune', mtype='series'))['watched'] == '1'
-    assert ctx.infowindow._item_properties(_make_meta('tt2', 'Severance', mtype='series'))['watched'] == ''
-
-
-def test_meta_line_puts_the_cinema_tag_after_the_year(load_infowindow):
-    ctx = load_infowindow()
-    line = ctx.infowindow._meta_line({'year': '2026', 'cinema': 'IN CINEMA', 'rating': '7.1', 'genre': 'Drama'})
-    assert line == '2026 · IN CINEMA · IMDb 7.1 · Drama'
-
-
 def test_enrich_merge_carries_dvd_release_so_the_tag_clears(load_infowindow, monkeypatch):
     """The preview has no `dvdRelease`; the full meta does, and the tag the
     sparse preview would have shown must be withdrawn."""
@@ -1963,7 +1804,6 @@ def test_enrich_merge_carries_dvd_release_so_the_tag_clears(load_infowindow, mon
     win._enrich_worker(0, win.metas[0])
     assert win.metas[0]['dvdRelease'] == _recent_release(2)
     assert win._enrich_pending[0]['in_cinema'] == ''
-    assert win._enrich_pending[0]['cinema'] == ''
 
 
 def test_a_fresh_coverflow_shows_the_account_check_from_the_service_cache(load_infowindow, monkeypatch):
