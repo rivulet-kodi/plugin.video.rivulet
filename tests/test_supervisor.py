@@ -93,7 +93,7 @@ class Player:
             raise self.error
 
 
-def make(tmp_path, settings=None, abort_after=1, autoload=None, player=None, clock=None):
+def make(tmp_path, settings=None, abort_after=1, autoload=None, player=None, clock=None, sync_iptv_fn=None):
     logs, notes, events = [], [], []
     monitor = Monitor(FakeAddon(settings or {"server_enable": True}), abort_after)
     sup = sr.Supervisor(
@@ -106,6 +106,7 @@ def make(tmp_path, settings=None, abort_after=1, autoload=None, player=None, clo
         lambda: events.append("bridge-shutdown"),
         autoload or Autoload(),
         clock=clock or (lambda: 100.0),
+        sync_iptv_fn=sync_iptv_fn,
     )
     sup.logs, sup.notes, sup.events = logs, notes, events
     return sup
@@ -290,3 +291,87 @@ def test_shutdown_survives_bridge_failure_and_stops_proc(tmp_path):
     sup.shutdown()
     assert proc.stops == 1
     assert any("bridge shutdown failed" in msg for _, msg in sup.logs)
+
+
+# --- IPTV add-on registration hook ----------------------------------------------
+
+
+def _iptv_calls(tmp_path, settings, setup=None):
+    """Run one `_sync_iptv_addon()` and return what the hook was called with."""
+    calls = []
+    sup = make(tmp_path, settings, sync_iptv_fn=lambda *args: calls.append(args))
+    if setup:
+        setup(sup.state)
+    sup._sync_iptv_addon(sup.state)
+    return calls
+
+
+def test_iptv_hook_gets_setting_url_and_serving_for_embedded_engine(tmp_path):
+    settings = {"server_enable": True, "iptv_playlists": "http://x/a.m3u", "server_url": "http://127.0.0.1:9"}
+
+    def embedded(state):
+        state.proc = Proc()
+        state.server_mode = "embedded"
+
+    assert _iptv_calls(tmp_path, settings, embedded) == [("http://x/a.m3u", "http://127.0.0.1:9", True)]
+
+
+def test_iptv_hook_serving_while_engine_is_restarting(tmp_path):
+    """Nothing running yet and nothing external adopted (the tick after a
+    settings-changed restart): still ours, so the entry goes offline rather
+    than being removed."""
+    calls = _iptv_calls(tmp_path, {"server_enable": True, "iptv_playlists": "http://x/a.m3u"})
+    assert calls[0][2] is True
+
+
+def test_iptv_hook_not_serving_when_embedded_server_disabled(tmp_path):
+    calls = _iptv_calls(tmp_path, {"server_enable": False, "iptv_playlists": "http://x/a.m3u"})
+    assert calls[0][2] is False
+
+
+def test_iptv_hook_not_serving_for_external_server(tmp_path):
+    def external(state):
+        state.server_mode = "external"
+
+    calls = _iptv_calls(tmp_path, {"server_enable": True, "iptv_playlists": "http://x/a.m3u"}, external)
+    assert calls[0][2] is False
+
+
+def test_iptv_hook_serving_for_fresh_spawn_while_mode_still_external(tmp_path):
+    """`server_mode` lags a tick behind a spawn that replaced an external
+    server: our process counts, or the entry would be removed for a tick."""
+    def spawned(state):
+        state.server_mode = "external"
+        state.proc = Proc()
+
+    calls = _iptv_calls(tmp_path, {"server_enable": True, "iptv_playlists": "http://x/a.m3u"}, spawned)
+    assert calls[0][2] is True
+
+
+def test_iptv_hook_failure_is_logged_not_raised(tmp_path):
+    def boom(*_args):
+        raise RuntimeError("store locked")
+
+    sup = make(tmp_path, {"server_enable": True}, sync_iptv_fn=boom)
+    sup._sync_iptv_addon(sup.state)
+    assert any("IPTV add-on sync failed" in msg for _, msg in sup.logs)
+
+
+def test_run_loop_syncs_iptv_after_dispatch_each_tick(tmp_path):
+    calls = []
+    sup = make(
+        tmp_path, {"server_enable": False, "iptv_playlists": "http://x/a.m3u"}, abort_after=2,
+        sync_iptv_fn=lambda *args: calls.append(args),
+    )
+    sup.run()
+    assert len(calls) == 2 and calls[0][2] is False
+
+
+def test_monitor_restarts_when_iptv_playlists_change():
+    addon = FakeAddon({"server_enable": True})
+    monitor = sr.ServiceMonitor(addon, FakeSettings)
+    addon.settings["iptv_playlists"] = "http://x/a.m3u"
+    monitor.onSettingsChanged()
+    assert monitor.restart_requested is True
+    assert monitor.extra_env["RIVULET_IPTV_PLAYLISTS"] == "http://x/a.m3u"
+    assert monitor.extra_settings["iptv_playlists"] == "http://x/a.m3u"

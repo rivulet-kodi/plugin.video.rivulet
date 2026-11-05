@@ -444,6 +444,10 @@ msgctxt "#30147"
 msgid "Stremio account auth key (HTTPS auto-cert)"
 msgstr "Klucz autoryzacji konta Stremio (auto-certyfikat HTTPS)"
 
+msgctxt "#30148"
+msgid "IPTV playlist URLs (comma-separated)"
+msgstr "Adresy URL list odtwarzania IPTV (oddzielone przecinkami)"
+
 msgctxt "#30150"
 msgid "Your saved titles"
 msgstr "Twoje zapisane tytuły"
@@ -1279,3 +1283,7 @@ msgstr "Na żywo"
 msgctxt "#30553"
 msgid "Live TV, sports and events from your addons"
 msgstr "Telewizja na żywo, sport i wydarzenia z dodatków"
+
+msgctxt "#30554"
+msgid "Live TV channels from one or more M3U playlists, offered as an IPTV add-on. Separate several URLs with commas, e.g. https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. Empty (the default) keeps it off. Only applies to the built-in server, which restarts when this changes."
+msgstr "Kanały telewizji na żywo z jednej lub kilku list M3U, udostępniane jako dodatek IPTV. Kilka adresów URL oddziel przecinkami, np. https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. Puste (domyślnie) wyłącza funkcję. Dotyczy tylko wbudowanego serwera, który uruchamia się ponownie po zmianie."

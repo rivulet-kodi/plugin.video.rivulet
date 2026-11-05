@@ -444,6 +444,10 @@ msgctxt "#30147"
 msgid "Stremio account auth key (HTTPS auto-cert)"
 msgstr "Stremio 계정 인증 키 (HTTPS 자동 인증서)"
 
+msgctxt "#30148"
+msgid "IPTV playlist URLs (comma-separated)"
+msgstr "IPTV 재생목록 URL (쉼표로 구분)"
+
 msgctxt "#30150"
 msgid "Your saved titles"
 msgstr "저장한 콘텐츠"
@@ -1279,3 +1283,7 @@ msgstr "라이브"
 msgctxt "#30553"
 msgid "Live TV, sports and events from your addons"
 msgstr "애드온의 라이브 TV, 스포츠, 이벤트"
+
+msgctxt "#30554"
+msgid "Live TV channels from one or more M3U playlists, offered as an IPTV add-on. Separate several URLs with commas, e.g. https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. Empty (the default) keeps it off. Only applies to the built-in server, which restarts when this changes."
+msgstr "하나 이상의 M3U 재생목록의 실시간 TV 채널을 IPTV 애드온으로 제공합니다. 여러 URL은 쉼표로 구분하세요. 예: https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. 비워 두면(기본값) 꺼집니다. 내장 서버에만 적용되며 변경하면 서버가 다시 시작됩니다."

@@ -532,6 +532,17 @@
                         <heading>30143</heading>
                     </control>
                 </setting>
+                <setting id="iptv_playlists" type="string" label="30148">
+                    <level>2</level>
+                    <default></default>
+                    <help>30554</help>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30148</heading>
+                    </control>
+                </setting>
                 <setting id="web_ui_location" type="string" label="30144">
                     <level>2</level>
                     <default></default>
