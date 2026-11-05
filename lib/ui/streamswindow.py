@@ -1545,7 +1545,10 @@ class _StreamAnswerConsumer:
 
 
 def _fetch_stream_pairs(stype, sid, meta=None):
-    """Fetch+parse (not sort) every installed addon's streams for
+    """The pairs of `_gather_stream_pairs`, whether or not the user
+    cancelled (the binge round trip and the picker take what arrived).
+
+    Fetch+parse (not sort) every installed addon's streams for
     (stype, sid) - the exact aggregate pipeline `open_streams()` has
     always run for its own initial fetch, factored out so
     `_try_binge_watch()` can silently re-run it for a next episode's OWN
@@ -1563,6 +1566,12 @@ def _fetch_stream_pairs(stype, sid, meta=None):
     function's callers (`_try_binge_watch()`, and `open_streams()`
     itself for as long as it used to) want the plain "wait for
     everything, then decide" contract."""
+    return _gather_stream_pairs(stype, sid, meta)[0]
+
+
+def _gather_stream_pairs(stype, sid, meta=None):
+    """``(pairs, cancelled)``: `_fetch_stream_pairs` plus whether the user
+    backed out of the spinner (then `pairs` is only what had arrived)."""
     import xbmc
 
     from lib.ui.compat import L, log
@@ -1571,7 +1580,7 @@ def _fetch_stream_pairs(stype, sid, meta=None):
     pairs = []
     failures = []
     if not addons:
-        return pairs
+        return pairs, False
 
     results = _start_stream_fetch_workers(stype, sid, addons)
     total = len(addons)
@@ -1586,10 +1595,11 @@ def _fetch_stream_pairs(stype, sid, meta=None):
                 break
             addon_name, _addon_pairs = result
             dialog.update(int(consume_next.consumed * 100 / total), L(30187) % addon_name)
+        cancelled = bool(dialog.iscanceled())
 
     if failures:
         log('streamswindow: %s' % _summarize_addon_failures(failures), xbmc.LOGWARNING)
-    return pairs
+    return pairs, cancelled
 
 
 def _binge_label(video):
@@ -1824,13 +1834,92 @@ class _PickerFeed:
             self._buffered = []
 
 
-def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video_id=None):
+def live_play_choice(pairs):
+    """What a one-click open of a live channel does with the streams found:
+    ``'none'`` (nothing: tell the viewer), ``'play'`` (exactly one: there is
+    nothing to choose between) or ``'pick'`` (several: the sources page).
+
+    stremio-core's live items open straight on their stream list instead
+    of a detail page (a channel has no synopsis worth a screen), and the
+    official apps play when the add-ons offer a single source. The count
+    is of every `(info, stream)` pair every add-on answered, after all of
+    them answered: deciding on the first answer alone would play a
+    channel one slow add-on offers a better source of.
+    """
+    if not pairs:
+        return 'none'
+    return 'play' if len(pairs) == 1 else 'pick'
+
+
+def open_live(stype, sid, poster=None, heading='', art=None, meta=None):
+    """Open a live channel in one click: no detail page. Always returns
+    False, like `open_streams()`.
+
+    The streams of every add-on are gathered under the spinner
+    (`_fetch_stream_pairs`, which does no IMDb lookup: a channel id is the
+    add-on's own), then `live_play_choice` decides. One stream plays at
+    once, through the same hand-off the picker and the binge chain use
+    (`play_direct(on_ready=close_windows_for_playback)`), and the screens
+    that were closed for the player come back when it ends
+    (`_wait_for_playback_end`, the settle pause, `end_player_phase`).
+    Several streams open the sources page on those same answers
+    (`open_streams(prefetched=...)`), none notifies "no streams" (#30030).
+    `video_id` is the channel id: a live item has no episodes, and the
+    player's live context (`lib.ui.player._record_now_playing`) keys on it.
+    """
+    import xbmc
+
+    from lib.ui.compat import L, log, notify
+    from lib.ui.player import play_direct
+
+    pairs, cancelled = _gather_stream_pairs(stype, sid, meta)
+    if cancelled:
+        # Back on the spinner: the pairs are only the early answers. Neither
+        # play one of them nor claim there are no streams.
+        return False
+    choice = live_play_choice(pairs)
+    if choice == 'none':
+        log('streamswindow: no streams for live %s/%s' % (stype, sid), xbmc.LOGINFO)
+        notify(L(30030))
+        return False
+    if choice == 'pick':
+        return open_streams(
+            stype, sid, poster=poster, heading=heading, art=art, meta=meta, video_id=sid, prefetched=pairs,
+        )
+    item_meta = {}
+    label = escape_label(heading or (meta or {}).get('name') or '')
+    if label:
+        item_meta['label'] = label
+    art = art or ({'poster': poster} if poster else None)
+    if art:
+        item_meta['art'] = art
+    if meta:
+        item_meta['meta'] = meta
+    watcher = new_playback_end_watcher()
+    _info, stream = pairs[0]
+    if not play_direct(
+        stream, stype, sid, item_meta=item_meta, on_ready=close_windows_for_playback, video_id=sid,
+    ):
+        return False  # resolution failed and was notified; nothing was closed
+    proceed, _ended_naturally = _wait_for_playback_end(player=watcher)
+    if proceed:
+        xbmc.Monitor().waitForAbort(_REOPEN_SETTLE_SECONDS)  # let the queued GUI work land first
+    end_player_phase()
+    return False
+
+
+def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video_id=None, prefetched=None):
     """Fetch+sort every installed addon's streams for (stype, sid) and
     show them; a pick resolves+plays directly. `heading`/`art`/`meta` are
     forwarded to `StreamsWindow.start()` unchanged, and `video_id` (the
     id of the episode `pairs` is for, `None` for a movie or a
     context-free call) drives the binge-watching round trip below - see
     the module docstring for both.
+
+    `prefetched` is a list of `(info, stream)` pairs a caller already
+    gathered (`open_live()` asks every add-on once to decide between
+    playing and picking): the picker then opens on them at once, with no
+    second IMDb lookup, fan-out or spinner, and nothing left streaming in.
 
     Every installed addon is queried CONCURRENTLY, and the picker opens
     as soon as the FIRST one answers with anything - the rest stream in
@@ -1850,22 +1939,24 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
 
     from lib.ui.compat import ADDON, L, log, notify
 
-    if not str(sid or '').startswith('tt'):
-        # Learn the IMDb id, if the meta does not carry one, before
-        # choosing addons: an addon that also takes this id as it is
-        # must not keep the IMDb-only ones (most stream addons) out.
-        meta = _meta_with_imdb(stype, (meta or {}).get('id') or sid, meta)
-        if meta is CANCELLED:
-            log('streamswindow: IMDb lookup cancelled by the user', xbmc.LOGINFO)
+    if prefetched is None:
+        if not str(sid or '').startswith('tt'):
+            # Learn the IMDb id, if the meta does not carry one, before
+            # choosing addons: an addon that also takes this id as it is
+            # must not keep the IMDb-only ones (most stream addons) out.
+            meta = _meta_with_imdb(stype, (meta or {}).get('id') or sid, meta)
+            if meta is CANCELLED:
+                log('streamswindow: IMDb lookup cancelled by the user', xbmc.LOGINFO)
+                return False
+        addons = _stream_targets(stype, sid, meta)
+        if not addons:
+            log('streamswindow: no enabled addon serves %s/%s streams' % (stype, sid), xbmc.LOGINFO)
+            notify(L(30030))
             return False
-    addons = _stream_targets(stype, sid, meta)
-    if not addons:
-        log('streamswindow: no enabled addon serves %s/%s streams' % (stype, sid), xbmc.LOGINFO)
-        notify(L(30030))
-        return False
-
-    results = _start_stream_fetch_workers(stype, sid, addons)
-    total = len(addons)
+        results = _start_stream_fetch_workers(stype, sid, addons)
+        total = len(addons)
+    else:
+        results, total = queue.Queue(), 0
     pairs = []
     failures = []
     # Guards `late_pairs` below - `consume_next` runs on `open_streams()`'s
@@ -1877,22 +1968,25 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
     # addon answer must be captured under this lock, never appended
     # straight onto a variable the main thread can rebind out from under it.
     pairs_lock = threading.Lock()
-    late_pairs = []
+    late_pairs = list(prefetched or [])
     consume_next = _StreamAnswerConsumer(results, total, late_pairs, failures, lock=pairs_lock)
 
     canceled = False
-    with busy_dialog(L(30033)) as dialog:
-        while not pairs:
-            if dialog.iscanceled():
-                break
-            result = consume_next(dialog.iscanceled)
-            if result is None:
-                break
-            addon_name, _addon_pairs = result
-            with pairs_lock:
-                pairs = list(late_pairs)
-            dialog.update(int(consume_next.consumed * 100 / total), L(30187) % addon_name)
-        canceled = dialog.iscanceled()
+    if prefetched is not None:
+        pairs = list(late_pairs)
+    else:
+        with busy_dialog(L(30033)) as dialog:
+            while not pairs:
+                if dialog.iscanceled():
+                    break
+                result = consume_next(dialog.iscanceled)
+                if result is None:
+                    break
+                addon_name, _addon_pairs = result
+                with pairs_lock:
+                    pairs = list(late_pairs)
+                dialog.update(int(consume_next.consumed * 100 / total), L(30187) % addon_name)
+            canceled = dialog.iscanceled()
 
     if not pairs:
         if failures:

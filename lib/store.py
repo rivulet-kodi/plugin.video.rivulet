@@ -97,6 +97,8 @@ import tempfile
 import time
 import zlib
 
+from lib.livetv import RECENT_LIMIT
+
 ADDONS_FILENAME = "addons.json"
 AUTH_FILENAME = "auth.json"
 SEARCH_HISTORY_FILENAME = "search_history.json"
@@ -112,6 +114,9 @@ PROGRESS_DISMISSED_FILENAME = "progress_dismissed.json"
 LIBRARY_FILENAME = "library.json"
 #: New episodes of library series. See :meth:`Store.set_last_videos`.
 LAST_VIDEOS_FILENAME = "last_videos.json"
+#: Live channels watched on this device while the account is not syncing
+#: progress. See :meth:`Store.note_recent_channel`.
+RECENT_CHANNELS_FILENAME = "recent_channels.json"
 
 #: Most-recent-first cap for the persisted search history list.
 MAX_SEARCH_HISTORY = 15
@@ -1100,6 +1105,7 @@ class Store:
         self._last_version_path = os.path.join(self.data_dir, LAST_VERSION_FILENAME)
         self._library_path = os.path.join(self.data_dir, LIBRARY_FILENAME)
         self._last_videos_path = os.path.join(self.data_dir, LAST_VIDEOS_FILENAME)
+        self._recent_channels_path = os.path.join(self.data_dir, RECENT_CHANNELS_FILENAME)
         #: Per-instance memoisation for `_cached_read`: `path -> ((mtime_ns,
         #: size), parsed_value)`. A single process/screen-render often
         #: calls e.g. `get_addons()` many times; a fresh eMMC/SD `open()`
@@ -1107,9 +1113,9 @@ class Store:
         #: NEVER consulted by `update_addons`'s compare-and-swap, which
         #: must always observe the current on-disk bytes -- see
         #: `_cached_read`'s docstring. Its key set is closed on purpose --
-        #: exactly nine fixed paths (addons, auth, search_history,
+        #: exactly ten fixed paths (addons, auth, search_history,
         #: now_playing, resume_offset, last_version, progress, library,
-        #: last_videos), which is
+        #: last_videos, recent_channels), which is
         #: why it needs no size cap; `home_layout.json` is deliberately not
         #: one of them. Adding a path is a decision to revisit that bound.
         self._read_cache = {}
@@ -2078,3 +2084,79 @@ class Store:
         except OSError:
             pass
         self._invalidate_cache(self._last_videos_path)
+
+    # -- recently watched live channels -------------------------------------
+
+    @staticmethod
+    def _recent_channel_entries(records):
+        """`records` without anything that is not a usable entry (a dict
+        with a non-empty string ``id``): a hand-edited file must not crash
+        the Home row or the next write."""
+        if not isinstance(records, list):
+            return []
+        return [r for r in records if isinstance(r, dict) and isinstance(r.get("id"), str) and r["id"]]
+
+    def get_recent_channels(self):
+        """The recently watched live channels recorded on this device,
+        newest first, at most :data:`lib.livetv.RECENT_LIMIT`: dicts of
+        ``{'id', 'type', 'name', 'poster', 'posterShape', 'last_watched'}``
+        (``last_watched`` is ISO 8601 UTC). Served from the per-instance
+        read cache -- see `_cached_read`.
+
+        This is the Recent channels row's source when the account is not
+        syncing progress (signed out, or `sync_progress` off); with sync on
+        the row reads the account's library (`lib.library.recent_live_records`)
+        and this file is not written."""
+        return self._recent_channel_entries(self._cached_read(self._recent_channels_path, None))[:RECENT_LIMIT]
+
+    def note_recent_channel(self, meta, when_iso=None):
+        """Record that live channel `meta` (``{'id', 'type', 'name',
+        'poster', 'posterShape'}``, only ``id`` required) was just watched:
+        it goes to the front, an existing entry of the same id is replaced
+        (so each channel appears once), and the list is capped at
+        :data:`lib.livetv.RECENT_LIMIT`. `when_iso` defaults to now.
+        Returns whether it wrote.
+
+        Plain read-modify-write like :meth:`add_search_query`: a lost update
+        under concurrent processes drops one entry of a convenience list. A
+        file that exists but cannot be read right now is never written over
+        (it is probably intact -- same rule as :meth:`set_progress`); a
+        missing one starts empty and a corrupt one is kept as
+        ``recent_channels.json.corrupt`` first. A `meta` without a string id
+        records nothing.
+        """
+        channel_id = meta.get("id") if isinstance(meta, dict) else None
+        if not isinstance(channel_id, str) or not channel_id:
+            return False
+        status, records = _load_json(self._recent_channels_path, list)
+        if status == _UNREADABLE:
+            return False
+        if status == _CORRUPT:
+            _keep_corrupt_copy(self._recent_channels_path)
+        entry = {
+            "id": channel_id,
+            "type": meta.get("type") if isinstance(meta.get("type"), str) else "tv",
+            "name": meta.get("name") if isinstance(meta.get("name"), str) else "",
+            "poster": meta.get("poster") if isinstance(meta.get("poster"), str) else None,
+            "posterShape": meta.get("posterShape") if isinstance(meta.get("posterShape"), str) else None,
+            "last_watched": when_iso or datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        kept = [r for r in self._recent_channel_entries(records if status == _OK else []) if r["id"] != channel_id]
+        _atomic_write(self._recent_channels_path, [entry] + kept[:RECENT_LIMIT - 1], compact=True)
+        self._invalidate_cache(self._recent_channels_path)
+        return True
+
+    def remove_recent_channel(self, channel_id):
+        """Drop `channel_id` from the recent channels ("Remove" on a row
+        card); returns whether an entry went. Same unreadable/corrupt rules
+        as :meth:`note_recent_channel`, except a corrupt file has nothing to
+        remove and is left alone."""
+        status, records = _load_json(self._recent_channels_path, list)
+        if status != _OK:
+            return False
+        kept = [r for r in records if not (isinstance(r, dict) and r.get("id") == channel_id)]
+        if len(kept) == len(records):
+            return False
+        _atomic_write(self._recent_channels_path, kept, compact=True)
+        self._invalidate_cache(self._recent_channels_path)
+        return True

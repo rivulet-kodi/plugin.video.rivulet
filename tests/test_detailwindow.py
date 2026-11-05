@@ -1953,3 +1953,60 @@ def test_a_failed_series_write_is_not_remembered_for_home(load_detailwindow, mon
 
     assert libraryaction.apply_library_writes([]) == []
     assert home._library_dirty is False
+
+
+# ---------------------------------------------------------------------------
+# open_detail() on a live channel - one click, no page, no meta fetch
+# ---------------------------------------------------------------------------
+
+
+def _live_wired(ctx, monkeypatch):
+    def _no_page(*_a, **_k):
+        raise AssertionError('a live channel has no detail page and needs no meta fetch')
+
+    monkeypatch.setattr(ctx.views, '_fetch_meta', _no_page)
+    monkeypatch.setattr(ctx.detailwindow, 'DetailWindow', _no_page)
+    opened = []
+
+    def fake_open_live(stype, sid, poster=None, heading='', art=None, meta=None):
+        opened.append((stype, sid, poster, heading, meta))
+        return False
+
+    monkeypatch.setattr(ctx.streamswindow, 'open_live', fake_open_live)
+    return opened
+
+
+def test_open_detail_of_a_tv_channel_goes_straight_to_its_streams(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    opened = _live_wired(ctx, monkeypatch)
+    from lib.ui import previews
+
+    previews.remember({'id': 'ch1', 'type': 'tv', 'name': 'One', 'poster': 'https://x/one.png'})
+
+    assert ctx.detailwindow.open_detail('tv', 'ch1') is False
+
+    (stype, sid, poster, heading, meta), = opened
+    assert (stype, sid, poster, heading) == ('tv', 'ch1', 'https://x/one.png', 'One')
+    assert meta['id'] == 'ch1' and meta['type'] == 'tv'
+
+
+def test_open_detail_of_a_live_hinted_item_of_another_type_is_one_click_too(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    opened = _live_wired(ctx, monkeypatch)
+    from lib.ui import previews
+
+    previews.remember({'id': 'ev1', 'type': 'events', 'name': 'Match', 'behaviorHints': {'isLive': True}})
+
+    ctx.detailwindow.open_detail('events', 'ev1')
+
+    assert [call[:2] for call in opened] == [('events', 'ev1')]
+
+
+def test_open_detail_of_a_plain_movie_still_resolves_its_meta(load_detailwindow, monkeypatch):
+    ctx = load_detailwindow()
+    fetched = []
+    monkeypatch.setattr(ctx.views, '_fetch_meta', lambda stype, sid: fetched.append(sid) or None)
+    monkeypatch.setattr(ctx.streamswindow, 'open_live', lambda *a, **k: pytest.fail('not live'))
+
+    assert ctx.detailwindow.open_detail('movie', 'tt1') is False
+    assert set(fetched) == {'tt1'}  # the ordinary meta path, never open_live

@@ -325,7 +325,7 @@ def test_iptv_hook_gets_setting_url_and_serving_for_embedded_engine(tmp_path):
         state.proc = Proc()
         state.server_mode = "embedded"
 
-    assert _iptv_calls(tmp_path, settings, embedded) == [("http://x/a.m3u", "http://127.0.0.1:9", True)]
+    assert _iptv_calls(tmp_path, settings, embedded) == [("http://x/a.m3u", "http://127.0.0.1:9", True, "")]
 
 
 def test_iptv_hook_serving_while_engine_is_restarting(tmp_path):
@@ -387,6 +387,31 @@ def test_monitor_restarts_when_iptv_playlists_change():
     assert monitor.restart_requested is True
     assert monitor.extra_env["RIVULET_IPTV_PLAYLISTS"] == "http://x/a.m3u"
     assert monitor.extra_settings["iptv_playlists"] == "http://x/a.m3u"
+
+
+def test_monitor_restarts_when_iptv_epg_changes():
+    addon = FakeAddon({"server_enable": True, "iptv_playlists": "http://x/a.m3u"})
+    monitor = sr.ServiceMonitor(addon, FakeSettings)
+    monitor.restart_requested = False
+    addon.settings["iptv_epg"] = "http://x/guide.xml"
+    monitor.onSettingsChanged()
+    assert monitor.restart_requested is True
+    assert monitor.extra_env["RIVULET_IPTV_EPG"] == "http://x/guide.xml"
+
+
+def test_iptv_hook_gets_the_guide_the_engine_was_started_with(tmp_path):
+    def embedded(state):
+        state.proc = Proc()
+        state.server_mode = "embedded"
+        state.proc.extra_env = {"RIVULET_IPTV_PLAYLISTS": "http://x/a.m3u", "RIVULET_IPTV_EPG": "http://x/old.xml"}
+
+    settings = {"server_enable": True, "iptv_playlists": "http://x/a.m3u", "iptv_epg": "http://x/new.xml"}
+    assert _iptv_calls(tmp_path, settings, embedded)[0][3] == "http://x/old.xml"
+
+
+def test_iptv_hook_gets_the_guide_setting_when_no_engine_of_ours_runs(tmp_path):
+    settings = {"server_enable": True, "iptv_playlists": "http://x/a.m3u", "iptv_epg": "http://x/new.xml"}
+    assert _iptv_calls(tmp_path, settings)[0][3] == "http://x/new.xml"
 
 
 # --- sliced sleep, playback sampling cadence, shutdown order -----------------

@@ -1583,3 +1583,27 @@ msgstr "advancedsettings.xml을 설치했습니다. 적용하려면 Kodi를 다�
 msgctxt "#30650"
 msgid "Trailers play through Kodi's YouTube add-on, which is turned off. Turn it on now?"
 msgstr "예고편은 Kodi의 YouTube 애드온으로 재생되는데, 현재 꺼져 있습니다. 지금 켤까요?"
+
+msgctxt "#30651"
+msgid "IPTV guide URLs (XMLTV, comma-separated)"
+msgstr "IPTV 편성표 URL (XMLTV, 쉼표로 구분)"
+
+msgctxt "#30652"
+msgid "XMLTV programme guides (plain or .gz) for the playlist channels, shown as Now and Next. Separate several URLs with commas. Empty (the default) keeps the guide off. Only applies to the built-in server, which restarts when this changes."
+msgstr "재생목록 채널용 XMLTV 편성표(일반 또는 .gz)로, 지금과 다음으로 표시됩니다. 여러 URL은 쉼표로 구분하세요. 비워 두면(기본값) 편성표를 사용하지 않습니다. 내장 서버에만 적용되며 변경하면 다시 시작됩니다."
+
+msgctxt "#30653"
+msgid "Now: %s"
+msgstr "지금: %s"
+
+msgctxt "#30654"
+msgid "Next: %s"
+msgstr "다음: %s"
+
+msgctxt "#30670"
+msgid "Recent channels"
+msgstr "최근 채널"
+
+msgctxt "#30671"
+msgid "Remove from recent channels"
+msgstr "최근 채널에서 제거"

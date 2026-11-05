@@ -118,6 +118,32 @@ _library_writes: Dict[str, dict] = {}
 _library_write_lock = threading.Lock()
 
 
+def dismiss_live(auth, channel_id):
+    """Take a live channel off the account's Recent channels row. True when
+    nothing is left to dismiss or the write landed.
+
+    stremio-core's `RewindLibraryItem` on a live item
+    (`library.rewind_live`): `lastWatched` goes null and the offset 0, on
+    the account's CURRENT record (read fresh, as `_write` does, so another
+    client's state is not replaced), through `push_write`. The record stays
+    (it may be in the library). An account with no record has nothing to
+    dismiss; a failed lookup tells the viewer (#30302) and returns False.
+    """
+    from lib import library
+    from lib.ui.compat import L, notify
+    from lib.ui.uicommon import CANCELLED
+
+    fresh, fresh_ok = _lookup(auth, channel_id)
+    if fresh is CANCELLED:
+        return False
+    if not fresh_ok:
+        notify(L(30302))
+        return False
+    if not isinstance(fresh, dict):
+        return True
+    return push_write(auth, library.rewind_live(fresh))
+
+
 def clear_library_writes():
     """Test hook. Production never calls this."""
     with _library_write_lock:

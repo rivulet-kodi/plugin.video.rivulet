@@ -36,6 +36,7 @@ import threading
 
 import xbmcgui
 
+from lib import livetv
 from lib.ui.uicommon import (
     ModalStackWindow,
     append_keeping_focus,
@@ -131,6 +132,9 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         #: skips an unchanged hero - a keypress that does not change focus
         #: (e.g. the enrich worker's Action(noop) wake-up) costs nothing.
         self._hero_painted = None
+        #: The live now/next worker (`lib.ui.livenow.NowNextFeed`), started
+        #: when a live poster is first focused and stopped by `close()`.
+        self._now_feed = None
         self._reset_enrich_state()
         self._reset_paging_state()
 
@@ -324,8 +328,14 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
     def _paint_hero(self, item):
         """The shared poster hero (logo or title, stars and facts, scores,
         plot, backdrop) for `item`, placed above the strip."""
-        from lib.ui import look
+        from lib.ui import livenow, look
 
+        # A live poster's now/next goes onto the item first: the hero
+        # below reads the item, and a changed plot/facts repaints it.
+        # The coverflow does not know the channel's guide catalog, so the
+        # schedule comes from the channel's own meta (`livenow`).
+        self._now_feed = livenow.ensure_feed(self._now_feed)
+        livenow.track_item(self._now_feed, item)
         # Home's stack: the row sits where Search's does, its position
         # line at y=630, so the hero ends at the same y=590.
         look.paint_poster_hero(self, item, None, BACKGROUND)
@@ -366,6 +376,12 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         # Same for the paging walk: setting this is what the worker polls
         # between pages to stop fetching for a strip nobody is looking at.
         self._paging_stopped.set()
+        # And the live schedule worker: plain data only, so stopping it is
+        # all a close owes it (it never held an item).
+        if self._now_feed is not None:
+            from lib.ui import livenow
+
+            livenow.stop_feed(self._now_feed)
         super().close()
 
     def _cancel_enrich_timer(self):
@@ -397,6 +413,11 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
             # One setProperties() call instead of one setProperty() per
             # key (genre/rating/plot/year).
             item.setProperties(props)
+            # The merge just rewrote hero_plot/hero_meta: a live card's
+            # now/next must be composed again over the new values.
+            from lib.ui import livenow
+
+            livenow.reset_item(item)
 
     def _enrich_focused(self, item, settle=True):
         """Fill in the description/genres a catalog meta preview lacks.
@@ -544,7 +565,7 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
             if focused is None:
                 return
             meta = self.metas[int(focused.getProperty('position'))]
-            if meta.get('type') == 'movie' and meta.get('id'):
+            if (meta.get('type') == 'movie' or livetv.is_live(meta)) and meta.get('id'):
                 self._play_movie(meta)
                 # Playback force-closed this window (flag set) so doModal()
                 # would reopen it behind the player; this click is the one
@@ -577,11 +598,15 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         `onClick()` clears `_closed_for_playback` and calls its own
         `self.close()` - so `ModalStackWindow.doModal()` never reopens a
         window that was about to close anyway."""
-        from lib.ui.streamswindow import open_streams
+        from lib.ui.streamswindow import open_live, open_streams
 
-        poster = meta.get('poster')
+        # A live channel plays at once when the add-ons offer one stream
+        # (`streamswindow.open_live`); it has no page to fall back on.
+        live = livetv.is_live(meta)
+        poster = meta.get('poster') or (meta.get('logo') if live else None)
         fanart = meta.get('background') or meta.get('logo') or poster
-        open_streams(
+        opener = open_live if live else open_streams
+        opener(
             meta.get('type'), meta.get('id'),
             poster=poster,
             heading=meta.get('name') or meta.get('id') or '',

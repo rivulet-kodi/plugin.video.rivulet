@@ -231,6 +231,9 @@ EXTRA_ENV_SETTINGS = (
     # /iptv/manifest.json, which lib.iptv registers as a builtin add-on.
     # Unset/empty leaves every /iptv route answering 404.
     ("iptv_playlists", "RIVULET_IPTV_PLAYLISTS", "string"),
+    # Comma-separated XMLTV guide URLs (plain or .gz) the engine joins to the
+    # playlist channels by tvg-id; also part of the IPTV stamp.
+    ("iptv_epg", "RIVULET_IPTV_EPG", "string"),
     ("web_ui_location", "WEB_UI_LOCATION", "string"),
     ("https_port", "HTTPS_PORT", "int"),
     ("pprof_addr", "RIVULET_PPROF", "string"),
@@ -829,6 +832,10 @@ def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn, spaw
             self._accepted_key = _context_key(context)
             self._last_local_write_at = None
             self._last_sample = None
+            if context.get("live"):
+                # A channel is recorded as watched as soon as it starts, not
+                # up to a push interval after the previous playback's push.
+                self._last_pushed_at = None
             offset_ms = store.get_resume_offset_ms()
             if not offset_ms:
                 return
@@ -992,6 +999,9 @@ def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn, spaw
             line. A periodic (non-final) read that fails mid-playback is
             still a warning."""
             key = _context_key(context)
+            if context.get("live"):
+                self._flush_live(context, final)
+                return
             if final:
                 cached = self._last_sample if self._last_sample and self._last_sample[0] == key else None
                 if cached is None:
@@ -1020,6 +1030,29 @@ def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn, spaw
                 return
             self._last_pushed_at = now
             self._queue_push(context, position_ms, duration_ms, final)
+
+        def _flush_live(self, context, final):
+            """The `_flush` of a live channel, mirroring stremio-core's
+            player for a live item (src/models/player.rs): there is no
+            timeline, so nothing is read from the player (a stream reports
+            no duration, which `_flush` treats as "nothing to record"),
+            no local progress is ever written, and nothing is flagged
+            watched. What is recorded is that the channel was watched:
+            `library.merge_live_playback` goes to the account on the usual
+            cadence (first sample of the playback, every
+            `LIBRARY_PUSH_INTERVAL_SECONDS`, and the final flush) even with
+            a duration of 0; without account sync (signed out, or
+            `sync_progress` off) the channel goes to the local recent
+            channels file instead, which feeds the same Home row."""
+            now = datetime.datetime.now(datetime.timezone.utc)
+            if not should_push_now(self._last_pushed_at, now, final):
+                return
+            self._last_pushed_at = now
+            auth = store.get_auth()
+            if sync_enabled_fn() and auth and auth.get("authKey"):
+                self._queue_push(context, 0, 0, final)
+                return
+            store.note_recent_channel(context)
 
         def _queue_push(self, context, position_ms, duration_ms, final):
             """Hand one push to the single worker thread; never blocks.
@@ -1085,10 +1118,15 @@ def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn, spaw
                     "type": context["type"],
                     "name": context.get("name", ""),
                     "poster": context.get("poster"),
+                    "posterShape": context.get("posterShape"),
+                    "behaviorHints": {"isLive": True} if context.get("live") else None,
                 })
-                merged = library.merge_playback(
-                    base, position_ms, duration_ms, video_id=context.get("video_id"),
-                )
+                if context.get("live"):
+                    merged = library.merge_live_playback(base)
+                else:
+                    merged = library.merge_playback(
+                        base, position_ms, duration_ms, video_id=context.get("video_id"),
+                    )
                 api.datastore_put(auth["authKey"], [merged])
             except Exception as exc:  # noqa: BLE001 - a Stremio API hiccup must never interrupt playback or crash the service
                 log_fn(xbmc_module.LOGWARNING, "library push failed: %r" % (exc,))
@@ -1474,7 +1512,7 @@ class Supervisor:
     - `sync_bridge_fn()`, `shutdown_bridge_fn()`: S4Me bridge hooks.
     - `autoload`: an `AutoloadTrigger`.
     - `clock`: monotonic time source.
-    - `sync_iptv_fn(playlists, server_url, serving)`: optional hook keeping
+    - `sync_iptv_fn(playlists, server_url, serving, epg)`: optional hook keeping
       the engine's IPTV builtin add-on registered (`lib.iptv`), see
       `_sync_iptv_addon()`.
 
@@ -1750,13 +1788,15 @@ class Supervisor:
             return
         serving = monitor.enabled and (state.proc is not None or state.server_mode != "external")
         playlists = monitor.extra_settings.get("iptv_playlists", "")
+        epg = monitor.extra_settings.get("iptv_epg", "")
         proc_env = getattr(state.proc, "extra_env", None)
         if isinstance(proc_env, dict):
             # Our own engine serves what it was STARTED with, not what the
-            # setting says now.
+            # settings say now.
             playlists = proc_env.get("RIVULET_IPTV_PLAYLISTS", "")
+            epg = proc_env.get("RIVULET_IPTV_EPG", "")
         try:
-            self._sync_iptv(playlists, monitor.server_url, serving)
+            self._sync_iptv(playlists, monitor.server_url, serving, epg)
         except Exception as exc:  # noqa: BLE001 - an IPTV registration failure must never crash the service loop
             self._warn("IPTV add-on sync failed: %r" % (exc,))
 
@@ -2167,10 +2207,11 @@ def main():
     # and logs on state changes only.
     iptv_registrar = iptv.IptvRegistrar()
 
-    def sync_iptv_addon(playlists, server_url, serving):
+    def sync_iptv_addon(playlists, server_url, serving, epg):
         iptv_registrar.apply(
             playlists, server_url, serving, store,
             log_fn=lambda message: log(xbmc.LOGINFO, "iptv: %s" % message),
+            epg=epg,
         )
 
     # Mix the Kodi Monitor in here: xbmc cannot be imported at module scope.

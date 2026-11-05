@@ -4,6 +4,18 @@ Full release history of the Rivulet add-on. `addon.xml` `<news>` carries only th
 release (Kodi's checker caps it at 1500 characters and the whole add-on.xml is part of every
 repository index download). Newest first.
 
+## v0.48.0
+
+- New: live channels show what is on now and next, with times, progress and the programme description, on the Live tab, in lists and in search. Add a programme guide address in Settings, Server add-ons, Live TV, IPTV guide URLs.
+- New: selecting a channel plays it straight away; a channel with several sources opens the source list.
+- New: a Recent channels row at the top of the Live tab, with what is on now; remove a channel from it with the context menu.
+- Changed: channels show as square logo cards, and the logo no longer stretches across the background.
+- Changed: live channels no longer appear in Continue and are never marked watched, as in Stremio.
+- Changed: IPTV playlists are sorted by channel number and send the user agent and referrer the playlist asks for.
+- Fix: changing the IPTV playlist addresses reloads the Live tab without restarting Kodi.
+- Fix: searching as you type uses less memory and network on slow devices.
+- Comes with rivulet-engine v0.33.0, installed automatically.
+
 ## v0.47.0
 
 - Changed: cast, crew and genre links open the same coverflow as Home's lists, titled with the name, with Search's details and poster reflections.

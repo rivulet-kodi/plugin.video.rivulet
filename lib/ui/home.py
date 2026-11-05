@@ -40,6 +40,8 @@ from functools import partial
 
 import xbmcgui
 
+from lib import livetv
+from lib.ui import livenow
 from lib.ui.dependencies import get_store
 from lib.ui.uicommon import BaseWindow, gated_input
 
@@ -217,19 +219,34 @@ def _poster_properties(meta, action='', sparse=False):
     properties and queue them for the GUI thread, as the coverflow's
     enrich worker does; `_poster_item` wraps them in the item.
     """
+    from lib.livetv import is_live
     from lib.stremio.ratings import panel_facts
-    from lib.ui.playbackmeta import in_cinema
+    from lib.ui.playbackmeta import card_shape, in_cinema
     from lib.ui.uicommon import escape_label
     from lib.ui.urlutil import sized_image
 
     name = meta.get('name') or ''
     background = meta.get('background') or ''
     poster = meta.get('poster') or ''
+    shape = card_shape(meta)
+    logo = meta.get('logo') or ''
+    if shape:
+        # A square/live item's art is a channel logo, not a poster: the
+        # card falls back to the logo when there is no poster, the hero
+        # shows it as the clearlogo over the real backdrop (or the addon
+        # fanart, `''`) instead of stretching it across the screen.
+        poster = poster or logo
+        logo = logo or poster
     return {
         # TMDB `original` art is megabytes for a 200px card (#18).
         'thumbnail': sized_image(poster, 'poster'),
-        'fanart': sized_image(background, 'backdrop') if background else sized_image(poster, 'fill'),
-        'hero_logo': meta.get('logo') or '',
+        'fanart': (
+            sized_image(background, 'backdrop') if background
+            else '' if shape else sized_image(poster, 'fill')
+        ),
+        'hero_logo': logo,
+        'shape': shape,
+        'live': '1' if is_live(meta) else '',
         'hero_title': escape_label(name),
         'hero_meta': escape_label(_hero_meta_text(meta)),
         'hero_plot': escape_label(_truncate(meta.get('description') or '', 280)),
@@ -239,7 +256,7 @@ def _poster_properties(meta, action='', sparse=False):
         # No backdrop: the poster fills the hero (scaled to cover) instead
         # of standing as a narrow pillarbox in the middle (#21). Library
         # records used to be the only ones; any catalog title can lack one.
-        'hero_fill': '1' if not background and poster else '',
+        'hero_fill': '1' if not background and poster and not shape else '',
         'needs_meta': '1' if sparse and meta.get('id') and meta.get('type') and not action else '',
         'action': action,
         'stype': str(meta.get('type') or ''),
@@ -339,6 +356,15 @@ def _shelf_page_gen(state):
                 raise _RememberedPageFailure(exc) from exc
             raise
         state['failed'] = None
+        # Which `skip` brought each id: a live row's guide page is the
+        # channel catalog's own page (`livenow`), so the focused channel's
+        # guide request needs the skip its card arrived with. The first page
+        # (skip 0) needs no entry.
+        skip = livenow.page_skip(extra)
+        pages = state.setdefault('page_skips', {})
+        for meta in page:
+            if isinstance(meta, dict) and meta.get('id'):
+                pages.setdefault(meta['id'], skip)
         state['served'] += len(page)
         state['seen_ids'].update(meta.get('id') for meta in page if isinstance(meta, dict))
         state['page_number'] = state.get('page_number', 1) + 1
@@ -602,6 +628,7 @@ def _library_continue_metas(entries):
     Resume records come first, then next-up, each most recently watched
     first, so the shelf cap never drops a resume for a next-up.
     """
+    from lib.livetv import is_live
     from lib.ui.mystuff import BAND_NEXT_UP, BAND_RESUME, RESUME_MAX_PERCENT, RESUME_MIN_PERCENT
 
     metas = []
@@ -613,6 +640,11 @@ def _library_continue_metas(entries):
         if not entry.get('_id'):
             continue
         if not (entry.get('name') or entry.get('poster')):
+            continue
+        if is_live(entry):
+            # stremio-core's continue watching excludes live items; a
+            # channel record that carries an offset (an older client) is
+            # not something to resume.
             continue
         state = entry.get('state') if isinstance(entry.get('state'), dict) else {}
         offset = _finite_number(state.get('timeOffset'))
@@ -716,17 +748,20 @@ def _map_continue_meta(fetch, wanted, deadline, stop):
 
 
 def _home_personal_jobs(cached, library_failed, suppressed, store, auth, plan, stopped, cancelled,
-                        timing):
+                        timing, recent_account=False):
     """Account read and bounded Continue work share the row pool in parallel.
 
     The window's cached library, its failure flag and the suppressed
     titles come in by value: the jobs run on worker threads and must not
     hold the window (or anything that reaches its `ListItem`s).
+    `recent_account` is whether the Recent channels row reads the account
+    library (signed in, progress sync on) rather than this device's file.
     """
     entries = {'value': cached}
     ready = threading.Event()
     jobs = []
-    needs_library = any(kind in ('continue', 'library') for _, kind, _, _, _ in plan)
+    needs_library = any(kind in ('continue', 'library') or (kind == 'recent' and recent_account)
+                        for _, kind, _, _, _ in plan)
     # Only the personal rows read the account here. The watched check on
     # catalog cards comes from the service's cached copy
     # (`watchmarks.refresh`), so a layout of catalogs only reads nothing.
@@ -782,8 +817,12 @@ def _played_metas(store, library_entries, variant='', suppressed=None, deadline=
     from lib.homelayout import matches_continue
 
     suppressed = suppressed or set()
+    # A live channel never resumes (no position, no end): stremio-core's
+    # Continue Watching excludes it, and it lives on the Recent channels
+    # row. A progress row written by an older build for one is dropped too.
     played = [entry for entry in merged if entry.get('band') != BAND_LIBRARY
-              and entry.get('id') not in suppressed and matches_continue(entry, variant)]
+              and entry.get('id') not in suppressed and matches_continue(entry, variant)
+              and not livetv.is_live(entry)]
     missing = [entry for entry in played if not (entry.get('name') or entry.get('poster'))]
     if missing:
         try:
@@ -900,18 +939,74 @@ def _fetch_library(store, auth):
     return fetched
 
 
+#: The Live tab's first row, ahead of whatever the viewer arranged. Not a
+#: layout id: `homelayout.valid_id` does not know it, so Arrange never
+#: lists, moves or saves it, and a layout saved before it existed shows it
+#: all the same. Heading: "Recent channels" (#30670).
+_RECENT_ENTRY = ('recent:live', 'recent', None, '', (30670,))
+
+
+def _tab_plan(layout, tab, catalogs):
+    """`homelayout.resolve` plus the Recent channels row on the Live tab.
+
+    The twelve poster slots are all there are: the arranged rows give way
+    at the tail, never the recent row.
+    """
+    from lib.homelayout import MAX_POSTER_ROWS, resolve
+
+    plan = resolve(layout, tab, catalogs)
+    if tab != 'live':
+        return plan
+    posters = 0
+    kept = []
+    for entry in plan:
+        if entry[1] != 'continue':
+            if posters >= MAX_POSTER_ROWS - 1:
+                continue
+            posters += 1
+        kept.append(entry)
+    return [_RECENT_ENTRY] + kept
+
+
+def _recent_account(auth):
+    """Whether the Recent channels row follows the account (signed in and
+    progress sync on, as the service's `merge_live_playback` push does)
+    rather than this device's `recent_channels.json`. GUI thread."""
+    from lib.ui.compat import setting_bool
+
+    return bool(auth) and setting_bool('sync_progress', True)
+
+
+def _recent_metas(store, entries, account):
+    """Card metas of the Recent channels row, newest first, as plain dicts.
+
+    `account`: the live records of the account library (`entries`;
+    `library.recent_live_records`: not removed, with a `lastWatched`, so a
+    rewound channel is gone, as in stremio-core's live Continue Watching).
+    A failed library read (`entries` None) falls back to the device's
+    list. Otherwise: `Store.get_recent_channels()`, which the service
+    keeps while nothing syncs. Off the GUI thread; builds no `ListItem`.
+    """
+    from lib import library
+
+    if account and entries is not None:
+        return livenow.metas_from_records(library.recent_live_records(entries))
+    return livenow.metas_from_local(store.get_recent_channels())
+
+
 # Each first-load fan-out has its own four-worker bound; later paging has
 # a separate two-worker bound because it runs while the remote is moving.
 _MAX_HOME_WORKERS = 4
 
 
-def _make_row_states(store, auth, entries, plan, fetched, suppressed=None, continued=None):
+def _make_row_states(store, auth, entries, plan, fetched, suppressed=None, continued=None, recent=None):
     """One plain state per planned row; `cells` says what each card shows.
 
     Runs on a worker thread, so it builds no `ListItem`: a cell is a
     `(kind, record)` pair and `_attach_items` turns the cells into items
     on the GUI thread. See `release_items` for why a worker must never
-    own native items.
+    own native items. `recent` is the Recent channels row's metas
+    (`_recent_metas`); an empty one leaves the row hidden.
     """
     from lib.homelayout import heading_text, matches_library
     from lib.ui.compat import L
@@ -938,6 +1033,9 @@ def _make_row_states(store, auth, entries, plan, fetched, suppressed=None, conti
             state['cells'] = [('continue', meta) for meta in played]
             if entries is None and auth and not state['cells']:
                 state['cells'] = [('poster', {'name': L(30032)})]
+        elif kind == 'recent':
+            state['metas'] = list(recent or [])
+            state['cells'] = [('poster', meta) for meta in state['metas']]
         elif entries is None and auth:
             state['cells'] = [('poster', {'name': L(30032)})]
         elif not auth:
@@ -1077,7 +1175,6 @@ def _tab_load_incomplete(window, reason):
 
 def _load_rows(window, store, auth):
     """Fetch only this tab's plan. One account read feeds every personal row."""
-    from lib.homelayout import resolve
     from lib.ui import watchmarks
     from lib.ui.compat import L, setting_bool
     from lib.ui.uicommon import CANCELLED, run_cancellable
@@ -1086,7 +1183,8 @@ def _load_rows(window, store, auth):
     _set_tab_loaded(window, False)
     if tab == 'anime' and not setting_bool('home_show_anime', True):
         return []
-    plan = resolve(window._layout, tab, window._catalogs)
+    plan = _tab_plan(window._layout, tab, window._catalogs)
+    recent_account = _recent_account(auth)
     session_stop = _home_stop(window)
     cancelled = threading.Event()
     load_stops = getattr(window, '_home_load_stops', [])
@@ -1107,7 +1205,8 @@ def _load_rows(window, store, auth):
 
     def load():
         jobs, needs_library, cached = _home_personal_jobs(
-            cached_entries, library_failed, suppressed, store, auth, plan, stopped, cancelled, timing)
+            cached_entries, library_failed, suppressed, store, auth, plan, stopped, cancelled, timing,
+            recent_account)
         for list_id, kind, descriptor, _variant, _heading in plan:
             if kind == 'catalog':
                 jobs.append((list_id, partial(_open_shelf, dict(descriptor, _stop=cancelled)),
@@ -1122,8 +1221,10 @@ def _load_rows(window, store, auth):
             return None
         entries = fetched.pop('library', cached)
         continued = fetched.pop('continue', {})
-        rows = _make_row_states(store, auth, cached if entries is None and cached is not None else entries, plan, fetched,
-                                suppressed, continued)
+        library = cached if entries is None and cached is not None else entries
+        recent = _recent_metas(store, library, recent_account) if any(
+            kind == 'recent' for _, kind, _, _, _ in plan) else None
+        rows = _make_row_states(store, auth, library, plan, fetched, suppressed, continued, recent)
         return entries if needs_library or cached is not None else None, rows
 
     try:
@@ -1233,14 +1334,18 @@ def _refresh_saved_rows(window, store=None):
     # pairs: the worker never touches a state, so never its `ListItem`s.
     continues = [(id(state), state['filter']) for state in live + cached_tabs
                  if state['kind'] == 'continue']
+    recent_account = _recent_account(auth)
 
     def reload():
         entries = _fetch_library(store, auth)
         if entries is None:
             return None
         # Continue rows may fetch metadata, so they are rebuilt here under
-        # the spinner rather than on the GUI thread afterwards.
-        return entries, _continue_rows(store, entries, continues, suppressed)
+        # the spinner rather than on the GUI thread afterwards. The Recent
+        # channels row is re-read too: coming back from a channel is
+        # exactly when it changed.
+        return (entries, _continue_rows(store, entries, continues, suppressed),
+                _recent_metas(store, entries, recent_account))
 
     with _loading(window):
         loaded = run_cancellable(reload, L(30033))
@@ -1250,7 +1355,7 @@ def _refresh_saved_rows(window, store=None):
             _set_tab_loaded(window, False)
         _library_dirty = True
         return
-    entries, continued = loaded
+    entries, continued, recent = loaded
     _cancel_shelf_extends(window)
     window._library_entries = entries
     window._library_failed = False
@@ -1260,14 +1365,14 @@ def _refresh_saved_rows(window, store=None):
     repaint_watched(window)
     # Cached tabs may contain personal rows too. Rebuild them when revisited.
     place = _remember_place(window)
-    _refresh_snapshot_personal(live, entries, auth, continued)
+    _refresh_snapshot_personal(live, entries, auth, continued, recent)
     for panel, state in getattr(window, '_rows', {}).items():
         if state['kind'] == 'catalog':
             continue
         label = 30140 if panel == CONTINUE_SHELF else next(h for _, p, h in _SHELVES if p == panel)
         prop = next(prop for p, prop, _ in _ROW_COUNTERS if p == panel)
         _set_shelf(window, panel, label, prop, state['heading'], state['items'])
-    _refresh_snapshot_personal(cached_tabs, entries, auth, continued)
+    _refresh_snapshot_personal(cached_tabs, entries, auth, continued, recent)
     _number_rows(window)
     _library_dirty = False
     _restore_place(window, place)
@@ -1290,11 +1395,12 @@ def _continue_rows(store, entries, continues, suppressed=None):
     return {key: _played_metas(store, entries, variant, suppressed) for key, variant in continues}
 
 
-def _refresh_snapshot_personal(states, entries, auth, continued):
+def _refresh_snapshot_personal(states, entries, auth, continued, recent=None):
     """Personal writes invalidate personal data, never a tab's loaded catalogs.
 
     `continued` is `_continue_rows` output, fetched off the GUI thread as
-    plain records; the `ListItem`s are made here, on it.
+    plain records; the `ListItem`s are made here, on it. `recent` is the
+    Recent channels row's metas (`_recent_metas`).
     """
     from lib.homelayout import matches_library
     from lib.ui.mystuff import library_metas
@@ -1303,6 +1409,9 @@ def _refresh_snapshot_personal(states, entries, auth, continued):
     for state in states:
         if state['kind'] == 'continue':
             state['items'][:] = [_continue_item(meta) for meta in continued[id(state)]]
+        elif state['kind'] == 'recent':
+            state['metas'] = list(recent or [])
+            state['items'][:] = [_poster_item(meta) for meta in state['metas']]
         elif state['kind'] == 'library':
             if not auth and signed_out_card:
                 state['items'][:] = []
@@ -1597,7 +1706,7 @@ def _watch_iptv_playlists(window):
         previous.set()
     window._iptv_stop = None
     try:
-        wanted = playlists_stamp(ADDON.getSetting('iptv_playlists'))
+        wanted = playlists_stamp(ADDON.getSetting('iptv_playlists'), ADDON.getSetting('iptv_epg'))
         if not wanted or published_stamp(get_store().get_enabled_addons()) == wanted:
             return
     except Exception:
@@ -1730,6 +1839,57 @@ def _remove_continue(window, item):
     paint_hero(window)
 
 
+def _remove_recent(window, item, control_id):
+    """Take one channel off the Recent channels row.
+
+    Signed in with sync on, the account's record is rewound
+    (`libraryaction.dismiss_live`: `lastWatched` null, as stremio-core does)
+    so the other apps drop it too; the device's own list loses it either
+    way (it holds the entry from before sync, or from a signed-out
+    spell). The card is then dropped from the row, from the row's snapshot
+    and from any other tab snapshot holding it, without a rebuild. The
+    account lookup and write (`dismiss_live`) are network calls made on
+    the GUI thread, each under a cancellable spinner. No confirmation: the channel is one click
+    from coming back.
+    """
+    from lib.ui.compat import log
+
+    sid = item.getProperty('sid')
+    store = get_store()
+    auth = store.get_auth()
+    if _recent_account(auth):
+        from lib.ui.libraryaction import dismiss_live
+
+        if not dismiss_live(auth, sid):
+            return
+    try:
+        store.remove_recent_channel(sid)
+    except Exception as exc:  # noqa: BLE001 - the account side is done; a device file problem is a log line
+        from lib.stremio.addons import addon_error_detail
+
+        log('home: recent channel removal failed: %s' % addon_error_detail(exc))
+    state = window._rows[control_id]
+    control = window.getControl(control_id)
+    position = control.getSelectedPosition()
+    state['metas'] = [meta for meta in state.get('metas') or [] if meta.get('id') != sid]
+    state['items'][:] = [it for it in state['items'] if it.getProperty('sid') != sid]
+    header = next(head for _slot, panel, head in _SHELVES if panel == control_id)
+    prop = next(name for panel, name, _counter in _ROW_COUNTERS if panel == control_id)
+    _set_shelf(window, control_id, header, prop, state['heading'], state['items'])
+    if state['items']:
+        control.selectItem(min(position, len(state['items']) - 1))
+        window.setFocusId(control_id)
+    else:
+        _select_active_chip(window)
+        window.setFocusId(BROWSE_LIST)
+    for saved in _snapshot_only_states(window):
+        if saved['kind'] == 'recent':
+            saved['metas'] = [meta for meta in saved.get('metas') or [] if meta.get('id') != sid]
+            saved['items'][:] = [it for it in saved['items'] if it.getProperty('sid') != sid]
+    _number_rows(window)
+    paint_hero(window)
+
+
 def _browse_catalog(window, state):
     from lib.ui.catalogpicker import open_single_catalog
 
@@ -1761,6 +1921,8 @@ def _offer_library(window, item, control_id=None):
     state = getattr(window, '_rows', {}).get(control_id)
     if state and state['kind'] == 'catalog':
         extra.append((L(30537), lambda: _browse_catalog(window, state)))
+    if state and state['kind'] == 'recent':
+        extra.append((L(30671), lambda: _remove_recent(window, item, control_id)))
     if poster_menu(meta, extra):
         refresh_library_row(window)
 
@@ -2193,6 +2355,8 @@ _HERO_PROPS = (
     'hero_plot', 'hero_facts', 'hero_fill', 'hero_runtime', 'needs_meta', 'stype', 'sid',
     # A library record has no `released`; the fetched meta decides the tag.
     'in_cinema',
+    # A library record may not know it is a square/live card until the meta says so.
+    'shape', 'live',
 )
 
 
@@ -2215,7 +2379,7 @@ def _write_meta_onto(item, meta, keep_label=False):
     fresh = _poster_item(merged)
     background = merged.get('background') or ''
     poster = merged.get('poster') or item.getProperty('thumbnail') or ''
-    if not background and poster:
+    if not background and poster and not fresh.getProperty('shape'):
         from lib.ui.urlutil import sized_image
 
         fresh.setProperty('hero_fill', '1')
@@ -2228,6 +2392,10 @@ def _write_meta_onto(item, meta, keep_label=False):
     if label and not keep_label:
         item.setLabel(label)
     item.setProperty('meta_state', 'done')
+    # The merge rewrote the hero properties (and `live`) the now/next
+    # worker had composed onto this card: forget that, so the next hero
+    # paint takes these values as the base and composes the programme again.
+    livenow.reset_item(item)
 
 
 def episode_label_for(meta, video_id):
@@ -2521,6 +2689,46 @@ def _hero_logo(window, item):
     return logo
 
 
+def _live_feed(window):
+    """Home's now/next worker (`livenow.NowNextFeed`), made on first use.
+
+    It stops with the window (its stop is Home's session event, so
+    `_stop_workers` ends it and a reopen gets a fresh one) and holds no
+    window or item: see `release_items`.
+    """
+    feed = getattr(window, '_now_feed', None)
+    if feed is None or feed.stopped:
+        feed = window._now_feed = livenow.new_feed(partial(_stopping, _home_stop(window)))
+    return feed
+
+
+def _guide_source(window, item):
+    """``(transport, type, guide catalog id, skip)`` for the guide catalog of
+    the row `item` is focused in, or None: the row is not a catalog row, its
+    add-on has no guide for that catalog (`guide_catalog_for`), or the
+    channel is unknown to the row's paging. Plain data for the worker."""
+    from lib.stremio.addons import guide_catalog_for
+
+    state = (getattr(window, '_rows', None) or {}).get(window.getFocusId())
+    if not state or state.get('kind') != 'catalog':
+        return None
+    guide = guide_catalog_for(state.get('manifest'), state.get('catalog'))
+    if guide is None:
+        return None
+    skip = (state.get('page_skips') or {}).get(item.getProperty('sid'), 0)
+    return state.get('transport'), guide.get('type'), guide.get('id'), skip
+
+
+def _track_live(window, item):
+    """Ask the now/next worker for the focused live item and write what it
+    has onto the item before the hero reads it (`livenow.track_item`)."""
+    live = item is not None and item.getProperty('live') == '1'
+    guide = _guide_source(window, item) if live else None
+    row = (getattr(window, '_rows', None) or {}).get(window.getFocusId()) if live else None
+    transport = row.get('transport') if row and row.get('kind') == 'catalog' else None
+    livenow.track_item(_live_feed(window), item, guide, transport)
+
+
 def paint_hero(window, item=None):
     """Paint the backdrop from the focused poster.
 
@@ -2551,6 +2759,8 @@ def paint_hero(window, item=None):
     label = item.getLabel() or ''
     if not title and not label and not item.getProperty('sid') and not item.getProperty('hero_logo'):
         return
+    # A live channel's current programme, its time span and the next one.
+    _track_live(window, item)
     meta = item.getProperty('hero_meta') or ''
     facts_raw = item.getProperty('hero_facts') or ''
     from lib.ui.ratingsched import needs_refresh
@@ -2605,6 +2815,9 @@ def _stop_workers(window):
     `release_items`.
     """
     _home_stop(window).set()
+    feed = getattr(window, '_now_feed', None)
+    if feed is not None:
+        feed.stop()
     iptv_stop = getattr(window, '_iptv_stop', None)
     if iptv_stop is not None:
         iptv_stop.set()
@@ -2645,6 +2858,9 @@ def _join_workers(window):
     iptv = getattr(window, '_iptv_thread', None)
     if iptv is not None:
         threads.append(iptv)
+    now_feed = getattr(window, '_now_feed', None)
+    if now_feed is not None and now_feed.thread is not None:
+        threads.append(now_feed.thread)
     deadline = time.monotonic() + _WORKER_JOIN_SECONDS
     for thread in threads:
         if thread is threading.current_thread():
@@ -2685,6 +2901,7 @@ def release_items(window):
     window._tab_snapshots = {}
     window._library_meta_thread = None
     window._iptv_thread = None
+    window._now_feed = None
     window._shelf_threads = []
     window._home_on_shown = None
     for list_id in _place_lists():

@@ -46,6 +46,7 @@ official Stremio client reads it back.
 """
 import datetime
 
+from lib import livetv
 from lib.stremio import watchedbitfield
 
 #: Default `posterShape` for a freshly-built item. stremio-core's own
@@ -111,22 +112,30 @@ def _default_state(now_iso):
 
 
 def _behavior_hints(meta):
-    """`MetaItemBehaviorHints`'s 3 named wire fields (src/types/resource/
-    meta_item.rs:422-431), read off `meta['behaviorHints']` with
-    upstream's own per-field defaults. Any OTHER key that dict carries
+    """`MetaItemBehaviorHints`'s named wire fields (src/types/resource/
+    meta_item.rs, `defaultVideoId`/`featuredVideoId`/`hasScheduledVideos`,
+    plus `isLive` for a live item only), read off `meta['behaviorHints']`
+    with upstream's own per-field defaults. Any OTHER key that dict carries
     (upstream flattens unknown keys into a separate `.other` map) is
-    dropped -- a `LibraryItem.behaviorHints` on the wire only ever has
-    these three."""
+    dropped."""
     hints = (meta or {}).get('behaviorHints')
     if not isinstance(hints, dict):
         # An addon's meta: a bool/string here is not worth an
         # `AttributeError` out of "Add to Library".
         hints = {}
-    return {
+    result = {
         'defaultVideoId': hints.get('defaultVideoId'),
         'featuredVideoId': hints.get('featuredVideoId'),
         'hasScheduledVideos': bool(hints.get('hasScheduledVideos', False)),
     }
+    if livetv.is_live(meta):
+        # `MetaItemBehaviorHints.is_live` (0.66, `skip_serializing_if` false):
+        # written only for a live item, and RESOLVED -- the library item's
+        # constructor stores `behavior_hints.is_live(&type)`, so a legacy
+        # `type: "tv"` meta with no hint is recorded as live too. Without it
+        # a record could not tell later that it is a channel.
+        result['isLive'] = True
+    return result
 
 
 def build_library_item(meta, now=None):
@@ -147,7 +156,7 @@ def build_library_item(meta, now=None):
     module's scope).
     """
     now_iso = iso8601_utc(now)
-    return {
+    item = {
         '_id': meta['id'],
         'name': meta.get('name', ''),
         'type': meta.get('type', ''),
@@ -160,6 +169,13 @@ def build_library_item(meta, now=None):
         'state': _default_state(now_iso),
         'behaviorHints': _behavior_hints(meta),
     }
+    if livetv.is_live(meta) and not meta.get('posterShape'):
+        # A channel logo with no declared shape is a square card here, not
+        # the poster default: the key is left out (core reads a missing one
+        # as its default and a null one as an error) so the record never
+        # claims a shape the add-on did not.
+        del item['posterShape']
+    return item
 
 
 def _resolve_video_id(item, video_id):
@@ -297,6 +313,79 @@ def merge_playback(item, position_ms, duration_ms, video_id=None, now=None):
     item['state'] = state
     item['_mtime'] = now_iso
     return item
+
+
+def merge_live_playback(item, now=None):
+    """Return a NEW LibraryItem dict (`item` is never mutated) recording
+    that a live channel is being watched -- what stremio-core's player does
+    for a live library item (src/models/player.rs: `TimeChanged` sets
+    `lastWatched`; `item_state_update` pins `timeOffset = 0` and
+    `video_id` = the channel id; `should_send_watched` is gated off for a
+    live item, so nothing is ever flagged watched).
+
+    Only `state.lastWatched`, `timeOffset`, `video_id` and the record's
+    `_mtime` change. `timeWatched`/`duration`/`flaggedWatched`/
+    `timesWatched`/`watched` are carried over untouched: a live stream has
+    no duration to measure a watched ratio against, and any played time
+    would otherwise cross the threshold at once. `lastWatched` is what
+    feeds the Recent channels row (:func:`recent_live_records`). Callers
+    push this also when the player reports no duration (it never does for
+    a channel), which :func:`merge_playback` would treat as no progress.
+    """
+    now_iso = iso8601_utc(now)
+    original_state = item.get('state')
+    state = dict(original_state) if isinstance(original_state, dict) else _default_state(now_iso)
+    state['lastWatched'] = now_iso
+    state['timeOffset'] = 0
+    state['video_id'] = item.get('_id')
+    result = dict(item)
+    result['state'] = state
+    result['_mtime'] = now_iso
+    return result
+
+
+def rewind_live(item, now=None):
+    """Return a NEW LibraryItem dict dismissing a live channel from the
+    Recent channels row: stremio-core's `RewindLibraryItem` on a live item
+    (src/models/ctx/update_library.rs, commit cfd182c7) sets `timeOffset`
+    to 0 AND `lastWatched` to null -- without the latter the channel would
+    stay in the row, which is ordered and filtered by `lastWatched`. The
+    record itself is kept (it may be in the user's library), and `_mtime`
+    advances so the change syncs to the account."""
+    original_state = item.get('state')
+    state = dict(original_state) if isinstance(original_state, dict) else _default_state(None)
+    state['timeOffset'] = 0
+    state['lastWatched'] = None
+    result = dict(item)
+    result['state'] = state
+    result['_mtime'] = iso8601_utc(now)
+    return result
+
+
+def recent_live_records(entries, limit=livetv.RECENT_LIMIT):
+    """The live records of `entries` (a ``libraryItem`` datastore read) the
+    Recent channels row lists: stremio-core's `LiveTvContinueWatching`
+    (src/models/live_tv_continue_watching.rs) -- live (`type` ``tv`` or
+    `behaviorHints.isLive`), not removed unless `temp`, with a usable
+    `state.lastWatched` -- newest first, capped at `limit`. A record that
+    is hostile (not a dict, no string id, an unparseable `lastWatched`) is
+    skipped rather than raised on; ties keep the order of `entries`."""
+    ranked = []
+    for index, item in enumerate(entries or ()):
+        if not isinstance(item, dict) or not livetv.is_live(item):
+            continue
+        if not isinstance(item.get('_id'), str) or not item['_id']:
+            continue
+        if item.get('removed') and not item.get('temp'):
+            continue
+        state = item.get('state')
+        stamp = _normalize_iso(state.get('lastWatched')) if isinstance(state, dict) else None
+        if stamp is None:
+            continue
+        ranked.append((stamp, index, item))
+    # Equal-width UTC strings: string order is time order.
+    ranked.sort(key=lambda row: (row[0], -row[1]), reverse=True)
+    return [item for _, _, item in ranked[:max(0, limit)]]
 
 
 def library_add_payload(meta, now=None):
@@ -487,7 +576,8 @@ def progress_from_library_item(item):
       100%. A flagged record with no known duration uses ``1/1`` for the
       same reason.
     * Skipped: a tombstoned record that is not also ``temp`` (stremio-
-      core's own continue-watching filter is ``!removed || temp``), one
+      core's own continue-watching filter is ``!removed || temp``), a live
+      channel (:func:`lib.livetv.is_live`; never resumable), one
       never played (no ``timeOffset`` and not flagged watched), one with
       no usable ``lastWatched`` (nothing to order it by), and a series
       record without an episode id (nothing to resume into).
@@ -506,6 +596,10 @@ def progress_from_library_item(item):
     if not item_id or not content_type or not isinstance(state, dict):
         return None
     if item.get('removed') and not item.get('temp'):
+        return None
+    if livetv.is_live(item):
+        # A channel has nothing to resume or finish (stremio-core's continue
+        # watching excludes it); it belongs to the Recent channels row.
         return None
     updated_at = _normalize_iso(state.get('lastWatched'))
     if updated_at is None:

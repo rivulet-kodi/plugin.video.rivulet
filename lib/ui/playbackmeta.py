@@ -13,7 +13,10 @@ responsibility (actually starting playback) separate from this one
 import datetime
 import os
 import re
+import time
 from urllib.parse import parse_qsl
+
+from lib.livetv import is_live
 
 #: Extension -> MIME type for the video containers Stremio streams commonly
 #: use. Keyed by `os.path.splitext()` output (lowercased, leading dot kept).
@@ -286,6 +289,29 @@ def _release_date(value):
         return datetime.datetime.strptime(value.strip()[:10], '%Y-%m-%d').date()
     except ValueError:
         return None
+
+
+def card_shape(meta):
+    """``'square'`` when a catalog `meta` is drawn as a square card, else
+    ``''`` (the 2:3 poster card).
+
+    A preview says ``posterShape: square`` (stremio-core's
+    `PosterShape::Square`, what channel logos and album covers are served
+    as). A live item (`livetv.is_live`: ``type: tv`` or
+    ``behaviorHints.isLive``) that gives no shape at all is square too: its
+    art is a channel logo, which a 2:3 cut would crop. An explicit
+    ``poster`` or ``landscape`` shape is the add-on's choice and kept as a
+    poster card. The skin draws the square inside the poster-width cell
+    (a list control has one fixed item width), centred with the plate.
+    """
+    if not isinstance(meta, dict):
+        return ''
+    shape = meta.get('posterShape')
+    if shape == 'square':
+        return 'square'
+    if not shape and is_live(meta):
+        return 'square'
+    return ''
 
 
 def in_cinema(meta, now=None):
@@ -609,3 +635,39 @@ def resolve_art(art, meta):
     if fanart:
         result['fanart'] = fanart
     return result
+
+
+def _live_clock(epoch, region_format):
+    """`epoch` as local clock text in Kodi's own time format (`region_format`
+    is ``xbmc.getRegion('time')``: ``%H:%M:%S`` or ``%I:%M:%S %p``); the
+    seconds are dropped, and a 12-hour clock reads "9:05 PM", not
+    "09:05 PM". An empty/odd format is a 24-hour ``%H:%M``."""
+    fmt = (region_format or '').replace(':%S', '').replace('.%S', '') or '%H:%M'
+    try:
+        text = time.strftime(fmt, time.localtime(epoch))
+    except (ValueError, OverflowError, OSError):
+        return ''
+    return text[1:] if '%I' in fmt and text.startswith('0') else text
+
+
+def live_programme_lines(now_next, now_line, next_line, region_format=''):
+    """The "now / next" lines a live channel's playing item shows in its
+    plot (Kodi's OSD info panel), from `lib.livetv.now_next()`'s result:
+    ``["Now: 20:00 - 21:00 Title", "Next: 21:00 Title"]`` with either line
+    absent when there is no such programme, `[]` for ``None``.
+    `now_line(text)`/`next_line(text)` wrap the programme text in the
+    caller's localized "Now: %s"/"Next: %s" so this stays free of Kodi; a
+    programme without a title shows its time alone.
+    """
+    if not isinstance(now_next, dict):
+        return []
+    lines = []
+    current = now_next.get('current')
+    if isinstance(current, dict):
+        span = '%s - %s' % (_live_clock(current['start'], region_format), _live_clock(current['end'], region_format))
+        lines.append(now_line(('%s %s' % (span, current.get('title') or '')).strip()))
+    upcoming = now_next.get('next')
+    if isinstance(upcoming, dict):
+        start = _live_clock(upcoming['start'], region_format)
+        lines.append(next_line(('%s %s' % (start, upcoming.get('title') or '')).strip()))
+    return lines

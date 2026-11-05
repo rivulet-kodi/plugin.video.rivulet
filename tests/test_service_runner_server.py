@@ -423,6 +423,12 @@ def test_extra_env_from_settings_forwards_iptv_playlists_only_when_set():
     assert service_runner.extra_env_from_settings({'iptv_playlists': ''}) == {}
 
 
+def test_extra_env_from_settings_forwards_iptv_epg_only_when_set():
+    urls = 'https://example.com/guide.xml,https://example.com/g2.xml.gz'
+    assert service_runner.extra_env_from_settings({'iptv_epg': urls}) == {'RIVULET_IPTV_EPG': urls}
+    assert service_runner.extra_env_from_settings({'iptv_epg': ''}) == {}
+
+
 def test_extra_env_from_settings_empty_values_dict_returns_empty_env():
     assert service_runner.extra_env_from_settings({}) == {}
 

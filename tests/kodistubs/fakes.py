@@ -73,6 +73,8 @@ _DEFAULT_LOCALIZED = {
     30440: 'Episode list',
     30441: 'Details',
     30494: 'Ends at %s',
+    30653: 'Now: %s',
+    30654: 'Next: %s',
     30383: 'Search incomplete, no answer from: %s',
     30416: 'Search incomplete, catalogs too slow to answer: %d',
 }

@@ -826,3 +826,44 @@ def test_a_pause_after_one_letter_does_not_search(load_search, monkeypatch):
     _type(win, ctx.search, 'a')
     _fire(win, timers[-1])
     assert calls == []
+
+
+def test_a_live_channel_result_shows_now_and_next_and_close_stops_the_feed(load_search, monkeypatch):
+    import time
+
+    from lib.ui import livenow
+
+    ctx = load_search()
+    import xbmcgui  # only importable once the stubs are installed
+
+    win = _init(ctx, monkeypatch)
+    woke, gate = threading.Event(), threading.Event()
+
+    def stamp(offset):
+        return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() + offset))
+
+    videos = [{'id': 'a', 'title': 'Evening News', 'overview': 'Headlines', 'startTime': stamp(-600),
+               'endTime': stamp(1200)},
+              {'id': 'b', 'title': 'Late Film', 'startTime': stamp(1200), 'endTime': stamp(4800)}]
+
+    def fetch_meta(_stype, sid, *_rest):
+        gate.wait(5.0)
+        return {'id': sid, 'videos': videos}
+
+    feed = livenow.NowNextFeed(lambda *_: [], fetch_meta, woke.set)
+    monkeypatch.setattr(livenow, 'new_feed', lambda *a, **k: feed)
+    channel = {'id': 'ch1', 'type': 'tv', 'name': 'One', 'poster': 'p', 'description': 'Channel blurb'}
+    try:
+        win._show([channel], True)
+        assert win.getControl(ctx.home.HERO_PLOT).text == 'Channel blurb'
+        gate.set()
+        assert woke.wait(5.0)
+        win.setFocusId(ctx.search.ROW)
+        win.onAction(xbmcgui.Action(0))  # the feed's Action(noop)
+        plot = win.getControl(ctx.home.HERO_PLOT).text
+        assert plot.startswith('Next: ') and 'Late Film' in plot and plot.endswith('Headlines')
+        assert 'Evening News' in win.getControl(ctx.home.HERO_META).text
+    finally:
+        win.close()
+        feed.thread.join(5.0)
+    assert feed.stopped and not feed.thread.is_alive()

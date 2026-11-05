@@ -1837,3 +1837,87 @@ def test_a_fresh_coverflow_shows_the_account_check_from_the_service_cache(load_i
     win.onInit()
     control = win.getControl(ctx.infowindow.SELECT)
     assert [control.getListItem(i).getProperty('watched') for i in range(2)] == ['1', '']
+
+
+# ---------------------------------------------------------------------------
+# Live channels: one-click open and the now/next hero
+# ---------------------------------------------------------------------------
+
+
+_LIVE = {'id': 'ch1', 'type': 'tv', 'name': 'One', 'poster': 'https://x/one.png', 'description': 'Channel blurb'}
+
+
+def test_onclick_select_with_a_live_channel_plays_through_open_live(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    win = _opened(ctx, [_LIVE])
+    monkeypatch.setattr(ctx.streamswindow, 'open_streams', lambda *a, **k: pytest.fail('a channel has no streams page'))
+    calls = []
+    monkeypatch.setattr(
+        ctx.streamswindow, 'open_live',
+        lambda stype, sid, poster=None, heading='', art=None, meta=None: calls.append((stype, sid, poster, heading, meta)),
+    )
+
+    win.onClick(ctx.infowindow.SELECT)
+
+    (stype, sid, poster, heading, meta), = calls
+    assert (stype, sid, poster, heading) == ('tv', 'ch1', 'https://x/one.png', 'One')
+    assert meta['id'] == 'ch1'
+    assert win.selected is None and win.closed is True
+
+
+def _schedule_feed(monkeypatch, videos):
+    """A real feed whose meta fetch waits on `gate`, so a test sees the hero
+    both before and after the schedule arrives; `woke` is its GUI nudge."""
+    import threading
+
+    from lib.ui import livenow
+
+    woke, gate = threading.Event(), threading.Event()
+
+    def fetch_meta(_stype, sid, *_rest):
+        gate.wait(5.0)
+        return {'id': sid, 'videos': videos}
+
+    feed = livenow.NowNextFeed(lambda *_: [], fetch_meta, woke.set)
+    monkeypatch.setattr(livenow, 'new_feed', lambda *a, **k: feed)
+    return feed, woke, gate
+
+
+def _now_schedule():
+    import time as _time
+
+    def stamp(offset):
+        return _time.strftime('%Y-%m-%dT%H:%M:%SZ', _time.gmtime(_time.time() + offset))
+
+    return [{'id': 'a', 'title': 'Evening News', 'overview': 'Headlines', 'startTime': stamp(-600), 'endTime': stamp(1200)},
+            {'id': 'b', 'title': 'Late Film', 'startTime': stamp(1200), 'endTime': stamp(4800)}]
+
+
+def test_a_focused_live_channel_shows_now_and_next_once_the_schedule_arrives(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    import xbmcgui
+    feed, woke, gate = _schedule_feed(monkeypatch, _now_schedule())
+    try:
+        win = _opened(ctx, [_LIVE])
+        assert win.getControl(ctx.home.HERO_PLOT).text == 'Channel blurb'  # until the schedule arrives
+        gate.set()
+        assert woke.wait(5.0)
+        win.onAction(xbmcgui.Action(0))  # the feed's Action(noop)
+        plot = win.getControl(ctx.home.HERO_PLOT).text
+        meta = win.getControl(ctx.home.HERO_META).text
+        assert plot.startswith('Next: ') and 'Late Film' in plot and plot.endswith('Headlines')
+        assert meta.startswith('Now: ') and 'Evening News' in meta and meta.endswith('%')
+        assert win.getControl(ctx.look.HERO_END).label.startswith('Ends at ')
+    finally:
+        feed.stop()
+        feed.thread.join(5.0)
+
+
+def test_closing_the_coverflow_stops_its_feed(load_infowindow, monkeypatch):
+    ctx = load_infowindow()
+    feed, _woke, gate = _schedule_feed(monkeypatch, _now_schedule())
+    win = _opened(ctx, [_LIVE])
+    gate.set()
+    win.close()
+    feed.thread.join(5.0)
+    assert feed.stopped and not feed.thread.is_alive()

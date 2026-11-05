@@ -710,6 +710,19 @@
                         <heading>30148</heading>
                     </control>
                 </setting>
+                <setting id="iptv_epg" type="string" label="30651" help="30652">
+                    <level>2</level>
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <dependencies>
+                        <dependency type="enable" setting="server_enable">true</dependency>
+                    </dependencies>
+                    <control type="edit" format="string">
+                        <heading>30651</heading>
+                    </control>
+                </setting>
             </group>
             <group id="3" label="30569">
                 <setting id="metadata_url" type="string" label="30140" help="30616">

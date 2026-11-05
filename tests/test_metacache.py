@@ -255,3 +255,31 @@ def test_store_cached_meta_delegates_through_the_batch_api_single_entry_unchange
 
     assert len(write_calls) == 1
     assert metacache.load_cached_meta(data_dir, 'movie', 'tt1') == {'name': 'Solo'}
+
+
+def test_a_live_channel_meta_is_never_cached(tmp_path):
+    # Its `videos` are the schedule, stale within minutes; a cached copy
+    # would also serve a day-old programme list to the hero.
+    data_dir = _data_dir(tmp_path)
+    schedule = [{'id': 'p1', 'title': 'News', 'startTime': '2026-05-04T10:00:00Z', 'endTime': '2026-05-04T11:00:00Z'}]
+    metacache.store_cached_meta(data_dir, 'tv', 'ch1', {'id': 'ch1', 'videos': schedule})
+    metacache.store_cached_meta(data_dir, 'events', 'ev1', {'id': 'ev1', 'behaviorHints': {'isLive': True}})
+    metacache.store_cached_metas(data_dir, [('tv', 'ch2', {'id': 'ch2'}), ('movie', 'tt1', {'id': 'tt1'})])
+    assert metacache.load_cached_meta(data_dir, 'tv', 'ch1') is None
+    assert metacache.load_cached_meta(data_dir, 'events', 'ev1') is None
+    assert metacache.load_cached_meta(data_dir, 'tv', 'ch2') is None
+    assert metacache.load_cached_meta(data_dir, 'movie', 'tt1') == {'id': 'tt1'}
+
+
+def test_a_live_entry_already_on_disk_is_a_miss(tmp_path):
+    # A cache file written before live metas were excluded.
+    data_dir = _data_dir(tmp_path)
+    metacache.store_cached_meta(data_dir, 'movie', 'tt1', {'id': 'tt1'})
+    path = metacache._path(data_dir)
+    with open(path) as handle:
+        entries = json.load(handle)
+    entries[metacache._key('tv', 'ch1')] = {'ts': metacache.time.time(), 'meta': {'id': 'ch1', 'videos': []}}
+    with open(path, 'w') as handle:
+        json.dump(entries, handle)
+    assert metacache.load_cached_meta(data_dir, 'tv', 'ch1') is None
+    assert metacache.load_cached_meta(data_dir, 'movie', 'tt1') == {'id': 'tt1'}

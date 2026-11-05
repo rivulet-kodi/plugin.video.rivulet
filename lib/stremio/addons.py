@@ -23,6 +23,8 @@ import threading
 import weakref
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
+from lib import livetv
+
 #: `requests` costs ~35ms and ~200 transitive modules to import - resolved
 #: lazily on first `AddonClient.__init__()` call via `_ensure_requests()`
 #: rather than at module import time, so this module's pure helpers
@@ -809,12 +811,20 @@ def iter_catalogs(addons, extra_required=None, types=None):
     protocol, so this is a plain membership test - see
     `lib.ui.homewindow`'s row definitions for how the ones Rivulet
     surfaces are grouped.
+
+    Guide catalogs (`livetv.is_guide_catalog`: a `date` extra on an
+    `epgProvider` add-on) are never yielded. stremio-core hides them from
+    Discover (`catalog_with_filters.rs` `is_epg_guide_request`) because
+    they are the per-day schedule source for a page of channels, not
+    something to browse; filtering here keeps them out of every walk at
+    once (Home rows/hubs, Arrange lists, the catalog picker and search).
+    `guide_catalog_for` is the one reader that wants them.
     """
     wanted = set(types) if types is not None else None
     for transport_url, manifest in iter_manifests(addons):
         catalogs = manifest.get('catalogs')
         for catalog in catalogs if isinstance(catalogs, list) else ():
-            if not isinstance(catalog, dict):
+            if not isinstance(catalog, dict) or livetv.is_guide_catalog(manifest, catalog):
                 continue
             if extra_required and extra_required not in _catalog_extra_names(catalog):
                 continue
@@ -823,6 +833,28 @@ def iter_catalogs(addons, extra_required=None, types=None):
                 if not isinstance(ctype, str) or ctype not in wanted:
                     continue
             yield transport_url, manifest, catalog
+
+
+def guide_catalog_for(manifest, catalog):
+    """The guide catalog of `manifest` that carries now/next for the
+    channels of `catalog`, or None.
+
+    Only guide catalogs (`livetv.is_guide_catalog`) of the same `type` are
+    candidates. `<catalog id>-guide` wins (the engine's naming); otherwise
+    the single guide catalog of that type; with several and none named so,
+    None rather than a guess. One request to it yields the programmes of a
+    whole page of channels (`livetv.guide_videos`)."""
+    if not isinstance(manifest, dict) or not isinstance(catalog, dict):
+        return None
+    ctype, cid = catalog.get('type'), catalog.get('id')
+    catalogs = manifest.get('catalogs')
+    guides = [candidate for candidate in catalogs if isinstance(candidate, dict)
+              and candidate.get('type') == ctype and livetv.is_guide_catalog(manifest, candidate)
+              ] if isinstance(catalogs, list) else []
+    for guide in guides:
+        if isinstance(cid, str) and guide.get('id') == cid + '-guide':
+            return guide
+    return guides[0] if len(guides) == 1 else None
 
 
 def default_meta_types(metas, ctype):

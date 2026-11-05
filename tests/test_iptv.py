@@ -240,6 +240,43 @@ def test_stamp_follows_the_playlists_not_their_whitespace():
     assert len(iptv.playlists_stamp("http://a")) == 12
 
 
+def test_stamp_without_a_guide_equals_the_playlists_only_hash():
+    """An install without `iptv_epg` keeps the stamp it published before the
+    setting existed: nothing churns on upgrade."""
+    import hashlib
+
+    assert iptv.playlists_stamp("http://a/x.m3u,http://b/y.m3u") == hashlib.sha1(
+        b"http://a/x.m3u\nhttp://b/y.m3u").hexdigest()[:12]
+    assert iptv.playlists_stamp("http://a/x.m3u", "") == iptv.playlists_stamp("http://a/x.m3u")
+    assert iptv.playlists_stamp("http://a/x.m3u", " , ") == iptv.playlists_stamp("http://a/x.m3u")
+
+
+def test_stamp_changes_with_the_guide_set_but_not_its_whitespace():
+    base = iptv.playlists_stamp("http://a/x.m3u")
+    one = iptv.playlists_stamp("http://a/x.m3u", "http://g/1.xml")
+    assert one != base
+    assert one == iptv.playlists_stamp("http://a/x.m3u", " http://g/1.xml , ")
+    assert one != iptv.playlists_stamp("http://a/x.m3u", "http://g/2.xml")
+    assert one != iptv.playlists_stamp("http://a/x.m3u", "http://g/1.xml,http://g/2.xml")
+    # the guide cannot be mistaken for a second playlist
+    assert iptv.playlists_stamp("http://a/x.m3u", "http://g/1.xml") != iptv.playlists_stamp("http://a/x.m3u,http://g/1.xml")
+    assert len(one) == 12
+
+
+def test_a_guide_without_playlists_is_no_stamp():
+    assert iptv.playlists_stamp("", "http://g/1.xml") == ""
+
+
+def test_changed_guide_republishes_with_a_new_stamp():
+    store, registrar = _FakeStore(), iptv.IptvRegistrar()
+    engine = _Engine(MANIFEST)
+    _apply(registrar, store, engine)
+    registrar.apply(PLAYLISTS, SERVER, True, store, fetch_fn=engine, epg="http://g/1.xml")
+    first, second = (call[2][iptv.STAMP_FIELD] for call in store.set_calls)
+    assert first == iptv.playlists_stamp(PLAYLISTS)
+    assert second == iptv.playlists_stamp(PLAYLISTS, "http://g/1.xml") != first
+
+
 def test_changed_playlists_republish_with_a_new_stamp_on_the_same_catalog_ids():
     store, registrar = _FakeStore(), iptv.IptvRegistrar()
     engine = _Engine(MANIFEST)

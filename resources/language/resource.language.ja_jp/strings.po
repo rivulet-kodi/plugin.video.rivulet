@@ -1583,3 +1583,27 @@ msgstr "advancedsettings.xml をインストールしました。反映するに
 msgctxt "#30650"
 msgid "Trailers play through Kodi's YouTube add-on, which is turned off. Turn it on now?"
 msgstr "予告編は KodiのYouTubeアドオンで再生されますが、現在無効です。今すぐ有効にしますか?"
+
+msgctxt "#30651"
+msgid "IPTV guide URLs (XMLTV, comma-separated)"
+msgstr "IPTV番組表のURL（XMLTV、カンマ区切り）"
+
+msgctxt "#30652"
+msgid "XMLTV programme guides (plain or .gz) for the playlist channels, shown as Now and Next. Separate several URLs with commas. Empty (the default) keeps the guide off. Only applies to the built-in server, which restarts when this changes."
+msgstr "プレイリストのチャンネル用のXMLTV番組表（通常または.gz）。「放送中」と「次」として表示されます。複数のURLはカンマで区切ります。空（既定）の場合、番組表はオフです。内蔵サーバーにのみ適用され、変更すると再起動します。"
+
+msgctxt "#30653"
+msgid "Now: %s"
+msgstr "放送中: %s"
+
+msgctxt "#30654"
+msgid "Next: %s"
+msgstr "次: %s"
+
+msgctxt "#30670"
+msgid "Recent channels"
+msgstr "最近のチャンネル"
+
+msgctxt "#30671"
+msgid "Remove from recent channels"
+msgstr "最近のチャンネルから削除"
