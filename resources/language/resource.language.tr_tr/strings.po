@@ -1287,3 +1287,295 @@ msgstr "Eklentilerinizden canlı TV, spor ve etkinlikler"
 msgctxt "#30554"
 msgid "Live TV channels from one or more M3U playlists, offered as an IPTV add-on. Separate several URLs with commas, e.g. https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. Empty (the default) keeps it off. Only applies to the built-in server, which restarts when this changes."
 msgstr "Bir veya daha fazla M3U oynatma listesindeki canlı TV kanalları, IPTV eklentisi olarak sunulur. Birden çok URL'yi virgülle ayırın, örn. https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. Boş (varsayılan) kapalı demektir. Yalnızca yerleşik sunucu için geçerlidir; bu değişince sunucu yeniden başlar."
+
+msgctxt "#30555"
+msgid "Lists"
+msgstr "Listeler"
+
+msgctxt "#30556"
+msgid "Ratings"
+msgstr "Puanlar"
+
+msgctxt "#30557"
+msgid "Maintenance"
+msgstr "Bakım"
+
+msgctxt "#30558"
+msgid "Sources"
+msgstr "Kaynaklar"
+
+msgctxt "#30559"
+msgid "Resume and next episode"
+msgstr "Devam etme ve sonraki bölüm"
+
+msgctxt "#30560"
+msgid "Buffering"
+msgstr "Arabellekleme"
+
+msgctxt "#30561"
+msgid "Embedded server"
+msgstr "Gömülü sunucu"
+
+msgctxt "#30562"
+msgid "Peers"
+msgstr "Eşler"
+
+msgctxt "#30563"
+msgid "Privacy"
+msgstr "Gizlilik"
+
+msgctxt "#30564"
+msgid "Trackers"
+msgstr "Tracker'lar"
+
+msgctxt "#30565"
+msgid "Performance"
+msgstr "Performans"
+
+msgctxt "#30566"
+msgid "Security"
+msgstr "Güvenlik"
+
+msgctxt "#30567"
+msgid "Addresses"
+msgstr "Adresler"
+
+msgctxt "#30568"
+msgid "Live TV"
+msgstr "Canlı TV"
+
+msgctxt "#30569"
+msgid "Torrent indexers"
+msgstr "Torrent indeksleyiciler"
+
+msgctxt "#30570"
+msgid "General"
+msgstr "Genel"
+
+msgctxt "#30571"
+msgid "Shows the Anime tab on Home, with the anime catalogs of your add-ons."
+msgstr "Ana ekranda, eklentilerinizin anime kataloglarıyla birlikte Anime sekmesini gösterir."
+
+msgctxt "#30572"
+msgid "Hides catalogs, add-ons and titles that look like adult content on Home, in Search and in the add-on catalog."
+msgstr "Yetişkin içeriğine benzeyen katalogları, eklentileri ve başlıkları ana ekranda, aramada ve eklenti kataloğunda gizler."
+
+msgctxt "#30573"
+msgid "Opens Rivulet instead of the Kodi home screen every time Kodi starts."
+msgstr "Kodi her başladığında Kodi ana ekranı yerine Rivulet'i açar."
+
+msgctxt "#30574"
+msgid "Order of the source list: best quality first, largest file first, or most seeders first."
+msgstr "Kaynak listesinin sırası: önce en iyi kalite, önce en büyük dosya veya önce en çok seeder."
+
+msgctxt "#30575"
+msgid "Hides sources below this resolution. Sources whose resolution is unknown stay in the list."
+msgstr "Bu çözünürlüğün altındaki kaynakları gizler. Çözünürlüğü bilinmeyen kaynaklar listede kalır."
+
+msgctxt "#30576"
+msgid "Hides sources larger than this, in GB. Sources whose size is unknown stay in the list. 0 shows every size."
+msgstr "Bu boyuttan büyük kaynakları GB cinsinden gizler. Boyutu bilinmeyen kaynaklar listede kalır. 0 her boyutu gösterir."
+
+msgctxt "#30577"
+msgid "Hides sources recorded in a cinema (CAM, TS, telesync, screener)."
+msgstr "Sinemada kaydedilmiş kaynakları gizler (CAM, TS, telesync, screener)."
+
+msgctxt "#30578"
+msgid "Shows only sources your debrid service reports as already cached, which start at once. Sources with no cache information are hidden too."
+msgstr "Yalnızca debrid hizmetinizin önbellekte olduğunu bildirdiği, hemen başlayan kaynakları gösterir. Önbellek bilgisi olmayan kaynaklar da gizlenir."
+
+msgctxt "#30579"
+msgid "When you stopped part way through, asks whether to continue from there. Off always starts from the beginning."
+msgstr "Yarıda bıraktığınızda oradan devam edilip edilmeyeceğini sorar. Kapalıysa her zaman baştan başlar."
+
+msgctxt "#30580"
+msgid "When an episode ends, counts down and plays the next one."
+msgstr "Bir bölüm bittiğinde geri sayım yapar ve sonrakini oynatır."
+
+msgctxt "#30581"
+msgid "Length of the countdown before the next episode starts, in seconds."
+msgstr "Sonraki bölüm başlamadan önceki geri sayımın süresi, saniye cinsinden."
+
+msgctxt "#30582"
+msgid "Downloads the start of a torrent before playback begins, so the video does not stall straight away."
+msgstr "Oynatma başlamadan önce torrentin başlangıcını indirir, böylece video hemen takılmaz."
+
+msgctxt "#30583"
+msgid "How much of a torrent to download before playback begins, in MB. More rides out a slow swarm better but takes longer to start."
+msgstr "Oynatma başlamadan önce torrentin ne kadarının indirileceği, MB cinsinden. Daha fazlası yavaş sürüyü daha iyi karşılar ama başlaması daha uzun sürer."
+
+msgctxt "#30584"
+msgid "Copies Rivulet's recommended network timeouts into Kodi's advancedsettings.xml, plus a larger video cache on Kodi 19 and 20. Never replaces an existing file. Restart Kodi afterwards."
+msgstr "Rivulet'in önerilen ağ zaman aşımlarını Kodi'nin advancedsettings.xml dosyasına kopyalar; Kodi 19 ve 20'de ayrıca daha büyük bir video önbelleği ekler. Var olan bir dosyanın üzerine asla yazmaz. Sonrasında Kodi'yi yeniden başlatın."
+
+msgctxt "#30585"
+msgid "Adds the subtitles your subtitle add-ons find for the video."
+msgstr "Altyazı eklentilerinizin video için bulduğu altyazıları ekler."
+
+msgctxt "#30586"
+msgid "Language of the subtitles to add, as a 2- or 3-letter ISO 639 code, for example en, it, pt or eng."
+msgstr "Eklenecek altyazıların dili; 2 veya 3 harfli ISO 639 kodu olarak, örneğin en, it, pt veya eng."
+
+msgctxt "#30587"
+msgid "Signs in with your Stremio account, to use the add-ons, library and progress saved there."
+msgstr "Stremio hesabınızla oturum açar; orada kayıtlı eklentileri, kitaplığı ve ilerlemeyi kullanmanızı sağlar."
+
+msgctxt "#30588"
+msgid "Signs out of your Stremio account on this device. Your add-ons stay installed."
+msgstr "Bu cihazda Stremio hesabınızdan çıkış yapar. Eklentileriniz yüklü kalır."
+
+msgctxt "#30589"
+msgid "Saves the add-ons installed here to your Stremio account now."
+msgstr "Burada yüklü eklentileri şimdi Stremio hesabınıza kaydeder."
+
+msgctxt "#30590"
+msgid "Saves where you stopped to your Stremio account and picks up progress from your other Stremio apps. Needs a signed-in account."
+msgstr "Kaldığınız yeri Stremio hesabınıza kaydeder ve diğer Stremio uygulamalarınızdaki ilerlemeyi alır. Oturum açmış bir hesap gerekir."
+
+msgctxt "#30591"
+msgid "Starts Rivulet's own streaming server with Kodi. Turn it off to use only a server already running at the server URL. The server settings below apply only to the embedded server."
+msgstr "Rivulet'in kendi yayın sunucusunu Kodi ile birlikte başlatır. Yalnızca sunucu URL'sinde zaten çalışan bir sunucuyu kullanmak için kapatın. Aşağıdaki sunucu ayarları yalnızca gömülü sunucu için geçerlidir."
+
+msgctxt "#30592"
+msgid "Address of the streaming server. The embedded server listens on this port; when a server already answers here, Rivulet uses that one instead."
+msgstr "Yayın sunucusunun adresi. Gömülü sunucu bu bağlantı noktasını dinler; burada zaten bir sunucu yanıt veriyorsa Rivulet onu kullanır."
+
+msgctxt "#30593"
+msgid "A rivulet-engine program of your own to run. Empty uses the one Rivulet downloads."
+msgstr "Çalıştırılacak kendi rivulet-engine programınız. Boş bırakılırsa Rivulet'in indirdiği kullanılır."
+
+msgctxt "#30594"
+msgid "Downloads the rivulet-engine version this Rivulet release needs and installs it."
+msgstr "Bu Rivulet sürümünün gerektirdiği rivulet-engine sürümünü indirir ve kurar."
+
+msgctxt "#30595"
+msgid "Port other peers connect to. 0 picks a free port at every start. Set a fixed port to forward it on your router and reach more peers."
+msgstr "Diğer eşlerin bağlandığı bağlantı noktası. 0 her başlangıçta boş bir bağlantı noktası seçer. Daha fazla eşe ulaşmak için sabit bir bağlantı noktası belirleyip yönlendiricide yönlendirin."
+
+msgctxt "#30596"
+msgid "Peer connections per torrent. 0 uses the built-in default (50). Fewer saves memory on small devices."
+msgstr "Torrent başına eş bağlantısı sayısı. 0 yerleşik varsayılanı (50) kullanır. Daha azı küçük cihazlarda bellek tasarrufu sağlar."
+
+msgctxt "#30597"
+msgid "Seconds a torrent stays loaded after you stop watching, so resuming starts at once. 0 keeps it loaded."
+msgstr "İzlemeyi bıraktıktan sonra bir torrentin kaç saniye yüklü kalacağı; böylece devam etmek hemen başlar. 0 yüklü tutar."
+
+msgctxt "#30598"
+msgid "Prefer encrypts peer connections when the peer can. Require drops peers that cannot, which can get past provider throttling. Disable never encrypts."
+msgstr "\"Tercih et\", eş destekliyorsa eş bağlantılarını şifreler. \"Zorunlu tut\", desteklemeyen eşleri reddeder; bu, sağlayıcı kısıtlamasını aşabilir. \"Devre dışı bırak\" hiç şifrelemez."
+
+msgctxt "#30599"
+msgid "Hides the client name and version from other peers."
+msgstr "İstemci adını ve sürümünü diğer eşlerden gizler."
+
+msgctxt "#30600"
+msgid "Finds peers only through DHT and peer exchange, never contacting trackers."
+msgstr "Eşleri yalnızca DHT ve eş değişimi üzerinden bulur, tracker'lara hiç bağlanmaz."
+
+msgctxt "#30601"
+msgid "SOCKS5 or HTTP proxy for trackers and torrent metadata, for example socks5://127.0.0.1:9050. Peer connections stay direct."
+msgstr "Tracker'lar ve torrent meta verileri için SOCKS5 veya HTTP proxy, örneğin socks5://127.0.0.1:9050. Eş bağlantıları doğrudan kalır."
+
+msgctxt "#30602"
+msgid "Skips WebTorrent (WebRTC) peers, which saves a lot of memory and processor time."
+msgstr "WebTorrent (WebRTC) eşlerini atlar; bu, çok miktarda bellek ve işlemci zamanı kazandırır."
+
+msgctxt "#30603"
+msgid "How many of the fastest public trackers each torrent uses. 0 uses the default (5)."
+msgstr "Her torrentin kullandığı en hızlı genel tracker sayısı. 0 varsayılanı (5) kullanır."
+
+msgctxt "#30604"
+msgid "Address of the public tracker list to download. Empty uses the built-in source; off skips the download."
+msgstr "İndirilecek genel tracker listesinin adresi. Boş bırakılırsa yerleşik kaynak kullanılır; off indirmeyi atlar."
+
+msgctxt "#30605"
+msgid "Extra DHT nodes to start from, as host:port separated by commas, for networks that block the default ones."
+msgstr "Başlangıç için ek DHT düğümleri; host:port biçiminde, virgülle ayrılmış. Varsayılanları engelleyen ağlar için."
+
+msgctxt "#30606"
+msgid "Soft memory ceiling for the streaming server, in MB. The server frees memory harder as it gets close. 0 sets no limit."
+msgstr "Yayın sunucusu için yumuşak bellek sınırı, MB cinsinden. Sunucu sınıra yaklaştıkça belleği daha sert boşaltır. 0 sınır koymaz."
+
+msgctxt "#30607"
+msgid "How many upcoming segments of a proxied HLS stream to fetch ahead. 0 turns it off."
+msgstr "Proxy'lenen bir HLS akışının kaç sonraki segmentinin önceden getirileceği. 0 kapatır."
+
+msgctxt "#30608"
+msgid "How long proxied stream segments stay cached, in seconds. 0 turns the cache off."
+msgstr "Proxy'lenen akış segmentlerinin önbellekte ne kadar kalacağı, saniye cinsinden. 0 önbelleği kapatır."
+
+msgctxt "#30609"
+msgid "Password that users of the server's stream proxy must send. Set one if other devices can reach the server."
+msgstr "Sunucunun akış proxy'sini kullananların göndermesi gereken parola. Sunucuya başka cihazlar erişebiliyorsa bir parola belirleyin."
+
+msgctxt "#30610"
+msgid "Addresses allowed to use the stream proxy, as CIDR ranges separated by commas, for example 192.168.1.0/24. Empty allows every address."
+msgstr "Akış proxy'sini kullanmasına izin verilen adresler; virgülle ayrılmış CIDR aralıkları olarak, örneğin 192.168.1.0/24. Boş bırakılırsa tüm adreslere izin verilir."
+
+msgctxt "#30611"
+msgid "Public address of this server, written into proxied playlists. Needed only behind a reverse proxy."
+msgstr "Bu sunucunun, proxy'lenen oynatma listelerine yazılan genel adresi. Yalnızca ters proxy arkasında gerekir."
+
+msgctxt "#30612"
+msgid "Proxy the stream proxy fetches through, for example socks5://host:1080."
+msgstr "Akış proxy'sinin üzerinden veri çektiği proxy, örneğin socks5://host:1080."
+
+msgctxt "#30613"
+msgid "Key that signs stream proxy links. Empty generates one and keeps it."
+msgstr "Akış proxy bağlantılarını imzalayan anahtar. Boş bırakılırsa bir tane üretilir ve saklanır."
+
+msgctxt "#30614"
+msgid "Lets the server cast to DLNA devices on your network."
+msgstr "Sunucunun ağınızdaki DLNA cihazlarına yayın yapmasını sağlar."
+
+msgctxt "#30615"
+msgid "Looks up titles and posters on IMDb for the server's local files add-on."
+msgstr "Sunucunun yerel dosyalar eklentisi için başlıkları ve afişleri IMDb'de arar."
+
+msgctxt "#30616"
+msgid "Cinemeta-compatible add-on the indexers use to look up titles. Empty uses Cinemeta; off turns the lookup off."
+msgstr "İndeksleyicilerin başlıkları aramak için kullandığı Cinemeta uyumlu eklenti. Boş bırakılırsa Cinemeta kullanılır; off aramayı kapatır."
+
+msgctxt "#30617"
+msgid "GraphQL address of your own Bitmagnet, for example http://localhost:3333/graphql, for the server's Bitmagnet add-on."
+msgstr "Kendi Bitmagnet'inizin GraphQL adresi, örneğin http://localhost:3333/graphql; sunucunun Bitmagnet eklentisi için."
+
+msgctxt "#30618"
+msgid "Torznab API address of an indexer such as Prowlarr or Jackett, for the server's Torznab add-on."
+msgstr "Prowlarr veya Jackett gibi bir indeksleyicinin Torznab API adresi; sunucunun Torznab eklentisi için."
+
+msgctxt "#30619"
+msgid "API key of that Torznab indexer. Prowlarr and Jackett need one."
+msgstr "Bu Torznab indeksleyicisinin API anahtarı. Prowlarr ve Jackett bir anahtar ister."
+
+msgctxt "#30620"
+msgid "Page the server's own address opens in a web browser. Empty uses web.stremio.com."
+msgstr "Sunucunun kendi adresinin web tarayıcısında açtığı sayfa. Boş bırakılırsa web.stremio.com kullanılır."
+
+msgctxt "#30621"
+msgid "Port of the server's HTTPS listener, for Stremio web apps. 0 turns HTTPS off."
+msgstr "Sunucunun HTTPS dinleyicisinin bağlantı noktası, Stremio web uygulamaları için. 0 HTTPS'yi kapatır."
+
+msgctxt "#30622"
+msgid "host:port where the server publishes profiling data, for example 127.0.0.1:6060. For debugging only; empty turns it off."
+msgstr "Sunucunun profil verilerini yayınladığı host:port, örneğin 127.0.0.1:6060. Yalnızca hata ayıklama içindir; boş bırakılırsa kapalıdır."
+
+msgctxt "#30623"
+msgid "Stremio auth key the server uses to get a trusted HTTPS certificate. Empty reuses a saved one."
+msgstr "Sunucunun güvenilir bir HTTPS sertifikası almak için kullandığı Stremio yetkilendirme anahtarı. Boş bırakılırsa kayıtlı olan yeniden kullanılır."
+
+msgctxt "#30624"
+msgid "Offers the Stream4Me channels as a Rivulet add-on."
+msgstr "Stream4Me kanallarını bir Rivulet eklentisi olarak sunar."
+
+msgctxt "#30625"
+msgid "Local port the Stream4Me bridge listens on."
+msgstr "Stream4Me köprüsünün dinlediği yerel bağlantı noktası."
+
+msgctxt "#30626"
+msgid "Stream4Me channels to offer, separated by commas. Empty offers every active channel."
+msgstr "Sunulacak Stream4Me kanalları, virgülle ayrılmış. Boş bırakılırsa tüm etkin kanallar sunulur."
+
+msgctxt "#30627"
+msgid "advancedsettings.xml installed - restart Kodi to apply. Set the video cache in Settings > Services > Caching."
+msgstr "advancedsettings.xml kuruldu - uygulamak için Kodi'yi yeniden başlatın. Video önbelleğini Ayarlar > Hizmetler > Önbelleğe Alma bölümünden belirleyin."

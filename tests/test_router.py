@@ -80,12 +80,13 @@ def load_router():
 
     with contextlib.ExitStack() as stack:
         def _load(addon_info=None, settings=None, localized=None, dialog_inputs=None,
-                   cancel=False, monitor_abort=False):
+                   cancel=False, monitor_abort=False, info_labels=None):
             ctx = stack.enter_context(install_kodi_stubs(
                 reload=_RELOAD_MODULE_NAMES,
                 addon_info=addon_info,
                 settings=settings,
                 localized=localized,
+                info_labels=info_labels,
                 dialog_inputs=dialog_inputs,
                 cancel=cancel,
                 monitor_abort=monitor_abort,
@@ -718,17 +719,20 @@ def test_advancedsettings_install_success_notifies_restart_message(load_router, 
 
     calls = []
 
-    def fake_install(source_path, dest_path):
-        calls.append((source_path, dest_path))
+    def fake_install(source_path, dest_path, shadow_paths=()):
+        calls.append((source_path, dest_path, shadow_paths))
         return 'installed'
 
     monkeypatch.setattr(advancedsettings, 'install', fake_install)
 
     ctx.router.run()
 
+    # Kodi 19 (no System.BuildVersion): the template with the <cache> block.
+    # The active profile's own file shadows the master profile's.
     assert calls == [(
         '/fake-kodi-home/home/addons/plugin.video.rivulet/resources/advancedsettings.xml',
         '/fake-kodi-home/masterprofile/advancedsettings.xml',
+        ('/fake-kodi-home/profile/advancedsettings.xml',),
     )]
     assert ctx.env.notifications == [('Rivulet', 'restart Kodi to apply', 'info', 4000)]
     assert ctx.env.end_of_directory == []
@@ -746,25 +750,45 @@ def test_advancedsettings_install_resolves_source_path_from_addon_id_not_hardcod
 
     calls = []
 
-    def fake_install(source_path, dest_path):
-        calls.append((source_path, dest_path))
+    def fake_install(source_path, dest_path, shadow_paths=()):
+        calls.append(source_path)
         return 'installed'
 
     monkeypatch.setattr(advancedsettings, 'install', fake_install)
 
     ctx.router.run()
 
-    assert calls == [(
-        '/fake-kodi-home/home/addons/plugin.video.otherfork/resources/advancedsettings.xml',
-        '/fake-kodi-home/masterprofile/advancedsettings.xml',
-    )]
+    assert calls == ['/fake-kodi-home/home/addons/plugin.video.otherfork/resources/advancedsettings.xml']
+
+
+@pytest.mark.parametrize('build', ['21.2 (21.2.0) Git:20250101-abc', '22.0-RC1 Git:20261001-def'])
+def test_advancedsettings_install_on_kodi21_plus_skips_the_ignored_cache_block(load_router, monkeypatch, build):
+    """Kodi 21 moved <cache> to Settings > Services > Caching and ignores it
+    in advancedsettings.xml: install the network-only template and say
+    where the cache setting went, instead of claiming the cache applies."""
+    ctx = load_router(info_labels={'System.BuildVersion': build},
+                      localized={30627: 'installed - cache is in Settings'})
+    monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=advancedsettings_install'])
+
+    calls = []
+
+    def fake_install(source_path, dest_path, shadow_paths=()):
+        calls.append(source_path)
+        return 'installed'
+
+    monkeypatch.setattr(advancedsettings, 'install', fake_install)
+
+    ctx.router.run()
+
+    assert calls == ['/fake-kodi-home/home/addons/plugin.video.rivulet/resources/advancedsettings_kodi21.xml']
+    assert ctx.env.notifications == [('Rivulet', 'installed - cache is in Settings', 'info', 4000)]
 
 
 def test_advancedsettings_install_exists_notifies_merge_manually_message(load_router, monkeypatch):
     ctx = load_router(localized={30067: 'already exists - merge manually'})
     monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=advancedsettings_install'])
 
-    monkeypatch.setattr(advancedsettings, 'install', lambda source_path, dest_path: 'exists')
+    monkeypatch.setattr(advancedsettings, 'install', lambda source_path, dest_path, shadow_paths=(): 'exists')
 
     ctx.router.run()
 
@@ -777,7 +801,7 @@ def test_advancedsettings_install_error_notifies_failure_and_logs_error(load_rou
     ctx = load_router(localized={30068: 'Failed to install advancedsettings.xml'})
     monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=advancedsettings_install'])
 
-    def fake_install(source_path, dest_path):
+    def fake_install(source_path, dest_path, shadow_paths=()):
         raise advancedsettings.AdvancedSettingsError('disk full')
 
     monkeypatch.setattr(advancedsettings, 'install', fake_install)
@@ -803,7 +827,7 @@ def test_advancedsettings_install_unwrapped_oserror_is_not_swallowed(load_router
     ctx = load_router()
     monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=advancedsettings_install'])
 
-    def fake_install(source_path, dest_path):
+    def fake_install(source_path, dest_path, shadow_paths=()):
         raise OSError('unexpected raw OSError, not wrapped')
 
     monkeypatch.setattr(advancedsettings, 'install', fake_install)

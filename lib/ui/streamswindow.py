@@ -221,11 +221,13 @@ _PLAYBACK_START_TIMEOUT_SECONDS = 45.0
 #: torrent whose next piece had not arrived; the service's callback landed at
 #: 01:08:00.137). The reopen must wait for that, or the new window is queued
 #: behind a frozen GUI thread and the Videos window's own refresh lands on top
-#: of it. Generous because a stalled stream can take the whole
-#: `curllowspeedtime` (resources/advancedsettings.xml); on expiry the wait
-#: gives up and reopens anyway, so a callback that never comes cannot strand
-#: the user on an empty screen.
-_PLAYER_CLOSE_TIMEOUT_SECONDS = 60.0
+#: of it. Generous because a stalled read can take `curllowspeedtime` once
+#: per try, i.e. curllowspeedtime x (curlretries + 1): 40s with
+#: resources/advancedsettings.xml installed, 60s with Kodi's defaults (20s,
+#: 2 retries), which is what most users run. 60 would race that; on expiry
+#: the wait gives up and reopens anyway, so a callback that never comes
+#: cannot strand the user on an empty screen.
+_PLAYER_CLOSE_TIMEOUT_SECONDS = 75.0
 
 #: resources/settings.xml keys for the two binge-watching controls.
 _BINGE_ENABLE_SETTING = 'binge_enable'

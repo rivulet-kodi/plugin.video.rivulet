@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- Installed on Kodi 19 and 20 only. Kodi 21 moved the <cache> tags to
+     Settings > Services > Caching and ignores them here, so it gets
+     advancedsettings_kodi21.xml, this file without the <cache> block
+     (lib/ui/router.py, _install_advancedsettings). Keep the two
+     <network> blocks identical: tests/test_advancedsettings.py checks. -->
 <advancedsettings>
     <network>
         <!-- curlclienttimeout is CURLOPT_CONNECTTIMEOUT plus, on some
@@ -28,8 +33,12 @@
         <curlretries>1</curlretries>
     </network>
     <cache>
-        <buffermode>1</buffermode>
+        <!-- No <buffermode>: Kodi's default (4, network filesystems)
+             already caches every http:// stream Rivulet plays, and the
+             1 this file used to set also cached local library files. -->
+        <!-- Bytes of RAM per playing file (Kodi's default: 20 MiB). -->
         <memorysize>209715200</memorysize>
+        <!-- Read ahead at up to 20x the video's bitrate (default 4). -->
         <readfactor>20</readfactor>
     </cache>
 </advancedsettings>

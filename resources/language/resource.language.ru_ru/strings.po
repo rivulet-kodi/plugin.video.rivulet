@@ -1287,3 +1287,295 @@ msgstr "ТВ, спорт и события в прямом эфире из ва�
 msgctxt "#30554"
 msgid "Live TV channels from one or more M3U playlists, offered as an IPTV add-on. Separate several URLs with commas, e.g. https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. Empty (the default) keeps it off. Only applies to the built-in server, which restarts when this changes."
 msgstr "Телеканалы в прямом эфире из одного или нескольких плейлистов M3U, доступные как дополнение IPTV. Несколько URL разделяйте запятыми, например https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. Пусто (по умолчанию) — выключено. Относится только к встроенному серверу, который перезапускается при изменении."
+
+msgctxt "#30555"
+msgid "Lists"
+msgstr "Списки"
+
+msgctxt "#30556"
+msgid "Ratings"
+msgstr "Рейтинги"
+
+msgctxt "#30557"
+msgid "Maintenance"
+msgstr "Обслуживание"
+
+msgctxt "#30558"
+msgid "Sources"
+msgstr "Источники"
+
+msgctxt "#30559"
+msgid "Resume and next episode"
+msgstr "Продолжение и следующая серия"
+
+msgctxt "#30560"
+msgid "Buffering"
+msgstr "Буферизация"
+
+msgctxt "#30561"
+msgid "Embedded server"
+msgstr "Встроенный сервер"
+
+msgctxt "#30562"
+msgid "Peers"
+msgstr "Пиры"
+
+msgctxt "#30563"
+msgid "Privacy"
+msgstr "Конфиденциальность"
+
+msgctxt "#30564"
+msgid "Trackers"
+msgstr "Трекеры"
+
+msgctxt "#30565"
+msgid "Performance"
+msgstr "Производительность"
+
+msgctxt "#30566"
+msgid "Security"
+msgstr "Безопасность"
+
+msgctxt "#30567"
+msgid "Addresses"
+msgstr "Адреса"
+
+msgctxt "#30568"
+msgid "Live TV"
+msgstr "Прямой эфир"
+
+msgctxt "#30569"
+msgid "Torrent indexers"
+msgstr "Торрент-индексаторы"
+
+msgctxt "#30570"
+msgid "General"
+msgstr "Общие"
+
+msgctxt "#30571"
+msgid "Shows the Anime tab on Home, with the anime catalogs of your add-ons."
+msgstr "Показывает вкладку «Аниме» на главной с каталогами аниме из ваших дополнений."
+
+msgctxt "#30572"
+msgid "Hides catalogs, add-ons and titles that look like adult content on Home, in Search and in the add-on catalog."
+msgstr "Скрывает каталоги, дополнения и названия, похожие на контент для взрослых, на главной, в поиске и в каталоге дополнения."
+
+msgctxt "#30573"
+msgid "Opens Rivulet instead of the Kodi home screen every time Kodi starts."
+msgstr "Открывает Rivulet вместо главного экрана Kodi при каждом запуске Kodi."
+
+msgctxt "#30574"
+msgid "Order of the source list: best quality first, largest file first, or most seeders first."
+msgstr "Порядок списка источников: сначала лучшее качество, сначала самые большие файлы или сначала с наибольшим числом сидов."
+
+msgctxt "#30575"
+msgid "Hides sources below this resolution. Sources whose resolution is unknown stay in the list."
+msgstr "Скрывает источники с разрешением ниже этого. Источники с неизвестным разрешением остаются в списке."
+
+msgctxt "#30576"
+msgid "Hides sources larger than this, in GB. Sources whose size is unknown stay in the list. 0 shows every size."
+msgstr "Скрывает источники больше указанного размера в ГБ. Источники с неизвестным размером остаются в списке. 0 показывает любой размер."
+
+msgctxt "#30577"
+msgid "Hides sources recorded in a cinema (CAM, TS, telesync, screener)."
+msgstr "Скрывает источники, записанные в кинотеатре (CAM, TS, telesync, screener)."
+
+msgctxt "#30578"
+msgid "Shows only sources your debrid service reports as already cached, which start at once. Sources with no cache information are hidden too."
+msgstr "Показывает только источники, которые ваш debrid-сервис считает уже кэшированными и которые запускаются сразу. Источники без сведений о кэше тоже скрываются."
+
+msgctxt "#30579"
+msgid "When you stopped part way through, asks whether to continue from there. Off always starts from the beginning."
+msgstr "Если вы остановились на середине, спрашивает, продолжить ли с этого места. Если выключено, всегда начинает с начала."
+
+msgctxt "#30580"
+msgid "When an episode ends, counts down and plays the next one."
+msgstr "Когда серия заканчивается, отсчитывает время и включает следующую."
+
+msgctxt "#30581"
+msgid "Length of the countdown before the next episode starts, in seconds."
+msgstr "Длительность обратного отсчёта до начала следующей серии в секундах."
+
+msgctxt "#30582"
+msgid "Downloads the start of a torrent before playback begins, so the video does not stall straight away."
+msgstr "Загружает начало торрента до начала воспроизведения, чтобы видео не зависало сразу."
+
+msgctxt "#30583"
+msgid "How much of a torrent to download before playback begins, in MB. More rides out a slow swarm better but takes longer to start."
+msgstr "Сколько данных торрента загрузить до начала воспроизведения, в МБ. Чем больше, тем лучше переносится медленный раздающий рой, но запуск дольше."
+
+msgctxt "#30584"
+msgid "Copies Rivulet's recommended network timeouts into Kodi's advancedsettings.xml, plus a larger video cache on Kodi 19 and 20. Never replaces an existing file. Restart Kodi afterwards."
+msgstr "Копирует рекомендуемые Rivulet сетевые тайм-ауты в advancedsettings.xml Kodi, а в Kodi 19 и 20 ещё и увеличенный видеокэш. Существующий файл никогда не заменяется. После этого перезапустите Kodi."
+
+msgctxt "#30585"
+msgid "Adds the subtitles your subtitle add-ons find for the video."
+msgstr "Добавляет субтитры, которые ваши дополнения субтитров находят для видео."
+
+msgctxt "#30586"
+msgid "Language of the subtitles to add, as a 2- or 3-letter ISO 639 code, for example en, it, pt or eng."
+msgstr "Язык добавляемых субтитров в виде 2- или 3-буквенного кода ISO 639, например en, it, pt или eng."
+
+msgctxt "#30587"
+msgid "Signs in with your Stremio account, to use the add-ons, library and progress saved there."
+msgstr "Входит в вашу учётную запись Stremio, чтобы использовать сохранённые там дополнения, библиотеку и прогресс."
+
+msgctxt "#30588"
+msgid "Signs out of your Stremio account on this device. Your add-ons stay installed."
+msgstr "Выходит из учётной записи Stremio на этом устройстве. Ваши дополнения остаются установленными."
+
+msgctxt "#30589"
+msgid "Saves the add-ons installed here to your Stremio account now."
+msgstr "Сохраняет установленные здесь дополнения в вашу учётную запись Stremio прямо сейчас."
+
+msgctxt "#30590"
+msgid "Saves where you stopped to your Stremio account and picks up progress from your other Stremio apps. Needs a signed-in account."
+msgstr "Сохраняет в учётную запись Stremio место, где вы остановились, и подхватывает прогресс из других ваших приложений Stremio. Требуется вход в учётную запись."
+
+msgctxt "#30591"
+msgid "Starts Rivulet's own streaming server with Kodi. Turn it off to use only a server already running at the server URL. The server settings below apply only to the embedded server."
+msgstr "Запускает собственный сервер потоковой передачи Rivulet вместе с Kodi. Выключите, чтобы использовать только уже работающий сервер по URL сервера. Приведённые ниже настройки сервера относятся только к встроенному серверу."
+
+msgctxt "#30592"
+msgid "Address of the streaming server. The embedded server listens on this port; when a server already answers here, Rivulet uses that one instead."
+msgstr "Адрес сервера потоковой передачи. Встроенный сервер слушает этот порт; если здесь уже отвечает другой сервер, Rivulet использует его."
+
+msgctxt "#30593"
+msgid "A rivulet-engine program of your own to run. Empty uses the one Rivulet downloads."
+msgstr "Ваша собственная программа rivulet-engine для запуска. Пусто — используется загруженная Rivulet."
+
+msgctxt "#30594"
+msgid "Downloads the rivulet-engine version this Rivulet release needs and installs it."
+msgstr "Загружает и устанавливает версию rivulet-engine, нужную этому выпуску Rivulet."
+
+msgctxt "#30595"
+msgid "Port other peers connect to. 0 picks a free port at every start. Set a fixed port to forward it on your router and reach more peers."
+msgstr "Порт, на который подключаются другие пиры. 0 — свободный порт при каждом запуске. Задайте фиксированный порт и пробросьте его на роутере, чтобы находить больше пиров."
+
+msgctxt "#30596"
+msgid "Peer connections per torrent. 0 uses the built-in default (50). Fewer saves memory on small devices."
+msgstr "Число подключений к пирам на торрент. 0 — значение по умолчанию (50). Меньшее значение экономит память на слабых устройствах."
+
+msgctxt "#30597"
+msgid "Seconds a torrent stays loaded after you stop watching, so resuming starts at once. 0 keeps it loaded."
+msgstr "Сколько секунд торрент остаётся загруженным после остановки просмотра, чтобы продолжение началось сразу. 0 — держать загруженным."
+
+msgctxt "#30598"
+msgid "Prefer encrypts peer connections when the peer can. Require drops peers that cannot, which can get past provider throttling. Disable never encrypts."
+msgstr "«Предпочитать» шифрует подключения к пирам, когда пир это поддерживает. «Требовать» отбрасывает пиров без такой поддержки, что может обойти ограничение скорости провайдером. «Отключить» — никогда не шифровать."
+
+msgctxt "#30599"
+msgid "Hides the client name and version from other peers."
+msgstr "Скрывает от других пиров имя и версию клиента."
+
+msgctxt "#30600"
+msgid "Finds peers only through DHT and peer exchange, never contacting trackers."
+msgstr "Ищет пиров только через DHT и обмен пирами, не обращаясь к трекерам."
+
+msgctxt "#30601"
+msgid "SOCKS5 or HTTP proxy for trackers and torrent metadata, for example socks5://127.0.0.1:9050. Peer connections stay direct."
+msgstr "Прокси SOCKS5 или HTTP для трекеров и метаданных торрента, например socks5://127.0.0.1:9050. Подключения к пирам остаются прямыми."
+
+msgctxt "#30602"
+msgid "Skips WebTorrent (WebRTC) peers, which saves a lot of memory and processor time."
+msgstr "Пропускает пиры WebTorrent (WebRTC), что заметно экономит память и процессорное время."
+
+msgctxt "#30603"
+msgid "How many of the fastest public trackers each torrent uses. 0 uses the default (5)."
+msgstr "Сколько самых быстрых публичных трекеров использует каждый торрент. 0 — значение по умолчанию (5)."
+
+msgctxt "#30604"
+msgid "Address of the public tracker list to download. Empty uses the built-in source; off skips the download."
+msgstr "Адрес загружаемого списка публичных трекеров. Пусто — встроенный источник; off — не загружать."
+
+msgctxt "#30605"
+msgid "Extra DHT nodes to start from, as host:port separated by commas, for networks that block the default ones."
+msgstr "Дополнительные узлы DHT для старта в виде host:port через запятую — для сетей, блокирующих стандартные."
+
+msgctxt "#30606"
+msgid "Soft memory ceiling for the streaming server, in MB. The server frees memory harder as it gets close. 0 sets no limit."
+msgstr "Мягкий предел памяти для сервера потоковой передачи в МБ. При приближении к нему сервер освобождает память активнее. 0 — без ограничения."
+
+msgctxt "#30607"
+msgid "How many upcoming segments of a proxied HLS stream to fetch ahead. 0 turns it off."
+msgstr "Сколько следующих сегментов проксируемого потока HLS загружать заранее. 0 — выключено."
+
+msgctxt "#30608"
+msgid "How long proxied stream segments stay cached, in seconds. 0 turns the cache off."
+msgstr "Как долго проксируемые сегменты потока хранятся в кэше, в секундах. 0 — кэш выключен."
+
+msgctxt "#30609"
+msgid "Password that users of the server's stream proxy must send. Set one if other devices can reach the server."
+msgstr "Пароль, который должны передавать пользователи потокового прокси сервера. Задайте его, если сервер доступен с других устройств."
+
+msgctxt "#30610"
+msgid "Addresses allowed to use the stream proxy, as CIDR ranges separated by commas, for example 192.168.1.0/24. Empty allows every address."
+msgstr "Адреса, которым разрешено использовать потоковый прокси, в виде диапазонов CIDR через запятую, например 192.168.1.0/24. Пусто — разрешены все адреса."
+
+msgctxt "#30611"
+msgid "Public address of this server, written into proxied playlists. Needed only behind a reverse proxy."
+msgstr "Публичный адрес этого сервера, записываемый в проксируемые плейлисты. Нужен только за обратным прокси."
+
+msgctxt "#30612"
+msgid "Proxy the stream proxy fetches through, for example socks5://host:1080."
+msgstr "Прокси, через который потоковый прокси загружает данные, например socks5://host:1080."
+
+msgctxt "#30613"
+msgid "Key that signs stream proxy links. Empty generates one and keeps it."
+msgstr "Ключ, которым подписываются ссылки потокового прокси. Пусто — ключ создаётся и сохраняется автоматически."
+
+msgctxt "#30614"
+msgid "Lets the server cast to DLNA devices on your network."
+msgstr "Позволяет серверу транслировать на устройства DLNA в вашей сети."
+
+msgctxt "#30615"
+msgid "Looks up titles and posters on IMDb for the server's local files add-on."
+msgstr "Ищет названия и постеры на IMDb для дополнения локальных файлов сервера."
+
+msgctxt "#30616"
+msgid "Cinemeta-compatible add-on the indexers use to look up titles. Empty uses Cinemeta; off turns the lookup off."
+msgstr "Совместимое с Cinemeta дополнение, которое индексаторы используют для поиска названий. Пусто — Cinemeta; off — поиск выключен."
+
+msgctxt "#30617"
+msgid "GraphQL address of your own Bitmagnet, for example http://localhost:3333/graphql, for the server's Bitmagnet add-on."
+msgstr "Адрес GraphQL вашего собственного Bitmagnet, например http://localhost:3333/graphql, для дополнения Bitmagnet сервера."
+
+msgctxt "#30618"
+msgid "Torznab API address of an indexer such as Prowlarr or Jackett, for the server's Torznab add-on."
+msgstr "Адрес API Torznab индексатора, например Prowlarr или Jackett, для дополнения Torznab сервера."
+
+msgctxt "#30619"
+msgid "API key of that Torznab indexer. Prowlarr and Jackett need one."
+msgstr "Ключ API этого индексатора Torznab. Prowlarr и Jackett его требуют."
+
+msgctxt "#30620"
+msgid "Page the server's own address opens in a web browser. Empty uses web.stremio.com."
+msgstr "Страница, которую открывает в браузере собственный адрес сервера. Пусто — web.stremio.com."
+
+msgctxt "#30621"
+msgid "Port of the server's HTTPS listener, for Stremio web apps. 0 turns HTTPS off."
+msgstr "Порт HTTPS-прослушивателя сервера для веб-приложений Stremio. 0 — HTTPS выключен."
+
+msgctxt "#30622"
+msgid "host:port where the server publishes profiling data, for example 127.0.0.1:6060. For debugging only; empty turns it off."
+msgstr "host:port, где сервер публикует данные профилирования, например 127.0.0.1:6060. Только для отладки; пусто — выключено."
+
+msgctxt "#30623"
+msgid "Stremio auth key the server uses to get a trusted HTTPS certificate. Empty reuses a saved one."
+msgstr "Ключ авторизации Stremio, с помощью которого сервер получает доверенный сертификат HTTPS. Пусто — используется сохранённый."
+
+msgctxt "#30624"
+msgid "Offers the Stream4Me channels as a Rivulet add-on."
+msgstr "Предоставляет каналы Stream4Me как дополнение Rivulet."
+
+msgctxt "#30625"
+msgid "Local port the Stream4Me bridge listens on."
+msgstr "Локальный порт, который слушает мост Stream4Me."
+
+msgctxt "#30626"
+msgid "Stream4Me channels to offer, separated by commas. Empty offers every active channel."
+msgstr "Каналы Stream4Me для предоставления, через запятую. Пусто — все активные каналы."
+
+msgctxt "#30627"
+msgid "advancedsettings.xml installed - restart Kodi to apply. Set the video cache in Settings > Services > Caching."
+msgstr "advancedsettings.xml установлен — перезапустите Kodi, чтобы применить. Видеокэш задаётся в разделе Настройки > Службы > Кеширование."

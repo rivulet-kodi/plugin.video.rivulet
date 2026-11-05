@@ -1287,3 +1287,295 @@ msgstr "アドオンのライブTV、スポーツ、イベント"
 msgctxt "#30554"
 msgid "Live TV channels from one or more M3U playlists, offered as an IPTV add-on. Separate several URLs with commas, e.g. https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. Empty (the default) keeps it off. Only applies to the built-in server, which restarts when this changes."
 msgstr "1 つ以上の M3U プレイリストのライブ TV チャンネルを IPTV アドオンとして提供します。複数の URL はカンマで区切ります（例: https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8）。空欄（既定）の場合は無効です。内蔵サーバーにのみ適用され、変更するとサーバーが再起動します。"
+
+msgctxt "#30555"
+msgid "Lists"
+msgstr "リスト"
+
+msgctxt "#30556"
+msgid "Ratings"
+msgstr "評価"
+
+msgctxt "#30557"
+msgid "Maintenance"
+msgstr "メンテナンス"
+
+msgctxt "#30558"
+msgid "Sources"
+msgstr "ソース"
+
+msgctxt "#30559"
+msgid "Resume and next episode"
+msgstr "再開と次のエピソード"
+
+msgctxt "#30560"
+msgid "Buffering"
+msgstr "バッファリング"
+
+msgctxt "#30561"
+msgid "Embedded server"
+msgstr "内蔵サーバー"
+
+msgctxt "#30562"
+msgid "Peers"
+msgstr "ピア"
+
+msgctxt "#30563"
+msgid "Privacy"
+msgstr "プライバシー"
+
+msgctxt "#30564"
+msgid "Trackers"
+msgstr "トラッカー"
+
+msgctxt "#30565"
+msgid "Performance"
+msgstr "パフォーマンス"
+
+msgctxt "#30566"
+msgid "Security"
+msgstr "セキュリティ"
+
+msgctxt "#30567"
+msgid "Addresses"
+msgstr "アドレス"
+
+msgctxt "#30568"
+msgid "Live TV"
+msgstr "ライブ TV"
+
+msgctxt "#30569"
+msgid "Torrent indexers"
+msgstr "トレントインデクサー"
+
+msgctxt "#30570"
+msgid "General"
+msgstr "一般"
+
+msgctxt "#30571"
+msgid "Shows the Anime tab on Home, with the anime catalogs of your add-ons."
+msgstr "ホームに「アニメ」タブを表示し、アドオンのアニメカタログを並べます。"
+
+msgctxt "#30572"
+msgid "Hides catalogs, add-ons and titles that look like adult content on Home, in Search and in the add-on catalog."
+msgstr "アダルトコンテンツと思われるカタログ、アドオン、タイトルを、ホーム、検索、アドオンのカタログで非表示にします。"
+
+msgctxt "#30573"
+msgid "Opens Rivulet instead of the Kodi home screen every time Kodi starts."
+msgstr "Kodi の起動のたびに、Kodi のホーム画面の代わりに Rivulet を開きます。"
+
+msgctxt "#30574"
+msgid "Order of the source list: best quality first, largest file first, or most seeders first."
+msgstr "ソース一覧の並び順です。画質の高い順、ファイルサイズの大きい順、シーダー数の多い順から選びます。"
+
+msgctxt "#30575"
+msgid "Hides sources below this resolution. Sources whose resolution is unknown stay in the list."
+msgstr "この解像度未満のソースを非表示にします。解像度が不明なソースは一覧に残ります。"
+
+msgctxt "#30576"
+msgid "Hides sources larger than this, in GB. Sources whose size is unknown stay in the list. 0 shows every size."
+msgstr "このサイズ（GB）を超えるソースを非表示にします。サイズが不明なソースは一覧に残ります。0 ですべてのサイズを表示します。"
+
+msgctxt "#30577"
+msgid "Hides sources recorded in a cinema (CAM, TS, telesync, screener)."
+msgstr "映画館で録画されたソース（CAM、TS、テレシンク、スクリーナー）を非表示にします。"
+
+msgctxt "#30578"
+msgid "Shows only sources your debrid service reports as already cached, which start at once. Sources with no cache information are hidden too."
+msgstr "Debrid サービスがキャッシュ済みと報告したソースだけを表示します。すぐに再生が始まります。キャッシュ情報のないソースも非表示になります。"
+
+msgctxt "#30579"
+msgid "When you stopped part way through, asks whether to continue from there. Off always starts from the beginning."
+msgstr "途中で止めた場合に、そこから再開するかどうかを確認します。オフにすると常に最初から再生します。"
+
+msgctxt "#30580"
+msgid "When an episode ends, counts down and plays the next one."
+msgstr "エピソードが終わると、カウントダウンして次のエピソードを再生します。"
+
+msgctxt "#30581"
+msgid "Length of the countdown before the next episode starts, in seconds."
+msgstr "次のエピソードが始まるまでのカウントダウンの長さ（秒）です。"
+
+msgctxt "#30582"
+msgid "Downloads the start of a torrent before playback begins, so the video does not stall straight away."
+msgstr "再生開始前にトレントの先頭部分をダウンロードし、映像がすぐに止まらないようにします。"
+
+msgctxt "#30583"
+msgid "How much of a torrent to download before playback begins, in MB. More rides out a slow swarm better but takes longer to start."
+msgstr "再生開始前にダウンロードするトレントの量（MB）です。大きいほど低速なスウォームに強くなりますが、開始が遅くなります。"
+
+msgctxt "#30584"
+msgid "Copies Rivulet's recommended network timeouts into Kodi's advancedsettings.xml, plus a larger video cache on Kodi 19 and 20. Never replaces an existing file. Restart Kodi afterwards."
+msgstr "Rivulet 推奨のネットワークタイムアウトを Kodi の advancedsettings.xml にコピーします。Kodi 19 と 20 ではより大きなビデオキャッシュも設定します。既存のファイルは置き換えません。完了後に Kodi を再起動してください。"
+
+msgctxt "#30585"
+msgid "Adds the subtitles your subtitle add-ons find for the video."
+msgstr "アドオンが見つけた字幕を動画に追加します。"
+
+msgctxt "#30586"
+msgid "Language of the subtitles to add, as a 2- or 3-letter ISO 639 code, for example en, it, pt or eng."
+msgstr "追加する字幕の言語を、2 文字または 3 文字の ISO 639 コードで指定します。例: en、it、pt、eng。"
+
+msgctxt "#30587"
+msgid "Signs in with your Stremio account, to use the add-ons, library and progress saved there."
+msgstr "Stremio アカウントでサインインし、そこに保存されたアドオン、ライブラリ、再生進捗を利用します。"
+
+msgctxt "#30588"
+msgid "Signs out of your Stremio account on this device. Your add-ons stay installed."
+msgstr "このデバイスで Stremio アカウントからサインアウトします。アドオンはインストールされたままです。"
+
+msgctxt "#30589"
+msgid "Saves the add-ons installed here to your Stremio account now."
+msgstr "ここにインストールされているアドオンを今すぐ Stremio アカウントに保存します。"
+
+msgctxt "#30590"
+msgid "Saves where you stopped to your Stremio account and picks up progress from your other Stremio apps. Needs a signed-in account."
+msgstr "再生を止めた位置を Stremio アカウントに保存し、他の Stremio アプリの進捗を取り込みます。サインイン済みのアカウントが必要です。"
+
+msgctxt "#30591"
+msgid "Starts Rivulet's own streaming server with Kodi. Turn it off to use only a server already running at the server URL. The server settings below apply only to the embedded server."
+msgstr "Kodi と一緒に Rivulet 独自のストリーミングサーバーを起動します。オフにすると、サーバー URL で既に動作しているサーバーだけを使います。以下のサーバー設定は内蔵サーバーにのみ適用されます。"
+
+msgctxt "#30592"
+msgid "Address of the streaming server. The embedded server listens on this port; when a server already answers here, Rivulet uses that one instead."
+msgstr "ストリーミングサーバーのアドレスです。内蔵サーバーはこのポートで待ち受けます。既にここで応答するサーバーがある場合は、Rivulet はそちらを使います。"
+
+msgctxt "#30593"
+msgid "A rivulet-engine program of your own to run. Empty uses the one Rivulet downloads."
+msgstr "実行する独自の rivulet-engine プログラムです。空のままにすると、Rivulet がダウンロードしたものを使います。"
+
+msgctxt "#30594"
+msgid "Downloads the rivulet-engine version this Rivulet release needs and installs it."
+msgstr "この Rivulet のリリースに必要な rivulet-engine のバージョンをダウンロードしてインストールします。"
+
+msgctxt "#30595"
+msgid "Port other peers connect to. 0 picks a free port at every start. Set a fixed port to forward it on your router and reach more peers."
+msgstr "他のピアが接続するポートです。0 にすると起動のたびに空きポートを選びます。固定ポートを設定してルーターで転送すると、より多くのピアに接続できます。"
+
+msgctxt "#30596"
+msgid "Peer connections per torrent. 0 uses the built-in default (50). Fewer saves memory on small devices."
+msgstr "トレントごとのピア接続数です。0 は組み込みの既定値（50）を使います。小型デバイスでは少なくするとメモリを節約できます。"
+
+msgctxt "#30597"
+msgid "Seconds a torrent stays loaded after you stop watching, so resuming starts at once. 0 keeps it loaded."
+msgstr "視聴を止めた後もトレントを読み込んだままにする秒数です。すぐに再開できます。0 にするとずっと読み込んだままにします。"
+
+msgctxt "#30598"
+msgid "Prefer encrypts peer connections when the peer can. Require drops peers that cannot, which can get past provider throttling. Disable never encrypts."
+msgstr "「優先」は、相手が対応していればピア接続を暗号化します。「必須」は暗号化できないピアを切断し、プロバイダーによる速度制限を回避できることがあります。「無効」は一切暗号化しません。"
+
+msgctxt "#30599"
+msgid "Hides the client name and version from other peers."
+msgstr "クライアント名とバージョンを他のピアに表示しません。"
+
+msgctxt "#30600"
+msgid "Finds peers only through DHT and peer exchange, never contacting trackers."
+msgstr "DHT とピア交換だけでピアを探し、トラッカーには接続しません。"
+
+msgctxt "#30601"
+msgid "SOCKS5 or HTTP proxy for trackers and torrent metadata, for example socks5://127.0.0.1:9050. Peer connections stay direct."
+msgstr "トラッカーとトレントのメタデータ用の SOCKS5 または HTTP プロキシです。例: socks5://127.0.0.1:9050。ピア接続は直接のままです。"
+
+msgctxt "#30602"
+msgid "Skips WebTorrent (WebRTC) peers, which saves a lot of memory and processor time."
+msgstr "WebTorrent（WebRTC）のピアを使用しません。メモリとプロセッサー時間を大幅に節約できます。"
+
+msgctxt "#30603"
+msgid "How many of the fastest public trackers each torrent uses. 0 uses the default (5)."
+msgstr "各トレントで使用する、最速の公開トラッカーの数です。0 は既定値（5）を使います。"
+
+msgctxt "#30604"
+msgid "Address of the public tracker list to download. Empty uses the built-in source; off skips the download."
+msgstr "ダウンロードする公開トラッカーリストのアドレスです。空のままにすると組み込みのソースを使い、off にするとダウンロードを行いません。"
+
+msgctxt "#30605"
+msgid "Extra DHT nodes to start from, as host:port separated by commas, for networks that block the default ones."
+msgstr "デフォルトのノードをブロックするネットワーク向けに、開始点となる追加の DHT ノードを host:port 形式でカンマ区切りで指定します。"
+
+msgctxt "#30606"
+msgid "Soft memory ceiling for the streaming server, in MB. The server frees memory harder as it gets close. 0 sets no limit."
+msgstr "ストリーミングサーバーのメモリ使用量のソフトな上限（MB）です。上限に近づくと、サーバーはより積極的にメモリを解放します。0 は無制限です。"
+
+msgctxt "#30607"
+msgid "How many upcoming segments of a proxied HLS stream to fetch ahead. 0 turns it off."
+msgstr "プロキシ経由の HLS ストリームで、先読みするセグメントの数です。0 でオフになります。"
+
+msgctxt "#30608"
+msgid "How long proxied stream segments stay cached, in seconds. 0 turns the cache off."
+msgstr "プロキシ経由のストリームセグメントをキャッシュしておく秒数です。0 でキャッシュがオフになります。"
+
+msgctxt "#30609"
+msgid "Password that users of the server's stream proxy must send. Set one if other devices can reach the server."
+msgstr "サーバーのストリームプロキシの利用者が送信する必要があるパスワードです。他のデバイスからサーバーにアクセスできる場合は設定してください。"
+
+msgctxt "#30610"
+msgid "Addresses allowed to use the stream proxy, as CIDR ranges separated by commas, for example 192.168.1.0/24. Empty allows every address."
+msgstr "ストリームプロキシの利用を許可するアドレスを、CIDR 範囲でカンマ区切りに指定します。例: 192.168.1.0/24。空のままにすると、すべてのアドレスを許可します。"
+
+msgctxt "#30611"
+msgid "Public address of this server, written into proxied playlists. Needed only behind a reverse proxy."
+msgstr "このサーバーの公開アドレスで、プロキシ経由のプレイリストに書き込まれます。リバースプロキシの背後にある場合にのみ必要です。"
+
+msgctxt "#30612"
+msgid "Proxy the stream proxy fetches through, for example socks5://host:1080."
+msgstr "ストリームプロキシが経由するプロキシです。例: socks5://host:1080。"
+
+msgctxt "#30613"
+msgid "Key that signs stream proxy links. Empty generates one and keeps it."
+msgstr "ストリームプロキシのリンクに署名するキーです。空のままにすると、自動生成して保存します。"
+
+msgctxt "#30614"
+msgid "Lets the server cast to DLNA devices on your network."
+msgstr "サーバーからネットワーク上の DLNA デバイスへキャストできるようにします。"
+
+msgctxt "#30615"
+msgid "Looks up titles and posters on IMDb for the server's local files add-on."
+msgstr "サーバーのローカルファイルアドオン用に、IMDb でタイトルとポスターを検索します。"
+
+msgctxt "#30616"
+msgid "Cinemeta-compatible add-on the indexers use to look up titles. Empty uses Cinemeta; off turns the lookup off."
+msgstr "インデクサーがタイトルの検索に使う Cinemeta 互換のアドオンです。空のままにすると Cinemeta を使い、off にすると検索をオフにします。"
+
+msgctxt "#30617"
+msgid "GraphQL address of your own Bitmagnet, for example http://localhost:3333/graphql, for the server's Bitmagnet add-on."
+msgstr "サーバーの Bitmagnet アドオン用の、お使いの Bitmagnet の GraphQL アドレスです。例: http://localhost:3333/graphql。"
+
+msgctxt "#30618"
+msgid "Torznab API address of an indexer such as Prowlarr or Jackett, for the server's Torznab add-on."
+msgstr "サーバーの Torznab アドオン用の、Prowlarr や Jackett などのインデクサーの Torznab API アドレスです。"
+
+msgctxt "#30619"
+msgid "API key of that Torznab indexer. Prowlarr and Jackett need one."
+msgstr "その Torznab インデクサーの API キーです。Prowlarr と Jackett では必須です。"
+
+msgctxt "#30620"
+msgid "Page the server's own address opens in a web browser. Empty uses web.stremio.com."
+msgstr "サーバー自身のアドレスを Web ブラウザーで開いたときに表示するページです。空のままにすると web.stremio.com を使います。"
+
+msgctxt "#30621"
+msgid "Port of the server's HTTPS listener, for Stremio web apps. 0 turns HTTPS off."
+msgstr "Stremio Web アプリ向けの、サーバーの HTTPS リスナーのポートです。0 で HTTPS をオフにします。"
+
+msgctxt "#30622"
+msgid "host:port where the server publishes profiling data, for example 127.0.0.1:6060. For debugging only; empty turns it off."
+msgstr "サーバーがプロファイリングデータを公開する host:port です。例: 127.0.0.1:6060。デバッグ専用です。空のままにするとオフになります。"
+
+msgctxt "#30623"
+msgid "Stremio auth key the server uses to get a trusted HTTPS certificate. Empty reuses a saved one."
+msgstr "サーバーが信頼される HTTPS 証明書を取得するために使う Stremio 認証キーです。空のままにすると保存済みのものを再利用します。"
+
+msgctxt "#30624"
+msgid "Offers the Stream4Me channels as a Rivulet add-on."
+msgstr "Stream4Me のチャンネルを Rivulet のアドオンとして提供します。"
+
+msgctxt "#30625"
+msgid "Local port the Stream4Me bridge listens on."
+msgstr "Stream4Me ブリッジが待ち受けるローカルポートです。"
+
+msgctxt "#30626"
+msgid "Stream4Me channels to offer, separated by commas. Empty offers every active channel."
+msgstr "提供する Stream4Me のチャンネルをカンマ区切りで指定します。空のままにすると、有効なすべてのチャンネルを提供します。"
+
+msgctxt "#30627"
+msgid "advancedsettings.xml installed - restart Kodi to apply. Set the video cache in Settings > Services > Caching."
+msgstr "advancedsettings.xml をインストールしました。反映するには Kodi を再起動してください。ビデオキャッシュは 設定 > サービス > キャッシュ で設定します。"

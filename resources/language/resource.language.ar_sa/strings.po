@@ -1287,3 +1287,295 @@ msgstr "البث التلفزيوني والرياضة والأحداث المب
 msgctxt "#30554"
 msgid "Live TV channels from one or more M3U playlists, offered as an IPTV add-on. Separate several URLs with commas, e.g. https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. Empty (the default) keeps it off. Only applies to the built-in server, which restarts when this changes."
 msgstr "قنوات تلفزيون مباشر من قائمة تشغيل M3U واحدة أو أكثر، تظهر كإضافة IPTV. افصل بين الروابط بفواصل، مثل https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. الفارغ (الافتراضي) يعني الإيقاف. يسري على الخادم المدمج فقط، ويُعاد تشغيله عند التغيير."
+
+msgctxt "#30555"
+msgid "Lists"
+msgstr "القوائم"
+
+msgctxt "#30556"
+msgid "Ratings"
+msgstr "التقييمات"
+
+msgctxt "#30557"
+msgid "Maintenance"
+msgstr "الصيانة"
+
+msgctxt "#30558"
+msgid "Sources"
+msgstr "المصادر"
+
+msgctxt "#30559"
+msgid "Resume and next episode"
+msgstr "الاستئناف والحلقة التالية"
+
+msgctxt "#30560"
+msgid "Buffering"
+msgstr "التخزين المؤقت للتشغيل"
+
+msgctxt "#30561"
+msgid "Embedded server"
+msgstr "الخادم المدمج"
+
+msgctxt "#30562"
+msgid "Peers"
+msgstr "النظراء"
+
+msgctxt "#30563"
+msgid "Privacy"
+msgstr "الخصوصية"
+
+msgctxt "#30564"
+msgid "Trackers"
+msgstr "المتتبعات"
+
+msgctxt "#30565"
+msgid "Performance"
+msgstr "الأداء"
+
+msgctxt "#30566"
+msgid "Security"
+msgstr "الأمان"
+
+msgctxt "#30567"
+msgid "Addresses"
+msgstr "العناوين"
+
+msgctxt "#30568"
+msgid "Live TV"
+msgstr "البث المباشر"
+
+msgctxt "#30569"
+msgid "Torrent indexers"
+msgstr "مفهرسات التورنت"
+
+msgctxt "#30570"
+msgid "General"
+msgstr "عام"
+
+msgctxt "#30571"
+msgid "Shows the Anime tab on Home, with the anime catalogs of your add-ons."
+msgstr "يعرض تبويب الأنمي في الرئيسية مع كتالوجات الأنمي من إضافاتك."
+
+msgctxt "#30572"
+msgid "Hides catalogs, add-ons and titles that look like adult content on Home, in Search and in the add-on catalog."
+msgstr "يخفي الكتالوجات والإضافات والعناوين التي تبدو محتوى للبالغين في الرئيسية وفي البحث وفي كتالوج الإضافة."
+
+msgctxt "#30573"
+msgid "Opens Rivulet instead of the Kodi home screen every time Kodi starts."
+msgstr "يفتح Rivulet بدلًا من الشاشة الرئيسية لـ Kodi في كل مرة يبدأ فيها Kodi."
+
+msgctxt "#30574"
+msgid "Order of the source list: best quality first, largest file first, or most seeders first."
+msgstr "ترتيب قائمة المصادر: الأفضل جودة أولًا، أو الأكبر حجمًا أولًا، أو الأكثر موزعين (Seeders) أولًا."
+
+msgctxt "#30575"
+msgid "Hides sources below this resolution. Sources whose resolution is unknown stay in the list."
+msgstr "يخفي المصادر ذات الدقة الأقل من هذه. تبقى المصادر ذات الدقة المجهولة في القائمة."
+
+msgctxt "#30576"
+msgid "Hides sources larger than this, in GB. Sources whose size is unknown stay in the list. 0 shows every size."
+msgstr "يخفي المصادر الأكبر من هذا الحجم بالجيجابايت. تبقى المصادر ذات الحجم المجهول في القائمة. القيمة 0 تعرض كل الأحجام."
+
+msgctxt "#30577"
+msgid "Hides sources recorded in a cinema (CAM, TS, telesync, screener)."
+msgstr "يخفي المصادر المسجلة في السينما (CAM وTS وtelesync وscreener)."
+
+msgctxt "#30578"
+msgid "Shows only sources your debrid service reports as already cached, which start at once. Sources with no cache information are hidden too."
+msgstr "يعرض فقط المصادر التي تبلغ خدمة debrid لديك أنها مخزنة مؤقتًا بالفعل وتبدأ فورًا. تُخفى أيضًا المصادر التي لا تتوفر عنها معلومات التخزين المؤقت."
+
+msgctxt "#30579"
+msgid "When you stopped part way through, asks whether to continue from there. Off always starts from the beginning."
+msgstr "عند التوقف في منتصف المحتوى، يسأل هل تريد المتابعة من هناك. عند الإيقاف يبدأ دائمًا من البداية."
+
+msgctxt "#30580"
+msgid "When an episode ends, counts down and plays the next one."
+msgstr "عند انتهاء الحلقة، يبدأ عدًّا تنازليًا ثم يشغّل الحلقة التالية."
+
+msgctxt "#30581"
+msgid "Length of the countdown before the next episode starts, in seconds."
+msgstr "مدة العد التنازلي قبل بدء الحلقة التالية، بالثواني."
+
+msgctxt "#30582"
+msgid "Downloads the start of a torrent before playback begins, so the video does not stall straight away."
+msgstr "ينزّل بداية التورنت قبل بدء التشغيل حتى لا يتوقف الفيديو فورًا."
+
+msgctxt "#30583"
+msgid "How much of a torrent to download before playback begins, in MB. More rides out a slow swarm better but takes longer to start."
+msgstr "مقدار ما يُنزَّل من التورنت قبل بدء التشغيل، بالميغابايت. الزيادة تتحمل بطء السرب أفضل لكن البدء يستغرق وقتًا أطول."
+
+msgctxt "#30584"
+msgid "Copies Rivulet's recommended network timeouts into Kodi's advancedsettings.xml, plus a larger video cache on Kodi 19 and 20. Never replaces an existing file. Restart Kodi afterwards."
+msgstr "ينسخ مهلات الشبكة التي يوصي بها Rivulet إلى advancedsettings.xml في Kodi، مع ذاكرة فيديو مؤقتة أكبر في Kodi 19 و20. لا يستبدل ملفًا موجودًا أبدًا. أعد تشغيل Kodi بعد ذلك."
+
+msgctxt "#30585"
+msgid "Adds the subtitles your subtitle add-ons find for the video."
+msgstr "يضيف الترجمات التي تجدها إضافات الترجمة لديك للفيديو."
+
+msgctxt "#30586"
+msgid "Language of the subtitles to add, as a 2- or 3-letter ISO 639 code, for example en, it, pt or eng."
+msgstr "لغة الترجمات المراد إضافتها، كرمز ISO 639 من حرفين أو ثلاثة، مثل en وit وpt وeng."
+
+msgctxt "#30587"
+msgid "Signs in with your Stremio account, to use the add-ons, library and progress saved there."
+msgstr "يسجّل الدخول إلى حساب Stremio لاستخدام الإضافات والمكتبة والتقدم المحفوظة هناك."
+
+msgctxt "#30588"
+msgid "Signs out of your Stremio account on this device. Your add-ons stay installed."
+msgstr "يسجّل الخروج من حساب Stremio على هذا الجهاز. تبقى إضافاتك مثبتة."
+
+msgctxt "#30589"
+msgid "Saves the add-ons installed here to your Stremio account now."
+msgstr "يحفظ الإضافات المثبتة هنا في حساب Stremio الآن."
+
+msgctxt "#30590"
+msgid "Saves where you stopped to your Stremio account and picks up progress from your other Stremio apps. Needs a signed-in account."
+msgstr "يحفظ موضع توقفك في حساب Stremio ويجلب التقدم من تطبيقات Stremio الأخرى لديك. يتطلب حسابًا مسجّل الدخول."
+
+msgctxt "#30591"
+msgid "Starts Rivulet's own streaming server with Kodi. Turn it off to use only a server already running at the server URL. The server settings below apply only to the embedded server."
+msgstr "يشغّل خادم البث الخاص بـ Rivulet مع Kodi. أوقفه لاستخدام خادم يعمل بالفعل على عنوان الخادم فقط. تسري إعدادات الخادم أدناه على الخادم المدمج فقط."
+
+msgctxt "#30592"
+msgid "Address of the streaming server. The embedded server listens on this port; when a server already answers here, Rivulet uses that one instead."
+msgstr "عنوان خادم البث. يستمع الخادم المدمج على هذا المنفذ؛ وإذا كان خادم يستجيب هنا بالفعل، يستخدمه Rivulet بدلًا منه."
+
+msgctxt "#30593"
+msgid "A rivulet-engine program of your own to run. Empty uses the one Rivulet downloads."
+msgstr "برنامج rivulet-engine خاص بك لتشغيله. الفارغ يستخدم البرنامج الذي ينزّله Rivulet."
+
+msgctxt "#30594"
+msgid "Downloads the rivulet-engine version this Rivulet release needs and installs it."
+msgstr "ينزّل إصدار rivulet-engine الذي يحتاجه هذا الإصدار من Rivulet ويثبّته."
+
+msgctxt "#30595"
+msgid "Port other peers connect to. 0 picks a free port at every start. Set a fixed port to forward it on your router and reach more peers."
+msgstr "المنفذ الذي يتصل عليه النظراء الآخرون. القيمة 0 تختار منفذًا حرًّا عند كل بدء. حدّد منفذًا ثابتًا ووجّهه في الراوتر للوصول إلى نظراء أكثر."
+
+msgctxt "#30596"
+msgid "Peer connections per torrent. 0 uses the built-in default (50). Fewer saves memory on small devices."
+msgstr "عدد اتصالات النظراء لكل تورنت. القيمة 0 تستخدم الافتراضي المدمج (50). الأقل يوفر الذاكرة في الأجهزة الصغيرة."
+
+msgctxt "#30597"
+msgid "Seconds a torrent stays loaded after you stop watching, so resuming starts at once. 0 keeps it loaded."
+msgstr "عدد الثواني التي يبقى فيها التورنت محمّلًا بعد التوقف عن المشاهدة ليبدأ الاستئناف فورًا. القيمة 0 تبقيه محمّلًا."
+
+msgctxt "#30598"
+msgid "Prefer encrypts peer connections when the peer can. Require drops peers that cannot, which can get past provider throttling. Disable never encrypts."
+msgstr "تفضيل يشفّر اتصالات النظراء عندما يدعم النظير ذلك. إلزامي يتجاهل النظراء الذين لا يدعمونه، وقد يتجاوز ذلك تقييد السرعة من المزوّد. تعطيل لا يشفّر أبدًا."
+
+msgctxt "#30599"
+msgid "Hides the client name and version from other peers."
+msgstr "يخفي اسم العميل وإصداره عن النظراء الآخرين."
+
+msgctxt "#30600"
+msgid "Finds peers only through DHT and peer exchange, never contacting trackers."
+msgstr "يجد النظراء عبر DHT وتبادل النظراء فقط، دون الاتصال بالمتتبعات أبدًا."
+
+msgctxt "#30601"
+msgid "SOCKS5 or HTTP proxy for trackers and torrent metadata, for example socks5://127.0.0.1:9050. Peer connections stay direct."
+msgstr "وكيل SOCKS5 أو HTTP للمتتبعات والبيانات الوصفية للتورنت، مثل socks5://127.0.0.1:9050. تبقى اتصالات النظراء مباشرة."
+
+msgctxt "#30602"
+msgid "Skips WebTorrent (WebRTC) peers, which saves a lot of memory and processor time."
+msgstr "يتخطى نظراء WebTorrent (WebRTC)، مما يوفر قدرًا كبيرًا من الذاكرة ووقت المعالج."
+
+msgctxt "#30603"
+msgid "How many of the fastest public trackers each torrent uses. 0 uses the default (5)."
+msgstr "عدد أسرع المتتبعات العامة التي يستخدمها كل تورنت. القيمة 0 تستخدم الافتراضي (5)."
+
+msgctxt "#30604"
+msgid "Address of the public tracker list to download. Empty uses the built-in source; off skips the download."
+msgstr "عنوان قائمة المتتبعات العامة المراد تنزيلها. الفارغ يستخدم المصدر المدمج؛ وoff يتخطى التنزيل."
+
+msgctxt "#30605"
+msgid "Extra DHT nodes to start from, as host:port separated by commas, for networks that block the default ones."
+msgstr "عُقد DHT إضافية للبدء منها، بصيغة host:port مفصولة بفواصل، للشبكات التي تحجب العُقد الافتراضية."
+
+msgctxt "#30606"
+msgid "Soft memory ceiling for the streaming server, in MB. The server frees memory harder as it gets close. 0 sets no limit."
+msgstr "حد ذاكرة مرن لخادم البث، بالميغابايت. يحرّر الخادم الذاكرة بقوة أكبر كلما اقترب منه. القيمة 0 تعني بلا حد."
+
+msgctxt "#30607"
+msgid "How many upcoming segments of a proxied HLS stream to fetch ahead. 0 turns it off."
+msgstr "عدد المقاطع القادمة من بث HLS عبر الوكيل التي تُجلب مسبقًا. القيمة 0 تعطّله."
+
+msgctxt "#30608"
+msgid "How long proxied stream segments stay cached, in seconds. 0 turns the cache off."
+msgstr "مدة بقاء مقاطع البث عبر الوكيل في الذاكرة المؤقتة، بالثواني. القيمة 0 تعطّل الذاكرة المؤقتة."
+
+msgctxt "#30609"
+msgid "Password that users of the server's stream proxy must send. Set one if other devices can reach the server."
+msgstr "كلمة المرور التي يجب أن يرسلها مستخدمو وكيل البث في الخادم. عيّن واحدة إذا كان بإمكان أجهزة أخرى الوصول إلى الخادم."
+
+msgctxt "#30610"
+msgid "Addresses allowed to use the stream proxy, as CIDR ranges separated by commas, for example 192.168.1.0/24. Empty allows every address."
+msgstr "العناوين المسموح لها باستخدام وكيل البث، كنطاقات CIDR مفصولة بفواصل، مثل 192.168.1.0/24. الفارغ يسمح بكل العناوين."
+
+msgctxt "#30611"
+msgid "Public address of this server, written into proxied playlists. Needed only behind a reverse proxy."
+msgstr "العنوان العام لهذا الخادم، ويُكتب في قوائم التشغيل عبر الوكيل. مطلوب فقط خلف وكيل عكسي."
+
+msgctxt "#30612"
+msgid "Proxy the stream proxy fetches through, for example socks5://host:1080."
+msgstr "الوكيل الذي يجلب منه وكيل البث، مثل socks5://host:1080."
+
+msgctxt "#30613"
+msgid "Key that signs stream proxy links. Empty generates one and keeps it."
+msgstr "المفتاح الذي يوقّع روابط وكيل البث. الفارغ يولّد مفتاحًا ويحتفظ به."
+
+msgctxt "#30614"
+msgid "Lets the server cast to DLNA devices on your network."
+msgstr "يتيح للخادم البث إلى أجهزة DLNA على شبكتك."
+
+msgctxt "#30615"
+msgid "Looks up titles and posters on IMDb for the server's local files add-on."
+msgstr "يبحث عن العناوين والملصقات في IMDb لإضافة الملفات المحلية في الخادم."
+
+msgctxt "#30616"
+msgid "Cinemeta-compatible add-on the indexers use to look up titles. Empty uses Cinemeta; off turns the lookup off."
+msgstr "إضافة متوافقة مع Cinemeta تستخدمها المفهرسات للبحث عن العناوين. الفارغ يستخدم Cinemeta؛ وoff يعطّل البحث."
+
+msgctxt "#30617"
+msgid "GraphQL address of your own Bitmagnet, for example http://localhost:3333/graphql, for the server's Bitmagnet add-on."
+msgstr "عنوان GraphQL لـ Bitmagnet الخاص بك، مثل http://localhost:3333/graphql، لإضافة Bitmagnet في الخادم."
+
+msgctxt "#30618"
+msgid "Torznab API address of an indexer such as Prowlarr or Jackett, for the server's Torznab add-on."
+msgstr "عنوان Torznab API لمفهرس مثل Prowlarr أو Jackett، لإضافة Torznab في الخادم."
+
+msgctxt "#30619"
+msgid "API key of that Torznab indexer. Prowlarr and Jackett need one."
+msgstr "مفتاح API لمفهرس Torznab هذا. يتطلب Prowlarr وJackett مفتاحًا."
+
+msgctxt "#30620"
+msgid "Page the server's own address opens in a web browser. Empty uses web.stremio.com."
+msgstr "الصفحة التي يفتحها عنوان الخادم نفسه في متصفح الويب. الفارغ يستخدم web.stremio.com."
+
+msgctxt "#30621"
+msgid "Port of the server's HTTPS listener, for Stremio web apps. 0 turns HTTPS off."
+msgstr "منفذ مستمع HTTPS في الخادم، لتطبيقات Stremio على الويب. القيمة 0 توقف HTTPS."
+
+msgctxt "#30622"
+msgid "host:port where the server publishes profiling data, for example 127.0.0.1:6060. For debugging only; empty turns it off."
+msgstr "host:port الذي ينشر الخادم عليه بيانات التحليل، مثل 127.0.0.1:6060. للتصحيح فقط؛ الفارغ يعطّله."
+
+msgctxt "#30623"
+msgid "Stremio auth key the server uses to get a trusted HTTPS certificate. Empty reuses a saved one."
+msgstr "مفتاح مصادقة Stremio الذي يستخدمه الخادم للحصول على شهادة HTTPS موثوقة. الفارغ يعيد استخدام المفتاح المحفوظ."
+
+msgctxt "#30624"
+msgid "Offers the Stream4Me channels as a Rivulet add-on."
+msgstr "يتيح قنوات Stream4Me كإضافة في Rivulet."
+
+msgctxt "#30625"
+msgid "Local port the Stream4Me bridge listens on."
+msgstr "المنفذ المحلي الذي يستمع عليه جسر Stream4Me."
+
+msgctxt "#30626"
+msgid "Stream4Me channels to offer, separated by commas. Empty offers every active channel."
+msgstr "قنوات Stream4Me المراد إتاحتها، مفصولة بفواصل. الفارغ يتيح كل القنوات النشطة."
+
+msgctxt "#30627"
+msgid "advancedsettings.xml installed - restart Kodi to apply. Set the video cache in Settings > Services > Caching."
+msgstr "تم تثبيت advancedsettings.xml - أعد تشغيل Kodi للتطبيق. اضبط ذاكرة الفيديو المؤقتة من الإعدادات > الخدمات > التخزين المؤقت."

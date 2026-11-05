@@ -31,6 +31,8 @@ _TEMPLATE_TEXT = (
 # directory pytest is invoked from.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHIPPED_TEMPLATE_PATH = os.path.join(_REPO_ROOT, 'resources', 'advancedsettings.xml')
+#: The Kodi 21+ template: the same <network> block, no <cache> (ignored there).
+SHIPPED_KODI21_TEMPLATE_PATH = os.path.join(_REPO_ROOT, 'resources', 'advancedsettings_kodi21.xml')
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +334,53 @@ def test_shipped_template_installs_and_is_valid_xml_with_expected_tunables(tmp_p
     assert root.findtext('network/curlclienttimeout') == '30'
     assert root.findtext('network/curllowspeedtime') == '20'
     assert root.findtext('network/curlretries') == '1'
-    assert root.findtext('cache/buffermode') == '1'
+    # buffermode stays Kodi's default (4, network filesystems), which already
+    # caches the http:// streams Rivulet plays; 1 also cached local files.
+    assert root.find('cache/buffermode') is None
     assert root.findtext('cache/memorysize') == '209715200'
     assert root.findtext('cache/readfactor') == '20'
+
+
+def test_kodi21_template_has_the_same_network_block_and_no_cache(tmp_path):
+    """Kodi 21+ ignores <cache> in advancedsettings.xml (it moved to
+    Settings > Services > Caching), so its template drops the block; the
+    network tunables must not drift between the two copies."""
+    import xml.etree.ElementTree as ET
+
+    dest = tmp_path / 'advancedsettings.xml'
+    assert install(SHIPPED_KODI21_TEMPLATE_PATH, str(dest)) == STATUS_INSTALLED
+
+    root = ET.parse(str(dest)).getroot()
+    legacy = ET.parse(SHIPPED_TEMPLATE_PATH).getroot()
+    assert root.tag == 'advancedsettings'
+    assert root.find('cache') is None
+    assert [(e.tag, e.text) for e in root.find('network')] == [
+        (e.tag, e.text) for e in legacy.find('network')
+    ]
+
+
+def test_install_refuses_when_a_shadowing_profile_file_exists(tmp_path):
+    """Kodi reads the active profile's advancedsettings.xml instead of the
+    master profile's: installing beside one would report success for a
+    file Kodi never loads, so that file counts as already installed."""
+    source = tmp_path / 'source.xml'
+    source.write_text(_TEMPLATE_TEXT, encoding='utf-8')
+    dest = tmp_path / 'master' / 'advancedsettings.xml'
+    profile = tmp_path / 'profiles' / 'kids' / 'advancedsettings.xml'
+    profile.parent.mkdir(parents=True)
+    profile.write_text('<advancedsettings/>', encoding='utf-8')
+
+    assert install(str(source), str(dest), shadow_paths=(str(profile),)) == STATUS_EXISTS
+    assert not dest.exists()
+    assert profile.read_text(encoding='utf-8') == '<advancedsettings/>'
+
+
+def test_install_ignores_an_absent_shadow_path(tmp_path):
+    source = tmp_path / 'source.xml'
+    source.write_text(_TEMPLATE_TEXT, encoding='utf-8')
+    dest = tmp_path / 'advancedsettings.xml'
+
+    status = install(str(source), str(dest), shadow_paths=(str(tmp_path / 'profile' / 'advancedsettings.xml'),))
+
+    assert status == STATUS_INSTALLED
+    assert dest.read_text(encoding='utf-8') == _TEMPLATE_TEXT

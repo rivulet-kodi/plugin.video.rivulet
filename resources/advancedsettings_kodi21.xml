@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Installed on Kodi 21 and later instead of advancedsettings.xml:
+     they ignore its <cache> tags, the video cache lives in
+     Settings > Services > Caching there. Keep this <network> block
+     identical to that file's: tests/test_advancedsettings.py checks. -->
+<advancedsettings>
+    <network>
+        <!-- curlclienttimeout is CURLOPT_CONNECTTIMEOUT plus, on some
+             handles, CURLOPT_TIMEOUT (xbmc/filesystem/CurlFile.cpp). Kept at
+             Kodi's own default: raising it bought nothing against a
+             streaming server on 127.0.0.1, where connecting is instant. -->
+        <curlclienttimeout>30</curlclienttimeout>
+        <!-- THIS is the one that decides how long stopping a stalled stream
+             takes. Kodi's playback reader is CFileCache, and its reads are
+             governed by CURLOPT_LOW_SPEED_TIME (with LOW_SPEED_LIMIT=1),
+             not by curlclienttimeout - so a stream sitting at 0 bytes/s
+             waits out this whole window, and CVideoPlayer::CloseFile()
+             cannot finish until that thread unblocks.
+
+             Measured on a live stall with curlclienttimeout already lowered
+             to 30: stop took 57s, and the curl retry-to-timeout interval was
+             exactly 60.000s - i.e. this setting, not the other one. Back to
+             Kodi's default of 20, which still rides out a recovering stream
+             (the same log shows one recovering across a 16s partial-file
+             gap, which a shorter window would have killed) while cutting the
+             teardown wait to roughly a third. An add-on cannot interrupt
+             Kodi's cache thread, so this timeout IS the only lever. -->
+        <curllowspeedtime>20</curllowspeedtime>
+        <!-- One retry still absorbs a transient blip - the same log shows
+             two partial-file reconnects that recovered mid-playback - while
+             halving the worst case versus Kodi's default of 2. -->
+        <curlretries>1</curlretries>
+    </network>
+</advancedsettings>

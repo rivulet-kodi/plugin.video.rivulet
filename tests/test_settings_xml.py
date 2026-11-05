@@ -84,3 +84,94 @@ def test_server_url_is_reachable_without_entering_a_text_field_first():
         "enters text-input mode as soon as the settings dialog opens" % owning[0]
     )
     assert _control_type(first) != "edit"
+
+
+def _settings():
+    return list(ET.parse(SETTINGS_XML).getroot().iter("setting"))
+
+
+def _shown(setting):
+    """Built into the dialog: not `<visible>false</visible>`, not level 4."""
+    return setting.findtext("visible") != "false" and setting.findtext("level") != "4"
+
+
+def test_help_is_an_attribute_never_a_child_element():
+    """Kodi reads `help` only as an attribute (ISetting::Deserialize, Kodi
+    19-22); a `<help>` child is silently ignored, which is how five
+    translated help texts never showed. Every setting the dialog builds
+    needs one, or its description pane stays blank."""
+    root = ET.parse(SETTINGS_XML).getroot()
+    assert root.find(".//setting/help") is None
+    missing = [s.get("id") for s in _settings() if _shown(s) and not s.get("help")]
+    assert missing == []
+
+
+def test_integer_settings_carry_both_bounds():
+    """Kodi enforces an integer's range only when minimum != maximum (both
+    default 0), so a lone `<minimum>` validates nothing and the engine
+    received whatever was typed, e.g. port 70000."""
+    loose = [s.get("id") for s in _settings()
+             if s.get("type") == "integer"
+             and (s.findtext("constraints/minimum") is None or s.findtext("constraints/maximum") is None)]
+    assert loose == []
+
+
+@pytest.mark.parametrize("setting_id", ["bt_listen_port", "https_port", "s4me_port"])
+def test_ports_stay_within_the_tcp_range(setting_id):
+    setting = ET.parse(SETTINGS_XML).getroot().find(".//setting[@id='%s']" % setting_id)
+    assert int(setting.findtext("constraints/maximum")) == 65535
+    assert int(setting.findtext("constraints/minimum")) in (0, 1)
+
+
+def test_dependencies_name_settings_that_exist():
+    """A condition on an unknown id evaluates false in Kodi, so a typo
+    silently disables or hides the setting for everyone."""
+    ids = {s.get("id") for s in _settings()}
+    refs = set()
+    for node in ET.parse(SETTINGS_XML).getroot().iter():
+        if node.tag in ("dependency", "condition") and node.get("setting"):
+            refs.add(node.get("setting"))
+    assert refs and refs <= ids, sorted(refs - ids)
+
+
+def test_embedded_server_settings_follow_server_enable():
+    """Engine settings reach only the embedded server, as environment
+    variables; with it off they are greyed out. server_url stays live,
+    since it is how an external server is reached, and bt_keep_torrents
+    stays live, since the player honours it on an external server."""
+    from lib.service_runner import EXTRA_ENV_SETTINGS
+
+    root = ET.parse(SETTINGS_XML).getroot()
+
+    def enabled_by_server(setting):
+        for dep in setting.iter("dependency"):
+            if dep.get("type") != "enable":
+                continue
+            if dep.get("setting") == "server_enable" and dep.text == "true":
+                return True
+            if any(c.get("setting") == "server_enable" and c.text == "true" for c in dep.iter("condition")):
+                return True
+        return False
+
+    for setting_id, _env, _kind in EXTRA_ENV_SETTINGS:
+        assert enabled_by_server(root.find(".//setting[@id='%s']" % setting_id)), setting_id
+    for setting_id in ("server_enable", "server_url", "bt_keep_torrents"):
+        assert not enabled_by_server(root.find(".//setting[@id='%s']" % setting_id)), setting_id
+
+
+@pytest.mark.parametrize("setting_id", [
+    "ratings_omdb_key", "ratings_mdblist_key", "proxy_password", "proxy_secret",
+    "torznab_apikey", "cert_authkey",
+])
+def test_secrets_are_masked_in_the_dialog(setting_id):
+    setting = ET.parse(SETTINGS_XML).getroot().find(".//setting[@id='%s']" % setting_id)
+    assert setting.findtext("control/hidden") == "true"
+
+
+@pytest.mark.parametrize("setting_id", ["ratings_pair_omdb", "ratings_pair_mdblist"])
+def test_key_pairing_closes_settings_before_it_writes(setting_id):
+    """While the add-on settings dialog is open, setSetting() lands in the
+    dialog's memory and Back discards it; `<close>` saves and closes the
+    dialog first, so the key the phone sends reaches disk."""
+    setting = ET.parse(SETTINGS_XML).getroot().find(".//setting[@id='%s']" % setting_id)
+    assert setting.findtext("control/close") == "true"

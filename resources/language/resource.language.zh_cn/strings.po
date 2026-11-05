@@ -1287,3 +1287,295 @@ msgstr "来自插件的直播电视、体育和赛事"
 msgctxt "#30554"
 msgid "Live TV channels from one or more M3U playlists, offered as an IPTV add-on. Separate several URLs with commas, e.g. https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. Empty (the default) keeps it off. Only applies to the built-in server, which restarts when this changes."
 msgstr "以 IPTV 插件形式提供一个或多个 M3U 播放列表中的直播电视频道。多个 URL 用逗号分隔，例如 https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8。留空（默认）表示关闭。仅适用于内置服务器，更改后服务器会重新启动。"
+
+msgctxt "#30555"
+msgid "Lists"
+msgstr "列表"
+
+msgctxt "#30556"
+msgid "Ratings"
+msgstr "评分"
+
+msgctxt "#30557"
+msgid "Maintenance"
+msgstr "维护"
+
+msgctxt "#30558"
+msgid "Sources"
+msgstr "来源"
+
+msgctxt "#30559"
+msgid "Resume and next episode"
+msgstr "续播与下一集"
+
+msgctxt "#30560"
+msgid "Buffering"
+msgstr "缓冲"
+
+msgctxt "#30561"
+msgid "Embedded server"
+msgstr "内置服务器"
+
+msgctxt "#30562"
+msgid "Peers"
+msgstr "对等节点"
+
+msgctxt "#30563"
+msgid "Privacy"
+msgstr "隐私"
+
+msgctxt "#30564"
+msgid "Trackers"
+msgstr "Tracker"
+
+msgctxt "#30565"
+msgid "Performance"
+msgstr "性能"
+
+msgctxt "#30566"
+msgid "Security"
+msgstr "安全"
+
+msgctxt "#30567"
+msgid "Addresses"
+msgstr "地址"
+
+msgctxt "#30568"
+msgid "Live TV"
+msgstr "直播电视"
+
+msgctxt "#30569"
+msgid "Torrent indexers"
+msgstr "种子索引器"
+
+msgctxt "#30570"
+msgid "General"
+msgstr "常规"
+
+msgctxt "#30571"
+msgid "Shows the Anime tab on Home, with the anime catalogs of your add-ons."
+msgstr "在主页显示“动漫”标签页，内容为你的插件提供的动漫目录。"
+
+msgctxt "#30572"
+msgid "Hides catalogs, add-ons and titles that look like adult content on Home, in Search and in the add-on catalog."
+msgstr "在主页、搜索和插件目录中隐藏疑似成人内容的目录、插件和标题。"
+
+msgctxt "#30573"
+msgid "Opens Rivulet instead of the Kodi home screen every time Kodi starts."
+msgstr "每次 Kodi 启动时打开 Rivulet，而不是 Kodi 主屏幕。"
+
+msgctxt "#30574"
+msgid "Order of the source list: best quality first, largest file first, or most seeders first."
+msgstr "来源列表的排序方式：画质最高优先、文件最大优先或做种者最多优先。"
+
+msgctxt "#30575"
+msgid "Hides sources below this resolution. Sources whose resolution is unknown stay in the list."
+msgstr "隐藏低于此分辨率的来源。分辨率未知的来源会保留在列表中。"
+
+msgctxt "#30576"
+msgid "Hides sources larger than this, in GB. Sources whose size is unknown stay in the list. 0 shows every size."
+msgstr "隐藏大于此大小（GB）的来源。大小未知的来源会保留在列表中。0 表示显示所有大小。"
+
+msgctxt "#30577"
+msgid "Hides sources recorded in a cinema (CAM, TS, telesync, screener)."
+msgstr "隐藏在影院中录制的来源（CAM、TS、telesync、screener）。"
+
+msgctxt "#30578"
+msgid "Shows only sources your debrid service reports as already cached, which start at once. Sources with no cache information are hidden too."
+msgstr "仅显示你的 Debrid 服务报告为已缓存的来源，可立即开始播放。没有缓存信息的来源也会被隐藏。"
+
+msgctxt "#30579"
+msgid "When you stopped part way through, asks whether to continue from there. Off always starts from the beginning."
+msgstr "当你中途停止播放时，询问是否从该处继续。关闭则始终从头开始。"
+
+msgctxt "#30580"
+msgid "When an episode ends, counts down and plays the next one."
+msgstr "一集播放结束后，倒计时并自动播放下一集。"
+
+msgctxt "#30581"
+msgid "Length of the countdown before the next episode starts, in seconds."
+msgstr "下一集开始前的倒计时时长，单位为秒。"
+
+msgctxt "#30582"
+msgid "Downloads the start of a torrent before playback begins, so the video does not stall straight away."
+msgstr "在开始播放前先下载种子的开头部分，避免视频一开始就卡顿。"
+
+msgctxt "#30583"
+msgid "How much of a torrent to download before playback begins, in MB. More rides out a slow swarm better but takes longer to start."
+msgstr "开始播放前要下载的种子数据量，单位为 MB。数值越大越能应对较慢的种子群，但启动也更慢。"
+
+msgctxt "#30584"
+msgid "Copies Rivulet's recommended network timeouts into Kodi's advancedsettings.xml, plus a larger video cache on Kodi 19 and 20. Never replaces an existing file. Restart Kodi afterwards."
+msgstr "将 Rivulet 推荐的网络超时设置复制到 Kodi 的 advancedsettings.xml，并在 Kodi 19 和 20 上加大视频缓存。不会替换已有文件。完成后请重启 Kodi。"
+
+msgctxt "#30585"
+msgid "Adds the subtitles your subtitle add-ons find for the video."
+msgstr "添加字幕插件为该视频找到的字幕。"
+
+msgctxt "#30586"
+msgid "Language of the subtitles to add, as a 2- or 3-letter ISO 639 code, for example en, it, pt or eng."
+msgstr "要添加的字幕语言，使用 2 位或 3 位 ISO 639 代码，例如 en、it、pt 或 eng。"
+
+msgctxt "#30587"
+msgid "Signs in with your Stremio account, to use the add-ons, library and progress saved there."
+msgstr "使用你的 Stremio 帐户登录，以使用保存在其中的插件、媒体库和播放进度。"
+
+msgctxt "#30588"
+msgid "Signs out of your Stremio account on this device. Your add-ons stay installed."
+msgstr "在此设备上退出你的 Stremio 帐户。已安装的插件会保留。"
+
+msgctxt "#30589"
+msgid "Saves the add-ons installed here to your Stremio account now."
+msgstr "立即将此处已安装的插件保存到你的 Stremio 帐户。"
+
+msgctxt "#30590"
+msgid "Saves where you stopped to your Stremio account and picks up progress from your other Stremio apps. Needs a signed-in account."
+msgstr "将播放停止的位置保存到你的 Stremio 帐户，并获取其他 Stremio 应用中的进度。需要已登录的帐户。"
+
+msgctxt "#30591"
+msgid "Starts Rivulet's own streaming server with Kodi. Turn it off to use only a server already running at the server URL. The server settings below apply only to the embedded server."
+msgstr "随 Kodi 启动 Rivulet 自带的流媒体服务器。关闭后仅使用服务器 URL 上已在运行的服务器。下方的服务器设置仅适用于内置服务器。"
+
+msgctxt "#30592"
+msgid "Address of the streaming server. The embedded server listens on this port; when a server already answers here, Rivulet uses that one instead."
+msgstr "流媒体服务器的地址。内置服务器会监听此端口；如果此处已有服务器响应，Rivulet 会改用那一个。"
+
+msgctxt "#30593"
+msgid "A rivulet-engine program of your own to run. Empty uses the one Rivulet downloads."
+msgstr "要运行的你自己的 rivulet-engine 程序。留空则使用 Rivulet 下载的版本。"
+
+msgctxt "#30594"
+msgid "Downloads the rivulet-engine version this Rivulet release needs and installs it."
+msgstr "下载并安装此 Rivulet 版本所需的 rivulet-engine 版本。"
+
+msgctxt "#30595"
+msgid "Port other peers connect to. 0 picks a free port at every start. Set a fixed port to forward it on your router and reach more peers."
+msgstr "其他对等节点连接所用的端口。0 表示每次启动时选择一个空闲端口。设置固定端口并在路由器上转发，可连接到更多对等节点。"
+
+msgctxt "#30596"
+msgid "Peer connections per torrent. 0 uses the built-in default (50). Fewer saves memory on small devices."
+msgstr "每个种子的对等连接数。0 使用内置默认值（50）。较小的值可在小型设备上节省内存。"
+
+msgctxt "#30597"
+msgid "Seconds a torrent stays loaded after you stop watching, so resuming starts at once. 0 keeps it loaded."
+msgstr "停止观看后种子保持加载的秒数，这样恢复播放时可立即开始。0 表示一直保持加载。"
+
+msgctxt "#30598"
+msgid "Prefer encrypts peer connections when the peer can. Require drops peers that cannot, which can get past provider throttling. Disable never encrypts."
+msgstr "“首选”会在对方支持时加密对等连接。“强制”会断开无法加密的对等节点，有助于绕过运营商限速。“禁用”则从不加密。"
+
+msgctxt "#30599"
+msgid "Hides the client name and version from other peers."
+msgstr "向其他对等节点隐藏客户端名称和版本。"
+
+msgctxt "#30600"
+msgid "Finds peers only through DHT and peer exchange, never contacting trackers."
+msgstr "仅通过 DHT 和对等交换查找对等节点，不连接 Tracker。"
+
+msgctxt "#30601"
+msgid "SOCKS5 or HTTP proxy for trackers and torrent metadata, for example socks5://127.0.0.1:9050. Peer connections stay direct."
+msgstr "用于 Tracker 和种子元数据的 SOCKS5 或 HTTP 代理，例如 socks5://127.0.0.1:9050。对等连接保持直连。"
+
+msgctxt "#30602"
+msgid "Skips WebTorrent (WebRTC) peers, which saves a lot of memory and processor time."
+msgstr "跳过 WebTorrent（WebRTC）对等节点，可大量节省内存和处理器时间。"
+
+msgctxt "#30603"
+msgid "How many of the fastest public trackers each torrent uses. 0 uses the default (5)."
+msgstr "每个种子使用多少个最快的公共 Tracker。0 使用默认值（5）。"
+
+msgctxt "#30604"
+msgid "Address of the public tracker list to download. Empty uses the built-in source; off skips the download."
+msgstr "要下载的公共 Tracker 列表的地址。留空则使用内置来源；填 off 则跳过下载。"
+
+msgctxt "#30605"
+msgid "Extra DHT nodes to start from, as host:port separated by commas, for networks that block the default ones."
+msgstr "额外的 DHT 起始节点，格式为 host:port，用逗号分隔，适用于屏蔽了默认节点的网络。"
+
+msgctxt "#30606"
+msgid "Soft memory ceiling for the streaming server, in MB. The server frees memory harder as it gets close. 0 sets no limit."
+msgstr "流媒体服务器的软内存上限，单位为 MB。接近上限时，服务器会更积极地释放内存。0 表示不限制。"
+
+msgctxt "#30607"
+msgid "How many upcoming segments of a proxied HLS stream to fetch ahead. 0 turns it off."
+msgstr "经代理的 HLS 流要提前获取多少个后续分片。0 表示关闭。"
+
+msgctxt "#30608"
+msgid "How long proxied stream segments stay cached, in seconds. 0 turns the cache off."
+msgstr "经代理的流分片缓存保留多久，单位为秒。0 表示关闭缓存。"
+
+msgctxt "#30609"
+msgid "Password that users of the server's stream proxy must send. Set one if other devices can reach the server."
+msgstr "服务器流代理的使用者必须发送的密码。如果其他设备可以访问该服务器，请设置密码。"
+
+msgctxt "#30610"
+msgid "Addresses allowed to use the stream proxy, as CIDR ranges separated by commas, for example 192.168.1.0/24. Empty allows every address."
+msgstr "允许使用流代理的地址，用 CIDR 范围表示并以逗号分隔，例如 192.168.1.0/24。留空则允许所有地址。"
+
+msgctxt "#30611"
+msgid "Public address of this server, written into proxied playlists. Needed only behind a reverse proxy."
+msgstr "此服务器的公开地址，会写入经代理的播放列表。仅在反向代理之后才需要。"
+
+msgctxt "#30612"
+msgid "Proxy the stream proxy fetches through, for example socks5://host:1080."
+msgstr "流代理用来获取内容的代理，例如 socks5://host:1080。"
+
+msgctxt "#30613"
+msgid "Key that signs stream proxy links. Empty generates one and keeps it."
+msgstr "用于为流代理链接签名的密钥。留空则自动生成并保存一个。"
+
+msgctxt "#30614"
+msgid "Lets the server cast to DLNA devices on your network."
+msgstr "允许服务器投放到你网络中的 DLNA 设备。"
+
+msgctxt "#30615"
+msgid "Looks up titles and posters on IMDb for the server's local files add-on."
+msgstr "为服务器的本地文件插件在 IMDb 上查询标题和海报。"
+
+msgctxt "#30616"
+msgid "Cinemeta-compatible add-on the indexers use to look up titles. Empty uses Cinemeta; off turns the lookup off."
+msgstr "索引器用来查询标题的 Cinemeta 兼容插件。留空使用 Cinemeta；填 off 则关闭查询。"
+
+msgctxt "#30617"
+msgid "GraphQL address of your own Bitmagnet, for example http://localhost:3333/graphql, for the server's Bitmagnet add-on."
+msgstr "你自己的 Bitmagnet 的 GraphQL 地址，例如 http://localhost:3333/graphql，供服务器的 Bitmagnet 插件使用。"
+
+msgctxt "#30618"
+msgid "Torznab API address of an indexer such as Prowlarr or Jackett, for the server's Torznab add-on."
+msgstr "Prowlarr 或 Jackett 等索引器的 Torznab API 地址，供服务器的 Torznab 插件使用。"
+
+msgctxt "#30619"
+msgid "API key of that Torznab indexer. Prowlarr and Jackett need one."
+msgstr "该 Torznab 索引器的 API 密钥。Prowlarr 和 Jackett 需要密钥。"
+
+msgctxt "#30620"
+msgid "Page the server's own address opens in a web browser. Empty uses web.stremio.com."
+msgstr "在网页浏览器中打开服务器自身地址时显示的页面。留空则使用 web.stremio.com。"
+
+msgctxt "#30621"
+msgid "Port of the server's HTTPS listener, for Stremio web apps. 0 turns HTTPS off."
+msgstr "服务器 HTTPS 监听端口，供 Stremio 网页应用使用。0 表示关闭 HTTPS。"
+
+msgctxt "#30622"
+msgid "host:port where the server publishes profiling data, for example 127.0.0.1:6060. For debugging only; empty turns it off."
+msgstr "服务器发布性能分析数据的 host:port，例如 127.0.0.1:6060。仅用于调试；留空则关闭。"
+
+msgctxt "#30623"
+msgid "Stremio auth key the server uses to get a trusted HTTPS certificate. Empty reuses a saved one."
+msgstr "服务器用来获取受信任 HTTPS 证书的 Stremio 认证密钥。留空则重用已保存的密钥。"
+
+msgctxt "#30624"
+msgid "Offers the Stream4Me channels as a Rivulet add-on."
+msgstr "将 Stream4Me 频道作为 Rivulet 插件提供。"
+
+msgctxt "#30625"
+msgid "Local port the Stream4Me bridge listens on."
+msgstr "Stream4Me 桥接监听的本地端口。"
+
+msgctxt "#30626"
+msgid "Stream4Me channels to offer, separated by commas. Empty offers every active channel."
+msgstr "要提供的 Stream4Me 频道，用逗号分隔。留空则提供所有活跃频道。"
+
+msgctxt "#30627"
+msgid "advancedsettings.xml installed - restart Kodi to apply. Set the video cache in Settings > Services > Caching."
+msgstr "已安装 advancedsettings.xml - 重启 Kodi 后生效。请在 设置 > 服务 > 缓存 中设置视频缓存。"

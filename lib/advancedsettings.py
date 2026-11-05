@@ -27,9 +27,15 @@ class AdvancedSettingsError(Exception):
     """Raised when install() hits an I/O error."""
 
 
-def install(source_path, dest_path):
+def install(source_path, dest_path, shadow_paths=()):
     """Copy `source_path` -> `dest_path`, creating dest's parent directories
-    as needed, UNLESS `dest_path` already exists.
+    as needed, UNLESS `dest_path` or any of `shadow_paths` already exists.
+
+    `shadow_paths` are files Kodi reads INSTEAD of `dest_path` when they
+    exist: Kodi loads the active profile's own advancedsettings.xml in
+    place of the master profile's (ProfileManager::GetUserDataItem), so
+    installing into the master profile beside one would report success
+    for a file this profile never reads.
 
     Returns STATUS_EXISTS without touching `dest_path` if it's already
     there (non-destructive: an existing advancedsettings.xml might be the
@@ -57,7 +63,7 @@ def install(source_path, dest_path):
     removed before the error propagates, so a failed install never
     litters the destination directory.
     """
-    if os.path.exists(dest_path):
+    if any(os.path.exists(path) for path in (dest_path,) + tuple(shadow_paths)):
         return STATUS_EXISTS
 
     try:

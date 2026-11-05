@@ -178,25 +178,34 @@ def _download_server_binary():
 
 def _install_advancedsettings():
     """Action 'advancedsettings_install': install the addon's bundled
-    resources/advancedsettings.xml template into the user's Kodi userdata
-    dir (special://masterprofile/advancedsettings.xml) so its generous
-    cURL timeouts + streaming cache apply globally - opt-in, and never
-    overwrites an advancedsettings.xml the user or another addon already
-    placed there.
+    advancedsettings template into the user's Kodi userdata dir
+    (special://masterprofile/advancedsettings.xml) so its cURL timeouts
+    (and, on Kodi 19/20, its video cache) apply globally - opt-in, and
+    never overwrites an advancedsettings.xml the user or another addon
+    already placed there.
+
+    Kodi 21 moved the <cache> tags to Settings > Services > Caching and
+    ignores them in this file, so it gets the template without them and
+    a toast naming where the cache went. Kodi reads the active profile's
+    own advancedsettings.xml instead of the master profile's when one
+    exists, so that file counts as already installed too.
     """
     import xbmc
     import xbmcvfs
 
     from lib import advancedsettings
-    from lib.ui.compat import ADDON_ID, L, log, notify
+    from lib.ui.compat import ADDON_ID, L, kodi_major_version, log, notify
 
+    cache_in_gui = kodi_major_version() >= 21
+    template = 'advancedsettings_kodi21.xml' if cache_in_gui else 'advancedsettings.xml'
     source = xbmcvfs.translatePath(
-        'special://home/addons/%s/resources/advancedsettings.xml' % ADDON_ID
+        'special://home/addons/%s/resources/%s' % (ADDON_ID, template)
     )
     dest = xbmcvfs.translatePath('special://masterprofile/advancedsettings.xml')
+    profile = xbmcvfs.translatePath('special://profile/advancedsettings.xml')
 
     try:
-        status = advancedsettings.install(source, dest)
+        status = advancedsettings.install(source, dest, shadow_paths=(profile,))
     except advancedsettings.AdvancedSettingsError as exc:
         log('router: advancedsettings_install failed: %s' % exc, xbmc.LOGERROR)
         notify(L(30068))
@@ -205,7 +214,7 @@ def _install_advancedsettings():
     if status == advancedsettings.STATUS_EXISTS:
         notify(L(30067))
     else:
-        notify(L(30066))
+        notify(L(30627) if cache_in_gui else L(30066))
 
 
 def _fail_gracefully(action):

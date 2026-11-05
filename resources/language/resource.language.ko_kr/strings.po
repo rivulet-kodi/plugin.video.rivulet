@@ -1287,3 +1287,295 @@ msgstr "애드온의 라이브 TV, 스포츠, 이벤트"
 msgctxt "#30554"
 msgid "Live TV channels from one or more M3U playlists, offered as an IPTV add-on. Separate several URLs with commas, e.g. https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. Empty (the default) keeps it off. Only applies to the built-in server, which restarts when this changes."
 msgstr "하나 이상의 M3U 재생목록의 실시간 TV 채널을 IPTV 애드온으로 제공합니다. 여러 URL은 쉼표로 구분하세요. 예: https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8. 비워 두면(기본값) 꺼집니다. 내장 서버에만 적용되며 변경하면 서버가 다시 시작됩니다."
+
+msgctxt "#30555"
+msgid "Lists"
+msgstr "목록"
+
+msgctxt "#30556"
+msgid "Ratings"
+msgstr "평점"
+
+msgctxt "#30557"
+msgid "Maintenance"
+msgstr "유지 관리"
+
+msgctxt "#30558"
+msgid "Sources"
+msgstr "소스"
+
+msgctxt "#30559"
+msgid "Resume and next episode"
+msgstr "이어 보기 및 다음 에피소드"
+
+msgctxt "#30560"
+msgid "Buffering"
+msgstr "버퍼링"
+
+msgctxt "#30561"
+msgid "Embedded server"
+msgstr "내장 서버"
+
+msgctxt "#30562"
+msgid "Peers"
+msgstr "피어"
+
+msgctxt "#30563"
+msgid "Privacy"
+msgstr "개인정보"
+
+msgctxt "#30564"
+msgid "Trackers"
+msgstr "트래커"
+
+msgctxt "#30565"
+msgid "Performance"
+msgstr "성능"
+
+msgctxt "#30566"
+msgid "Security"
+msgstr "보안"
+
+msgctxt "#30567"
+msgid "Addresses"
+msgstr "주소"
+
+msgctxt "#30568"
+msgid "Live TV"
+msgstr "라이브 TV"
+
+msgctxt "#30569"
+msgid "Torrent indexers"
+msgstr "토렌트 인덱서"
+
+msgctxt "#30570"
+msgid "General"
+msgstr "일반"
+
+msgctxt "#30571"
+msgid "Shows the Anime tab on Home, with the anime catalogs of your add-ons."
+msgstr "홈에 애니 탭을 표시하고, 애드온의 애니 카탈로그를 보여 줍니다."
+
+msgctxt "#30572"
+msgid "Hides catalogs, add-ons and titles that look like adult content on Home, in Search and in the add-on catalog."
+msgstr "성인 콘텐츠로 보이는 카탈로그, 애드온, 제목을 홈, 검색, 애드온 카탈로그에서 숨깁니다."
+
+msgctxt "#30573"
+msgid "Opens Rivulet instead of the Kodi home screen every time Kodi starts."
+msgstr "Kodi를 시작할 때마다 Kodi 홈 화면 대신 Rivulet을 엽니다."
+
+msgctxt "#30574"
+msgid "Order of the source list: best quality first, largest file first, or most seeders first."
+msgstr "소스 목록의 정렬 순서입니다. 화질이 높은 순, 파일 크기가 큰 순, 시더가 많은 순 중에서 선택합니다."
+
+msgctxt "#30575"
+msgid "Hides sources below this resolution. Sources whose resolution is unknown stay in the list."
+msgstr "이 해상도 미만의 소스를 숨깁니다. 해상도를 알 수 없는 소스는 목록에 남습니다."
+
+msgctxt "#30576"
+msgid "Hides sources larger than this, in GB. Sources whose size is unknown stay in the list. 0 shows every size."
+msgstr "이 크기(GB)보다 큰 소스를 숨깁니다. 크기를 알 수 없는 소스는 목록에 남습니다. 0이면 모든 크기를 표시합니다."
+
+msgctxt "#30577"
+msgid "Hides sources recorded in a cinema (CAM, TS, telesync, screener)."
+msgstr "극장에서 녹화된 소스(CAM, TS, 텔레싱크, 스크리너)를 숨깁니다."
+
+msgctxt "#30578"
+msgid "Shows only sources your debrid service reports as already cached, which start at once. Sources with no cache information are hidden too."
+msgstr "Debrid 서비스가 이미 캐시되었다고 알린 소스만 표시합니다. 바로 재생이 시작됩니다. 캐시 정보가 없는 소스도 숨겨집니다."
+
+msgctxt "#30579"
+msgid "When you stopped part way through, asks whether to continue from there. Off always starts from the beginning."
+msgstr "중간에 멈춘 경우 그 지점부터 이어서 볼지 묻습니다. 끄면 항상 처음부터 재생합니다."
+
+msgctxt "#30580"
+msgid "When an episode ends, counts down and plays the next one."
+msgstr "에피소드가 끝나면 카운트다운 후 다음 에피소드를 재생합니다."
+
+msgctxt "#30581"
+msgid "Length of the countdown before the next episode starts, in seconds."
+msgstr "다음 에피소드가 시작되기 전 카운트다운 시간(초)입니다."
+
+msgctxt "#30582"
+msgid "Downloads the start of a torrent before playback begins, so the video does not stall straight away."
+msgstr "재생을 시작하기 전에 토렌트의 앞부분을 내려받아, 영상이 바로 끊기지 않게 합니다."
+
+msgctxt "#30583"
+msgid "How much of a torrent to download before playback begins, in MB. More rides out a slow swarm better but takes longer to start."
+msgstr "재생을 시작하기 전에 내려받을 토렌트의 양(MB)입니다. 값이 클수록 느린 스웜에 잘 대응하지만 시작이 늦어집니다."
+
+msgctxt "#30584"
+msgid "Copies Rivulet's recommended network timeouts into Kodi's advancedsettings.xml, plus a larger video cache on Kodi 19 and 20. Never replaces an existing file. Restart Kodi afterwards."
+msgstr "Rivulet이 권장하는 네트워크 제한 시간을 Kodi의 advancedsettings.xml에 복사합니다. Kodi 19와 20에서는 더 큰 비디오 캐시도 설정합니다. 기존 파일은 덮어쓰지 않습니다. 완료 후 Kodi를 다시 시작하세요."
+
+msgctxt "#30585"
+msgid "Adds the subtitles your subtitle add-ons find for the video."
+msgstr "자막 애드온이 찾은 자막을 동영상에 추가합니다."
+
+msgctxt "#30586"
+msgid "Language of the subtitles to add, as a 2- or 3-letter ISO 639 code, for example en, it, pt or eng."
+msgstr "추가할 자막의 언어를 2자 또는 3자의 ISO 639 코드로 입력합니다. 예: en, it, pt, eng."
+
+msgctxt "#30587"
+msgid "Signs in with your Stremio account, to use the add-ons, library and progress saved there."
+msgstr "Stremio 계정으로 로그인하여 그곳에 저장된 애드온, 보관함, 진행 상황을 사용합니다."
+
+msgctxt "#30588"
+msgid "Signs out of your Stremio account on this device. Your add-ons stay installed."
+msgstr "이 기기에서 Stremio 계정을 로그아웃합니다. 애드온은 설치된 채로 유지됩니다."
+
+msgctxt "#30589"
+msgid "Saves the add-ons installed here to your Stremio account now."
+msgstr "이곳에 설치된 애드온을 지금 Stremio 계정에 저장합니다."
+
+msgctxt "#30590"
+msgid "Saves where you stopped to your Stremio account and picks up progress from your other Stremio apps. Needs a signed-in account."
+msgstr "멈춘 위치를 Stremio 계정에 저장하고 다른 Stremio 앱의 진행 상황을 가져옵니다. 로그인된 계정이 필요합니다."
+
+msgctxt "#30591"
+msgid "Starts Rivulet's own streaming server with Kodi. Turn it off to use only a server already running at the server URL. The server settings below apply only to the embedded server."
+msgstr "Kodi와 함께 Rivulet 자체 스트리밍 서버를 시작합니다. 끄면 서버 URL에서 이미 실행 중인 서버만 사용합니다. 아래 서버 설정은 내장 서버에만 적용됩니다."
+
+msgctxt "#30592"
+msgid "Address of the streaming server. The embedded server listens on this port; when a server already answers here, Rivulet uses that one instead."
+msgstr "스트리밍 서버의 주소입니다. 내장 서버는 이 포트에서 대기합니다. 이미 이 주소에서 응답하는 서버가 있으면 Rivulet은 그 서버를 사용합니다."
+
+msgctxt "#30593"
+msgid "A rivulet-engine program of your own to run. Empty uses the one Rivulet downloads."
+msgstr "직접 실행할 rivulet-engine 프로그램입니다. 비워 두면 Rivulet이 내려받은 것을 사용합니다."
+
+msgctxt "#30594"
+msgid "Downloads the rivulet-engine version this Rivulet release needs and installs it."
+msgstr "이 Rivulet 릴리스에 필요한 rivulet-engine 버전을 내려받아 설치합니다."
+
+msgctxt "#30595"
+msgid "Port other peers connect to. 0 picks a free port at every start. Set a fixed port to forward it on your router and reach more peers."
+msgstr "다른 피어가 연결하는 포트입니다. 0이면 시작할 때마다 사용 가능한 포트를 고릅니다. 고정 포트를 지정하고 공유기에서 포워딩하면 더 많은 피어에 접속할 수 있습니다."
+
+msgctxt "#30596"
+msgid "Peer connections per torrent. 0 uses the built-in default (50). Fewer saves memory on small devices."
+msgstr "토렌트당 피어 연결 수입니다. 0이면 내장 기본값(50)을 사용합니다. 값을 줄이면 소형 기기에서 메모리를 절약합니다."
+
+msgctxt "#30597"
+msgid "Seconds a torrent stays loaded after you stop watching, so resuming starts at once. 0 keeps it loaded."
+msgstr "시청을 멈춘 뒤에도 토렌트를 로드된 상태로 유지하는 시간(초)입니다. 다시 재생하면 바로 시작됩니다. 0이면 계속 유지합니다."
+
+msgctxt "#30598"
+msgid "Prefer encrypts peer connections when the peer can. Require drops peers that cannot, which can get past provider throttling. Disable never encrypts."
+msgstr "선호는 상대가 지원하면 피어 연결을 암호화합니다. 필수는 암호화할 수 없는 피어를 끊으며, 통신사의 속도 제한을 피할 수 있습니다. 사용 안 함은 암호화하지 않습니다."
+
+msgctxt "#30599"
+msgid "Hides the client name and version from other peers."
+msgstr "클라이언트 이름과 버전을 다른 피어에게 숨깁니다."
+
+msgctxt "#30600"
+msgid "Finds peers only through DHT and peer exchange, never contacting trackers."
+msgstr "DHT와 피어 교환으로만 피어를 찾고, 트래커에는 접속하지 않습니다."
+
+msgctxt "#30601"
+msgid "SOCKS5 or HTTP proxy for trackers and torrent metadata, for example socks5://127.0.0.1:9050. Peer connections stay direct."
+msgstr "트래커와 토렌트 메타데이터용 SOCKS5 또는 HTTP 프록시입니다. 예: socks5://127.0.0.1:9050. 피어 연결은 직접 연결을 유지합니다."
+
+msgctxt "#30602"
+msgid "Skips WebTorrent (WebRTC) peers, which saves a lot of memory and processor time."
+msgstr "WebTorrent(WebRTC) 피어를 건너뜁니다. 메모리와 프로세서 시간을 크게 절약합니다."
+
+msgctxt "#30603"
+msgid "How many of the fastest public trackers each torrent uses. 0 uses the default (5)."
+msgstr "토렌트마다 사용할 가장 빠른 공개 트래커의 수입니다. 0이면 기본값(5)을 사용합니다."
+
+msgctxt "#30604"
+msgid "Address of the public tracker list to download. Empty uses the built-in source; off skips the download."
+msgstr "내려받을 공개 트래커 목록의 주소입니다. 비워 두면 내장 소스를 사용하고, off를 입력하면 내려받지 않습니다."
+
+msgctxt "#30605"
+msgid "Extra DHT nodes to start from, as host:port separated by commas, for networks that block the default ones."
+msgstr "기본 노드를 차단하는 네트워크를 위해, 시작점으로 쓸 추가 DHT 노드를 host:port 형식으로 쉼표로 구분해 입력합니다."
+
+msgctxt "#30606"
+msgid "Soft memory ceiling for the streaming server, in MB. The server frees memory harder as it gets close. 0 sets no limit."
+msgstr "스트리밍 서버의 소프트 메모리 상한(MB)입니다. 상한에 가까워지면 서버가 메모리를 더 적극적으로 해제합니다. 0이면 제한이 없습니다."
+
+msgctxt "#30607"
+msgid "How many upcoming segments of a proxied HLS stream to fetch ahead. 0 turns it off."
+msgstr "프록시를 거치는 HLS 스트림에서 미리 가져올 다음 세그먼트의 수입니다. 0이면 꺼집니다."
+
+msgctxt "#30608"
+msgid "How long proxied stream segments stay cached, in seconds. 0 turns the cache off."
+msgstr "프록시를 거치는 스트림 세그먼트를 캐시에 보관하는 시간(초)입니다. 0이면 캐시가 꺼집니다."
+
+msgctxt "#30609"
+msgid "Password that users of the server's stream proxy must send. Set one if other devices can reach the server."
+msgstr "서버의 스트림 프록시 사용자가 보내야 하는 비밀번호입니다. 다른 기기에서 서버에 접근할 수 있다면 설정하세요."
+
+msgctxt "#30610"
+msgid "Addresses allowed to use the stream proxy, as CIDR ranges separated by commas, for example 192.168.1.0/24. Empty allows every address."
+msgstr "스트림 프록시 사용을 허용할 주소를 CIDR 범위로 쉼표로 구분해 입력합니다. 예: 192.168.1.0/24. 비워 두면 모든 주소를 허용합니다."
+
+msgctxt "#30611"
+msgid "Public address of this server, written into proxied playlists. Needed only behind a reverse proxy."
+msgstr "이 서버의 공개 주소로, 프록시를 거치는 재생목록에 기록됩니다. 리버스 프록시 뒤에서만 필요합니다."
+
+msgctxt "#30612"
+msgid "Proxy the stream proxy fetches through, for example socks5://host:1080."
+msgstr "스트림 프록시가 거쳐 가져오는 프록시입니다. 예: socks5://host:1080."
+
+msgctxt "#30613"
+msgid "Key that signs stream proxy links. Empty generates one and keeps it."
+msgstr "스트림 프록시 링크에 서명하는 키입니다. 비워 두면 하나를 생성해 보관합니다."
+
+msgctxt "#30614"
+msgid "Lets the server cast to DLNA devices on your network."
+msgstr "서버가 네트워크의 DLNA 기기로 캐스트할 수 있게 합니다."
+
+msgctxt "#30615"
+msgid "Looks up titles and posters on IMDb for the server's local files add-on."
+msgstr "서버의 로컬 파일 애드온을 위해 IMDb에서 제목과 포스터를 조회합니다."
+
+msgctxt "#30616"
+msgid "Cinemeta-compatible add-on the indexers use to look up titles. Empty uses Cinemeta; off turns the lookup off."
+msgstr "인덱서가 제목을 조회하는 데 사용하는 Cinemeta 호환 애드온입니다. 비워 두면 Cinemeta를 사용하고, off를 입력하면 조회를 끕니다."
+
+msgctxt "#30617"
+msgid "GraphQL address of your own Bitmagnet, for example http://localhost:3333/graphql, for the server's Bitmagnet add-on."
+msgstr "서버의 Bitmagnet 애드온을 위한, 직접 운영하는 Bitmagnet의 GraphQL 주소입니다. 예: http://localhost:3333/graphql."
+
+msgctxt "#30618"
+msgid "Torznab API address of an indexer such as Prowlarr or Jackett, for the server's Torznab add-on."
+msgstr "서버의 Torznab 애드온을 위한, Prowlarr나 Jackett 같은 인덱서의 Torznab API 주소입니다."
+
+msgctxt "#30619"
+msgid "API key of that Torznab indexer. Prowlarr and Jackett need one."
+msgstr "해당 Torznab 인덱서의 API 키입니다. Prowlarr와 Jackett에는 필요합니다."
+
+msgctxt "#30620"
+msgid "Page the server's own address opens in a web browser. Empty uses web.stremio.com."
+msgstr "웹 브라우저에서 서버 자체 주소를 열 때 표시되는 페이지입니다. 비워 두면 web.stremio.com을 사용합니다."
+
+msgctxt "#30621"
+msgid "Port of the server's HTTPS listener, for Stremio web apps. 0 turns HTTPS off."
+msgstr "Stremio 웹 앱을 위한 서버 HTTPS 리스너의 포트입니다. 0이면 HTTPS를 끕니다."
+
+msgctxt "#30622"
+msgid "host:port where the server publishes profiling data, for example 127.0.0.1:6060. For debugging only; empty turns it off."
+msgstr "서버가 프로파일링 데이터를 공개하는 host:port입니다. 예: 127.0.0.1:6060. 디버깅 전용이며, 비워 두면 꺼집니다."
+
+msgctxt "#30623"
+msgid "Stremio auth key the server uses to get a trusted HTTPS certificate. Empty reuses a saved one."
+msgstr "서버가 신뢰할 수 있는 HTTPS 인증서를 받는 데 사용하는 Stremio 인증 키입니다. 비워 두면 저장된 키를 다시 사용합니다."
+
+msgctxt "#30624"
+msgid "Offers the Stream4Me channels as a Rivulet add-on."
+msgstr "Stream4Me 채널을 Rivulet 애드온으로 제공합니다."
+
+msgctxt "#30625"
+msgid "Local port the Stream4Me bridge listens on."
+msgstr "Stream4Me 브리지가 대기하는 로컬 포트입니다."
+
+msgctxt "#30626"
+msgid "Stream4Me channels to offer, separated by commas. Empty offers every active channel."
+msgstr "제공할 Stream4Me 채널을 쉼표로 구분해 입력합니다. 비워 두면 활성 상태인 모든 채널을 제공합니다."
+
+msgctxt "#30627"
+msgid "advancedsettings.xml installed - restart Kodi to apply. Set the video cache in Settings > Services > Caching."
+msgstr "advancedsettings.xml을 설치했습니다. 적용하려면 Kodi를 다시 시작하세요. 비디오 캐시는 설정 > 서비스 > 캐싱에서 지정합니다."
