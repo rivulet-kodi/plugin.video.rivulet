@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.rivulet" name="Rivulet" version="0.46.0" provider-name="M0RF30">
+<addon id="plugin.video.rivulet" name="Rivulet" version="0.47.0" provider-name="M0RF30">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" version="2.22.0"/>
@@ -12,8 +12,17 @@
     <summary lang="en_GB">Rivulet: watch Stremio-protocol catalogs, addons and streams in Kodi</summary>
     <description lang="en_GB">Rivulet is a Kodi client for the Stremio addon protocol: browse and search catalogs by type, install community Stremio addons from a manifest URL, resolve streams and play them back through an embedded or remote rivulet-engine streaming server, and optionally sync your addon collection with your Stremio account.</description>
     <disclaimer lang="en_GB">This addon does not host, index or provide any media content. It is a client for third-party Stremio addons that you install yourself.</disclaimer>
-    <news>v0.46.0:
-- New: live TV from M3U playlists. Enter one or more playlist addresses in Settings, Server add-ons, IPTV playlist URLs (an Expert-level setting; for example the Free-TV list) and the channels appear on the Live tab, with their playlist groups as genres. Off by default; only for the built-in server. Comes with rivulet-engine v0.32.0, installed automatically.</news>
+    <news>v0.47.0:
+- Changed: cast, crew and genre links open the same coverflow as Home's lists, titled with the name, with Search's details and poster reflections.
+- New: Search searches as you type, a moment after the last key; Enter is no longer needed.
+- Changed: Settings reorganised into labelled groups with help on every option; options that do nothing in the current setup are greyed out, API keys and passwords are masked, and number fields have real limits.
+- Fix: a ratings key paired with your phone is used right away and no longer wiped by the next Settings OK.
+- Fix: playback progress is saved every few seconds and on pause or seek, so short sessions and external servers resume where you stopped.
+- Fix: Brazilian Portuguese, Greek and Czech subtitles are found when you pick that language.
+- Fix: Rivulet screens stay visible when reopened over a video playing in a window.
+- Fix: a disabled Stream4Me or YouTube add-on is no longer treated as installed; trailers offer to enable YouTube.
+- Fix: the Kodi buffer settings install now matches your Kodi version (Kodi 21+ keeps its cache in Settings &gt; Services &gt; Caching).
+- Changed: smaller images on detail, source and showcase pages; long titles without a poster wrap.</news>
     <platform>all</platform>
     <license>MIT AND GPL-3.0-only</license>
     <website>https://github.com/rivulet-kodi/plugin.video.rivulet</website>
