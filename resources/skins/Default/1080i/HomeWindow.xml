@@ -64,11 +64,11 @@
                 <control type="button" id="30072"><width>56</width><height>56</height><texturefocus colordiffuse="FFFFFFFF">look_icon_settings_focus.png</texturefocus><texturenofocus colordiffuse="B3FFFFFF">look_icon_settings.png</texturenofocus><label></label><ondown>30001</ondown><onup>30011</onup></control>
             </control>
 <!-- Hero, stacked up from the row by lib/ui/look.py: the logo (or the title), stars and facts, the plot (three lines at most), the scores. -->
-<control type="image" id="30023"><left>80</left><top>281</top><width>1000</width><height>120</height><aspectratio align="left" aligny="bottom">keep</aspectratio><texture background="true"></texture><visible>!String.IsEmpty(Window.Property(HeroLogo))</visible></control>
-<control type="label" id="30020"><left>80</left><top>321</top><width>1100</width><height>80</height><font>font45</font><textcolor>FFEDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny><wrapmultiline>false</wrapmultiline><label></label><visible>String.IsEmpty(Window.Property(HeroLogo))</visible></control>
-<control type="image" id="30027"><left>80</left><top>423</top><width>150</width><height>28</height><aspectratio>keep</aspectratio><texture></texture></control>
-<control type="label" id="30024"><left>246</left><top>417</top><width>1200</width><height>40</height><font>font13</font><textcolor>E6EDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny><label></label></control>
-<control type="textbox" id="30022"><left>80</left><top>428</top><width>920</width><height>122</height><font>font13</font><textcolor>C7EDEDED</textcolor><shadowcolor>C8000000</shadowcolor><autoscroll delay="3000" time="4000" repeat="6000">true</autoscroll><label></label></control>
+<control type="image" id="30023"><left>80</left><top>280</top><width>1000</width><height>120</height><aspectratio align="left" aligny="bottom">keep</aspectratio><texture background="true"></texture><visible>!String.IsEmpty(Window.Property(HeroLogo))</visible></control>
+<control type="label" id="30020"><left>80</left><top>320</top><width>1100</width><height>80</height><font>font45</font><textcolor>FFEDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny><wrapmultiline>false</wrapmultiline><label></label><visible>String.IsEmpty(Window.Property(HeroLogo))</visible></control>
+<control type="image" id="30027"><left>80</left><top>422</top><width>150</width><height>28</height><aspectratio>keep</aspectratio><texture></texture></control>
+<control type="label" id="30024"><left>246</left><top>416</top><width>1200</width><height>40</height><font>font13</font><textcolor>E6EDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny><label></label></control>
+<control type="textbox" id="30022"><left>80</left><top>427</top><width>920</width><height>123</height><font>font13</font><textcolor>C7EDEDED</textcolor><shadowcolor>C8000000</shadowcolor><autoscroll delay="3000" time="4000" repeat="6000">true</autoscroll><label></label></control>
 <control type="group" id="30025">
     <left>80</left><top>550</top><width>1400</width><height>40</height>
     <control type="grouplist">

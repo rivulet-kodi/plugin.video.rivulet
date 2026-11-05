@@ -48,12 +48,12 @@
                  the row's position line): the clearlogo or the bold title, the stars and facts
                  line, the plot (three lines, then it scrolls), the score icons. 30021 is the
                  hidden catalog line the shared painter writes. -->
-            <control type="image" id="30023"><left>80</left><top>232</top><width>1000</width><height>120</height><aspectratio align="left" aligny="bottom">keep</aspectratio><texture background="true"></texture><visible>!String.IsEmpty(Window.Property(HeroLogo))</visible></control>
-            <control type="label" id="30020"><left>80</left><top>272</top><width>1100</width><height>80</height><font>font45</font><textcolor>FFEDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny><wrapmultiline>false</wrapmultiline><label></label><visible>String.IsEmpty(Window.Property(HeroLogo))</visible></control>
-            <control type="image" id="30027"><left>80</left><top>374</top><width>150</width><height>28</height><aspectratio>keep</aspectratio><texture></texture></control>
-            <control type="label" id="30024"><left>246</left><top>368</top><width>1200</width><height>40</height><font>font13</font><textcolor>E6EDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny><label></label></control>
+            <control type="image" id="30023"><left>80</left><top>231</top><width>1000</width><height>120</height><aspectratio align="left" aligny="bottom">keep</aspectratio><texture background="true"></texture><visible>!String.IsEmpty(Window.Property(HeroLogo))</visible></control>
+            <control type="label" id="30020"><left>80</left><top>271</top><width>1100</width><height>80</height><font>font45</font><textcolor>FFEDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny><wrapmultiline>false</wrapmultiline><label></label><visible>String.IsEmpty(Window.Property(HeroLogo))</visible></control>
+            <control type="image" id="30027"><left>80</left><top>373</top><width>150</width><height>28</height><aspectratio>keep</aspectratio><texture></texture></control>
+            <control type="label" id="30024"><left>246</left><top>367</top><width>1200</width><height>40</height><font>font13</font><textcolor>E6EDEDED</textcolor><shadowcolor>C8000000</shadowcolor><aligny>center</aligny><label></label></control>
             <control type="textbox" id="30021"><left>0</left><top>0</top><width>1</width><height>1</height><font>font12</font><textcolor>FFFFFFFF</textcolor><label></label><visible>false</visible></control>
-            <control type="textbox" id="30022"><left>80</left><top>418</top><width>920</width><height>122</height><font>font13</font><textcolor>C7EDEDED</textcolor><shadowcolor>C8000000</shadowcolor><autoscroll delay="3000" time="4000" repeat="6000">true</autoscroll><label></label></control>
+            <control type="textbox" id="30022"><left>80</left><top>417</top><width>920</width><height>123</height><font>font13</font><textcolor>C7EDEDED</textcolor><shadowcolor>C8000000</shadowcolor><autoscroll delay="3000" time="4000" repeat="6000">true</autoscroll><label></label></control>
             <control type="group" id="30025">
                 <left>80</left><top>540</top><width>1400</width><height>40</height>
                 <control type="grouplist">
