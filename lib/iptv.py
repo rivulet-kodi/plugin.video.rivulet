@@ -84,12 +84,15 @@ def fetch_manifest(server_url, timeout=PROBE_TIMEOUT_SECONDS):
     cost `lib.service_runner.probe_listening()` documents: the fetch only
     runs while the setting is on.
     """
+    import http.client
     import json
     import urllib.error
     import urllib.request
 
-    request = urllib.request.Request(manifest_url(server_url), headers={"User-Agent": USER_AGENT})
     try:
+        # Inside the try: a free-text server_url without a scheme makes
+        # Request() itself raise ValueError.
+        request = urllib.request.Request(manifest_url(server_url), headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(request, timeout=timeout) as response:
             body = response.read()
     except urllib.error.HTTPError as exc:
@@ -101,7 +104,7 @@ def fetch_manifest(server_url, timeout=PROBE_TIMEOUT_SECONDS):
         except Exception:  # noqa: BLE001 - closing is best-effort cleanup
             pass
         return None, "HTTP %d" % exc.code
-    except (urllib.error.URLError, OSError, ValueError):
+    except (urllib.error.URLError, OSError, ValueError, http.client.IncompleteRead):
         return None, _UNREACHABLE
 
     try:
@@ -157,15 +160,17 @@ class IptvRegistrar:
         """
         if not parse_playlists(playlists) or not serving:
             if self._state != _OFF:
-                self._state = _OFF
+                # State follows a successful write only: a failed one is
+                # retried on the next tick.
                 store.remove_builtin_addon(BUILTIN_ID)
+                self._state = _OFF
             return
 
         manifest, reason = fetch_fn(server_url)
         if manifest is None:
             if self._state != _OFFLINE:
-                self._state = _OFFLINE
                 store.set_builtin_addon_offline(BUILTIN_ID)
+                self._state = _OFFLINE
                 # "Unreachable" is the ordinary engine-starting/restarting
                 # case, which the supervisor already logs; only an engine
                 # that ANSWERS without the add-on is news.

@@ -148,7 +148,57 @@ def test_fetch_manifest_unreachable(monkeypatch):
     assert iptv.fetch_manifest(SERVER) == (None, "unreachable")
 
 
+def test_fetch_manifest_schemeless_server_url_is_unreachable():
+    # Request() itself raises ValueError for a URL without a scheme.
+    assert iptv.fetch_manifest("127.0.0.1") == (None, "unreachable")
+
+
+def test_fetch_manifest_truncated_body_is_unreachable(monkeypatch):
+    import http.client
+
+    class _Truncated(_Resp):
+        def read(self):
+            raise http.client.IncompleteRead(b'{"id"', 100)
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _Truncated(b""))
+    assert iptv.fetch_manifest(SERVER) == (None, "unreachable")
+
+
 # --- IptvRegistrar ------------------------------------------------------------
+
+
+class _FailingStore(_FakeStore):
+    """Raises on the first remove/offline write, succeeds afterwards."""
+
+    def __init__(self):
+        super().__init__()
+        self.fail = {"remove", "offline"}
+
+    def remove_builtin_addon(self, builtin_id):
+        if "remove" in self.fail:
+            self.fail.discard("remove")
+            raise OSError("addons.json locked")
+        super().remove_builtin_addon(builtin_id)
+
+    def set_builtin_addon_offline(self, builtin_id):
+        if "offline" in self.fail:
+            self.fail.discard("offline")
+            raise OSError("addons.json locked")
+        super().set_builtin_addon_offline(builtin_id)
+
+
+def test_a_failed_store_write_is_retried_next_tick():
+    store, registrar = _FailingStore(), iptv.IptvRegistrar()
+    _apply(registrar, store, _Engine(MANIFEST))
+    for kwargs, calls in (({"playlists": ""}, store.remove_calls), ({}, store.offline_calls)):
+        engine = _Engine("unreachable")
+        try:
+            _apply(registrar, store, engine, **kwargs)
+        except OSError:
+            pass
+        assert calls == []
+        _apply(registrar, store, engine, **kwargs)
+        assert calls == ["rivulet-iptv"]
 
 
 def test_publishes_when_engine_serves_the_manifest():
