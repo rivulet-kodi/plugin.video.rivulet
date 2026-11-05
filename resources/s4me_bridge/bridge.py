@@ -20,7 +20,8 @@
 Launched by `lib.s4me.BridgeSupervisor` (see `lib/service_runner.py`) via
 `xbmc.executebuiltin('RunScript(<addon path>/resources/s4me_bridge/bridge.py,<port>)')`,
 ONLY when the opt-in `s4me_enable` setting is on AND
-`System.HasAddon(plugin.video.s4me)` is true. Serves the Stremio addon
+`System.AddonIsEnabled(plugin.video.s4me)` is true (`HasAddon` is also true
+for an installed-but-disabled add-on, which `xbmcaddon.Addon(id)` refuses). Serves the Stremio addon
 protocol on `127.0.0.1:<port>` for as long as this process's own
 `xbmc.Monitor` stays un-aborted (i.e. for the rest of the Kodi session, or
 until Kodi shuts down) OR until a `POST /shutdown` request arrives (see
@@ -50,7 +51,7 @@ imported by plain sibling-file name instead - see its own docstring.
 
 Every Stream4Me call is wrapped defensively (broad `except Exception`):
 an import failure at startup logs and exits immediately (`sys.exit(1)`),
-after which `System.HasAddon()` still reports Stream4Me installed but the
+after which `System.AddonIsEnabled()` may still report Stream4Me enabled but the
 store's protected addon entry is never created (`BridgeSupervisor` only
 adds it once ITS launch succeeds in staying up - see that class's
 docstring), so `lib.ui.addonswindow` simply never lists an addon that

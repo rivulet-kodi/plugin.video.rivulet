@@ -83,9 +83,13 @@ class Autoload:
 
 
 class Player:
-    def __init__(self, error=None):
+    def __init__(self, error=None, sampling=False):
         self.error = error
         self.samples = 0
+        self.sampling = sampling
+
+    def is_sampling(self):
+        return self.sampling
 
     def sample_if_playing(self):
         self.samples += 1
@@ -110,6 +114,14 @@ def make(tmp_path, settings=None, abort_after=1, autoload=None, player=None, clo
     )
     sup.logs, sup.notes, sup.events = logs, notes, events
     return sup
+
+
+@pytest.fixture(autouse=True)
+def _unsliced_sleep(monkeypatch):
+    """These tests script `waitForAbort()` by call count, one call per
+    supervision interval; slicing (see `test_supervisor.py`'s
+    `test_sleep_*`) would turn each interval into several calls."""
+    monkeypatch.setattr(sr, "SLEEP_SLICE_SECONDS", float("inf"))
 
 
 @pytest.fixture(autouse=True)
@@ -375,3 +387,89 @@ def test_monitor_restarts_when_iptv_playlists_change():
     assert monitor.restart_requested is True
     assert monitor.extra_env["RIVULET_IPTV_PLAYLISTS"] == "http://x/a.m3u"
     assert monitor.extra_settings["iptv_playlists"] == "http://x/a.m3u"
+
+
+# --- sliced sleep, playback sampling cadence, shutdown order -----------------
+
+
+class SliceMonitor(Monitor):
+    def __init__(self, addon, on_wait=None):
+        super().__init__(addon, abort_after=10 ** 9)
+        self.on_wait = on_wait
+
+    def waitForAbort(self, timeout=None):
+        self.waits.append(timeout)
+        if self.on_wait:
+            self.on_wait(self, len(self.waits))
+        return False
+
+
+def make_sliced(tmp_path, on_wait=None):
+    sup = make(tmp_path)
+    sup.monitor = SliceMonitor(FakeAddon({"server_enable": True}), on_wait)
+    return sup
+
+
+def test_sleep_runs_in_slices_totalling_the_interval(monkeypatch, tmp_path):
+    monkeypatch.setattr(sr, "SLEEP_SLICE_SECONDS", 1.0)
+    sup = make_sliced(tmp_path)
+    assert sup._sleep(2.5) is False
+    assert sup.monitor.waits == [1.0, 1.0, 0.5]
+
+
+def test_sleep_wakes_early_on_a_pending_restart(monkeypatch, tmp_path):
+    """A 300 s latched-platform sleep must not hold a settings change."""
+    monkeypatch.setattr(sr, "SLEEP_SLICE_SECONDS", 1.0)
+    sup = make_sliced(tmp_path, lambda m, n: setattr(m, "restart_requested", True) if n == 2 else None)
+    assert sup._sleep(300.0) is False
+    assert sup.monitor.waits == [1.0, 1.0]
+    assert sup.monitor.restart_requested is True  # consumed by the next tick, not here
+
+
+def test_sleep_wakes_early_on_any_settings_change_and_clears_the_flag(monkeypatch, tmp_path):
+    monkeypatch.setattr(sr, "SLEEP_SLICE_SECONDS", 1.0)
+    sup = make_sliced(tmp_path, lambda m, n: setattr(m, "wake_requested", True) if n == 1 else None)
+    assert sup._sleep(300.0) is False
+    assert sup.monitor.waits == [1.0]
+    assert sup.monitor.wake_requested is False
+
+
+def test_sleep_reports_abort_immediately(monkeypatch, tmp_path):
+    monkeypatch.setattr(sr, "SLEEP_SLICE_SECONDS", 1.0)
+    sup = make_sliced(tmp_path)
+    sup.monitor.waitForAbort = lambda timeout=None: True
+    assert sup._sleep(300.0) is True
+
+
+def test_monitor_flags_wake_on_every_settings_change():
+    monitor = sr.ServiceMonitor(FakeAddon({"server_enable": True}), FakeSettings)
+    monitor.onSettingsChanged()
+    assert monitor.wake_requested is True
+    assert monitor.restart_requested is False
+
+
+def test_run_caps_the_interval_while_a_playback_is_sampled(tmp_path):
+    sup = make(tmp_path, player=Player(sampling=True))
+    sup.run()
+    assert sup.monitor.waits and max(sup.monitor.waits) <= sr.PLAYBACK_SAMPLE_INTERVAL
+
+
+def test_shutdown_drains_the_final_push_before_the_blocking_engine_stop(tmp_path):
+    sup = make(tmp_path)
+    order = []
+    sup.progress_player.drain_pushes = lambda timeout: order.append("drain") or True
+    sup.state.proc = Proc()
+    sup.state.proc.stop = lambda: order.append("stop")
+    sup.shutdown()
+    assert order == ["drain", "stop"]
+
+
+def test_monitor_translates_special_paths_for_binary_and_cache_dir():
+    addon = FakeAddon({"server_enable": True, "server_binary": "special://home/bin/engine",
+                       "cache_dir": "special://temp/c", "server_url": "http://x:1"})
+    monitor = sr.ServiceMonitor(addon, FakeSettings, translate_path=lambda p: p.replace("special://", "/k/"))
+    assert monitor.binary_setting == "/k/home/bin/engine"
+    assert monitor.extra_env["RIVULET_CACHE_ROOT"] == "/k/temp/c"
+    addon.settings["cache_dir"] = "/plain/dir"
+    monitor.onSettingsChanged()
+    assert monitor.extra_env["RIVULET_CACHE_ROOT"] == "/plain/dir"

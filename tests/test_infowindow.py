@@ -134,6 +134,19 @@ def test_item_properties_thumbnail_falls_back_to_logo_without_poster(load_infowi
     assert props['thumbnail'] == 'https://x/logo.png'
 
 
+def test_item_properties_route_tmdb_art_through_sized_image(load_infowindow):
+    """A TMDB `original` is a multi-MB download for a 200px card; the
+    coverflow must ask for the size the slot needs."""
+    ctx = load_infowindow()
+    tmdb = 'https://image.tmdb.org/t/p/original/%s.jpg'
+    props = ctx.infowindow._item_properties({'poster': tmdb % 'p', 'background': tmdb % 'b'})
+    assert props['thumbnail'] == 'https://image.tmdb.org/t/p/w342/p.jpg'
+    assert props['fanart'] == 'https://image.tmdb.org/t/p/w1280/b.jpg'
+    # A poster standing in for a missing backdrop fills the screen: w780.
+    only_poster = ctx.infowindow._item_properties({'poster': tmdb % 'p'})
+    assert only_poster['fanart'] == 'https://image.tmdb.org/t/p/w780/p.jpg'
+
+
 def test_item_properties_fanart_falls_back_through_logo_then_poster(load_infowindow):
     ctx = load_infowindow()
     _item_properties = ctx.infowindow._item_properties

@@ -1579,3 +1579,7 @@ msgstr "Kanały Stream4Me do udostępnienia, rozdzielone przecinkami. Puste udos
 msgctxt "#30627"
 msgid "advancedsettings.xml installed - restart Kodi to apply. Set the video cache in Settings > Services > Caching."
 msgstr "Zainstalowano advancedsettings.xml - uruchom Kodi ponownie, aby zastosować. Pamięć podręczną wideo ustawisz w Ustawienia > Usługi > Buforowanie."
+
+msgctxt "#30650"
+msgid "Trailers play through Kodi's YouTube add-on, which is turned off. Turn it on now?"
+msgstr "Zwiastuny odtwarzane są przez dodatek YouTube w Kodi, który jest wyłączony. Włączyć go teraz?"

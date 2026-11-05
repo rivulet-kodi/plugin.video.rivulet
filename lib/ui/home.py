@@ -176,8 +176,10 @@ def _mark_watched_on(item, watched):
     only calls this for a watched card; clearing one goes through here
     too, because a card cannot un-set a playcount any other way.
     """
+    from lib.ui.compat import set_watched
+
     item.setProperty('watched', '1' if watched else '')
-    item.setInfo('video', {'playcount': 1 if watched else 0, 'overlay': 5 if watched else 4})
+    set_watched(item, watched)
 
 
 def repaint_watched(window):

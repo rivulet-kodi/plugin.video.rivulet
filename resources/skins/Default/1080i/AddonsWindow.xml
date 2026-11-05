@@ -6,7 +6,7 @@
     <controls>
         <control type="group">
             <left>0</left><top>0</top>
-            <visible>!Player.HasVideo</visible>
+            <visible>!Window.IsActive(fullscreenvideo)</visible>
             <animation type="WindowOpen" reversible="false">
                 <effect type="fade" delay="0" end="100" time="200" />
             </animation>
@@ -28,14 +28,14 @@
                 <!-- Seven rows of 120; focused is the white panel with dark text, as on the series page. -->
                 <itemlayout height="120">
                     <control type="label"><left>36</left><top>20</top><width>1730</width><height>42</height><font>font13</font><textcolor>E6EDEDED</textcolor><aligny>center</aligny><label>[B]$INFO[ListItem.Label][/B]</label></control>
-                    <control type="label"><left>36</left><top>66</top><width>1730</width><height>34</height><font>font12</font><textcolor>B3EDEDED</textcolor><aligny>center</aligny><label>$INFO[ListItem.Label2]</label></control>
+                    <control type="label"><left>36</left><top>64</top><width>1730</width><height>38</height><font>font12</font><textcolor>B3EDEDED</textcolor><aligny>center</aligny><label>$INFO[ListItem.Label2]</label></control>
                 </itemlayout>
                 <focusedlayout height="120">
                     <control type="image"><left>0</left><top>6</top><width>1800</width><height>108</height><texture border="40" colordiffuse="FFFFFFFF">look_panel.png</texture><visible>Control.HasFocus(30002)</visible></control>
                     <control type="label"><left>36</left><top>20</top><width>1730</width><height>42</height><font>font13</font><textcolor>FF07090B</textcolor><aligny>center</aligny><label>[B]$INFO[ListItem.Label][/B]</label><visible>Control.HasFocus(30002)</visible></control>
-                    <control type="label"><left>36</left><top>66</top><width>1730</width><height>34</height><font>font12</font><textcolor>B307090B</textcolor><aligny>center</aligny><label>$INFO[ListItem.Label2]</label><visible>Control.HasFocus(30002)</visible></control>
+                    <control type="label"><left>36</left><top>64</top><width>1730</width><height>38</height><font>font12</font><textcolor>B307090B</textcolor><aligny>center</aligny><label>$INFO[ListItem.Label2]</label><visible>Control.HasFocus(30002)</visible></control>
                     <control type="label"><left>36</left><top>20</top><width>1730</width><height>42</height><font>font13</font><textcolor>E6EDEDED</textcolor><aligny>center</aligny><label>[B]$INFO[ListItem.Label][/B]</label><visible>!Control.HasFocus(30002)</visible></control>
-                    <control type="label"><left>36</left><top>66</top><width>1730</width><height>34</height><font>font12</font><textcolor>B3EDEDED</textcolor><aligny>center</aligny><label>$INFO[ListItem.Label2]</label><visible>!Control.HasFocus(30002)</visible></control>
+                    <control type="label"><left>36</left><top>64</top><width>1730</width><height>38</height><font>font12</font><textcolor>B3EDEDED</textcolor><aligny>center</aligny><label>$INFO[ListItem.Label2]</label><visible>!Control.HasFocus(30002)</visible></control>
                 </focusedlayout>
             </control>
             <!-- Kept for the page control; the position is printed below. -->

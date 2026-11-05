@@ -255,8 +255,15 @@ def run_script_command(addon_path, port):
     other bridge setting itself via
     `xbmcaddon.Addon('plugin.video.rivulet')`, sidestepping that limit
     entirely.
+
+    The script path is quoted the way Kodi's own `StringUtils::Paramify`
+    does (`"` wrapped, `\\` and `"` backslash-escaped): the splitter
+    (`SplitParams` in `xbmc/utils/ExecString.cpp`) honours double quotes, so
+    a comma in the install path (a Windows user name, a portable-install
+    folder) stays inside the first argument instead of splitting it.
     """
-    return "RunScript(%s,%s)" % (bridge_script_path(addon_path), port)
+    quoted = '"%s"' % bridge_script_path(addon_path).replace("\\", "\\\\").replace('"', '\\"')
+    return "RunScript(%s,%s)" % (quoted, port)
 
 
 class BridgeSupervisor:

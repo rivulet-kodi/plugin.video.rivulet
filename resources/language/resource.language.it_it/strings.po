@@ -1579,3 +1579,7 @@ msgstr "Canali Stream4Me da offrire, separati da virgole. Vuoto offre tutti i ca
 msgctxt "#30627"
 msgid "advancedsettings.xml installed - restart Kodi to apply. Set the video cache in Settings > Services > Caching."
 msgstr "advancedsettings.xml installato - riavvia Kodi per applicarlo. Imposta la cache video in Impostazioni > Servizi > Cache."
+
+msgctxt "#30650"
+msgid "Trailers play through Kodi's YouTube add-on, which is turned off. Turn it on now?"
+msgstr "I trailer si riproducono con il componente aggiuntivo YouTube di Kodi, che è disattivato. Attivarlo ora?"

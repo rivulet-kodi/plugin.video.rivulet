@@ -46,6 +46,7 @@ from lib.ui.uicommon import (
     log_paging_failure,
     take_pending_pages,
 )
+from lib.ui.urlutil import sized_image
 
 BACKGROUND = 30000
 LOADING = 30001
@@ -212,8 +213,12 @@ def _item_properties(meta):
     if not isinstance(genres, list):
         genres = []
     props = {
-        'thumbnail': art.get('thumb') or logo or '',
-        'fanart': art.get('fanart') or poster or '',
+        'thumbnail': sized_image(art.get('thumb') or logo, 'poster'),
+        'fanart': (
+            sized_image(art['fanart'], 'backdrop')
+            if art.get('fanart')
+            else sized_image(poster, 'fill')
+        ),
         'genre': escape_label(', '.join(g for g in genres if isinstance(g, str))),
         'rating': escape_label(str(rating)) if rating not in (None, '') else '',
         'plot': escape_label(meta.get('description') or ''),

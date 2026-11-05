@@ -310,6 +310,9 @@
                     <constraints>
                         <writable>false</writable>
                         <masking>executable</masking>
+                        <sources>
+                            <source>local</source>
+                        </sources>
                         <allowempty>true</allowempty>
                     </constraints>
                     <dependencies>
@@ -539,6 +542,9 @@
                     <default/>
                     <constraints>
                         <writable>false</writable>
+                        <sources>
+                            <source>local</source>
+                        </sources>
                         <allowempty>true</allowempty>
                     </constraints>
                     <dependencies>
@@ -822,7 +828,7 @@
                     <dependencies>
                         <dependency type="visible">
                             <and>
-                                <condition on="property" name="InfoBool">System.HasAddon(plugin.video.s4me)</condition>
+                                <condition on="property" name="InfoBool">System.AddonIsEnabled(plugin.video.s4me)</condition>
                                 <condition on="property" name="InfoBool">String.IsEqual(System.Language,Italian)</condition>
                             </and>
                         </dependency>
@@ -839,7 +845,7 @@
                     <dependencies>
                         <dependency type="visible">
                             <and>
-                                <condition on="property" name="InfoBool">System.HasAddon(plugin.video.s4me)</condition>
+                                <condition on="property" name="InfoBool">System.AddonIsEnabled(plugin.video.s4me)</condition>
                                 <condition on="property" name="InfoBool">String.IsEqual(System.Language,Italian)</condition>
                             </and>
                         </dependency>
@@ -858,7 +864,7 @@
                     <dependencies>
                         <dependency type="visible">
                             <and>
-                                <condition on="property" name="InfoBool">System.HasAddon(plugin.video.s4me)</condition>
+                                <condition on="property" name="InfoBool">System.AddonIsEnabled(plugin.video.s4me)</condition>
                                 <condition on="property" name="InfoBool">String.IsEqual(System.Language,Italian)</condition>
                             </and>
                         </dependency>

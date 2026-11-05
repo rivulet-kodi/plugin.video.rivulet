@@ -10,6 +10,7 @@ lives in views.py / player.py. Pure URL-building/stream-token logic
 lib.ui.urlutil instead; this module keeps only the mutable
 ADDON_HANDLE/BASE_URL dispatch state and the querystring parser.
 """
+import os
 import sys
 import time
 from urllib.parse import parse_qs
@@ -194,13 +195,13 @@ def _install_advancedsettings():
     import xbmcvfs
 
     from lib import advancedsettings
-    from lib.ui.compat import ADDON_ID, L, kodi_major_version, log, notify
+    from lib.ui.compat import ADDON, L, kodi_major_version, log, notify
 
     cache_in_gui = kodi_major_version() >= 21
     template = 'advancedsettings_kodi21.xml' if cache_in_gui else 'advancedsettings.xml'
-    source = xbmcvfs.translatePath(
-        'special://home/addons/%s/resources/%s' % (ADDON_ID, template)
-    )
+    # The add-on's own install path, wherever Kodi found it (user, system
+    # or portable add-on dir), not a guess under special://home/addons.
+    source = os.path.join(xbmcvfs.translatePath(ADDON.getAddonInfo('path')), 'resources', template)
     dest = xbmcvfs.translatePath('special://masterprofile/advancedsettings.xml')
     profile = xbmcvfs.translatePath('special://profile/advancedsettings.xml')
 

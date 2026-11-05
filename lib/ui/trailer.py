@@ -91,10 +91,20 @@ def _plays(url):
             pass
 
 
-def _youtube_addon_url(yt):
+def _youtube_addon_enabled():
+    """True when Kodi's YouTube add-on is installed AND enabled.
+    `System.HasAddon` alone is true for a disabled add-on too (Kodi 19+,
+    xbmc/xbmc#16707), and a route to a disabled add-on never starts."""
     import xbmc
 
-    if not xbmc.getCondVisibility('System.HasAddon(%s)' % _YOUTUBE_ADDON):
+    return bool(
+        xbmc.getCondVisibility('System.HasAddon(%s)' % _YOUTUBE_ADDON)
+        and xbmc.getCondVisibility('System.AddonIsEnabled(%s)' % _YOUTUBE_ADDON)
+    )
+
+
+def _youtube_addon_url(yt):
+    if not _youtube_addon_enabled():
         return ''
     return 'plugin://%s/play/?video_id=%s' % (_YOUTUBE_ADDON, yt)
 
@@ -315,17 +325,22 @@ def _watch():
 
 def _offer_youtube_addon(L, notify):
     """Nothing can play it: offer Kodi's YouTube add-on, which Kodi then
-    installs from its own repository (it asks once more itself)."""
+    installs from its own repository (it asks once more itself), or turns
+    on when it is installed but disabled."""
     import xbmc
 
     from lib.ui import dialogs
 
-    if xbmc.getCondVisibility('System.HasAddon(%s)' % _YOUTUBE_ADDON):
+    installed = xbmc.getCondVisibility('System.HasAddon(%s)' % _YOUTUBE_ADDON)
+    if installed and _youtube_addon_enabled():
         notify(L(30498))
         return
+    # Installed but turned off: enabling it is the fix, not installing it.
     try:
-        yes = dialogs.confirm(L(30499), L(30504), xbmc.getLocalizedString(107), xbmc.getLocalizedString(106))
+        yes = dialogs.confirm(
+            L(30499), L(30650 if installed else 30504), xbmc.getLocalizedString(107), xbmc.getLocalizedString(106),
+        )
     except Exception:
         yes = False
     if yes:
-        xbmc.executebuiltin('InstallAddon(%s)' % _YOUTUBE_ADDON)
+        xbmc.executebuiltin('%s(%s)' % ('EnableAddon' if installed else 'InstallAddon', _YOUTUBE_ADDON))

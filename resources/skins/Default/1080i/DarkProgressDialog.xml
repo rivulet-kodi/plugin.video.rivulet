@@ -27,16 +27,16 @@
             </control>
 
             <control type="label" id="30302">
-                <left>576</left><top>472</top><width>768</width><height>40</height>
+                <left>576</left><top>476</top><width>768</width><height>36</height>
                 <font>font13</font><textcolor>FFEDEDED</textcolor>
-                <aligny>bottom</aligny>
+                <aligny>center</aligny>
                 <label></label>
             </control>
 
             <control type="label" id="30303">
-                <left>576</left><top>472</top><width>768</width><height>40</height>
+                <left>576</left><top>476</top><width>768</width><height>36</height>
                 <font>font13</font><textcolor>FFEDEDED</textcolor>
-                <align>right</align><aligny>bottom</aligny>
+                <align>right</align><aligny>center</aligny>
                 <label></label>
                 <visible>!String.IsEmpty(Control.GetLabel(30303))</visible>
             </control>

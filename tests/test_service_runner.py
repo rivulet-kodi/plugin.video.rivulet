@@ -34,6 +34,14 @@ import lib.service_runner as service_runner
 from tests.kodistubs import install_kodi_stubs
 from tests.test_service_runner_server import fake_popen  # noqa: F401 -- pytest fixture
 
+
+@pytest.fixture(autouse=True)
+def _unsliced_sleep(monkeypatch):
+    """These tests script `waitForAbort()` by call count, one call per
+    supervision interval; slicing (tested in `test_supervisor.py`) would
+    turn each interval into several calls."""
+    monkeypatch.setattr(service_runner, "SLEEP_SLICE_SECONDS", float("inf"))
+
 # ===========================================================================
 # http_port_from_url
 # ===========================================================================
@@ -495,7 +503,8 @@ def test_main_syncs_s4me_bridge_every_tick_with_current_settings(monkeypatch, tm
     assert port == 11499
     assert has_addon is True
     assert launch_fn == expected_launch_fn
-    assert any('plugin.video.s4me' in c for c in cond_calls)
+    assert 'System.AddonIsEnabled(plugin.video.s4me)' in cond_calls
+    assert 'System.HasAddon(plugin.video.s4me)' not in cond_calls
 
 
 def test_main_s4me_bridge_on_by_default_for_italian_users(monkeypatch, tmp_path):
@@ -1858,7 +1867,7 @@ def test_main_autoload_probes_kodis_home_window_for_gui_readiness(monkeypatch, t
     with _autoload_main_env(tmp_path, monkeypatch, wait, settings, cond_visibility=record):
         service_runner.main()
 
-    gui_probes = [c for c in conditions if 'HasAddon' not in c]  # the S4Me bridge probes its own
+    gui_probes = [c for c in conditions if 'AddonIsEnabled' not in c]  # the S4Me bridge probes its own
     assert gui_probes and all(c == 'Window.IsVisible(home)' for c in gui_probes)
 
 
@@ -2706,3 +2715,23 @@ def test_main_unsupported_platform_error_branch_falls_back_to_executable_when_li
     assert len(bin_spawned) == 1
     assert bin_spawned[0].start_calls == 1
     assert intervals == [service_runner.HEALTHY_POLL_INTERVAL]
+
+def test_main_s4me_bridge_stays_off_for_an_installed_but_disabled_stream4me(monkeypatch, tmp_path):
+    """`System.HasAddon` is true for a disabled add-on, whose
+    `xbmcaddon.Addon(id)` the bridge cannot open: only the ENABLED check may
+    start it (otherwise it is relaunched every 30 s for the whole session)."""
+    _FakeBridgeSupervisor.instances = []
+    monkeypatch.setattr(service_runner.s4me, "BridgeSupervisor", _FakeBridgeSupervisor)
+    monkeypatch.setattr(service_runner, "probe_listening", lambda *a, **kw: True)
+    monkeypatch.setattr(service_runner, "_detect_italian_user", lambda xbmc: True)
+
+    def cond_visibility(cond):
+        return cond.startswith('System.HasAddon')
+
+    wait = _scripted_wait([], [None])
+    with _main_env(tmp_path, wait, settings={'server_enable': True}, cond_visibility=cond_visibility):
+        service_runner.main()
+
+    enabled, _port, has_addon, _launch, _store = _FakeBridgeSupervisor.instances[0].apply_calls[0]
+    assert enabled is False
+    assert has_addon is False

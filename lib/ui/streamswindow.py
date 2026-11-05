@@ -119,6 +119,7 @@ from lib.ui.uicommon import (
     open_window,
     take_ui_show_request,
 )
+from lib.ui.urlutil import sized_image
 
 BACKGROUND = 30000
 LIST = 30002
@@ -281,6 +282,7 @@ class StreamsWindow(BaseWindow):
         self.video_id = None
         self.played = False
         self.played_pair = None
+        self.end_watcher = None
         #: True once close() has run - add_pairs()/set_loading() become
         #: silent no-ops from then on, so a straggling addon answering
         #: after the user backed out (or after playback started) never
@@ -355,6 +357,7 @@ class StreamsWindow(BaseWindow):
         self.video_id = video_id
         self.played = False
         self.played_pair = None
+        self.end_watcher = None
         self._closed = False
         self._pick_in_progress = False
         if not self.pairs:
@@ -765,9 +768,14 @@ class StreamsWindow(BaseWindow):
         if not effective_art.get('poster') and self.poster:
             effective_art['poster'] = self.poster
         resolved_art = resolve_art(effective_art, self.meta)
-        background = resolved_art.get('fanart') or resolved_art.get('poster') or addon_fanart()
+        if resolved_art.get('fanart'):
+            background = sized_image(resolved_art['fanart'], 'backdrop')
+        elif resolved_art.get('poster'):
+            background = sized_image(resolved_art['poster'], 'fill')
+        else:
+            background = addon_fanart()
         self.getControl(BACKGROUND).setImage(background)
-        self.getControl(POSTER).setImage(resolved_art.get('poster') or '')
+        self.getControl(POSTER).setImage(sized_image(resolved_art.get('poster'), 'poster'))
         # self.heading carries a caller-supplied title (a Stremio
         # catalog/meta name off an untrusted third-party addon) straight
         # into a rendered label - escape_label() neutralises any [B]/
@@ -865,6 +873,10 @@ class StreamsWindow(BaseWindow):
             item_meta['meta'] = self.meta
 
         from lib.ui.player import play_direct
+
+        # Built before play() so an onPlayBackError() that fires at once
+        # is not missed (new_playback_end_watcher()'s docstring).
+        self.end_watcher = new_playback_end_watcher()
         if play_direct(
             stream, self.stype, self.sid, item_meta=item_meta,
             on_ready=lambda: _close_for_player_handoff(self),
@@ -897,6 +909,56 @@ def _close_for_player_handoff(picker):
     """
     close_windows_for_playback(exclude=picker)
     picker.close()
+
+
+def new_playback_end_watcher():
+    """A `_PlaybackEndWatcher`: a tiny `xbmc.Player` subclass, defined here
+    rather than at module scope since this module only ever imports
+    `xbmc` lazily inside the functions that need it.
+
+    Kodi delivers `onPlayBack*` callbacks to the `Player` instances that
+    exist when the event fires, so the watcher MUST be constructed BEFORE
+    the `play()` it watches: one made after `play()` returned misses an
+    `onPlayBackError()` that fired at once, and the wait then runs out
+    its whole start budget on a stream that already failed. Hand it to
+    `_wait_for_playback_end(player=...)`."""
+    import xbmc
+
+    class _PlaybackEndWatcher(xbmc.Player):
+        """Distinguishes a natural end from a user stop/failure, which
+        `isPlaying()` alone cannot - it reports False as soon as
+        playback stops for ANY reason - and records that Kodi has
+        announced the player closed (`playback_finished`), which is the
+        only signal that CVideoPlayer::CloseFile() has returned, and
+        whether the stream failed to open at all (`open_failed`: an error
+        callback with no `onAVStarted()` since)."""
+
+        def __init__(self):
+            super().__init__()
+            self.ended_naturally = False
+            self.playback_finished = False
+            self.open_failed = False
+
+        def onAVStarted(self):
+            # A new item replaced one that was playing (Kodi calls the old
+            # item's stop callback first): only a stop AFTER this start counts.
+            self.playback_finished = False
+            self.open_failed = False
+
+        def onPlayBackEnded(self):
+            self.ended_naturally = True
+            self.playback_finished = True
+
+        def onPlayBackStopped(self):
+            self.ended_naturally = False
+            self.playback_finished = True
+
+        def onPlayBackError(self):
+            self.ended_naturally = False
+            self.playback_finished = True
+            self.open_failed = True
+
+    return _PlaybackEndWatcher()
 
 
 def _wait_for_playback_end(player=None, monitor=None, start_timeout=_PLAYBACK_START_TIMEOUT_SECONDS, tick=0.5):
@@ -957,10 +1019,9 @@ def _wait_for_playback_end(player=None, monitor=None, start_timeout=_PLAYBACK_ST
     `player`/`monitor` are injectable (unit tests pass tiny fakes);
     an injected `player` is asked for its own `ended_naturally`
     attribute (`getattr(player, 'ended_naturally', False)`) once it
-    stops. Production callers omit `player` and get a
-    `_PlaybackEndWatcher` - a tiny `xbmc.Player` subclass, defined here
-    rather than at module scope since this module only ever imports
-    `xbmc` lazily inside the functions that need it - whose
+    stops. Production callers pass the `new_playback_end_watcher()` they
+    built BEFORE starting playback (so an immediate `onPlayBackError()` is
+    not missed); omitting `player` builds one here, after the fact. Its
     `onPlayBackEnded()`/`onPlayBackStopped()`/`onPlayBackError()`
     overrides record which one Kodi actually called.
     """
@@ -968,43 +1029,9 @@ def _wait_for_playback_end(player=None, monitor=None, start_timeout=_PLAYBACK_ST
 
     from lib.ui.compat import log
 
-    class _PlaybackEndWatcher(xbmc.Player):
-        """Distinguishes a natural end from a user stop/failure, which
-        `isPlaying()` alone cannot - it reports False as soon as
-        playback stops for ANY reason - and records that Kodi has
-        announced the player closed (`playback_finished`), which is the
-        only signal that CVideoPlayer::CloseFile() has returned, and
-        whether the stream failed to open at all (`open_failed`: an error
-        callback with no `onAVStarted()` since)."""
-
-        def __init__(self):
-            super().__init__()
-            self.ended_naturally = False
-            self.playback_finished = False
-            self.open_failed = False
-
-        def onAVStarted(self):
-            # A new item replaced one that was playing (Kodi calls the old
-            # item's stop callback first): only a stop AFTER this start counts.
-            self.playback_finished = False
-            self.open_failed = False
-
-        def onPlayBackEnded(self):
-            self.ended_naturally = True
-            self.playback_finished = True
-
-        def onPlayBackStopped(self):
-            self.ended_naturally = False
-            self.playback_finished = True
-
-        def onPlayBackError(self):
-            self.ended_naturally = False
-            self.playback_finished = True
-            self.open_failed = True
-
     try:
         if player is None:
-            player = _PlaybackEndWatcher()
+            player = new_playback_end_watcher()
         if monitor is None:
             monitor = xbmc.Monitor()
 
@@ -1700,6 +1727,7 @@ def _try_binge_watch(stype, meta, poster, art, video_id, played_info):
                 return False
 
             item_meta = _binge_item_meta(show_name, candidate, art, poster, meta)
+            watcher = new_playback_end_watcher()
             if not play_direct(
                 picked_stream, stype, candidate.get('id'), item_meta=item_meta,
                 on_ready=close_windows_for_playback,
@@ -1709,7 +1737,7 @@ def _try_binge_watch(stype, meta, poster, art, video_id, played_info):
             last_played = (candidate, next_pairs)
             log('streamswindow: binge-watching auto-played %r' % candidate.get('id'), xbmc.LOGINFO)
 
-            proceed, ended_naturally = _wait_for_playback_end()
+            proceed, ended_naturally = _wait_for_playback_end(player=watcher)
             if not proceed:
                 end_player_phase()
                 return False
@@ -1973,7 +2001,7 @@ def open_streams(stype, sid, poster=None, heading='', art=None, meta=None, video
         # that still ignore input, phase `player` - anything queued while
         # the player owned the screen. Only then does the phase end and a
         # window open, so nothing opens behind a frozen GUI thread.
-        proceed, ended_naturally = _wait_for_playback_end()
+        proceed, ended_naturally = _wait_for_playback_end(player=win.end_watcher)
         if not proceed:
             end_player_phase()
             return False

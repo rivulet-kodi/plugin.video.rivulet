@@ -1579,3 +1579,7 @@ msgstr "要提供的 Stream4Me 频道，用逗号分隔。留空则提供所有�
 msgctxt "#30627"
 msgid "advancedsettings.xml installed - restart Kodi to apply. Set the video cache in Settings > Services > Caching."
 msgstr "已安装 advancedsettings.xml - 重启 Kodi 后生效。请在 设置 > 服务 > 缓存 中设置视频缓存。"
+
+msgctxt "#30650"
+msgid "Trailers play through Kodi's YouTube add-on, which is turned off. Turn it on now?"
+msgstr "预告片通过 Kodi 的 YouTube 插件播放,但该插件已被禁用。现在启用吗?"

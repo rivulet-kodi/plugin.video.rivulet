@@ -8,6 +8,7 @@ legacy ListItem.setInfo API) and Kodi >= 20 (Nexus+, InfoTagVideo
 setter API). Everything else in the UI layer should go through here
 instead of poking xbmc*/xbmcvfs/xbmcaddon directly for these concerns.
 """
+import os
 import re
 
 import xbmc
@@ -17,7 +18,78 @@ import xbmcvfs
 
 from lib import settings as _settings
 
-ADDON = xbmcaddon.Addon()
+
+class AddonProxy:
+    """A plain-Python stand-in for one long-lived ``xbmcaddon.Addon()`` that
+    never serves stale settings.
+
+    Why it exists. Every legacy ``xbmcaddon.Addon()`` is its own
+    ``CAddon`` with its own in-memory settings, and a save reloads only
+    the FIRST one registered for the id: ``CAddon::SaveSettings`` ->
+    ``CAddonMgr::ReloadSettings`` takes the first match in
+    ``m_updateableAddons`` (xbmc/addons/AddonManager.cpp), which is the
+    service's object created at login. Home's object is never reloaded, so
+    a key paired in a ``RunPlugin`` interpreter (``pairwindow``) stays
+    invisible to Home, and Home's next Settings OK (``SaveAndClose``
+    writes the dialog add-on's WHOLE state) would write the old empty key
+    back over it. Kodi 19 additionally keeps cancelled Settings edits in
+    the object the dialog was opened on
+    (``CGUIDialogAddonSettings::ShowForAddon`` has no reload on cancel;
+    Nexus+ reloads in ``ShowForSingleInstance``).
+
+    What it does. It holds a real ``Addon`` and swaps it for a fresh one
+    (loaded from disk) whenever the userdata ``settings.xml`` changed
+    since it was loaded - one ``os.stat`` fingerprint (mtime_ns, size) per
+    ``getSetting*``/``setSetting*`` call, the path computed once. A missing
+    file is a valid state (never saved) and fingerprints as ``None``.
+    ``openSettings()`` runs on a throw-away instance, and the cached one is
+    replaced afterwards, so cancelled edits die with the throw-away object
+    and OK'd ones are re-read. Everything else (``getAddonInfo``,
+    ``getLocalizedString``...) is delegated untouched.
+
+    Deliberately NOT an ``xbmcaddon.Addon`` subclass: Kodi 22's SWIG
+    classes reject Python-side subclass/attribute writes (see AGENTS.md).
+    """
+
+    def __init__(self, factory):
+        self._factory = factory
+        self._addon = factory()
+        self._settings_file = None
+        self._fingerprint = self._stat()
+
+    def _stat(self):
+        if self._settings_file is None:
+            profile = self._addon.getAddonInfo('profile')
+            self._settings_file = os.path.join(xbmcvfs.translatePath(profile), 'settings.xml')
+        try:
+            info = os.stat(self._settings_file)
+        except OSError:
+            return None
+        return (info.st_mtime_ns, info.st_size)
+
+    def _current(self):
+        fingerprint = self._stat()
+        if fingerprint != self._fingerprint:
+            # Fingerprint first: a write landing during the reload makes
+            # the next call reload again instead of being missed.
+            self._fingerprint = fingerprint
+            self._addon = self._factory()
+        return self._addon
+
+    def openSettings(self):
+        try:
+            self._factory().openSettings()
+        finally:
+            self._fingerprint = self._stat()
+            self._addon = self._factory()
+
+    def __getattr__(self, name):
+        if name.startswith(('getSetting', 'setSetting')):
+            return getattr(self._current(), name)
+        return getattr(self._addon, name)
+
+
+ADDON = AddonProxy(lambda: xbmcaddon.Addon())
 ADDON_ID = ADDON.getAddonInfo('id')
 ADDON_NAME = ADDON.getAddonInfo('name')
 ADDON_FANART = ADDON.getAddonInfo('fanart')
@@ -41,10 +113,12 @@ def addon_profile_dir():
 def addon_media_path(name):
     """Return the special:// filesystem path to a bundled resources/media asset.
 
-    Built from ADDON_ID at call time (never a hardcoded addon id) so this
-    keeps working under a future rename/fork.
+    Built from the add-on's own ``path`` info (never a hardcoded addon id
+    or a ``special://home/addons`` guess, which is wrong for a system-wide
+    install) so this keeps working under a rename/fork.
     """
-    return xbmcvfs.translatePath('special://home/addons/%s/resources/media/%s' % (ADDON_ID, name))
+    root = xbmcvfs.translatePath(ADDON.getAddonInfo('path'))
+    return os.path.join(root, 'resources', 'media', name)
 
 
 def addon_fanart():
@@ -140,7 +214,6 @@ _VIDEO_INFO_SETTERS = {
     'sortseason': ('setSortSeason', int),
     'sortepisode': ('setSortEpisode', int),
     'rating': ('setRating', float),
-    'votes': ('setVotes', str),
     'duration': ('setDuration', int),
     'mediatype': ('setMediaType', _identity),
     'premiered': ('setPremiered', _identity),
@@ -194,7 +267,9 @@ def set_resume_point(list_item, position, total):
     """Badge `list_item` with a resume point (seconds) on any Kodi version.
 
     Kodi >= 20 uses InfoTagVideo.setResumePoint; older Kodi (or a missing
-    setter) falls back to the legacy setInfo resumetime/totaltime keys.
+    setter) falls back to the ``ResumeTime``/``TotalTime`` ListItem
+    properties, which is what Kodi 19's plugin ListItem reads (its
+    ``setInfo`` has no resumetime/totaltime keys).
     """
     position = float(position)
     total = float(total)
@@ -207,7 +282,28 @@ def set_resume_point(list_item, position, total):
                 return
             except (TypeError, ValueError):
                 pass
-    list_item.setInfo('video', {'resumetime': position, 'totaltime': total})
+    list_item.setProperty('ResumeTime', str(position))
+    list_item.setProperty('TotalTime', str(total))
+
+
+def set_watched(list_item, watched):
+    """Mark `list_item` watched/unwatched on any Kodi version.
+
+    Kodi >= 20 takes ``InfoTagVideo.setPlaycount`` (``setInfo`` is
+    deprecated there, and no skin XML reads ``ListItem.Overlay``, so the
+    legacy overlay code is not needed); Kodi 19 keeps the classic
+    ``setInfo`` playcount/overlay pair (5 watched, 4 unwatched).
+    """
+    if kodi_major_version() >= 20:
+        tag = getattr(list_item, 'getVideoInfoTag', lambda: None)()
+        setter = getattr(tag, 'setPlaycount', None)
+        if setter is not None:
+            try:
+                setter(1 if watched else 0)
+                return
+            except (TypeError, ValueError):
+                pass
+    list_item.setInfo('video', {'playcount': 1 if watched else 0, 'overlay': 5 if watched else 4})
 
 
 def set_video_cast(list_item, cast):

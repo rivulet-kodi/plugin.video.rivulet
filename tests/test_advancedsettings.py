@@ -337,8 +337,8 @@ def test_shipped_template_installs_and_is_valid_xml_with_expected_tunables(tmp_p
     # buffermode stays Kodi's default (4, network filesystems), which already
     # caches the http:// streams Rivulet plays; 1 also cached local files.
     assert root.find('cache/buffermode') is None
-    assert root.findtext('cache/memorysize') == '209715200'
-    assert root.findtext('cache/readfactor') == '20'
+    assert root.findtext('cache/memorysize') == '67108864'
+    assert root.find('cache/readfactor') is None
 
 
 def test_kodi21_template_has_the_same_network_block_and_no_cache(tmp_path):

@@ -150,6 +150,29 @@ def test_onclick_dispatches_the_focused_pairs_own_stream_to_play_direct(load_str
     assert win.closed is True
 
 
+def test_the_end_watcher_exists_before_play_so_an_immediate_error_is_seen(load_streamswindow, monkeypatch):
+    """Kodi delivers onPlayBackError() to the Player instances that exist
+    when it fires: the watcher must be built before play_direct() starts
+    playback, and it is the one open_streams() waits on afterwards."""
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = [({'raw': 'A'}, {'url': 'https://a.example/a.mp4'})]
+    win.stype, win.sid = 'movie', 'tt1'
+    win.onInit()
+    seen = {}
+
+    def fake_play_direct(stream, stype, sid, item_meta=None, on_ready=None, video_id=None):
+        seen['watcher_at_play'] = win.end_watcher
+        return True
+
+    monkeypatch.setattr(ctx.player, 'play_direct', fake_play_direct)
+
+    win.onClick(ctx.streamswindow.LIST)
+
+    assert seen['watcher_at_play'] is not None
+    assert win.end_watcher is seen['watcher_at_play']
+
+
 def test_a_trailer_row_plays_as_a_trailer_not_as_the_title(load_streamswindow, monkeypatch):
     ctx = load_streamswindow()
     import lib.ui.trailer as trailer

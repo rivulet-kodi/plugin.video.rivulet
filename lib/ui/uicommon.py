@@ -200,8 +200,9 @@ def wait_cancellable(func, dialog, monitor=None):
 
     On `CANCELLED` the worker is NOT interrupted - a blocking socket read
     cannot be, and it is bounded by the request's own timeout - it is
-    simply orphaned (daemon, so it never delays shutdown) and its result
-    or exception is discarded: the caller must not use anything `func`
+    simply orphaned (daemon: CPython does not wait for it, but Kodi waits
+    for a script's threads up to 5 s at stop, so it can linger that long)
+    and its result or exception is discarded: the caller must not use anything `func`
     was producing, and so can never open a screen for it later.
 
     After a Back cancel the queue is drained (`drain_queued_input()`)

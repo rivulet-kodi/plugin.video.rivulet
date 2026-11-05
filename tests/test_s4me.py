@@ -690,3 +690,19 @@ def test_launched_port_tracks_launch():
     assert sup.launched_port() is None
     sup._launch(11480, lambda cmd: None)
     assert sup.launched_port() == 11480
+
+
+def test_run_script_command_quotes_the_path_so_a_comma_cannot_split_it():
+    """Kodi's builtin splitter honours double quotes (`SplitParams` in
+    xbmc/utils/ExecString.cpp); a comma in the install path must stay in
+    argument one."""
+    command = s4me.run_script_command("/home/a,b/addon", 11480)
+
+    assert command.startswith('RunScript("/home/a,b/addon')
+    assert command.endswith('.py",11480)')
+
+
+def test_run_script_command_escapes_backslashes_and_quotes():
+    command = s4me.run_script_command('C:\\x"y', 1)
+
+    assert command.startswith('RunScript("C:\\\\x\\"y')

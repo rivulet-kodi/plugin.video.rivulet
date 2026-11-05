@@ -1579,3 +1579,7 @@ msgstr "قنوات Stream4Me المراد إتاحتها، مفصولة بفوا
 msgctxt "#30627"
 msgid "advancedsettings.xml installed - restart Kodi to apply. Set the video cache in Settings > Services > Caching."
 msgstr "تم تثبيت advancedsettings.xml - أعد تشغيل Kodi للتطبيق. اضبط ذاكرة الفيديو المؤقتة من الإعدادات > الخدمات > التخزين المؤقت."
+
+msgctxt "#30650"
+msgid "Trailers play through Kodi's YouTube add-on, which is turned off. Turn it on now?"
+msgstr "تُشغَّل المقاطع الدعائية عبر إضافة YouTube في Kodi، وهي معطّلة. هل تريد تفعيلها الآن؟"

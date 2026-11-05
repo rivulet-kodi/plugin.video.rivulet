@@ -49,9 +49,19 @@ _ISO639_1_TO_3 = {
 # A handful of languages have distinct ISO 639-2/T (terminological) codes
 # that also show up in the wild alongside the /B form above.
 _ISO639_1_TO_3_ALT = {
-    'de': 'deu', 'es': 'spa', 'fr': 'fra', 'hy': 'hye', 'is': 'isl',
+    'cs': 'ces', 'cy': 'cym', 'de': 'deu', 'el': 'ell', 'es': 'spa',
+    'eu': 'eus', 'fa': 'fas', 'fr': 'fra', 'hy': 'hye', 'is': 'isl',
     'ka': 'kat', 'mk': 'mkd', 'ms': 'msa', 'my': 'mya', 'nl': 'nld',
     'ro': 'ron', 'sk': 'slk', 'sq': 'sqi', 'zh': 'zho',
+}
+
+# Non-ISO codes the OpenSubtitles v3 addon (and the OpenSubtitles API it
+# wraps) reports for regional variants, mapped to their base language:
+# Brazilian/Mozambican Portuguese, Traditional/Simplified Chinese and the
+# Chinese-English bilingual track. Without them a user asking for `pt` or
+# `zh` would never see those tracks.
+_EXTENSION_CODES = {
+    'pob': 'pt', 'pom': 'pt', 'zht': 'zh', 'zhc': 'zh', 'ze': 'zh',
 }
 
 _ISO639_3_TO_1 = {three: two for two, three in _ISO639_1_TO_3.items()}
@@ -60,18 +70,23 @@ _ISO639_3_TO_1.update({three: two for two, three in _ISO639_1_TO_3_ALT.items()})
 
 def _lang_aliases(code):
     """Return the set of language codes considered equivalent to `code`
-    (itself, plus its ISO 639-1<->639-2 counterpart when known), lowercased."""
+    (itself, its ISO 639-1<->639-2 counterparts when known, and the base
+    language of a BCP 47 / locale tag such as ``pt-BR`` or ``en_US`` or of
+    an OpenSubtitles extension code such as ``pob``), lowercased."""
     code = (code or '').strip().lower()
     if not code:
         return set()
     aliases = {code}
-    three = _ISO639_1_TO_3.get(code)
+    base = code.replace('_', '-').split('-', 1)[0]
+    base = _EXTENSION_CODES.get(base, base)
+    aliases.add(base)
+    three = _ISO639_1_TO_3.get(base)
     if three:
         aliases.add(three)
-    alt = _ISO639_1_TO_3_ALT.get(code)
+    alt = _ISO639_1_TO_3_ALT.get(base)
     if alt:
         aliases.add(alt)
-    two = _ISO639_3_TO_1.get(code)
+    two = _ISO639_3_TO_1.get(base)
     if two:
         aliases.add(two)
     return aliases

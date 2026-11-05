@@ -74,17 +74,103 @@ def test_set_resume_point_kodi21_falls_back_when_setter_missing(load_compat):
 
     ctx.compat.set_resume_point(li, 21, 50)
 
-    assert li.legacy_info == {'resumetime': 21.0, 'totaltime': 50.0}
+    assert li.properties == {'ResumeTime': '21.0', 'TotalTime': '50.0'}
+    assert li.legacy_info == {}
 
 
-def test_set_resume_point_kodi19_uses_legacy_setinfo(load_compat):
+def test_set_resume_point_kodi19_uses_listitem_properties(load_compat):
     ctx = load_compat()
     li = FakeListItem()
 
     ctx.compat.set_resume_point(li, 3, 9)
 
-    assert li.legacy_info == {'resumetime': 3.0, 'totaltime': 9.0}
+    assert li.properties == {'ResumeTime': '3.0', 'TotalTime': '9.0'}
+    assert li.legacy_info == {}
     assert li.info_tag.calls == {}
+
+
+# ---------------------------------------------------------------------------
+# set_watched()
+# ---------------------------------------------------------------------------
+
+
+def test_set_watched_kodi21_uses_infotag_playcount(load_compat):
+    ctx = load_compat(info_labels=_KODI21_LABELS)
+    li = FakeListItem()
+
+    ctx.compat.set_watched(li, True)
+    assert li.info_tag.calls == {'setPlaycount': 1}
+    ctx.compat.set_watched(li, False)
+    assert li.info_tag.calls == {'setPlaycount': 0}
+    assert li.legacy_info == {}
+
+
+def test_set_watched_kodi19_uses_legacy_playcount_and_overlay(load_compat):
+    ctx = load_compat()
+    li = FakeListItem()
+
+    ctx.compat.set_watched(li, True)
+    assert li.legacy_info == {'playcount': 1, 'overlay': 5}
+    ctx.compat.set_watched(li, False)
+    assert li.legacy_info == {'playcount': 0, 'overlay': 4}
+
+
+# ---------------------------------------------------------------------------
+# AddonProxy: settings written by another interpreter are seen
+# ---------------------------------------------------------------------------
+
+
+class _DiskAddon:
+    """Fake Addon whose settings are loaded from a file at construction,
+    like a real legacy Addon() (own in-memory state, loaded once)."""
+
+    opened = []
+
+    def __init__(self, path):
+        self._path = path
+        self._values = dict(
+            line.split('=', 1) for line in path.read_text().splitlines() if '=' in line
+        ) if path.exists() else {}
+
+    def getAddonInfo(self, key):
+        return str(self._path.parent) if key == 'profile' else ''
+
+    def getSetting(self, key):
+        return self._values.get(key, '')
+
+    def setSetting(self, key, value):
+        self._values[key] = value
+        self._path.write_text(''.join('%s=%s\n' % kv for kv in self._values.items()))
+
+    def openSettings(self):
+        _DiskAddon.opened.append(self)
+        self._values['edited'] = 'cancelled'  # an unsaved edit
+
+
+def test_addon_proxy_sees_key_written_by_another_process(load_compat, tmp_path):
+    ctx = load_compat()
+    settings_file = tmp_path / 'settings.xml'
+    proxy = ctx.compat.AddonProxy(lambda: _DiskAddon(settings_file))
+    assert proxy.getSetting('ratings_omdb_key') == ''
+
+    # "Second interpreter": its own Addon object saves the paired key.
+    _DiskAddon(settings_file).setSetting('ratings_omdb_key', 'KEY')
+
+    assert proxy.getSetting('ratings_omdb_key') == 'KEY'
+    # Our own later write therefore starts from the paired state.
+    proxy.setSetting('other', '1')
+    assert settings_file.read_text().splitlines() == ['ratings_omdb_key=KEY', 'other=1']
+
+
+def test_addon_proxy_open_settings_drops_cancelled_edits(load_compat, tmp_path):
+    ctx = load_compat()
+    _DiskAddon.opened = []
+    proxy = ctx.compat.AddonProxy(lambda: _DiskAddon(tmp_path / 'settings.xml'))
+
+    proxy.openSettings()
+
+    assert len(_DiskAddon.opened) == 1
+    assert proxy.getSetting('edited') == ''
 
 
 # ---------------------------------------------------------------------------

@@ -676,6 +676,89 @@ def test_window_close_animation_is_rejected_regression(tmp_path):
     assert len(_window_close_animations(str(bad))) == 1
 
 
+def _layout_wrapmultiline(path):
+    """`<wrapmultiline>` tags inside an itemlayout/focusedlayout."""
+    root = ET.parse(path).getroot()
+    return [
+        el for layout in root.iter()
+        if layout.tag in ('itemlayout', 'focusedlayout')
+        for el in layout.iter('wrapmultiline')
+    ]
+
+
+def test_skin_layouts_never_use_wrapmultiline():
+    """Inside a list/panel layout `GUIControlFactory::Create` builds a
+    `CGUIListLabel` and never passes `wrapMultiLine` to it, so the tag is
+    dead there and a long title ends in "...". A `textbox` is created the
+    same inside or outside a container and does wrap."""
+    offenders = [os.path.basename(p) for p in _skin_files() if _layout_wrapmultiline(p)]
+    assert offenders == []
+
+
+def test_layout_wrapmultiline_is_rejected_regression(tmp_path):
+    bad = tmp_path / 'Bad.xml'
+    bad.write_text(
+        '<window><itemlayout><control type="label">'
+        '<wrapmultiline>true</wrapmultiline></control></itemlayout></window>',
+        encoding='utf-8',
+    )
+    assert len(_layout_wrapmultiline(str(bad))) == 1
+
+
+def _aligny_values(path):
+    """Every `<aligny>` text in one file."""
+    return [(el.text or '').strip() for el in ET.parse(path).iter('aligny')]
+
+
+def test_skin_aligny_is_a_value_kodi_honours():
+    """`GUIControlFactory::GetAlignmentY` honours only `center`; anything
+    else (`bottom` shipped in DarkProgressDialog) is silently top. Say
+    `center` or leave the tag out and place the box with top/height."""
+    offenders = [
+        '%s: <aligny>%s</aligny>' % (os.path.basename(p), v)
+        for p in _skin_files() for v in _aligny_values(p) if v not in ('center', 'top')
+    ]
+    assert offenders == []
+
+
+def test_aligny_bottom_is_rejected_regression(tmp_path):
+    bad = tmp_path / 'Bad.xml'
+    bad.write_text('<window><aligny>bottom</aligny></window>', encoding='utf-8')
+    assert _aligny_values(str(bad)) == ['bottom']
+
+
+def _player_hasvideo_conditions(path):
+    """Every `<visible>` that tests `Player.HasVideo` in one file."""
+    return [
+        el.text for el in ET.parse(path).iter('visible')
+        if 'Player.HasVideo' in (el.text or '')
+    ]
+
+
+def test_no_skin_window_hides_itself_on_player_hasvideo():
+    """`Player.HasVideo` is `appPlayer->HasVideo()`: true for the whole life
+    of a video item, windowed or not. A root group gated on it is invisible
+    AND unfocusable while the window is still on the modal stack and
+    taking input - exactly the issue #73 paths that reopen Home or the
+    picker over a video that is still running. The original intent (never
+    cover fullscreen video) is `!Window.IsActive(fullscreenvideo)`:
+    `CGUIWindowManager::GetActiveWindow()` is the base window, so it is
+    only true while the fullscreen video window itself is showing."""
+    offenders = [os.path.basename(p) for p in _skin_files() if _player_hasvideo_conditions(p)]
+    assert offenders == []
+
+
+def test_player_hasvideo_visibility_is_rejected_regression(tmp_path):
+    """Regression: the exact condition every screen's root group carried."""
+    bad = tmp_path / 'Bad.xml'
+    bad.write_text(
+        '<window><controls><control type="group">'
+        '<visible>!Player.HasVideo</visible></control></controls></window>',
+        encoding='utf-8',
+    )
+    assert _player_hasvideo_conditions(str(bad)) == ['!Player.HasVideo']
+
+
 def test_home_row_navigation_follows_the_entire_slot_chain():
     """A copied row must go Up to its predecessor, never to itself."""
     root = ET.parse(os.path.join(_SKIN_DIR, 'HomeWindow.xml')).getroot()

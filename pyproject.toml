@@ -54,6 +54,10 @@ ignore_names = [
     "onPlayBackStopped",
     "onPlayBackEnded",
     "onPlayBackError",
+    "onPlayBackPaused",
+    "onPlayBackResumed",
+    "onPlayBackSeek",
+    "seekOffset",
     # xbmc.Monitor: Kodi calls it when a setting changes (service_runner.py).
     "onSettingsChanged",
     # http.server / socketserver hooks the stdlib reads or calls by name

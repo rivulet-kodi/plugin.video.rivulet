@@ -354,6 +354,25 @@ def test_oninit_background_fallback_chain(load_detailwindow, meta, expected_key)
     assert win.getControl(ctx.detailwindow.BACKGROUND).image == expected
 
 
+def test_oninit_routes_tmdb_art_through_sized_image(load_detailwindow):
+    ctx = load_detailwindow()
+    win = _make_window(ctx.detailwindow)
+    tmdb = 'https://image.tmdb.org/t/p/original/%s.jpg'
+    win.meta = {'background': tmdb % 'b', 'poster': tmdb % 'p'}
+
+    win.onInit()
+
+    assert win.getControl(ctx.detailwindow.BACKGROUND).image == 'https://image.tmdb.org/t/p/w1280/b.jpg'
+    assert win.getControl(ctx.detailwindow.POSTER).image == 'https://image.tmdb.org/t/p/w342/p.jpg'
+
+
+def test_episode_thumb_is_sized_for_the_row_still(load_detailwindow):
+    ctx = load_detailwindow()
+    props = ctx.detailwindow._episode_properties(
+        {'thumbnail': 'https://image.tmdb.org/t/p/original/e.jpg'})
+    assert props['thumb'] == 'https://image.tmdb.org/t/p/w342/e.jpg'
+
+
 def test_oninit_builds_one_item_per_row_with_row_id_property_for_a_series(load_detailwindow):
     ctx = load_detailwindow()
     picker = ctx.detailwindow
@@ -629,7 +648,8 @@ def test_oninit_sets_watched_percent_and_resume_info_from_the_local_progress_cac
     label = item.getProperty('watched_percent')
     assert label == '42% WATCHED'
     assert label.count('%') == 1
-    assert item.legacy_info == {'resumetime': 21.0, 'totaltime': 50.0}
+    assert item.properties['ResumeTime'] == '21.0'
+    assert item.properties['TotalTime'] == '50.0'
     assert store.calls == [('series', 'tt1', 'v1')]
 
 

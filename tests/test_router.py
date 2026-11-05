@@ -714,7 +714,8 @@ def test_server_download_user_cancel_mid_download_notifies_download_error(load_r
 
 
 def test_advancedsettings_install_success_notifies_restart_message(load_router, monkeypatch):
-    ctx = load_router(localized={30066: 'restart Kodi to apply'})
+    ctx = load_router(addon_info={'path': 'special://xbmc/addons/plugin.video.rivulet'},
+                      localized={30066: 'restart Kodi to apply'})
     monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=advancedsettings_install'])
 
     calls = []
@@ -730,7 +731,7 @@ def test_advancedsettings_install_success_notifies_restart_message(load_router, 
     # Kodi 19 (no System.BuildVersion): the template with the <cache> block.
     # The active profile's own file shadows the master profile's.
     assert calls == [(
-        '/fake-kodi-home/home/addons/plugin.video.rivulet/resources/advancedsettings.xml',
+        '/fake-kodi-home/xbmc/addons/plugin.video.rivulet/resources/advancedsettings.xml',
         '/fake-kodi-home/masterprofile/advancedsettings.xml',
         ('/fake-kodi-home/profile/advancedsettings.xml',),
     )]
@@ -741,11 +742,10 @@ def test_advancedsettings_install_success_notifies_restart_message(load_router, 
     assert ctx.player.calls == []
 
 
-def test_advancedsettings_install_resolves_source_path_from_addon_id_not_hardcoded(load_router, monkeypatch):
-    """Regression guard: the source path must be built from the addon's own
-    ADDON_ID (so a fork/rename keeps working), never a literal
-    'plugin.video.rivulet' string."""
-    ctx = load_router(addon_info={'id': 'plugin.video.otherfork'})
+def test_advancedsettings_install_resolves_source_path_from_addon_install_path(load_router, monkeypatch):
+    """The template is found through the add-on's own install path, so a
+    system-wide or portable install (not under special://home/addons) works."""
+    ctx = load_router(addon_info={'path': '/usr/share/kodi/addons/plugin.video.otherfork'})
     monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=advancedsettings_install'])
 
     calls = []
@@ -758,7 +758,7 @@ def test_advancedsettings_install_resolves_source_path_from_addon_id_not_hardcod
 
     ctx.router.run()
 
-    assert calls == ['/fake-kodi-home/home/addons/plugin.video.otherfork/resources/advancedsettings.xml']
+    assert calls == ['/usr/share/kodi/addons/plugin.video.otherfork/resources/advancedsettings.xml']
 
 
 @pytest.mark.parametrize('build', ['21.2 (21.2.0) Git:20250101-abc', '22.0-RC1 Git:20261001-def'])
@@ -767,6 +767,7 @@ def test_advancedsettings_install_on_kodi21_plus_skips_the_ignored_cache_block(l
     in advancedsettings.xml: install the network-only template and say
     where the cache setting went, instead of claiming the cache applies."""
     ctx = load_router(info_labels={'System.BuildVersion': build},
+                      addon_info={'path': 'special://home/addons/plugin.video.rivulet'},
                       localized={30627: 'installed - cache is in Settings'})
     monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=advancedsettings_install'])
 
@@ -824,7 +825,7 @@ def test_advancedsettings_install_unwrapped_oserror_is_not_swallowed(load_router
     documented contract) - a plain OSError escaping install() by mistake
     must still surface via router.run()'s top-level guard instead of
     vanishing silently."""
-    ctx = load_router()
+    ctx = load_router(addon_info={'path': 'special://xbmc/addons/plugin.video.rivulet'})
     monkeypatch.setattr(sys, 'argv', ['plugin://x/', '7', '?action=advancedsettings_install'])
 
     def fake_install(source_path, dest_path, shadow_paths=()):

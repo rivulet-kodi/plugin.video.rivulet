@@ -647,6 +647,26 @@ def test_adaptive_stream_falls_back_to_direct_playback_when_isa_not_installed(ko
     )
 
 
+def test_direct_stream_merges_embedded_pipe_headers_with_proxy_headers_once(kodi_stubs, monkeypatch):
+    """A url already baking '|Referer=..' plus proxyHeaders.request must
+    end with ONE '|' suffix carrying both (proxyHeaders winning a clash):
+    Kodi splits at the first '|', so a second one garbles a value."""
+    env = kodi_stubs.env
+    resolve_url = 'https://cdn.example/x.mp4|Referer=https%3A%2F%2Fsite.example&User-Agent=Old'
+    _ServerScript(resolve_url=resolve_url).install(monkeypatch, kodi_stubs.player)
+
+    stream = {'url': resolve_url,
+              'behaviorHints': {'proxyHeaders': {'request': {'User-Agent': 'Rivulet'}}}}
+    kodi_stubs.player.play(57, stream, 'movie', 'tt57')
+
+    _handle, _succeeded, list_item = _resolved_one(env)
+    base, _, raw = list_item.path.partition('|')
+    assert base == 'https://cdn.example/x.mp4'
+    assert '|' not in raw
+    assert dict(pair.split('=', 1) for pair in raw.split('&')) == {
+        'Referer': 'https%3A%2F%2Fsite.example', 'User-Agent': 'Rivulet'}
+
+
 def test_adaptive_stream_falls_back_when_isa_installed_but_disabled(kodi_stubs, monkeypatch):
     """`System.HasAddon` alone stopped implying "enabled" once Kodi
     started returning True for a merely-installed-but-disabled addon

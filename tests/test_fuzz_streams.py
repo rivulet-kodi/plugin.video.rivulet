@@ -190,12 +190,13 @@ def test_collect_subtitles_tolerates_arbitrary_installed_addons(answer, addon_li
 
 
 _sub_entries = st.lists(st.fixed_dictionaries({
-    'id': any_text, 'url': any_text, 'lang': st.sampled_from(['en', 'eng', 'it', 'ita', 'fr', '', ' EN ']) | any_text,
+    'id': any_text, 'url': any_text, 'lang': st.sampled_from(['en', 'eng', 'it', 'ita', 'fr', '', ' EN ', 'pob', 'pt-BR', 'en_US', 'ell']) | any_text,
 }), max_size=6)
 
 
 @given(_sub_entries, json_values)
 @example([{'id': 'a', 'url': 'u', 'lang': 'en'}], 5)
+@example([{'id': 'a', 'url': 'u', 'lang': 'pob'}, {'id': 'b', 'url': 'u', 'lang': 'pt-BR'}], 'pt')
 def test_filter_subtitles_returns_an_ordered_subset(subs, preferred):
     kept = subtitles.filter_subtitles(subs, preferred if isinstance(preferred, str) or preferred is None else '')
     positions = [next(i for i, sub in enumerate(subs) if sub is entry) for entry in kept]

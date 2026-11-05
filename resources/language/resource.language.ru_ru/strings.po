@@ -1579,3 +1579,7 @@ msgstr "Каналы Stream4Me для предоставления, через �
 msgctxt "#30627"
 msgid "advancedsettings.xml installed - restart Kodi to apply. Set the video cache in Settings > Services > Caching."
 msgstr "advancedsettings.xml установлен — перезапустите Kodi, чтобы применить. Видеокэш задаётся в разделе Настройки > Службы > Кеширование."
+
+msgctxt "#30650"
+msgid "Trailers play through Kodi's YouTube add-on, which is turned off. Turn it on now?"
+msgstr "Трейлеры воспроизводятся через дополнение YouTube для Kodi, но оно отключено. Включить сейчас?"

@@ -474,6 +474,19 @@ def test_oninit_art_fanart_drives_background_and_art_poster_drives_the_side_pane
     assert win.getControl(ctx.streamswindow.POSTER).image == 'https://x/art-poster.jpg'
 
 
+def test_oninit_routes_tmdb_art_through_sized_image(load_streamswindow):
+    ctx = load_streamswindow()
+    win = _make_window(ctx.streamswindow)
+    win.pairs = []
+    tmdb = 'https://image.tmdb.org/t/p/original/%s.jpg'
+    win.art = {'poster': tmdb % 'p', 'fanart': tmdb % 'f'}
+
+    win.onInit()
+
+    assert win.getControl(ctx.streamswindow.BACKGROUND).image == 'https://image.tmdb.org/t/p/w1280/f.jpg'
+    assert win.getControl(ctx.streamswindow.POSTER).image == 'https://image.tmdb.org/t/p/w342/p.jpg'
+
+
 def test_oninit_art_poster_drives_background_when_no_fanart_is_supplied(load_streamswindow):
     ctx = load_streamswindow()
     win = _make_window(ctx.streamswindow)

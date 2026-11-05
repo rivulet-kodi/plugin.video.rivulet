@@ -10,6 +10,8 @@ that role and records every call for assertions.
 """
 import threading
 
+import pytest
+
 from lib.stremio.addons import AddonError
 from lib.stremio.subtitles import collect_subtitles, filter_subtitles
 
@@ -481,3 +483,24 @@ def test_malformed_subtitle_url_is_dropped_not_raised():
     from lib.stremio.subtitles import _is_usable_subtitle_url
 
     assert _is_usable_subtitle_url("http://[x/a") is False
+
+
+@pytest.mark.parametrize("preferred, lang", [
+    # 639-2/T codes Stremio's OpenSubtitles addon really answers with
+    ("el", "ell"), ("gre", "ell"), ("ell", "el"),
+    ("cs", "ces"), ("cs", "cze"), ("cy", "cym"), ("eu", "eus"), ("fa", "fas"), ("fa", "per"),
+    # OpenSubtitles extension codes for regional variants
+    ("pt", "pob"), ("pt", "pom"), ("por", "pob"), ("pob", "pt"),
+    ("zh", "zht"), ("zh", "zhc"), ("zh", "ze"), ("chi", "zht"),
+    # BCP 47 / locale tags reduce to their base language
+    ("pt-BR", "pob"), ("pt_BR", "por"), ("pt", "pt-BR"), ("en", "en-US"), ("eng", "en_US"),
+])
+def test_filter_subtitles_matches_real_world_language_codes(preferred, lang):
+    subs = [{"id": "x", "lang": lang, "url": "https://a.example/x.srt"}]
+    assert filter_subtitles(subs, preferred) == subs
+
+
+@pytest.mark.parametrize("preferred, lang", [("el", "eng"), ("pt", "es"), ("zh", "ja"), ("en", "pob")])
+def test_filter_subtitles_extension_and_tag_aliases_do_not_over_match(preferred, lang):
+    subs = [{"id": "x", "lang": lang, "url": "https://a.example/x.srt"}]
+    assert filter_subtitles(subs, preferred) == []

@@ -837,6 +837,48 @@ def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn, spaw
                 self.seekTime(offset_ms / library.MS_PER_SECOND)
             except Exception as exc:  # noqa: BLE001 - a seek failure must never crash the service or interrupt playback
                 log_fn(xbmc_module.LOGWARNING, "resume seek failed: %r" % (exc,))
+                return
+            # The seek is asynchronous, so `getTime()` here would still read
+            # the pre-seek position. The target is the position that counts:
+            # a stop right after the resume keeps it instead of recording
+            # nothing (or 0).
+            self._remember_sample(context, position_ms=offset_ms)
+
+        def onPlayBackPaused(self):
+            self._remember_sample()
+
+        def onPlayBackResumed(self):
+            self._remember_sample()
+
+        def onPlayBackSeek(self, time, seekOffset):  # noqa: N803 - Kodi's callback signature
+            self._remember_sample()
+
+        def is_sampling(self):
+            """True while a Rivulet context is accepted for the running
+            playback: `Supervisor.run` then caps its sleep at
+            `PLAYBACK_SAMPLE_INTERVAL` so the cadence of `_last_sample` does
+            not depend on which supervision branch picked the interval."""
+            return self._accepted_key is not None
+
+        def _remember_sample(self, context=None, position_ms=None):
+            """Refresh `_last_sample` (memory only: no local write, no push)
+            from a callback delivered while the player is still valid
+            (pause/resume/seek/AV start), so a stop soon after is not
+            replayed from a sample up to a whole supervision interval old.
+            Never called from stop/end/error, where `getTime()` raises."""
+            try:
+                if context is None:
+                    context = store.get_now_playing()
+                if context is None or _context_key(context) != self._accepted_key:
+                    return
+                if position_ms is None:
+                    position_ms = int(self.getTime() * library.MS_PER_SECOND)
+                duration_ms = int(self.getTotalTime() * library.MS_PER_SECOND)
+            except Exception as exc:  # noqa: BLE001 - a failed read must never disturb playback
+                log_fn(xbmc_module.LOGDEBUG, "playback sample refresh failed: %r" % (exc,))
+                return
+            if duration_ms > 0:
+                self._last_sample = (_context_key(context), position_ms, duration_ms)
 
         def onPlayBackStopped(self):
             self._terminate()
@@ -880,6 +922,19 @@ def build_progress_player(xbmc_module, store, api, log_fn, sync_enabled_fn, spaw
                 except Exception as exc:  # noqa: BLE001 - final flush is best-effort; cleanup below is unconditional
                     log_fn(xbmc_module.LOGWARNING, "final flush failed: %r" % (exc,))
             owns_context = accepted or (failed and self._accepted_key is None)
+            if not owns_context and context is not None and self._accepted_key is None:
+                # Stopped/ended before `onAVStarted` accepted anything. Either
+                # the user stopped the open phase of THIS attempt (nothing is
+                # playing now: drop its context and resume offset, or the next
+                # unrelated video -- a trailer, a library item -- inside the
+                # 60 s freshness window would be seeked and have its progress
+                # pushed under this title), or this is the stop of the video
+                # `play()` replaced and the new item is already opening
+                # (something is playing: keep the context for it).
+                try:
+                    owns_context = not self.isPlaying()
+                except Exception:  # noqa: BLE001 - unknown -> keep the context; the age check still sweeps it
+                    owns_context = False
             self._accepted_key = None
             self._last_sample = None
             self._last_local_write_at = None
@@ -1219,8 +1274,14 @@ def _addon_client():
 
 
 def _spawn_daemon(target, name="rivulet-library-pull"):
-    """Start `target` on a daemon thread and return the thread -- daemon so
-    a request still in flight at Kodi quit never holds the interpreter."""
+    """Start `target` on a daemon thread and return the thread.
+
+    Daemon only means CPython itself does not wait for it at interpreter
+    exit. Kodi does: `CPythonInvoker` waits for every thread of the script's
+    interpreter, daemon or not, up to `PYTHON_SCRIPT_TIMEOUT` (5 s) and then
+    injects `SystemExit` into the stragglers. A request still in flight at
+    quit therefore lingers for up to that long, which is why shutdown work
+    (`Supervisor.shutdown`) is ordered to fit inside it."""
     thread = threading.Thread(target=target, name=name)
     thread.daemon = True
     thread.start()
@@ -1230,6 +1291,18 @@ def _spawn_daemon(target, name="rivulet-library-pull"):
 def _spawn_push_worker(target):
     return _spawn_daemon(target, name="rivulet-library-push")
 
+
+#: Longest slice `Supervisor._sleep` waits at once. `Monitor.onSettingsChanged`
+#: only runs while the service thread is inside `waitForAbort`, but that call
+#: does not return for it, so a long supervision interval (300 s while
+#: `unsupported_platform` is latched) is cut into slices to notice a pending
+#: settings change; abort still ends a slice immediately.
+SLEEP_SLICE_SECONDS = 1.0
+
+#: Cadence of `_last_sample` refreshes while a Rivulet playback is accepted,
+#: whatever interval the supervision branch picked (10 s external server,
+#: 300 s latched platform, minutes during a binary download).
+PLAYBACK_SAMPLE_INTERVAL = 2.0
 
 #: Longest `Supervisor.shutdown()` waits for the progress player's push
 #: worker: long enough for one API round trip on a healthy link, short
@@ -1281,11 +1354,16 @@ class ServiceMonitor:
     and `settings` are injected, so it can also be exercised directly.
     """
 
-    def __init__(self, addon, settings=_settings):
+    def __init__(self, addon, settings=_settings, translate_path=None):
         super().__init__()
         self._addon = addon
         self._settings = settings
+        self._translate_path = translate_path
         self.restart_requested = False
+        #: Set by any settings change; the supervisor's sliced sleep wakes on
+        #: it so settings read live each tick (`s4me_enable`, `s4me_port`)
+        #: apply promptly instead of after the loop interval.
+        self.wake_requested = False
         self.enabled = False
         self.binary_setting = ""
         self.server_url = DEFAULT_SERVER_URL
@@ -1294,11 +1372,21 @@ class ServiceMonitor:
         self.force_library = False
         self._refresh()
 
+    def _local_path(self, value):
+        """`special://...` -> real path. `server_binary` and `cache_dir` are
+        restricted to local sources in settings.xml, but the browser still
+        returns `special://` locations for e.g. the profile folder, and both
+        consumers (`resolve_binary`, the engine's `RIVULET_CACHE_ROOT`) need
+        a filesystem path."""
+        if value and self._translate_path is not None and value.startswith("special://"):
+            return self._translate_path(value)
+        return value
+
     def _refresh(self):
         addon = self._addon
         cfg = self._settings
         self.enabled = cfg.setting_bool(addon, "server_enable", EXTRA_ENV_TYPED_DEFAULTS["server_enable"])
-        self.binary_setting = addon.getSetting("server_binary")
+        self.binary_setting = self._local_path(addon.getSetting("server_binary"))
         self.server_url = addon.getSetting("server_url") or DEFAULT_SERVER_URL
         self.force_library = cfg.setting_bool(addon, "server_force_library", False)
         values = {}
@@ -1308,6 +1396,8 @@ class ServiceMonitor:
                 values[setting_id] = cfg.setting_bool(addon, setting_id, default)
             elif kind in ("int", "mb_to_bytes"):
                 values[setting_id] = cfg.setting_int(addon, setting_id, default)
+            elif setting_id == "cache_dir":
+                values[setting_id] = self._local_path(addon.getSetting(setting_id))
             else:
                 values[setting_id] = addon.getSetting(setting_id)
         self.extra_settings = values
@@ -1320,6 +1410,7 @@ class ServiceMonitor:
         )
 
     def onSettingsChanged(self):
+        self.wake_requested = True
         prev = self._snapshot()
         self._refresh()
         if prev != self._snapshot():
@@ -1899,10 +1990,28 @@ class Supervisor:
                 self._sync_iptv_addon(self.state)
 
                 interval = self._autoload_interval(interval)
-                if monitor.waitForAbort(interval):
+                if self.progress_player.is_sampling():
+                    interval = min(interval, PLAYBACK_SAMPLE_INTERVAL)
+                if self._sleep(interval):
                     break
         finally:
             self.shutdown()
+
+    def _sleep(self, interval):
+        """`monitor.waitForAbort(interval)` in `SLEEP_SLICE_SECONDS` slices,
+        returning early (False) once a settings change is pending so
+        `restart_requested`/`wake_requested` act now instead of after the
+        whole interval. True when Kodi requested abort."""
+        monitor = self.monitor
+        remaining = interval
+        while True:
+            step = min(SLEEP_SLICE_SECONDS, remaining)
+            if monitor.waitForAbort(step):
+                return True
+            remaining -= step
+            if remaining <= 0 or monitor.restart_requested or monitor.wake_requested:
+                monitor.wake_requested = False
+                return False
 
     def shutdown(self):
         # Kodi never delivers the abort to the RunScript-launched bridge in
@@ -1914,17 +2023,22 @@ class Supervisor:
         except Exception as exc:  # noqa: BLE001 - shutdown must continue regardless
             self._warn("s4me bridge shutdown failed: %r" % (exc,))
 
-        if self.state.proc is not None:
-            self._info("shutting down embedded server")
-            self._stop_process(self.state.proc)
-
-        # Last: the final push of a playback that ended with Kodi runs on a
-        # daemon thread that would otherwise die with the interpreter.
+        # Before the blocking engine stop: Kodi gives the whole script 5 s
+        # (`PYTHON_SCRIPT_TIMEOUT`) and then injects SystemExit, and the
+        # engine drain alone is measured at about 5 s with a stream open, so
+        # a drain placed after it never ran. The final push of a playback
+        # that ended with Kodi runs on a daemon thread that would otherwise
+        # die with the interpreter; the engine is only needed by streaming,
+        # not by that push (it goes to the Stremio API).
         try:
             if not self.progress_player.drain_pushes(PUSH_DRAIN_SECONDS):
                 self._warn("progress push still in flight at shutdown, giving up on it")
         except Exception as exc:  # noqa: BLE001 - shutdown must finish regardless
             self._warn("progress push drain failed: %r" % (exc,))
+
+        if self.state.proc is not None:
+            self._info("shutting down embedded server")
+            self._stop_process(self.state.proc)
 
 
 def main():
@@ -2001,12 +2115,14 @@ def main():
         try:
             # Stream4Me's channels are Italian-language sites: the bridge
             # only runs for Italian users who also have Stream4Me
-            # installed. s4me_enable defaults to on, so for those users it
+            # enabled. s4me_enable defaults to on, so for those users it
             # is active without setup; the setting (hidden from everyone
-            # else by settings.xml) lets them turn it off. Installed-ness
-            # is checked first: it is one cheap builtin, and most users
-            # lack Stream4Me, so they never pay for the language lookup.
-            has_addon = bool(xbmc.getCondVisibility("System.HasAddon(%s)" % s4me.S4ME_ADDON_ID))
+            # else by settings.xml) lets them turn it off. "Enabled" is
+            # checked, not merely installed: `System.HasAddon` is true for a
+            # disabled add-on too, whose `xbmcaddon.Addon(id)` the bridge
+            # cannot open. It is one cheap builtin, and most users lack
+            # Stream4Me, so they never pay for the language lookup.
+            has_addon = bool(xbmc.getCondVisibility("System.AddonIsEnabled(%s)" % s4me.S4ME_ADDON_ID))
             enabled = (
                 has_addon
                 and _settings.setting_bool(addon, "s4me_enable", True)
@@ -2046,7 +2162,7 @@ def main():
     # Mix the Kodi Monitor in here: xbmc cannot be imported at module scope.
     monitor_cls = type("KodiServiceMonitor", (ServiceMonitor, xbmc.Monitor), {})
     Supervisor(
-        monitor_cls(addon),
+        monitor_cls(addon, translate_path=xbmcvfs.translatePath),
         profile_dir,
         log,
         LogLevels(xbmc.LOGINFO, xbmc.LOGWARNING, xbmc.LOGERROR),

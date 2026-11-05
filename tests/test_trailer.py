@@ -366,15 +366,17 @@ def test_no_server_or_a_server_that_errors_gives_no_url(trailer, monkeypatch):
     assert probed == []
 
 
-def test_the_youtube_addon_is_a_route_only_when_installed(trailer, monkeypatch):
+def test_the_youtube_addon_is_a_route_only_when_installed_and_enabled(trailer, monkeypatch):
     import xbmc
 
-    asked = []
-    monkeypatch.setattr(xbmc, 'getCondVisibility', lambda cond: asked.append(cond) or False)
-    assert trailer.trailer._youtube_addon_url('abcdefghijk') == ''
-    monkeypatch.setattr(xbmc, 'getCondVisibility', lambda cond: asked.append(cond) or True)
-    assert trailer.trailer._youtube_addon_url('abcdefghijk') == 'plugin://plugin.video.youtube/play/?video_id=abcdefghijk'
-    assert asked == ['System.HasAddon(plugin.video.youtube)'] * 2
+    url = 'plugin://plugin.video.youtube/play/?video_id=abcdefghijk'
+    for installed, enabled, expected in ((False, False, ''), (True, False, ''), (True, True, url)):
+        conds = {
+            'System.HasAddon(plugin.video.youtube)': installed,
+            'System.AddonIsEnabled(plugin.video.youtube)': enabled,
+        }
+        monkeypatch.setattr(xbmc, 'getCondVisibility', conds.__getitem__)
+        assert trailer.trailer._youtube_addon_url('abcdefghijk') == expected
 
 
 def test_no_route_at_all_gives_an_empty_url(trailer, monkeypatch):
@@ -687,13 +689,18 @@ def test_watching_when_already_full_screen_does_not_switch_again(trailer, monkey
 # --- the YouTube add-on offer ---------------------------------------------------
 
 
-def _offer(trailer, monkeypatch, installed, confirm):
+def _offer(trailer, monkeypatch, installed, confirm, enabled=None):
     import xbmc
 
     import lib.ui.dialogs as dialogs
 
     told = []
-    monkeypatch.setattr(xbmc, 'getCondVisibility', lambda cond: installed)
+    enabled = installed if enabled is None else enabled
+    conds = {
+        'System.HasAddon(plugin.video.youtube)': installed,
+        'System.AddonIsEnabled(plugin.video.youtube)': enabled,
+    }
+    monkeypatch.setattr(xbmc, 'getCondVisibility', conds.__getitem__)
     monkeypatch.setattr(dialogs, 'confirm', confirm)
     trailer.trailer._offer_youtube_addon(lambda sid: 'STR%d' % sid, told.append)
     return told
@@ -705,6 +712,15 @@ def test_an_installed_addon_that_still_fails_is_reported(trailer, monkeypatch):
 
     told = _offer(trailer, monkeypatch, True, _never)
     assert told == ['STR30498']
+    assert not any('InstallAddon' in b for b in trailer.env.executed_builtins)
+
+
+def test_an_installed_but_disabled_addon_is_offered_for_enabling(trailer, monkeypatch):
+    asked = []
+    told = _offer(trailer, monkeypatch, True, lambda *args: asked.append(args) or True, enabled=False)
+    assert told == []
+    assert asked[0][1] == 'STR30650'
+    assert 'EnableAddon(plugin.video.youtube)' in trailer.env.executed_builtins
     assert not any('InstallAddon' in b for b in trailer.env.executed_builtins)
 
 

@@ -175,3 +175,24 @@ def test_key_pairing_closes_settings_before_it_writes(setting_id):
     dialog first, so the key the phone sends reaches disk."""
     setting = ET.parse(SETTINGS_XML).getroot().find(".//setting[@id='%s']" % setting_id)
     assert setting.findtext("control/close") == "true"
+
+
+@pytest.mark.parametrize("setting_id", ["server_binary", "cache_dir"])
+def test_local_paths_are_restricted_to_local_sources(setting_id):
+    """The service uses these as plain filesystem paths (`os.path.isfile`,
+    `RIVULET_CACHE_ROOT`); without `local` as the only source Kodi's browser
+    also offers smb://, nfs:// and upnp:// roots that cannot work."""
+    root = ET.parse(SETTINGS_XML).getroot()
+    setting = next(s for s in root.iter("setting") if s.get("id") == setting_id)
+    sources = [e.text for e in setting.findall("constraints/sources/source")]
+
+    assert sources == ["local"]
+
+
+def test_s4me_conditions_test_enabled_not_merely_installed():
+    """`System.HasAddon` is true for an installed-but-DISABLED add-on, which
+    `xbmcaddon.Addon(id)` then refuses to open (the bridge would exit)."""
+    text = SETTINGS_XML.read_text(encoding="utf-8")
+
+    assert "System.HasAddon(plugin.video.s4me)" not in text
+    assert text.count("System.AddonIsEnabled(plugin.video.s4me)") == 3

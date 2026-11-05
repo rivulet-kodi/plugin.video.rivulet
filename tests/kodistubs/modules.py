@@ -208,12 +208,14 @@ def make_xbmc(env, info_labels=None, cond_visibility=None):
             env.player_is_playing_calls += 1
             playing = env.player_is_playing
             result = bool(playing(env.player_is_playing_calls)) if callable(playing) else bool(playing)
-            if self._was_playing and not result:
+            was_playing, self._was_playing = self._was_playing, result
+            # State is updated BEFORE the dispatch: a callback may itself call
+            # isPlaying() (as real Kodi allows) without re-triggering it.
+            if was_playing and not result:
                 if env.player_end_reason == 'stopped':
                     self.onPlayBackStopped()
                 else:
                     self.onPlayBackEnded()
-            self._was_playing = result
             return result
 
         def isPlayingVideo(self):

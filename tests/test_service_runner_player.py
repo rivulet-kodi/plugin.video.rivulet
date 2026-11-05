@@ -581,14 +581,78 @@ def test_stop_of_the_previous_video_does_not_wipe_the_new_playbacks_context():
 
 
 def test_stop_of_an_unrelated_video_leaves_a_pending_context_alone():
-    """Nothing accepted yet: a stop callback cannot be about the context
-    waiting for its onAVStarted (a non-Rivulet video that was playing)."""
+    """Nothing accepted yet and the new item is already opening: a stop
+    callback cannot be about the context waiting for its onAVStarted (a
+    non-Rivulet video that was playing)."""
     store = _FakeProgressStore(now_playing=_CONTEXT, resume_offset_ms=45000)
     with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        env.player_is_playing = True
         player.onPlayBackStopped()
         player.onPlayBackEnded()
     assert store.get_now_playing() == _CONTEXT
     assert store.get_resume_offset_ms() == 45000
+
+
+@pytest.mark.parametrize('callback', ['onPlayBackStopped', 'onPlayBackEnded'])
+def test_stop_during_the_open_phase_drops_the_context_and_resume_offset(callback):
+    """The user stops before onAVStarted and nothing else is playing: the
+    context must not survive its 60 s window, or the next unrelated video
+    (a trailer, a library item) would be seeked and have its progress
+    pushed under this title."""
+    store = _FakeProgressStore(now_playing=_CONTEXT, resume_offset_ms=45000, auth={'authKey': 'tok'})
+    api = _FakeProgressAPI()
+    with _progress_player_env(store, api, sync_enabled=True) as (env, player, logs):
+        env.player_is_playing = False
+        getattr(player, callback)()
+        assert store.get_now_playing() is None
+        assert store.get_resume_offset_ms() is None
+        env.player_is_playing = True
+        env.player_get_time = 5.0
+        env.player_get_total_time = 100.0
+        player.onAVStarted()  # the trailer starts
+        player.sample_if_playing()
+    assert store.progress_calls == []
+    assert api.datastore_put_calls == []
+
+
+def test_is_sampling_follows_the_accepted_context():
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        assert player.is_sampling() is False
+        player.onAVStarted()
+        assert player.is_sampling() is True
+        player.onPlayBackStopped()
+        assert player.is_sampling() is False
+
+
+def test_pause_resume_and_seek_refresh_the_sample_replayed_at_stop():
+    """The final flush replays `_last_sample`; without a periodic tick in
+    between it would write nothing. Callbacks delivered while the player is
+    valid keep it current, memory only (no local write, no push)."""
+    store = _FakeProgressStore(now_playing=_CONTEXT)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        env.player_get_total_time = 100.0
+        player.onAVStarted()
+        env.player_get_time = 30.0
+        player.onPlayBackPaused()
+        assert store.progress_calls == []
+        env.player_get_time = 60.0
+        player.onPlayBackSeek(60000, 30000)
+        env.player_get_time = 61.0
+        player.onPlayBackResumed()
+        env.player_get_time = None  # player closed: getTime would raise
+        player.onPlayBackStopped()
+    assert store.progress_calls[-1][3:5] == (61000, 100000)
+
+
+def test_resume_seek_target_is_remembered_as_the_sample():
+    store = _FakeProgressStore(now_playing=_CONTEXT, resume_offset_ms=45000)
+    with _progress_player_env(store, _FakeProgressAPI(), sync_enabled=False) as (env, player, logs):
+        env.player_get_total_time = 100.0
+        env.player_get_time = 0.0  # the seek is asynchronous
+        player.onAVStarted()
+        player.onPlayBackStopped()
+    assert store.progress_calls[-1][3:5] == (45000, 100000)
 
 
 # --- the push runs on a worker, never on the caller -------------------------

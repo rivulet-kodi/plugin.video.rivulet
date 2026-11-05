@@ -36,9 +36,16 @@
         <!-- No <buffermode>: Kodi's default (4, network filesystems)
              already caches every http:// stream Rivulet plays, and the
              1 this file used to set also cached local library files. -->
-        <!-- Bytes of RAM per playing file (Kodi's default: 20 MiB). -->
-        <memorysize>209715200</memorysize>
-        <!-- Read ahead at up to 20x the video's bitrate (default 4). -->
-        <readfactor>20</readfactor>
+        <!-- Bytes of RAM per playing file: 64 MiB, the default Kodi 21+
+             itself ships for filecache.memorysize (system/settings/
+             settings.xml), up from Kodi 19/20's 20 MiB. memorysize is the
+             cache's whole RAM budget for each cached read, not a budget of
+             this add-on, and the boxes this add-on targets (1-2 GB) also
+             run the embedded engine, so no larger value is taken without a
+             measurement. No <readfactor>: Kodi's default of 4 applies; a
+             high factor leaves the reader unthrottled until the cache is
+             nearly full (FileCache.cpp), pulling a torrent as fast as the
+             engine serves it. -->
+        <memorysize>67108864</memorysize>
     </cache>
 </advancedsettings>

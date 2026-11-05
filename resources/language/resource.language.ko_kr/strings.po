@@ -1579,3 +1579,7 @@ msgstr "제공할 Stream4Me 채널을 쉼표로 구분해 입력합니다. 비�
 msgctxt "#30627"
 msgid "advancedsettings.xml installed - restart Kodi to apply. Set the video cache in Settings > Services > Caching."
 msgstr "advancedsettings.xml을 설치했습니다. 적용하려면 Kodi를 다시 시작하세요. 비디오 캐시는 설정 > 서비스 > 캐싱에서 지정합니다."
+
+msgctxt "#30650"
+msgid "Trailers play through Kodi's YouTube add-on, which is turned off. Turn it on now?"
+msgstr "예고편은 Kodi의 YouTube 애드온으로 재생되는데, 현재 꺼져 있습니다. 지금 켤까요?"

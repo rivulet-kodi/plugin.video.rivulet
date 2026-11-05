@@ -61,6 +61,7 @@ from lib.ui.uicommon import (
     open_window,
     run_cancellable,
 )
+from lib.ui.urlutil import sized_image
 
 BACKGROUND = 30000
 POSTER = 30004
@@ -206,7 +207,7 @@ def _episode_properties(video, fallback=''):
     raw_thumb = video.get('thumbnail')
     thumb = raw_thumb.strip() if isinstance(raw_thumb, str) else ''
     return {
-        'thumb': thumb or fallback or '',
+        'thumb': sized_image(thumb or fallback or '', 'poster'),
         'line2': escape_label(line1 or aired or ''),
         'code': _episode_code(video),
         'title': _episode_title(video),
@@ -272,7 +273,7 @@ def _show_logo(window, logo_url):
     """Keep the text title until the existing logo cache knows the image."""
     from lib.ui.home import _logo_known_good, _warm_logos
 
-    wanted = logo_url or ''
+    wanted = sized_image(logo_url or '', 'fill')
     logo = wanted if _logo_known_good(wanted) else ''
     try:
         if wanted and not logo:
@@ -527,10 +528,10 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
                 properties['watched'] = '1'
             item.setProperties(properties)
             if video.get('id') in self._watched_ids:
-                item.setInfo('video', {'playcount': 1, 'overlay': 5})
+                from lib.ui.compat import set_watched
+                set_watched(item, True)
             if percent is not None:
-                # The same legacy setInfo('video', {resumetime,
-                # totaltime}) shape any Kodi video plugin uses to badge
+                # The same resume badge any Kodi video plugin uses on
                 # a "continue watching" row - independent of this
                 # addon's own `state.watched` bitfield (lib.library
                 # never touches that; see its module docstring).
@@ -627,8 +628,10 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         from lib.ui.compat import addon_fanart
 
         background = self.meta.get('background') or self.meta.get('logo') or self.meta.get('poster')
-        self.getControl(BACKGROUND).setImage(background or addon_fanart())
-        self.getControl(POSTER).setImage(self.meta.get('poster') or '')
+        self.getControl(BACKGROUND).setImage(
+            sized_image(background, 'backdrop') if background else addon_fanart()
+        )
+        self.getControl(POSTER).setImage(sized_image(self.meta.get('poster'), 'poster'))
         # [B]...[/B] applied here, not in the skin XML, because this
         # label is always Python-set: any markup baked into the
         # <label> itself would just be overwritten the moment this
@@ -896,12 +899,14 @@ class DetailWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         Deliberately not `_populate_episode_list()`: a reset() would snap
         the selection back to the top under the user's cursor, which an
         open-time fetch landing late would do mid-scroll."""
+        from lib.ui.compat import set_watched
+
         control = self.getControl(LIST)
         for position in range(control.size()):
             item = control.getListItem(position)
             watched = item.getProperty('row_id') in self._watched_ids
             item.setProperty('watched', '1' if watched else '')
-            item.setInfo('video', {'playcount': 1 if watched else 0, 'overlay': 5 if watched else 4})
+            set_watched(item, watched)
 
     def _toggle_library(self, auth, item, add, lookup_ok):
         """Push an explicit `library_add_payload()` (built fresh from

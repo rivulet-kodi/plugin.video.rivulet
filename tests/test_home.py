@@ -1180,7 +1180,7 @@ def test_a_card_without_art_shows_its_title_on_the_plate():
         for layout in ('itemlayout', 'focusedlayout'):
             labels = [
                 el for el in panel.find(layout).findall('control')
-                if el.get('type') == 'label' and 'ListItem.Label' in (el.findtext('label') or '')
+                if el.get('type') == 'textbox' and 'ListItem.Label' in (el.findtext('label') or '')
                 and any('String.IsEmpty(ListItem.Property(thumbnail))' in (v.text or '') for v in el.findall('visible'))
             ]
             assert len(labels) == 1, (panel_id, layout)

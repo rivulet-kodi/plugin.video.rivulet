@@ -1579,3 +1579,7 @@ msgstr "提供する Stream4Me のチャンネルをカンマ区切りで指定�
 msgctxt "#30627"
 msgid "advancedsettings.xml installed - restart Kodi to apply. Set the video cache in Settings > Services > Caching."
 msgstr "advancedsettings.xml をインストールしました。反映するには Kodi を再起動してください。ビデオキャッシュは 設定 > サービス > キャッシュ で設定します。"
+
+msgctxt "#30650"
+msgid "Trailers play through Kodi's YouTube add-on, which is turned off. Turn it on now?"
+msgstr "予告編は KodiのYouTubeアドオンで再生されますが、現在無効です。今すぐ有効にしますか?"

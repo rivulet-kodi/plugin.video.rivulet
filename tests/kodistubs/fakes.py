@@ -17,6 +17,7 @@ _DEFAULT_ADDON_INFO = {
     'name': 'Rivulet',
     'icon': 'special://home/addons/plugin.video.rivulet/icon.png',
     'fanart': 'special://home/addons/plugin.video.rivulet/fanart.jpg',
+    'profile': 'special://profile/addon_data/plugin.video.rivulet/',
 }
 
 # Default settings dict (`xbmcaddon.Addon.getSetting`/getSettingBool/

@@ -301,8 +301,8 @@ def test_open_settings_opens_addon_settings_and_ends_directory_failed(load_views
 # ---------------------------------------------------------------------------
 
 
-def test_addon_media_path_builds_from_addon_id_not_hardcoded(load_views):
-    ctx = load_views(addon_info={'id': 'org.custom.testaddon'})
+def test_addon_media_path_builds_from_addon_path_not_hardcoded(load_views):
+    ctx = load_views(addon_info={'path': '/opt/addons/org.custom.testaddon'})
     compat = ctx.compat
 
     path = compat.addon_media_path('discover.png')

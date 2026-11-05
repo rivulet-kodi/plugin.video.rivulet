@@ -94,6 +94,14 @@ def test_every_texture_the_home_names_is_shipped():
 
 # --- the hero lines ----------------------------------------------------------
 
+def test_fanart_path_comes_from_the_installed_addon_dir(load_homewindow):
+    """`special://home/addons/<id>` is a guess: a system-wide or portable
+    install lives elsewhere. Ask Kodi where the add-on actually is."""
+    ctx = load_homewindow()
+    ctx.env.addon.info['path'] = '/opt/kodi/addons/plugin.video.rivulet'
+    assert ctx.look.fanart() == '/opt/kodi/addons/plugin.video.rivulet/resources/fanart_grey.jpg'
+
+
 def test_hero_parts_split_scores_from_facts():
     text = 'Rotten Tomatoes 94%\nMetascore 71\nIMDb 7.4\n2025\n1h 52m\nThriller, Mystery'
     stars, facts, scores = look_hero_parts(text)

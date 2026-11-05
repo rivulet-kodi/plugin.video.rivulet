@@ -28,6 +28,7 @@ so the addon reads as one app:
 """
 
 import math
+import os
 import time
 
 #: The backdrop behind a screen with no title focused: the addon's
@@ -78,9 +79,11 @@ def fanart():
     """Filesystem path of `FANART` in this addon."""
     import xbmcvfs
 
-    from lib.ui.compat import ADDON_ID
+    from lib.ui.compat import ADDON
 
-    return xbmcvfs.translatePath('special://home/addons/%s/resources/%s' % (ADDON_ID, FANART))
+    # The installed add-on's own dir (a system-wide, portable or
+    # bundled install is not under special://home/addons).
+    return os.path.join(xbmcvfs.translatePath(ADDON.getAddonInfo('path')), 'resources', FANART)
 
 
 def _clock_format():

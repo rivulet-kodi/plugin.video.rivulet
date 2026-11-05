@@ -75,7 +75,7 @@ def _url_for(action, **params):
 #: `_fetch_meta()`'s docstring for why raw daemon Threads are used here
 #: instead of `concurrent.futures.ThreadPoolExecutor` (its atexit join
 #: hook blocks interpreter shutdown on an in-flight worker regardless of
-#: the daemon flag).
+#: the daemon flag; Kodi itself still lingers up to 5 s for any thread).
 _SOFT_DEADLINE_S = 4.0
 
 
@@ -313,7 +313,10 @@ def _fetch_meta(stype, sid, store=True, on_miss=None):  # noqa: C901 - legacy; r
     blocked plugin-process exit for a full 6.0s, because
     `pool.shutdown(wait=False)` only stops the pool itself from waiting,
     not the interpreter's own atexit join. A raw daemon thread has no
-    such hook: the interpreter abandons it outright at exit.
+    such hook: CPython does not wait for it at exit. Kodi's own
+    CPythonInvoker still waits for every interpreter thread, daemon or
+    not, up to PYTHON_SCRIPT_TIMEOUT (5 s) and then injects SystemExit,
+    so a straggler can linger at most that long.
 
     A short-TTL disk cache (`lib.ui.metacache`) sits in front of the
     fan-out: DetailWindow, infowindow's enrichment, and any other custom
@@ -928,7 +931,8 @@ def home():
         # selecting it would have it try to play `?action=home`, which
         # answers with endOfDirectory() and fails playback - a broken row in
         # the one screen that exists to survive breakage. As a folder it
-        # simply redraws this directory, i.e. a harmless retry.
+        # reopens the Home window (lib/ui/entry.py intercepts `action=home`), i.e.
+        # a harmless retry that lands back here if Home still fails.
         (_url_for('home'), notice, True),
         _action_item(L(30004), _url_for('settings'), compat.addon_media_path('settings.png')),
     ]

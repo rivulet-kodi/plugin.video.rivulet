@@ -1543,17 +1543,18 @@ def _build_playable_item(stream, stype, sid, item_meta, video_id):
             'falling back to direct playback' % (manifest_type, stype, sid),
             xbmc.LOGINFO,
         )
-    if use_isa:
-        # ISA reads its own Properties (set below), never a path suffix,
-        # so a resolved url baking its own "|urlencoded=headers" (some
-        # addons/resolvers do this directly, same convention this
-        # module's own non-ISA branch below bakes) must be split back
-        # apart here and merged into proxyHeaders - otherwise those
-        # headers are silently lost and ISA's manifest fetch can fail.
+    # A resolved url may bake its own "|urlencoded=headers" (some
+    # addons/resolvers do this directly). Split it back apart and merge it
+    # with proxyHeaders (proxyHeaders win) on both paths: ISA reads its own
+    # Properties, never a path suffix, so the headers would be lost there,
+    # and on the direct path a second "|" would make Kodi parse
+    # "a=b|c=d" as one garbled option.
+    # A url with no proxyHeaders on the direct path is left exactly as
+    # resolved: Kodi parses its own suffix fine.
+    if use_isa or request_headers:
         url, embedded_headers = split_embedded_headers(url)
-        if embedded_headers:
-            request_headers = dict(request_headers, **embedded_headers)
-    elif request_headers:
+        request_headers = dict(embedded_headers, **request_headers)
+    if not use_isa and request_headers:
         # Kodi convention: "|urlencoded=headers" appended to the path makes
         # the player send these headers with every request for that URL.
         url = '%s|%s' % (url, urlencode(request_headers))

@@ -1579,3 +1579,7 @@ msgstr "Sunulacak Stream4Me kanalları, virgülle ayrılmış. Boş bırakılır
 msgctxt "#30627"
 msgid "advancedsettings.xml installed - restart Kodi to apply. Set the video cache in Settings > Services > Caching."
 msgstr "advancedsettings.xml kuruldu - uygulamak için Kodi'yi yeniden başlatın. Video önbelleğini Ayarlar > Hizmetler > Önbelleğe Alma bölümünden belirleyin."
+
+msgctxt "#30650"
+msgid "Trailers play through Kodi's YouTube add-on, which is turned off. Turn it on now?"
+msgstr "Fragmanlar Kodi'nin YouTube eklentisiyle oynatılır, ancak eklenti kapalı. Şimdi açılsın mı?"
