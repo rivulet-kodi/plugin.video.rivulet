@@ -8,14 +8,16 @@ imports them as a module), so they're exercised the same way here, via
 xbmc*/lib.ui stubs in tests/kodistubs (no real Kodi runtime, no network,
 no subprocess).
 
-`default.py` only imports `xbmc`/`xbmcplugin`/`lib.ui.compat`/
-`lib.ui.homewindow`/`lib.ui.uicommon` inside its `action == 'home'` branch,
-so `load_default` reloads exactly those four `lib.ui.*` modules (plus
-`lib.ui.router`, which it always touches) fresh against fresh stubs -
+`default.py` is a bootstrap that calls `lib.ui.entry.run(sys.argv)`; that
+module imports `xbmc`/`xbmcplugin`/`lib.ui.compat`/`lib.ui.homewindow`/
+`lib.ui.uicommon` only inside its `action == 'home'` path, so `load_default`
+reloads exactly those modules (plus `lib.ui.router`, which it always
+touches, and `lib.ui.entry` itself so it binds the fresh router) against
+fresh stubs -
 mirroring tests/test_router.py's and tests/test_homewindow.py's own
 reload lists. `lib.ui.router.run()` (the non-home dispatch target) and
 `lib.ui.homewindow.open_home()` are replaced with call-recording fakes so
-this file only asserts on default.py's own argv/query parsing and
+this file only asserts on the entry point's own argv/query parsing and
 home-branch control flow, never on router.run()'s or HomeWindow's
 internals (already covered by tests/test_router.py and
 tests/test_homewindow.py respectively).
@@ -39,7 +41,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PY = str(REPO_ROOT / 'default.py')
 SERVICE_PY = str(REPO_ROOT / 'service.py')
 
-_RELOAD_MODULE_NAMES = ('lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.router', 'lib.ui.homewindow')
+_RELOAD_MODULE_NAMES = (
+    'lib.ui.compat', 'lib.ui.uicommon', 'lib.ui.router', 'lib.ui.homewindow', 'lib.ui.entry',
+)
 
 
 @pytest.fixture
@@ -56,7 +60,7 @@ def load_default(monkeypatch):
     `open_home` (e.g. a function that raises) to override it.
 
     Returns `(namespace, ctx)`: `namespace` is default.py's executed
-    global dict (exposing its module-private `_action`/`_raw_qs`), `ctx`
+    global dict, `ctx`
     is `tests.kodistubs`' namespace (`.env`, `.router`, `.homewindow`, ...)
     plus `.run_calls`/`.open_home_calls`.
     """
@@ -109,22 +113,22 @@ def test_argv_non_numeric_handle_falls_back_to_negative_one(load_default):
 
 
 def test_leading_question_mark_is_stripped_and_action_dispatched(load_default):
-    ns, ctx = load_default(['plugin://plugin.video.rivulet/', '3', '?action=meta&type=movie&id=tt1'])
-    assert ns['_raw_qs'] == 'action=meta&type=movie&id=tt1'
-    assert ns['_action'] == 'meta'
+    _ns, ctx = load_default(['plugin://plugin.video.rivulet/', '3', '?action=meta&type=movie&id=tt1'])
+    assert ctx.entry._launch_action_name(
+        ['plugin://plugin.video.rivulet/', '3', '?action=meta&type=movie&id=tt1']) == 'meta'
     assert ctx.run_calls == [True]
     assert ctx.env.end_of_directory == []  # non-home action never touches the home branch
 
 
 def test_query_without_leading_question_mark_still_parses_action(load_default):
-    ns, ctx = load_default(['plugin://plugin.video.rivulet/', '3', 'action=play'])
-    assert ns['_action'] == 'play'
+    _ns, ctx = load_default(['plugin://plugin.video.rivulet/', '3', 'action=play'])
+    assert ctx.entry._launch_action_name(['plugin://plugin.video.rivulet/', '3', 'action=play']) == 'play'
     assert ctx.run_calls == [True]
 
 
 def test_missing_query_defaults_action_to_home(load_default):
-    ns, ctx = load_default(['plugin://plugin.video.rivulet/', '9', ''])
-    assert ns['_action'] == 'home'
+    _ns, ctx = load_default(['plugin://plugin.video.rivulet/', '9', ''])
+    assert ctx.entry._launch_action_name(['plugin://plugin.video.rivulet/', '9', '']) == 'home'
     assert ctx.run_calls == []
     assert len(ctx.env.end_of_directory) == 1
 

@@ -9,7 +9,8 @@ socket (port 9090, always on - no webserver/auth setup needed) to walk
 through the addon's screens, taking a screenshot at each stop via the
 `screenshot` input action (written by Kodi to `debug.screenshotpath`,
 see `userdata/guisettings.xml`), then resizes/redacts/renames the result
-into `artwork/screenshots/`.
+into `artwork/screenshots/` (1400px masters for README/site) and derives
+the add-on's `resources/screenshots/` copies at 1280x720.
 
 Requirements (all one-time, on the machine actually running Kodi):
   - Kodi installed with the Rivulet addon, logged in, with at least one
@@ -40,6 +41,14 @@ SHOTS_DIR = os.path.expanduser("~/kodi-screens")
 RAW_DIR = "/tmp/rivulet-shots"
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.path.join(_REPO_ROOT, "artwork", "screenshots")
+ADDON_SHOTS_DIR = os.path.join(_REPO_ROOT, "resources", "screenshots")
+
+#: addon.xml <screenshot> assets, in declaration order, built from these
+#: curated masters. Kept separate from the masters on purpose: the README
+#: and site lightbox show the 1400px masters, while kodi-addon-checker only
+#: accepts 1280x720 or 1920x1080 for an add-on screenshot.
+ADDON_SHOTS = ("home", "series-episodes", "search", "detail-streams")
+ADDON_SHOT_SIZE = "1280x720"
 
 # Box covering HomeWindow's "Logged in as <email>" status pill, blacked
 # out before resize so a real account email never ends up in a committed
@@ -161,9 +170,16 @@ def optimise(path):
                 os.remove(tmp)
 
 
-def curate(raw_path, out_name, redact=False, width=1400):
-    """Optionally black out the account-email box, downscale, optimise,
-    and drop the result into artwork/screenshots/<out_name>.png."""
+#: Exactly what kodi-addon-checker accepts for addon.xml <screenshot> assets
+#: (1280x720 or 1920x1080). The raw capture is 16:9, so the forced size
+#: ("!" ignores aspect) does not distort; 1280x720 also keeps each file well
+#: under the checker's 750 KB cap.
+OUT_SIZE = "1280x720"
+
+
+def curate(raw_path, out_name, redact=False):
+    """Optionally black out the account-email box, downscale to OUT_SIZE,
+    optimise, and drop the result into artwork/screenshots/<out_name>.png."""
     if raw_path is None:
         return
     cmd = ["magick", raw_path]
@@ -174,7 +190,7 @@ def curate(raw_path, out_name, redact=False, width=1400):
         y1, y2 = int(raw_h * fy1), int(raw_h * fy2)
         cmd += ["-fill", "black", "-draw", f"rectangle {x1},{y1} {x2},{y2}"]
     dst = os.path.join(OUT_DIR, f"{out_name}.png")
-    cmd += ["-resize", f"{width}x", "-strip", "-colors", "256", dst]
+    cmd += ["-resize", f"{OUT_SIZE}!", "-strip", "-colors", "256", dst]
     subprocess.run(cmd, check=True)
     optimise(dst)
 
@@ -341,7 +357,25 @@ def main():
     time.sleep(2.5)
     curate(take_screenshot(rpc, "addons_manager"), "addons-manager")
 
-    print(f"Done. Curated screenshots in {OUT_DIR}")
+    export_addon_shots()
+    print(f"Done. Curated screenshots in {OUT_DIR}, add-on copies in {ADDON_SHOTS_DIR}")
+
+
+def export_addon_shots():
+    """Write resources/screenshots/screenshot-0N.png at exactly
+    ADDON_SHOT_SIZE from the curated masters. The capture is 16:9, so the
+    forced size ("!" ignores aspect) does not distort, and 1280x720 keeps
+    each file under the checker's 750 KB cap. A master this run skipped is
+    left alone rather than failing the whole export."""
+    for index, name in enumerate(ADDON_SHOTS, start=1):
+        src = os.path.join(OUT_DIR, f"{name}.png")
+        if not os.path.exists(src):
+            print(f"  skip addon screenshot {index}: {src} missing")
+            continue
+        dst = os.path.join(ADDON_SHOTS_DIR, f"screenshot-{index:02d}.png")
+        subprocess.run(["magick", src, "-resize", f"{ADDON_SHOT_SIZE}!", "-strip",
+                        "-colors", "256", dst], check=True)
+        optimise(dst)
 
 
 if __name__ == "__main__":

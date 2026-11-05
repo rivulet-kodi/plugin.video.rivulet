@@ -168,6 +168,14 @@ jobs:
               zip_path = addon_dir / f"{addon_id}-{version}.zip"
               staged.replace(zip_path)
 
+              # <hashes>sha256</hashes> in repository.rivulet makes Kodi fetch
+              # <zip>.sha256 (bare hex digest; Repository.cpp reads up to the
+              # first space or newline) and refuse a zip that does not match.
+              # Without it a truncated or corrupted download installs unchecked.
+              (addon_dir / f"{zip_path.name}.sha256").write_text(
+                  hashlib.sha256(zip_path.read_bytes()).hexdigest()
+              )
+
               # GitHub Pages serves no directory autoindex, so
               # .../plugin.video.rivulet/ was a 404 and the way people
               # actually install a Kodi repo - add a file source, then
@@ -196,12 +204,17 @@ jobs:
               addons_xml_path, encoding="UTF-8", xml_declaration=True
           )
 
-          digest = hashlib.md5(addons_xml_path.read_bytes()).hexdigest()
-          (repo_dir / "addons.xml.md5").write_text(digest)
+          index_bytes = addons_xml_path.read_bytes()
+          # The .md5 stays for repository add-ons older than 1.0.3, which read
+          # it as change detection only; 1.0.3+ declares
+          # <checksum verify="sha256"> and has Kodi reject an index that does
+          # not match addons.xml.sha256.
+          (repo_dir / "addons.xml.md5").write_text(hashlib.md5(index_bytes).hexdigest())
+          (repo_dir / "addons.xml.sha256").write_text(hashlib.sha256(index_bytes).hexdigest())
           PY
 
       - name: Deploy to gh-pages
-        uses: peaceiris/actions-gh-pages@v4
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./_repo

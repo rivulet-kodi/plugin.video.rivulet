@@ -20,6 +20,7 @@ derived deterministically from GITHUB_REPO/SERVER_TAG/asset-name -- this
 module never queries the "latest release" API or a same-release
 checksums.txt at runtime; see PINNED_SHA256 below for why.
 """
+import errno
 import hashlib
 import os
 import platform
@@ -58,6 +59,11 @@ REQUEST_TIMEOUT = 30
 DOWNLOAD_ATTEMPTS = 3
 DOWNLOAD_BACKOFF = 2.0
 VERIFY_TIMEOUT = 15
+
+#: verify_executable() retries an exec that fails with ETXTBSY this many
+#: times, VERIFY_ETXTBSY_DELAY seconds apart (see its docstring).
+VERIFY_ETXTBSY_ATTEMPTS = 5
+VERIFY_ETXTBSY_DELAY = 0.1
 
 #: `sys.platform` values CPython reports on Apple's mobile systems, and the
 #: `platform.machine()` hardware-model prefixes real iOS/tvOS devices
@@ -191,7 +197,7 @@ def platform_key():
     """Return (os_name, arch) matching the goreleaser archive naming.
 
     os_name is one of {"Linux", "Darwin", "Windows", "Android", "iOS",
-    "tvOS"}; arch is one of {"x86_64", "i386", "arm64", "armv7"} (or the raw
+    "tvOS"}; arch is one of {"x86_64", "i386", "arm64", "armv7", "armv6"} (or the raw
     `platform.machine()` value when it doesn't match a known mapping).
     Neither Android nor the Apple mobile systems can be recognised from
     `platform.system()` alone -- they report "Linux" and "Darwin" exactly
@@ -224,7 +230,14 @@ def platform_key():
         arch = "i386"
     elif machine in ("aarch64", "arm64"):
         arch = "arm64"
-    elif machine in ("armv7l", "armv6l", "armv8l"):
+    elif machine == "armv6l":
+        # ARMv6 (Raspberry Pi 1/Zero). The engine's 32-bit ARM builds are
+        # GOARM=7 (rivulet-engine .goreleaser.yml / Makefile), so the armv7
+        # asset would die with SIGILL here: report it as its own arch, which
+        # install_binary() refuses before any network request instead of
+        # installing a binary that crash-loops.
+        arch = "armv6"
+    elif machine in ("armv7l", "armv8l"):
         # armv8l: a 32-bit Android/Linux userspace running on an ARMv8
         # (aarch64) kernel reports this via platform.machine() -- the
         # normal case on Android TV sticks (e.g. Chromecast with Google
@@ -616,19 +629,33 @@ def verify_executable(path):
     otherwise-successful install over that would be a worse outcome than
     skipping the check. On Windows this spawn is window-suppressed (see
     lib/procflags.py) so a fresh install never flashes a console box.
+
+    ETXTBSY is the exception among OSErrors: it says the file is still open
+    for writing somewhere, not that the device refuses exec. A fork elsewhere
+    in the process (Kodi runs many threads) can inherit the just-written
+    `.part` descriptor for a few milliseconds, and recording that as a
+    permanent denial would make install_binary() stamp the tag as attempted
+    and never retry. So it is retried briefly and, if it still persists,
+    tolerated like a timeout: the check is skipped, not failed.
     """
-    try:
-        subprocess.run(
-            [path, "version"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=VERIFY_TIMEOUT,
-            **procflags.no_window_kwargs())
-    except OSError:
-        raise UnsupportedPlatformError("%s cannot be executed on this device" % path)
-    except subprocess.TimeoutExpired:
-        pass
+    for attempt in range(VERIFY_ETXTBSY_ATTEMPTS):
+        try:
+            subprocess.run(
+                [path, "version"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=VERIFY_TIMEOUT,
+                **procflags.no_window_kwargs())
+        except OSError as exc:
+            if exc.errno != errno.ETXTBSY:
+                raise UnsupportedPlatformError("%s cannot be executed on this device" % path)
+            if attempt + 1 < VERIFY_ETXTBSY_ATTEMPTS:
+                _sleep(VERIFY_ETXTBSY_DELAY)
+        except subprocess.TimeoutExpired:
+            return
+        else:
+            return
 
 
 def install_binary(dest_dir, progress_cb=None, sleep_fn=None):
@@ -697,6 +724,11 @@ def install_binary(dest_dir, progress_cb=None, sleep_fn=None):
             "running elsewhere instead" % apple_mobile)
 
     os_name, arch = platform_key()
+    if arch == "armv6":
+        raise UnsupportedPlatformError(
+            "the server binary needs an ARMv7 CPU; this device reports ARMv6. "
+            "Point Settings -> Streaming server -> Server URL at a server "
+            "running elsewhere instead")
     asset = select_asset(os_name, arch)
     if asset is None:
         raise NoAssetError("no pinned %s release asset for %s/%s" % (SERVER_TAG, os_name, arch))

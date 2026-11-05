@@ -10,6 +10,7 @@ checksums.txt asset. `fake_requests` patches the real `requests.get` the
 same way lib.serverbin's module-scope `requests` import resolves it --
 only the archive download itself ever issues a request.
 """
+import errno
 import hashlib
 import io
 import os
@@ -74,9 +75,20 @@ def test_platform_key_linux_armv7l_maps_to_armv7(monkeypatch):
     assert platform_key() == ("Linux", "armv7")
 
 
-def test_platform_key_linux_armv6l_maps_to_armv7(monkeypatch):
+def test_platform_key_linux_armv6l_is_its_own_arch(monkeypatch):
+    # The engine's 32-bit ARM builds are GOARM=7: mapping ARMv6 onto them
+    # would install a binary that dies with SIGILL.
     _set_platform(monkeypatch, "Linux", "armv6l")
-    assert platform_key() == ("Linux", "armv7")
+    assert platform_key() == ("Linux", "armv6")
+
+
+def test_install_binary_refuses_armv6l_before_any_network(monkeypatch, tmp_path, fake_requests):
+    _set_platform(monkeypatch, "Linux", "armv6l")
+
+    with pytest.raises(UnsupportedPlatformError, match="ARMv6"):
+        serverbin.install_binary(str(tmp_path))
+
+    assert fake_requests.calls == []
 
 
 def test_platform_key_linux_armv8l_maps_to_armv7(monkeypatch):
@@ -650,6 +662,47 @@ def test_verify_executable_raises_unsupported_platform_error_on_os_error(monkeyp
 
     with pytest.raises(UnsupportedPlatformError):
         verify_executable("/fake/path/rivulet-engine")
+
+
+def _etxtbsy():
+    return OSError(errno.ETXTBSY, "Text file busy")
+
+
+def test_verify_executable_retries_etxtbsy_instead_of_denying_exec(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(serverbin, "_sleep", sleeps.append)
+    outcomes = [_etxtbsy(), _etxtbsy(), None]
+    calls = []
+
+    def _run(*args, **kwargs):
+        calls.append(args)
+        outcome = outcomes.pop(0)
+        if outcome is not None:
+            raise outcome
+
+    monkeypatch.setattr(subprocess, "run", _run)
+
+    verify_executable("/fake/path/rivulet-engine")  # must not raise
+
+    assert len(calls) == 3
+    assert sleeps == [serverbin.VERIFY_ETXTBSY_DELAY] * 2
+
+
+def test_verify_executable_tolerates_persistent_etxtbsy(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(serverbin, "_sleep", sleeps.append)
+    calls = []
+
+    def _run(*args, **kwargs):
+        calls.append(args)
+        raise _etxtbsy()
+
+    monkeypatch.setattr(subprocess, "run", _run)
+
+    verify_executable("/fake/path/rivulet-engine")  # busy is not a denial
+
+    assert len(calls) == serverbin.VERIFY_ETXTBSY_ATTEMPTS
+    assert len(sleeps) == serverbin.VERIFY_ETXTBSY_ATTEMPTS - 1
 
 
 def test_verify_executable_tolerates_nonzero_exit_status(monkeypatch):

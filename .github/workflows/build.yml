@@ -18,19 +18,28 @@ jobs:
         id: addon
         run: |
           VERSION=$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('addon.xml').getroot().get('version'))")
+          REPO_VERSION=$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('repository.rivulet/addon.xml').getroot().get('version'))")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "repo_version=$REPO_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Check tag matches addon.xml version
         # A release is a release/X.Y.Z PR bumping addon.xml, then a vX.Y.Z
         # tag on its merge commit; a mismatched tag would publish a zip whose
-        # version disagrees with the tag name.
+        # version disagrees with the tag name. The repository add-on is
+        # released on its own vX.Y.Z-repo tags (see repo.yml) and is checked
+        # against repository.rivulet/addon.xml instead.
         if: startsWith(github.ref, 'refs/tags/')
         env:
           TAG: ${{ github.ref_name }}
           VERSION: ${{ steps.addon.outputs.version }}
+          REPO_VERSION: ${{ steps.addon.outputs.repo_version }}
         run: |
-          if [ "$TAG" != "v$VERSION" ]; then
-            echo "::error::tag $TAG does not match addon.xml version v$VERSION"
+          case "$TAG" in
+            *-repo) EXPECTED="v$REPO_VERSION-repo"; FILE=repository.rivulet/addon.xml ;;
+            *) EXPECTED="v$VERSION"; FILE=addon.xml ;;
+          esac
+          if [ "$TAG" != "$EXPECTED" ]; then
+            echo "::error::tag $TAG does not match $FILE version ($EXPECTED)"
             exit 1
           fi
 
@@ -47,6 +56,7 @@ jobs:
           python3 - <<'PY'
           import os
           import sys
+          import xml.etree.ElementTree as ET
           import zipfile
 
           zip_path = os.environ["ZIP_PATH"]
@@ -59,6 +69,27 @@ jobs:
           if missing:
               sys.exit(f"Missing required addon members: {missing}")
           print("Verified addon package members:", required)
+
+          # repo.yml aborts at tag time, after the release is cut, when a
+          # declared <assets> path is missing from the zip; catch it here.
+          with zipfile.ZipFile(zip_path) as zf:
+              root = ET.fromstring(zf.read(prefix + "addon.xml"))
+              declared = [
+                  (el.text or "").strip()
+                  for el in root.iterfind("extension[@point='xbmc.addon.metadata']/assets/*")
+              ]
+              absent = [a for a in declared if a and prefix + a not in names]
+              if absent:
+                  sys.exit(f"addon.xml declares assets the package lacks: {absent}")
+              # Kodi starts scripts through its interpreter; the checker
+              # rejects a stand-alone executable in an add-on.
+              executable = [
+                  i.filename for i in zf.infolist()
+                  if not i.is_dir() and (i.external_attr >> 16) & 0o111
+              ]
+              if executable:
+                  sys.exit(f"executable files shipped in the package: {executable}")
+          print("Verified %d declared assets, no executable files" % len(declared))
           PY
 
       - name: Upload artifact

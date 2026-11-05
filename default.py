@@ -5,100 +5,15 @@
 
 Kodi invokes this script directly (not as an import), passing the
 plugin:// invocation as sys.argv. Bootstrap sys.path so the addon's own
-``lib`` package is importable, then either open the custom HomeWindow
-(a bare invocation - clicking the addon - is Rivulet's own app UI now)
-or hand off to the router for every other action (context-menu
-RunPlugin callbacks, Settings buttons, ``play``, ...).
+``lib`` package is importable, then hand off to ``lib.ui.entry`` (which
+opens Rivulet's Home window for a bare launch and the router for every
+other action). The body lives there so it is importable under test.
 """
 import os
 import sys
-from urllib.parse import parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from lib.ui import router, urlutil
+from lib.ui import entry
 
-router.BASE_URL = sys.argv[0] if len(sys.argv) > 0 else 'plugin://plugin.video.rivulet/'
-try:
-    router.ADDON_HANDLE = int(sys.argv[1])
-except (IndexError, ValueError):
-    router.ADDON_HANDLE = -1
-
-_raw_qs = sys.argv[2] if len(sys.argv) > 2 else ''
-if _raw_qs.startswith('?'):
-    _raw_qs = _raw_qs[1:]
-_action = parse_qs(_raw_qs).get('action', ['home'])[0]
-
-if _action == 'home':
-    import xbmc
-    import xbmcplugin
-
-    from lib.ui.compat import log
-
-    # Kodi's GetDirectory contract for this handle must be satisfied exactly
-    # once (an empty, instant directory) before the custom window takes over
-    # the screen - see lib.ui.uicommon's module docstring.
-    xbmcplugin.endOfDirectory(
-        router.ADDON_HANDLE, succeeded=True, updateListing=False, cacheToDisc=False
-    )
-    def _recover_home(exc):
-        from lib.stremio.addons import addon_error_detail
-
-        log('default: HomeWindow failed to open: %s' % addon_error_detail(exc), xbmc.LOGERROR)
-        # The original handle is spent. Recovery needs a fresh invocation,
-        # whose unregistered action routes to the minimal Settings directory.
-        fallback_url = urlutil.url_for(router.BASE_URL, 'home_classical')
-        xbmc.executebuiltin('Container.Update(%s)' % fallback_url)
-
-    try:
-        from lib.ui.homewindow import HomeOpenError, open_home
-        from lib.ui.uicommon import (
-            LAUNCH_IGNORE,
-            LAUNCH_SHOW,
-            dismiss_busy_dialog,
-            launch_action,
-            leave_launch_directory,
-            request_ui_show,
-        )
-    except Exception as exc:  # import failure: no Home can be constructed
-        _recover_home(exc)
-    else:
-        verdict = None
-        try:
-            try:
-                verdict = launch_action()
-                if verdict == LAUNCH_SHOW:
-                    # The user left the fullscreen video and opened Rivulet while
-                    # the running UI waits out the playback under its force-closed
-                    # screens (issue #73): wake that UI rather than stack a second
-                    # one. See lib.ui.uicommon's "UI phases" notes.
-                    log(
-                        'default: Rivulet UI is waiting on playback - asking it to come back',
-                        xbmc.LOGINFO,
-                    )
-                    request_ui_show()
-                elif verdict == LAUNCH_IGNORE:
-                    # Kodi re-ran the plugin root (it re-fetches the Videos container
-                    # the addon was started from whenever that window is activated
-                    # again - e.g. when playback stops: kodi.log 01:07:59.987 ->
-                    # 01:08:00.189) while another interpreter's UI is alive. The
-                    # directory handle is satisfied above; opening Home here would
-                    # stack a second UI over the restored picker, and
-                    # dismiss_busy_dialog() would close that picker. See
-                    # lib.ui.uicommon's "UI phases" notes for the exact rule.
-                    log(
-                        'default: a Rivulet UI is already running - ignoring bare launch',
-                        xbmc.LOGINFO,
-                    )
-                else:
-                    dismiss_busy_dialog()
-            except Exception as exc:
-                _recover_home(exc)
-            else:
-                if verdict not in (LAUNCH_SHOW, LAUNCH_IGNORE):
-                    open_home()
-                    leave_launch_directory()
-        except HomeOpenError as exc:
-            _recover_home(exc)
-else:
-    router.run()
+entry.run(sys.argv)
