@@ -1524,7 +1524,9 @@ def test_open_detail_not_found_notifies_and_returns_false_without_building_a_win
     result = ctx.detailwindow.open_detail('movie', 'tt404')
 
     assert result is False
-    assert ctx.env.notifications == [('Rivulet', 'STR30030', 'info', 4000)]
+    # Regression: this said "No streams found" (#30030) although no stream
+    # lookup had happened; the failure is a missing meta (#30672).
+    assert ctx.env.notifications == [('Rivulet', 'STR30672', 'info', 4000)]
 
 
 def test_open_detail_movie_skips_detailwindow_and_opens_streams_directly(

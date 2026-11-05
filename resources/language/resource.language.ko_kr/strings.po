@@ -1607,3 +1607,7 @@ msgstr "최근 채널"
 msgctxt "#30671"
 msgid "Remove from recent channels"
 msgstr "최근 채널에서 제거"
+
+msgctxt "#30672"
+msgid "No details found for this title"
+msgstr "이 작품의 상세 정보를 찾을 수 없습니다"
