@@ -1607,3 +1607,7 @@ msgstr "Недавние каналы"
 msgctxt "#30671"
 msgid "Remove from recent channels"
 msgstr "Убрать из недавних каналов"
+
+msgctxt "#30672"
+msgid "No details found for this title"
+msgstr "Подробности об этом названии не найдены"

@@ -262,9 +262,9 @@ def test_search_omdb_overlay_moves_plot_and_scores_and_reuses_helpers(load_searc
     assert logos[-1] == ['later-logo']
     assert win.getProperty('HeroLogo') == 'logo'
     plot, scores = win.getControl(30022), win.getControl(30025)
-    assert (plot.y, plot.height, scores.y, scores.height) == (468, 82, 550, 40)
-    assert win.getControl(30024).y == 418 and win.getControl(30027).y == 424
-    assert win.getControl(30023).y == 302 and win.getControl(30020).y == 322
+    assert (plot.y, plot.height, scores.y, scores.height) == (469, 81, 550, 40)
+    assert win.getControl(30024).y == 419 and win.getControl(30027).y == 425
+    assert win.getControl(30023).y == 303 and win.getControl(30020).y == 323
     assert win.getControl(30029).label == '[COLOR B3EDEDED]IMDb[/COLOR] 8.3'
     assert win.getControl(30032).image == 'rating_rt_fresh.png' and win.getControl(30033).label == ' : 98%'
     assert win.getControl(30034).image == 'rating_mc_green.png' and win.getControl(30035).label == ' : 67'
@@ -325,7 +325,7 @@ def test_eighty_search_hero_combinations(load_search, plot, scores, stars, facts
         box(30027)
     if plot:
         p = box(30022)
-        assert p[3] == 82 and p[1] + p[3] == (550 if scores else 590)
+        assert p[3] == 81 and p[1] + p[3] == (550 if scores else 590)
     if scores:
         s = box(30025)
         assert s[1] + s[3] == 590 < 630
@@ -440,7 +440,7 @@ def test_malformed_facts_and_broken_control_do_not_skip_hero_geometry(load_searc
         raise RuntimeError('unwrappable')
     monkeypatch.setattr(win.getControl(30023), 'setImage', fail)
     ctx.look.paint_poster_hero(win, item, ctx.search.SEARCH_STACK)
-    assert win.getControl(30022).y == 468 and win.getControl(30025).y == 550
+    assert win.getControl(30022).y == 469 and win.getControl(30025).y == 550
     assert win.getControl(30020).label == 'Alien'
     assert any('look: hero control failed: RuntimeError' in message for message, _ in ctx.env.log_calls)
 

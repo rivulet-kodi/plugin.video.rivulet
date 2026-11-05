@@ -225,7 +225,7 @@ def test_score_grouplist_layout():
     child_xml = b''.join(ET.tostring(c) for c in inner.findall('control'))
     assert hashlib.sha256(child_xml).hexdigest() == 'd3d194f753dce6e76824d5c3a9533f2f7bb94b221d4877f695659dd159062ad5'
     plot = root.find(".//control[@id='30022']")
-    assert plot.findtext('top') == '427' and plot.findtext('height') == '123'
+    assert plot.findtext('top') == '428' and plot.findtext('height') == '122'
     assert int(plot.findtext('top')) + int(plot.findtext('height')) == int(scores.findtext('top'))
     for name in ICONS:
         assert (MEDIA / name).is_file() and (MEDIA / name).stat().st_size <= 8192

@@ -41,7 +41,7 @@ def test_fixed_boxes_do_not_overlap_at_any_plot_length(
         box(30027)
     if plot:
         p = box(30022)
-        assert p[3] - p[1] == look._STACK['plot_h'] == 123
+        assert p[3] - p[1] == look._STACK['plot_h'] == 122
         assert p[3] == (550 if scores else 590)
     if scores:
         s = box(30025)
@@ -58,8 +58,8 @@ def test_full_omdb_hero_places_wrappable_plot_and_scores_on_real_kodi_rules(load
     win = _look_hero(ctx, OMDB_PANEL, plot=DEMON_PLOT, runtime='156')
     ctx.home.paint_hero(win)
     plot, scores = win.getControl(30022), win.getControl(30025)
-    assert (plot.y, plot.height, scores.y, scores.height) == (427, 123, 550, 40)
-    assert win.getControl(30024).y == 377 and win.getControl(30027).y == 383
+    assert (plot.y, plot.height, scores.y, scores.height) == (428, 122, 550, 40)
+    assert win.getControl(30024).y == 378 and win.getControl(30027).y == 384
     assert win.getControl(30029).label == '[COLOR B3EDEDED]IMDb[/COLOR] 8.3'
     assert win.getControl(30033).label == ' : 98%' and win.getControl(30035).label == ' : 67'
     assert win.getControl(30036).label.startswith('Ends at ')
@@ -129,8 +129,8 @@ def test_an_unsupported_scores_group_cannot_skip_other_placement(load_homewindow
     monkeypatch.setattr(win, '_control_types', dict(win._control_types))
     win._control_types[30025] = 'grouplist'  # The device bug before the wrapper.
     ctx.look.paint_hero(win, DEMON_PLOT, OMDB_PANEL, '156')
-    assert (win.getControl(30022).y, win.getControl(30022).height) == (427, 123)
-    assert win.getControl(30024).y == 377
+    assert (win.getControl(30022).y, win.getControl(30022).height) == (428, 122)
+    assert win.getControl(30024).y == 378
     assert win.getControl(30035).label == ' : 67'
     assert len([msg for msg, _ in ctx.env.log_calls if 'hero control failed' in msg]) == 1
 
@@ -140,6 +140,6 @@ def test_static_plot_box_meets_scores_and_retains_autoscroll():
     plot = root.find(".//control[@id='30022']")
     scores = root.find(".//control[@id='30025']")
     assert int(plot.findtext('top')) + int(plot.findtext('height')) == int(scores.findtext('top')) == 550
-    assert plot.findtext('height') == '123'
+    assert plot.findtext('height') == '122'
     auto = plot.find('autoscroll')
     assert auto.text == 'true' and auto.attrib == {'delay': '3000', 'time': '4000', 'repeat': '6000'}

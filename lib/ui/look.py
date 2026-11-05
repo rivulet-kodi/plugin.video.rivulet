@@ -56,8 +56,11 @@ _SCORE_CONTROLS = (
 
 #: The hero stack, bottom-up from the row band (y=630, 40px above it).
 #: Pixels at 1080p. Font13's 30px face size is not its line advance.
-#: Reserve three 41px lines per the device-test allowance, independent
-#: of plot length; Kodi's unchanged textbox autoscroll handles overflow.
+#: Reserve three lines, independent of plot length; Kodi's unchanged
+#: textbox autoscroll handles overflow. Noto Sans advances 1.362 em, so
+#: font13 is 40.86px a line: a box of N lines is floor(N * 40.86) tall
+#: (3 -> 122, 2 -> 81). Rounding up to 41px/line (123, 82) let the next
+#: line's top edge in as a sliver. `tests/test_skin_xml.py` pins the XML.
 _STACK = {
     'left': 80,
     'bottom': 590,
@@ -65,7 +68,7 @@ _STACK = {
     'text_title_h': 80,
     'facts_h': 40,
     'scores_h': 40,
-    'plot_h': 123,
+    'plot_h': 122,
     'gap_title': 16,
     'gap': 10,
     'stars_w': 150,

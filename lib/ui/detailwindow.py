@@ -1185,7 +1185,7 @@ def open_detail(stype, sid):
         )
     if not meta_obj:
         log('detailwindow: no addon returned a meta for %s/%s' % (stype, sid), xbmc.LOGWARNING)
-        notify(L(30030))
+        notify(L(30672))
         return False
 
     videos = meta_obj.get('videos')

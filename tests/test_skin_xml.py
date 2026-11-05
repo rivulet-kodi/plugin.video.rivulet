@@ -807,3 +807,58 @@ def test_ratings_pair_action_targets_this_addon():
         assert action.get('label') in strings
     assert group.find("setting[@id='ratings_omdb_key']").get('help') == '30515'
     assert '30541' in strings and '30542' in strings
+
+
+# ---------------------------------------------------------------------------
+# 7. layout invariants: hero plot textbox is a whole number of lines
+
+
+#: Noto Sans (Estuary's font13 face) advances 1.362 em per line, so font13
+#: is 30 * 1.362 = 40.86px a line, not the 41px it was once rounded to: a
+#: 123px box (3 * 41) let the top of a fourth line show as a sliver.
+_FONT13_LINE_PX = _ESTUARY_FONT_SIZES['font13'] * 1.362
+_HERO_PLOT_ID = '30022'
+
+
+def _plot_box_lines(height):
+    """The line count a `height`px box holds. Raises unless the box ends
+    within a pixel *before* the next line boundary: any overshoot lets the
+    top of a further line show."""
+    lines = round(height / _FONT13_LINE_PX)
+    slack = height - lines * _FONT13_LINE_PX
+    assert lines and -1 < slack <= 0, (
+        'height %s is not a whole number of %.2fpx lines (nearest %d lines, %+.2fpx)'
+        % (height, _FONT13_LINE_PX, lines, slack))
+    return lines
+
+
+def _plot_boxes():
+    boxes = {}
+    for path in _skin_files():
+        for control in ET.parse(path).iter('control'):
+            if control.get('type') == 'textbox' and control.get('id') == _HERO_PLOT_ID and control.findtext('font') == 'font13':
+                boxes[os.path.basename(path)] = (int(control.findtext('top')), int(control.findtext('height')))
+    return boxes
+
+
+def test_hero_plot_textbox_is_a_whole_number_of_lines_in_every_window():
+    boxes = _plot_boxes()
+    assert set(boxes) == {'HomeWindow.xml', 'SearchWindow.xml', 'ShowcaseWindow.xml'}
+    lines = {name: _plot_box_lines(height) for name, (_top, height) in boxes.items()}
+    assert lines == {'HomeWindow.xml': 3, 'SearchWindow.xml': 2, 'ShowcaseWindow.xml': 3}
+
+
+def test_hero_plot_height_matches_the_stack_constants():
+    from lib.ui import look
+
+    boxes = _plot_boxes()
+    assert boxes['HomeWindow.xml'][1] == boxes['ShowcaseWindow.xml'][1] == look._STACK['plot_h']
+    with open(os.path.join(_REPO_ROOT, 'lib', 'ui', 'search.py'), encoding='utf-8') as fh:
+        search_plot_h = int(re.search(r"SEARCH_STACK = \{[^}]*'plot_h': (\d+)", fh.read()).group(1))
+    assert boxes['SearchWindow.xml'][1] == search_plot_h
+
+
+def test_fourth_line_sliver_height_is_rejected_regression():
+    for height in (123, 82):
+        with pytest.raises(AssertionError):
+            _plot_box_lines(height)

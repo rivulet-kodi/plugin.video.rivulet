@@ -63,7 +63,7 @@ KEYS = tuple('ABCDEFGHIJKLMN') + tuple('OPQRSTUVWXYZ') + (' ', '<')
 MAX_QUERY = 60
 #: The hero here sits between the letters and the row: a shorter logo,
 #: two lines of plot.
-SEARCH_STACK = {'title_h': 100, 'plot_h': 82}
+SEARCH_STACK = {'title_h': 100, 'plot_h': 81}
 _BACK_ACTIONS = frozenset((9, 10, 92))
 #: ACTION_SELECT_ITEM and ACTION_MOUSE_LEFT_CLICK: on the bar, Kodi opens
 #: its keyboard for these before Python sees them.

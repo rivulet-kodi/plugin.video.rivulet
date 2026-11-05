@@ -191,7 +191,7 @@ def test_look_stack_ends_on_the_same_line_above_the_row(load_homewindow, monkeyp
     scores = win.getControl(look.HERO_SCORES)
     assert scores.y + scores.height == look._STACK['bottom']
     plot = win.getControl(ctx.homewindow.HERO_PLOT)
-    assert plot.height == look._STACK['plot_h'] == 123
+    assert plot.height == look._STACK['plot_h'] == 122
     assert plot.y + plot.height == scores.y
     tall_logo_top = win.getControl(ctx.homewindow.HERO_LOGO).y
 
@@ -199,7 +199,7 @@ def test_look_stack_ends_on_the_same_line_above_the_row(load_homewindow, monkeyp
     ctx.homewindow.paint_hero(short)
     # Every non-empty plot reserves the same scrolling box.
     assert short.getControl(ctx.homewindow.HERO_LOGO).y == tall_logo_top
-    assert short.getControl(ctx.homewindow.HERO_PLOT).height == 123
+    assert short.getControl(ctx.homewindow.HERO_PLOT).height == 122
 
 
 def test_look_facts_start_at_the_margin_without_stars(load_homewindow, monkeypatch):

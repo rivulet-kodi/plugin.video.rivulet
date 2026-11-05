@@ -1607,3 +1607,7 @@ msgstr "Recente zenders"
 msgctxt "#30671"
 msgid "Remove from recent channels"
 msgstr "Verwijderen uit recente zenders"
+
+msgctxt "#30672"
+msgid "No details found for this title"
+msgstr "Geen details gevonden voor deze titel"

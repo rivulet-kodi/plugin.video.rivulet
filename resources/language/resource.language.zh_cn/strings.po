@@ -1607,3 +1607,7 @@ msgstr "最近的频道"
 msgctxt "#30671"
 msgid "Remove from recent channels"
 msgstr "从最近的频道中移除"
+
+msgctxt "#30672"
+msgid "No details found for this title"
+msgstr "未找到此标题的详细信息"

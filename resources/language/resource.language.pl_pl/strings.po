@@ -1607,3 +1607,7 @@ msgstr "Ostatnie kanały"
 msgctxt "#30671"
 msgid "Remove from recent channels"
 msgstr "Usuń z ostatnich kanałów"
+
+msgctxt "#30672"
+msgid "No details found for this title"
+msgstr "Nie znaleziono szczegółów tego tytułu"
