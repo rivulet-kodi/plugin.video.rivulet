@@ -4,6 +4,17 @@ Full release history of the Rivulet add-on. `addon.xml` `<news>` carries only th
 release (Kodi's checker caps it at 1500 characters and the whole add-on.xml is part of every
 repository index download). Newest first.
 
+## v0.47.0
+
+- Changed: Settings reorganised into labelled groups with help on every option; options that do nothing in the current setup are greyed out, API keys and passwords are masked, and number fields have real limits.
+- Fix: a ratings key paired with your phone is used right away and no longer wiped by the next Settings OK.
+- Fix: playback progress is saved every few seconds and on pause or seek, so short sessions and external servers resume where you stopped.
+- Fix: Brazilian Portuguese, Greek and Czech subtitles are found when you pick that language.
+- Fix: Rivulet screens stay visible when reopened over a video playing in a window.
+- Fix: a disabled Stream4Me or YouTube add-on is no longer treated as installed; trailers offer to enable YouTube.
+- Fix: the Kodi buffer settings install now matches your Kodi version (Kodi 21+ keeps its cache in Settings > Services > Caching).
+- Changed: smaller images on detail, source and showcase pages; long titles without a poster wrap.
+
 ## v0.46.0
 
 - New: live TV from M3U playlists. Enter one or more playlist addresses in Settings, Server add-ons, IPTV playlist URLs (an Expert-level setting; for example the Free-TV list) and the channels appear on the Live tab, with their playlist groups as genres. Off by default; only for the built-in server. Comes with rivulet-engine v0.32.0, installed automatically.
