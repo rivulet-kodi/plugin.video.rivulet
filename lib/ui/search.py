@@ -121,7 +121,9 @@ class SearchWindow(BaseWindow):
         if timer is not None:
             timer.cancel()
         if self._now_feed is not None:
-            self._now_feed.stop()
+            from lib.ui import livenow
+
+            livenow.stop_feed(self._now_feed)
         super().close()
 
     def start(self):

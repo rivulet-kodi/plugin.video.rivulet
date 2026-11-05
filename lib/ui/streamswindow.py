@@ -1545,7 +1545,10 @@ class _StreamAnswerConsumer:
 
 
 def _fetch_stream_pairs(stype, sid, meta=None):
-    """Fetch+parse (not sort) every installed addon's streams for
+    """The pairs of `_gather_stream_pairs`, whether or not the user
+    cancelled (the binge round trip and the picker take what arrived).
+
+    Fetch+parse (not sort) every installed addon's streams for
     (stype, sid) - the exact aggregate pipeline `open_streams()` has
     always run for its own initial fetch, factored out so
     `_try_binge_watch()` can silently re-run it for a next episode's OWN
@@ -1563,6 +1566,12 @@ def _fetch_stream_pairs(stype, sid, meta=None):
     function's callers (`_try_binge_watch()`, and `open_streams()`
     itself for as long as it used to) want the plain "wait for
     everything, then decide" contract."""
+    return _gather_stream_pairs(stype, sid, meta)[0]
+
+
+def _gather_stream_pairs(stype, sid, meta=None):
+    """``(pairs, cancelled)``: `_fetch_stream_pairs` plus whether the user
+    backed out of the spinner (then `pairs` is only what had arrived)."""
     import xbmc
 
     from lib.ui.compat import L, log
@@ -1571,7 +1580,7 @@ def _fetch_stream_pairs(stype, sid, meta=None):
     pairs = []
     failures = []
     if not addons:
-        return pairs
+        return pairs, False
 
     results = _start_stream_fetch_workers(stype, sid, addons)
     total = len(addons)
@@ -1586,10 +1595,11 @@ def _fetch_stream_pairs(stype, sid, meta=None):
                 break
             addon_name, _addon_pairs = result
             dialog.update(int(consume_next.consumed * 100 / total), L(30187) % addon_name)
+        cancelled = bool(dialog.iscanceled())
 
     if failures:
         log('streamswindow: %s' % _summarize_addon_failures(failures), xbmc.LOGWARNING)
-    return pairs
+    return pairs, cancelled
 
 
 def _binge_label(video):
@@ -1862,7 +1872,11 @@ def open_live(stype, sid, poster=None, heading='', art=None, meta=None):
     from lib.ui.compat import L, log, notify
     from lib.ui.player import play_direct
 
-    pairs = _fetch_stream_pairs(stype, sid, meta)
+    pairs, cancelled = _gather_stream_pairs(stype, sid, meta)
+    if cancelled:
+        # Back on the spinner: the pairs are only the early answers. Neither
+        # play one of them nor claim there are no streams.
+        return False
     choice = live_play_choice(pairs)
     if choice == 'none':
         log('streamswindow: no streams for live %s/%s' % (stype, sid), xbmc.LOGINFO)

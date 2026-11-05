@@ -379,7 +379,9 @@ class ShowcaseWindow(ModalStackWindow, xbmcgui.WindowXMLDialog):
         # And the live schedule worker: plain data only, so stopping it is
         # all a close owes it (it never held an item).
         if self._now_feed is not None:
-            self._now_feed.stop()
+            from lib.ui import livenow
+
+            livenow.stop_feed(self._now_feed)
         super().close()
 
     def _cancel_enrich_timer(self):

@@ -1847,8 +1847,9 @@ def _remove_recent(window, item, control_id):
     so the other apps drop it too; the device's own list loses it either
     way (it holds the entry from before sync, or from a signed-out
     spell). The card is then dropped from the row, from the row's snapshot
-    and from any other tab snapshot holding it, without a rebuild: no
-    network on the GUI thread. No confirmation: the channel is one click
+    and from any other tab snapshot holding it, without a rebuild. The
+    account lookup and write (`dismiss_live`) are network calls made on
+    the GUI thread, each under a cancellable spinner. No confirmation: the channel is one click
     from coming back.
     """
     from lib.ui.compat import log
@@ -2391,6 +2392,10 @@ def _write_meta_onto(item, meta, keep_label=False):
     if label and not keep_label:
         item.setLabel(label)
     item.setProperty('meta_state', 'done')
+    # The merge rewrote the hero properties (and `live`) the now/next
+    # worker had composed onto this card: forget that, so the next hero
+    # paint takes these values as the base and composes the programme again.
+    livenow.reset_item(item)
 
 
 def episode_label_for(meta, video_id):
@@ -2717,8 +2722,11 @@ def _guide_source(window, item):
 def _track_live(window, item):
     """Ask the now/next worker for the focused live item and write what it
     has onto the item before the hero reads it (`livenow.track_item`)."""
-    guide = _guide_source(window, item) if item is not None and item.getProperty('live') == '1' else None
-    livenow.track_item(_live_feed(window), item, guide)
+    live = item is not None and item.getProperty('live') == '1'
+    guide = _guide_source(window, item) if live else None
+    row = (getattr(window, '_rows', None) or {}).get(window.getFocusId()) if live else None
+    transport = row.get('transport') if row and row.get('kind') == 'catalog' else None
+    livenow.track_item(_live_feed(window), item, guide, transport)
 
 
 def paint_hero(window, item=None):

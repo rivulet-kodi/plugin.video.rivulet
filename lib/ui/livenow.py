@@ -199,7 +199,7 @@ NOW_STRING_ID = 30653
 NEXT_STRING_ID = 30654
 
 
-def track_item(feed, item, guide=None):
+def track_item(feed, item, guide=None, transport=None):
     """GUI thread, once per hero paint: ask `feed` for the focused item's
     schedule and write what it has so far onto the item BEFORE the hero
     reads it. True when the item changed. A non-live item (or none) tells
@@ -212,7 +212,7 @@ def track_item(feed, item, guide=None):
         feed.want()
         return False
     sid = item.getProperty('sid')
-    feed.want(item.getProperty('stype') or 'tv', sid, guide)
+    feed.want(item.getProperty('stype') or 'tv', sid, guide, transport)
     known, info = feed.snapshot(sid)
     if not known:
         return False
@@ -281,16 +281,30 @@ def fetch_guide_page(source, dates):
     return metas
 
 
-def fetch_live_meta(stype, sid):
-    """The meta of a live channel with its schedule, or None. The first
-    add-on (`ordered_meta_addons`) whose meta carries `videos` wins; the
-    first usable meta without them is the fallback."""
+def fetch_live_meta(stype, sid, transport=None, widen=True):
+    """The meta of a live channel with its schedule, or None.
+
+    `transport` is the add-on the channel came from (its row's, or the
+    guide page's): it is asked FIRST, and with `widen` False it is the only
+    one asked, so a channel its own add-on has no schedule for does not make
+    every installed add-on answer every refresh. With `widen` the other
+    add-ons (`ordered_meta_addons`) follow, as stremio-core's live row
+    falls back from the add-on that served the stream; the feed allows that
+    once per channel per session. The first meta that carries `videos`
+    wins; the first usable one without them is the fallback. With no
+    `transport` (a coverflow or Search card does not know its source) every
+    add-on is the only possible source, so `widen` has nothing to narrow.
+    """
     from lib.stremio.addons import AddonError
     from lib.ui.dependencies import get_client, get_store
 
     client = get_client()
     best = None
-    for transport, _manifest in ordered_meta_addons(get_store().get_enabled_addons(), stype, sid):
+    order = ordered_meta_addons(get_store().get_enabled_addons(), stype, sid)
+    if transport:
+        own = [entry for entry in order if entry[0] == transport]
+        order = own + ([entry for entry in order if entry[0] != transport] if widen else [])
+    for transport, _manifest in order:
         try:
             meta = client.meta(transport, stype, sid)
         except AddonError:
@@ -326,6 +340,16 @@ def next_boundary(videos, now):
     return min(edges) if edges else None
 
 
+def _interval(videos, now, failed):
+    """Seconds to the next fetch. stremio-core's 60 s retry is for a
+    schedule whose coverage ended or a fetch that failed; a channel (or
+    guide page) that simply has no programmes is asked at the 15 minute
+    refresh, not every minute."""
+    if not failed and not videos:
+        return livetv.REFRESH_SECONDS
+    return livetv.refresh_interval(videos, now, failed)
+
+
 class NowNextFeed:
     """The worker behind a window's live hero. See the module docstring.
 
@@ -354,6 +378,9 @@ class NowNextFeed:
         self._schedules = {}
         self._pages = {}
         self._announced = {}
+        #: Channels whose meta was already asked of every add-on this
+        #: session: later refreshes ask only the channel's own one.
+        self._widened = set()
 
     @property
     def stopped(self):
@@ -361,11 +388,15 @@ class NowNextFeed:
         A window builds a fresh feed when it finds this set."""
         return self._stopped()
 
-    def want(self, stype=None, sid=None, guide=None):
+    def want(self, stype=None, sid=None, guide=None, transport=None):
         """The channel whose schedule the window shows now (None: no live
         item focused). `guide` is ``(transport, type, catalog id, skip)``
-        of the guide catalog serving the channel's row, or None."""
-        wanted = (stype, sid, guide) if sid else None
+        of the guide catalog serving the channel's row, or None;
+        `transport` is the add-on the channel's row came from (the guide's
+        own when `guide` is given), or None when unknown."""
+        if transport is None and guide is not None:
+            transport = guide[0]
+        wanted = (stype, sid, guide, transport) if sid else None
         with self._lock:
             if wanted == self._wanted:
                 return
@@ -455,14 +486,17 @@ class NowNextFeed:
             pass
 
     def _refresh(self, wanted):
-        stype, sid, guide = wanted
+        stype, sid, guide, transport = wanted
         now = self._clock()
         videos, failed = [], False
         if guide is not None:
             videos = self._guide_programmes(guide, sid, now)
         if not videos:
+            with self._lock:
+                widen = sid not in self._widened
+                self._widened.add(sid)
             try:
-                meta = self._fetch_meta(stype, sid)
+                meta = self._fetch_meta(stype, sid, transport, widen)
             except Exception:  # noqa: BLE001 - any failure is "try again in a minute"
                 meta = None
             listed = meta.get('videos') if isinstance(meta, dict) else None
@@ -474,7 +508,7 @@ class NowNextFeed:
                 videos = previous['videos']
             self._schedules[sid] = {
                 'videos': videos,
-                'next': self._mono() + livetv.refresh_interval(videos, now, failed),
+                'next': self._mono() + _interval(videos, now, failed),
             }
 
     def _guide_programmes(self, source, sid, now):
@@ -494,10 +528,31 @@ class NowNextFeed:
                 ids = {meta.get('id') for meta in metas if isinstance(meta, dict) and meta.get('id')}
                 by_id = {cid: livetv.guide_videos(metas, cid) for cid in ids}
                 every = [video for videos in by_id.values() for video in videos]
-                page = {'by_id': by_id, 'next': self._mono() + livetv.refresh_interval(every, now)}
+                page = {'by_id': by_id, 'next': self._mono() + _interval(every, now, False)}
             with self._lock:
                 self._pages[source] = page
         return page['by_id'].get(sid) or []
+
+
+#: How long a closing window waits for its feed's thread to let go
+#: (the worker polls its stop flag between requests, so this is a bound,
+#: not a wait for a fetch to finish).
+JOIN_SECONDS = 1.0
+
+
+def stop_feed(feed, timeout=JOIN_SECONDS):
+    """Stop `feed` (None is fine) and join its thread for at most
+    `timeout`, as Home's `_join_workers` does: a thread still running a
+    request must not outlive the window that closes it."""
+    if feed is None:
+        return
+    feed.stop()
+    thread = feed.thread
+    if thread is not None and thread is not threading.current_thread():
+        try:
+            thread.join(timeout)
+        except RuntimeError:  # never started
+            pass
 
 
 def ensure_feed(feed):

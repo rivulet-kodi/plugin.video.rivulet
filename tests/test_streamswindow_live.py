@@ -42,7 +42,8 @@ def test_live_play_choice(load_streamswindow, count, expected):
 
 def _wire(sw, monkeypatch, ctx, pairs, play_ok=True):
     log = []
-    monkeypatch.setattr(sw, '_fetch_stream_pairs', lambda stype, sid, meta=None: log.append(('fetch', stype, sid)) or pairs)
+    monkeypatch.setattr(sw, '_gather_stream_pairs',
+                        lambda stype, sid, meta=None: log.append(('fetch', stype, sid)) or (pairs, False))
     monkeypatch.setattr(sw, 'new_playback_end_watcher', lambda: log.append('watcher') or 'W')
 
     def play_direct(stream, stype, sid, item_meta=None, on_ready=None, video_id=None):
@@ -137,3 +138,45 @@ def test_open_streams_on_prefetched_pairs_does_no_second_lookup(load_streamswind
     assert sorted(info['name'] for info, _stream in seen['pairs']) == ['src0', 'src1']
     assert seen['video_id'] == 'ch1'
     assert seen['loading'] in ('', None)  # nothing is still streaming in
+
+
+def test_backing_out_of_the_spinner_plays_nothing_and_says_nothing(load_streamswindow, monkeypatch):
+    """Back on the spinner leaves only the early answers in `pairs`: one of
+    them must not play, and an empty set must not claim "no streams"."""
+    ctx = load_streamswindow()
+    sw = ctx.streamswindow
+    state = {'cancelled': False}
+
+    class Dialog:
+        def iscanceled(self):
+            return state['cancelled']
+
+        def update(self, *args):
+            pass
+
+    @contextlib.contextmanager
+    def busy(*args, **kwargs):
+        yield Dialog()
+
+    class Consumer:
+        consumed = 1
+
+        def __init__(self, results, total, pairs, failures):
+            self.pairs = pairs
+
+        def __call__(self, cancelled):
+            self.pairs.extend(_pairs(1))  # one add-on answered ...
+            state['cancelled'] = True  # ... then the viewer pressed Back
+            return ('src0', None)
+
+    played = []
+    monkeypatch.setattr(sw, '_stream_targets', lambda stype, sid, meta: ['addon'])
+    monkeypatch.setattr(sw, '_start_stream_fetch_workers', lambda stype, sid, addons: None)
+    monkeypatch.setattr(sw, '_StreamAnswerConsumer', Consumer)
+    monkeypatch.setattr(sw, 'busy_dialog', busy)
+    monkeypatch.setattr(ctx.player, 'play_direct', lambda *a, **k: played.append(a) or True)
+    monkeypatch.setattr(sw, 'open_streams', lambda *a, **k: played.append('picker'))
+
+    assert sw.open_live('tv', 'ch1') is False
+
+    assert played == [] and ctx.env.notifications == []

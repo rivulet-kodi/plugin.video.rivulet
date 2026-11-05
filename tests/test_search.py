@@ -846,7 +846,7 @@ def test_a_live_channel_result_shows_now_and_next_and_close_stops_the_feed(load_
                'endTime': stamp(1200)},
               {'id': 'b', 'title': 'Late Film', 'startTime': stamp(1200), 'endTime': stamp(4800)}]
 
-    def fetch_meta(_stype, sid):
+    def fetch_meta(_stype, sid, *_rest):
         gate.wait(5.0)
         return {'id': sid, 'videos': videos}
 

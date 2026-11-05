@@ -61,7 +61,7 @@ def live_feed(monkeypatch):
         probe.gate.wait(5.0)
         return [{'id': 'tt0', 'type': 'tv', 'videos': probe.videos}]
 
-    def fetch_meta(stype, sid):
+    def fetch_meta(stype, sid, transport=None, widen=True):
         probe.metas.append((stype, sid))
         probe.gate.wait(5.0)
         return {'id': sid, 'videos': probe.videos}
@@ -381,3 +381,22 @@ def test_closing_home_stops_the_now_next_worker(load_homewindow, monkeypatch, li
     assert feed.stopped and not feed.thread.is_alive()
     ctx.home.release_items(win)
     assert win._now_feed is None
+
+
+def test_a_library_meta_merge_lets_the_programme_be_composed_again(load_homewindow, monkeypatch, live_feed):
+    """`_write_meta_onto` rewrites the hero properties; without
+    `livenow.reset_item` the item still claims its now/next is on it, and
+    the programme never comes back over the catalog text."""
+    ctx = load_homewindow()
+    item = ctx.home._poster_item({'id': 'c1', 'type': 'tv', 'name': 'One', 'description': 'Channel blurb'})
+    from lib import livetv
+
+    now = time.time()
+    videos = [{'id': 'a', 'title': 'Evening News', 'startTime': _stamp(-600), 'endTime': _stamp(1200)}]
+    current = livetv.now_next(videos, now)
+    args = ('%H:%M', 'Now: %s', 'Next: %s')
+    assert livenow.apply_to_item(item, current, *args, now=now)
+    ctx.home._write_meta_onto(item, {'id': 'c1', 'type': 'tv', 'name': 'One', 'description': 'Fresh blurb'})
+    assert item.getProperty('hero_plot') == 'Fresh blurb'  # the merge overwrote the composed plot
+    assert livenow.apply_to_item(item, current, *args, now=now)  # ... so it is composed again
+    assert 'Evening News' in item.getProperty('hero_meta')

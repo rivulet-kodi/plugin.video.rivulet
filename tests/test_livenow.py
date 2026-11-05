@@ -208,7 +208,7 @@ class Harness:
     GUI nudges."""
 
     def __init__(self, pages=None, metas=None, **kwargs):
-        self.page_calls, self.meta_calls = [], []
+        self.page_calls, self.meta_calls, self.meta_args = [], [], []
         self.pages, self.metas = pages or {}, metas or {}
         self.woken = threading.Semaphore(0)
         self.wakes = 0
@@ -226,8 +226,9 @@ class Harness:
             raise answer
         return answer
 
-    def fetch_meta(self, stype, sid):
+    def fetch_meta(self, stype, sid, transport=None, widen=True):
         self.meta_calls.append((stype, sid))
+        self.meta_args.append((transport, widen))
         answer = self.metas.get(sid)
         if isinstance(answer, Exception):
             raise answer
@@ -391,3 +392,95 @@ def test_ensure_feed_keeps_a_running_feed_and_replaces_a_stopped_one(monkeypatch
     feed.stop()
     assert livenow.ensure_feed(feed) is made[0]
     assert livenow.ensure_feed(None) is made[1]
+
+
+# ------------------------------------------- request volume (one add-on first)
+
+def test_the_rows_own_add_on_is_asked_and_the_others_only_once_per_channel(harness):
+    h = harness(metas={'ch1': {'id': 'ch1'}})  # a meta with no schedule
+    h.feed.want('tv', 'ch1', None, 'https://row/manifest.json')
+    deadline = time.monotonic() + 5.0
+    while not h.feed.snapshot('ch1')[0] and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert h.meta_args == [('https://row/manifest.json', True)]
+    # Due again: the channel was already widened, so only its own add-on.
+    with h.feed._lock:
+        h.feed._schedules['ch1']['next'] = time.monotonic() - 1
+    h.feed._nudge.set()
+    deadline = time.monotonic() + 5.0
+    while len(h.meta_args) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert h.meta_args[1] == ('https://row/manifest.json', False)
+
+
+def test_the_guides_own_transport_is_the_meta_source_when_the_guide_fails(harness):
+    h = harness(pages={GUIDE: RuntimeError('down')}, metas={'ch1': {'id': 'ch1', 'videos': _schedule()}})
+    h.feed.want('tv', 'ch1', GUIDE)
+    h.wait_for_wake()
+    assert h.meta_args == [(GUIDE[0], True)]
+
+
+def test_a_channel_with_no_schedule_is_asked_again_at_the_long_interval_not_every_minute(harness):
+    h = harness(metas={'ch1': {'id': 'ch1'}})
+    h.feed.want('tv', 'ch1')
+    deadline = time.monotonic() + 5.0
+    while not h.feed.snapshot('ch1')[0] and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert h.feed._schedules['ch1']['next'] - time.monotonic() > livetv.RETRY_SECONDS * 2
+    assert livenow._interval([], NOW, True) == livetv.RETRY_SECONDS  # a failed fetch: still a minute
+    expired = [_programme('a', NOW - 900, NOW - 300, 'Old')]
+    assert livenow._interval(expired, NOW, False) == livetv.RETRY_SECONDS  # coverage ended
+
+
+class _Thread:
+    def __init__(self):
+        self.joined = []
+
+    def join(self, timeout=None):
+        self.joined.append(timeout)
+
+
+def test_stop_feed_stops_and_joins_the_thread():
+    class Feed:
+        stopped = False
+
+        def __init__(self):
+            self.thread = _Thread()
+
+        def stop(self):
+            self.stopped = True
+
+    feed = Feed()
+    livenow.stop_feed(feed)
+    assert feed.stopped and feed.thread.joined == [livenow.JOIN_SECONDS]
+    livenow.stop_feed(None)  # no feed yet: nothing to do
+
+
+def test_fetch_live_meta_asks_the_rows_add_on_alone_unless_widened(monkeypatch):
+    import sys
+    import types
+
+    asked = []
+
+    class Client:
+        def meta(self, transport, stype, sid):
+            asked.append(transport)
+            return {'id': sid}  # no schedule anywhere
+
+    class Store:
+        def get_enabled_addons(self):
+            return []
+
+    monkeypatch.setitem(sys.modules, 'lib.ui.dependencies',
+                        types.SimpleNamespace(get_client=lambda: Client(), get_store=lambda: Store()))
+    monkeypatch.setattr(livenow, 'ordered_meta_addons',
+                        lambda addons, stype, sid: [('a', {}), ('b', {}), ('c', {})])
+
+    livenow.fetch_live_meta('tv', 'ch1', 'b', widen=False)
+    assert asked == ['b']
+    asked.clear()
+    livenow.fetch_live_meta('tv', 'ch1', 'b', widen=True)
+    assert asked == ['b', 'a', 'c']
+    asked.clear()
+    livenow.fetch_live_meta('tv', 'ch1')  # source unknown: every add-on
+    assert asked == ['a', 'b', 'c']

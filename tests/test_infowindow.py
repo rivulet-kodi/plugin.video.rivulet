@@ -1874,7 +1874,7 @@ def _schedule_feed(monkeypatch, videos):
 
     woke, gate = threading.Event(), threading.Event()
 
-    def fetch_meta(_stype, sid):
+    def fetch_meta(_stype, sid, *_rest):
         gate.wait(5.0)
         return {'id': sid, 'videos': videos}
 
