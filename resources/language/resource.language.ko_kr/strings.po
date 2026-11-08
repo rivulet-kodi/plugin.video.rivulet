@@ -1365,8 +1365,8 @@ msgid "Opens Rivulet instead of the Kodi home screen every time Kodi starts."
 msgstr "Kodi를 시작할 때마다 Kodi 홈 화면 대신 Rivulet을 엽니다."
 
 msgctxt "#30574"
-msgid "Order of the source list: best quality first, largest file first, or most seeders first."
-msgstr "소스 목록의 정렬 순서입니다. 화질이 높은 순, 파일 크기가 큰 순, 시더가 많은 순 중에서 선택합니다."
+msgid "Order of the source list: best quality first, largest file first, most seeders first, or \"Do not sort\" to keep the order the addons returned - useful when an aggregator addon already ranks them for you."
+msgstr "소스 목록의 정렬 순서입니다. 화질 높은 순, 파일 큰 순, 시더 많은 순 또는 \"정렬 안 함\"으로 애드온이 반환한 순서를 그대로 유지합니다. 애그리게이터 애드온이 이미 정렬해 주는 경우에 유용합니다."
 
 msgctxt "#30575"
 msgid "Hides sources below this resolution. Sources whose resolution is unknown stay in the list."
@@ -1611,3 +1611,7 @@ msgstr "최근 채널에서 제거"
 msgctxt "#30672"
 msgid "No details found for this title"
 msgstr "이 작품의 상세 정보를 찾을 수 없습니다"
+
+msgctxt "#30673"
+msgid "Do not sort"
+msgstr "정렬 안 함"
