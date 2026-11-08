@@ -121,6 +121,7 @@
                             <option label="30074">quality</option>
                             <option label="30075">size</option>
                             <option label="30076">seeders</option>
+                            <option label="30673">none</option>
                         </options>
                         <allowempty>false</allowempty>
                     </constraints>

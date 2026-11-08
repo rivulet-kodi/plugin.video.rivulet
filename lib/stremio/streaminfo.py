@@ -1227,9 +1227,25 @@ def sort_streams(pairs, key='quality'):
       (streams with unknown seeders sort last), then size desc.
     - ``'size'``: size desc (unknown size last).
     - ``'seeders'``: seeders desc (unknown seeders last).
+    - ``'none'``: no reordering at all - the addons' own order is kept.
+
+    ``'none'`` exists because an aggregator addon (AIOStreams and the
+    like) already ranks what it returns, using signals Rivulet cannot
+    see: debrid cache state, per-service priorities, regex preferences,
+    the user's own ordered formats. Re-sorting that by resolution or
+    seeders discards a deliberate ranking and replaces it with a worse
+    one built from whatever `parse_stream()` managed to scrape out of
+    the titles. For those setups the right amount of sorting is none.
+
+    The list is still COPIED, never handed back as the caller's own
+    object: `sort_streams()`'s contract is a new list (callers rebind
+    `self.pairs` to the result while other code holds the old one), and
+    returning the input itself would quietly make that an alias.
     """
     pairs = list(pairs or [])
 
+    if key == 'none':
+        return pairs
     if key == 'size':
         return sorted(pairs, key=lambda pair: _desc_none_last(pair[0].get('size_bytes')))
     if key == 'seeders':
