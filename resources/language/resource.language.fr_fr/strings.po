@@ -1365,8 +1365,8 @@ msgid "Opens Rivulet instead of the Kodi home screen every time Kodi starts."
 msgstr "Ouvre Rivulet à la place de l'écran d'accueil de Kodi à chaque démarrage de Kodi."
 
 msgctxt "#30574"
-msgid "Order of the source list: best quality first, largest file first, or most seeders first."
-msgstr "Ordre de la liste des sources : meilleure qualité d'abord, plus gros fichier d'abord ou plus de seeders d'abord."
+msgid "Order of the source list: best quality first, largest file first, most seeders first, or \"Do not sort\" to keep the order the addons returned - useful when an aggregator addon already ranks them for you."
+msgstr "Ordre de la liste des sources : meilleure qualité d'abord, fichier le plus gros d'abord, plus de sources d'abord, ou « Ne pas trier » pour conserver l'ordre renvoyé par les extensions - utile lorsqu'une extension agrégatrice les classe déjà pour vous."
 
 msgctxt "#30575"
 msgid "Hides sources below this resolution. Sources whose resolution is unknown stay in the list."
@@ -1611,3 +1611,7 @@ msgstr "Retirer des chaînes récentes"
 msgctxt "#30672"
 msgid "No details found for this title"
 msgstr "Aucun détail trouvé pour ce titre"
+
+msgctxt "#30673"
+msgid "Do not sort"
+msgstr "Ne pas trier"

@@ -1365,8 +1365,8 @@ msgid "Opens Rivulet instead of the Kodi home screen every time Kodi starts."
 msgstr "每次 Kodi 启动时打开 Rivulet，而不是 Kodi 主屏幕。"
 
 msgctxt "#30574"
-msgid "Order of the source list: best quality first, largest file first, or most seeders first."
-msgstr "来源列表的排序方式：画质最高优先、文件最大优先或做种者最多优先。"
+msgid "Order of the source list: best quality first, largest file first, most seeders first, or \"Do not sort\" to keep the order the addons returned - useful when an aggregator addon already ranks them for you."
+msgstr "来源列表的排序方式：画质优先、文件最大优先、做种数最多优先，或选择“不排序”以保留插件返回的顺序——当聚合插件已为你排好序时很有用。"
 
 msgctxt "#30575"
 msgid "Hides sources below this resolution. Sources whose resolution is unknown stay in the list."
@@ -1611,3 +1611,7 @@ msgstr "从最近的频道中移除"
 msgctxt "#30672"
 msgid "No details found for this title"
 msgstr "未找到此标题的详细信息"
+
+msgctxt "#30673"
+msgid "Do not sort"
+msgstr "不排序"

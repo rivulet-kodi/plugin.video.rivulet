@@ -89,7 +89,8 @@ def _sort_key(video):
 
 def pick_binge_stream(pairs, binge_group):
     """From `pairs` (the next episode's own already-fetched, already
-    quality-sorted `(info, stream)` list - see `sort_streams()`), return
+    sorted `(info, stream)` list - whatever order `sort_streams()` left
+    it in, which for the `none` key is the addons' own), return
     the first pair whose `info['binge_group']` equals `binge_group` (the
     just-played stream's own binge group - same release group/quality,
     which is precisely what `behaviorHints.bingeGroup` is for), or the

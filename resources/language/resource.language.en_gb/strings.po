@@ -1365,7 +1365,7 @@ msgid "Opens Rivulet instead of the Kodi home screen every time Kodi starts."
 msgstr ""
 
 msgctxt "#30574"
-msgid "Order of the source list: best quality first, largest file first, or most seeders first."
+msgid "Order of the source list: best quality first, largest file first, most seeders first, or \"Do not sort\" to keep the order the addons returned - useful when an aggregator addon already ranks them for you."
 msgstr ""
 
 msgctxt "#30575"
@@ -1610,4 +1610,8 @@ msgstr ""
 
 msgctxt "#30672"
 msgid "No details found for this title"
+msgstr ""
+
+msgctxt "#30673"
+msgid "Do not sort"
 msgstr ""
