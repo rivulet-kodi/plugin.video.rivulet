@@ -4,6 +4,10 @@ Full release history of the Rivulet add-on. `addon.xml` `<news>` carries only th
 release (Kodi's checker caps it at 1500 characters and the whole add-on.xml is part of every
 repository index download). Newest first.
 
+## v0.49.1
+
+- Fix: the streaming server can no longer be crashed by a misbehaving peer or a malformed torrent, and torrent streaming is more efficient. Comes with rivulet-engine v0.34.0, installed automatically.
+
 ## v0.49.0
 
 - New: a "Do not sort" option for the source list keeps the order the add-on gave, so an aggregator such as AIOStreams can put cached sources first.
