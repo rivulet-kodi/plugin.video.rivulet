@@ -844,6 +844,20 @@ def test_may_start_early_gives_up_waiting_after_the_budget(kodi_stubs):
     assert player._may_start_early(slow, 1245184, target, player._TARGET_WAIT_SECONDS) is True
 
 
+def test_may_start_early_keeps_buffering_past_the_budget_when_infeasible(kodi_stubs):
+    """A swarm measured below the file's own bitrate must not be started on
+    a partial buffer just because the wait cap passed - it drains within
+    seconds and Kodi's curl reader times out (live: 'Error creating
+    demuxer')."""
+    player = kodi_stubs.player
+    target = 20 * 1024 * 1024
+    slow = {'downloadSpeed': 7263.8}
+
+    assert player._may_start_early(
+        slow, 8 * 1024 * 1024, target, player._TARGET_WAIT_SECONDS + 50, infeasible=True,
+    ) is False
+
+
 def test_prebuffer_starts_late_rather_than_failing_when_budget_is_spent(kodi_stubs, monkeypatch):
     """With the gate holding a starved swarm back, the retry budget can now
     run out while the header floor HAS been cleared. Before the gate that

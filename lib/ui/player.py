@@ -528,7 +528,7 @@ def _poll_stats_best_effort(server, info_hash, trackers=None, dialog=None, monit
         return None
 
 
-def _may_start_early(stats, got, target, waited, stalled=False, progressed=False):
+def _may_start_early(stats, got, target, waited, stalled=False, progressed=False, infeasible=False):
     """Whether a front read that cleared the header floor but not `target`
     may start playback anyway.
 
@@ -558,9 +558,15 @@ def _may_start_early(stats, got, target, waited, stalled=False, progressed=False
     buffering instead, still bounded by `_TARGET_WAIT_SECONDS` below.
 
     Also yes once `_TARGET_WAIT_SECONDS` of filling has gone by, so a
-    slow-but-alive swarm eventually plays instead of buffering forever.
+    slow-but-alive swarm eventually plays instead of buffering forever -
+    unless `infeasible`: the latest measured speed is below the file's own
+    average bitrate (`_feasibility_warning_needed`), so playback started on
+    a partial buffer would drain it and leave Kodi's reader in a curl
+    timeout (observed live: three time-cap starts at 7-520 KB/s, two dead
+    within 45s, one "Error creating demuxer"). Such a swarm keeps filling
+    toward the full target, still bounded by the attempt budget.
     """
-    if waited >= _TARGET_WAIT_SECONDS:
+    if waited >= _TARGET_WAIT_SECONDS and not infeasible:
         return True
     if stalled and not progressed:
         return False
@@ -1054,6 +1060,9 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=None):
         #: from "still making progress elsewhere, just not on this file's
         #: front yet". None until a poll actually reports one.
         prev_downloaded = None
+        #: Latest measured-speed verdict from `_feasibility_warning_needed`;
+        #: kept across attempts whose stats poll failed (absent ≠ fast).
+        infeasible = False
 
         for attempt in range(_MAX_FRONT_ATTEMPTS):
             if dialog.iscanceled():
@@ -1069,9 +1078,11 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=None):
             if dialog.iscanceled():
                 return False, url, None
 
+            measured_speed = (stats or {}).get('downloadSpeed')
+            if measured_speed is not None:
+                infeasible = _feasibility_warning_needed(runtime_seconds, file_length_bytes, measured_speed)
             if not feasibility_warned and file_length_bytes and runtime_seconds:
-                measured_speed = (stats or {}).get('downloadSpeed')
-                if _feasibility_warning_needed(runtime_seconds, file_length_bytes, measured_speed):
+                if infeasible:
                     feasibility_warned = True
                     log(
                         'player: feasibility warning for %s: runtime=%.0fs size=%d speed=%r'
@@ -1154,7 +1165,8 @@ def _prebuffer_torrent(server, stream, url, dialog, monitor, item_meta=None):
                 return True, url, filename
 
             if total_got >= _HEADER_MIN_BYTES and _may_start_early(
-                stats, total_got, target, waited(), stalled=stalled, progressed=progressed
+                stats, total_got, target, waited(), stalled=stalled, progressed=progressed,
+                infeasible=infeasible,
             ):
                 log(
                     'player: pre-buffer header floor reached, starting early for %s: '
