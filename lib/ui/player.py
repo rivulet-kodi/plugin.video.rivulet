@@ -571,11 +571,13 @@ def _may_start_early(stats, got, target, waited, stalled=False, progressed=False
     if stalled and not progressed:
         return False
     if not isinstance(stats, dict) or 'downloadSpeed' not in stats:
-        return True
+        # Unknown now, but an earlier attempt measured it too slow: a failed
+        # poll on a struggling swarm is not evidence it recovered.
+        return not infeasible
     try:
         speed = float(stats.get('downloadSpeed') or 0)
     except (TypeError, ValueError):
-        return True
+        return not infeasible
     if speed <= 0:
         return False
     return (target - got) / speed <= _EARLY_START_ETA_SECONDS

@@ -858,6 +858,17 @@ def test_may_start_early_keeps_buffering_past_the_budget_when_infeasible(kodi_st
     ) is False
 
 
+def test_may_start_early_honours_a_retained_infeasible_verdict_when_stats_fail(kodi_stubs):
+    """A stats poll failing after an earlier attempt measured the swarm too
+    slow must not be read as 'unknown, start fast' - failed polls are
+    common on exactly those swarms."""
+    player = kodi_stubs.player
+    target = 20 * 1024 * 1024
+
+    assert player._may_start_early(None, 8 * 1024 * 1024, target, 10.0, infeasible=True) is False
+    assert player._may_start_early(None, 8 * 1024 * 1024, target, 10.0) is True
+
+
 def test_prebuffer_starts_late_rather_than_failing_when_budget_is_spent(kodi_stubs, monkeypatch):
     """With the gate holding a starved swarm back, the retry budget can now
     run out while the header floor HAS been cleared. Before the gate that
